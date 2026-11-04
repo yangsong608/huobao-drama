@@ -236,6 +236,21 @@
             </label>
 
             <label class="field">
+              <span class="field-label">
+                {{ t('index.createDialog.visualBackground') }}
+                <span class="field-optional">{{ t('index.createDialog.optional') }}</span>
+              </span>
+              <textarea
+                v-model="form.visual_background"
+                class="textarea"
+                rows="3"
+                maxlength="400"
+                :placeholder="t('index.createDialog.visualBackgroundPlaceholder')"
+              />
+              <span class="field-hint">{{ t('index.createDialog.visualBackgroundHint') }}</span>
+            </label>
+
+            <label class="field">
               <span class="field-label">{{ t('index.createDialog.aspectRatio') }}</span>
               <BaseSelect v-model="form.aspect_ratio" :options="aspectRatioOptions" :placeholder="t('index.createDialog.aspectRatioPlaceholder')" />
               <span class="field-hint">{{ t('index.createDialog.aspectRatioHint') }}</span>
@@ -308,7 +323,7 @@ const sortOptions = computed(() => ([
 const activeMenuId = ref(null)
 const dramaToDelete = ref(null)
 const deletingDrama = ref(false)
-const form = ref({ title: '', style: '', background: '', aspect_ratio: '16:9' })
+const form = ref({ title: '', style: '', background: '', visual_background: '', aspect_ratio: '16:9' })
 const stylePresets = ref([])
 const styleSelectOptions = computed(() => stylePresets.value.map(p => ({ label: p.name, value: p.value })))
 const selectedStyleDesc = computed(() => stylePresets.value.find(p => p.value === form.value.style)?.description || '')

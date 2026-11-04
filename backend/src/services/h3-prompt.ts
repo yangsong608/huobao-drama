@@ -45,7 +45,13 @@ const DIALOGUE: NamedDialogue[] = [
 ]
 
 function stripQuotedDialogue(text: string): string {
-  return text.replace(/[「“"]([^」”"]*)[」”"]/g, '').replace(/[「」“”]/g, '')
+  return text
+    .replace(/[「“"]([^」”"]*)[」”"]/g, (_match, inner: string) => {
+      const value = String(inner || '')
+      // 短词多为专有名词（如“陆缘”）；长句或带句读的才按台词整段删除，避免变成字幕
+      return value.length > 16 || /[。！？!?，,；;]/.test(value) ? '' : value
+    })
+    .replace(/[「」“”]/g, '')
 }
 
 /** 确定性转换：不依赖文本模型，输出去掉所有字幕源（对白原文/引号/标记） */
@@ -133,6 +139,37 @@ function defaultTranslate(text: string): Promise<string> {
     timeoutMs: 30_000,
     responseFormat: 'text',
   }).then(result => result.text)
+}
+
+export interface TranslateH3TextOptions {
+  translate?: (text: string) => Promise<string>
+}
+
+/** 单独翻译视觉背景；失败返回 null，由调用方决定是否跳过 */
+export async function translateH3Text(
+  text: string,
+  options: TranslateH3TextOptions = {},
+): Promise<string | null> {
+  const source = String(text || '').trim()
+  if (!source) return ''
+  if (!CJK_RE.test(source)) return source
+
+  const key = `visual-background\n${source}`
+  const cached = translationCache.get(key)
+  if (cached) return cached
+
+  try {
+    const translated = normalizeTranslation(await (options.translate ?? defaultTranslate)(source))
+    if (!translated) throw new Error('翻译结果为空')
+    if (translationCache.size >= CACHE_LIMIT) {
+      translationCache.delete(translationCache.keys().next().value as string)
+    }
+    translationCache.set(key, translated)
+    return translated
+  } catch (err: any) {
+    logTaskWarn('H3Prompt', 'visual-background-translate-failed', { error: err?.message || String(err) })
+    return null
+  }
 }
 
 export interface CompileLocalH3Options {

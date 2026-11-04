@@ -1,7 +1,11 @@
 /**
- * 项目背景服务 — dramas.background（世界观/时代/地域/主线设定）
+ * 项目背景服务 — dramas.background / dramas.visual_background
  *
- * 与「视觉风格」是两个维度：
+ * 两个维度分开：
+ * - background         → 世界观/时代/主线设定，用于剧本、分镜与资产图
+ * - visual_background  → 场景/光影/色彩等画面描述，仅注入视频提示词
+ *
+ * 与「视觉风格」也是两个维度：
  * - style      → 画面长什么样（渲染方式、色调、材质）
  * - background → 画面里是什么世界（朝代、地域、社会氛围、故事前提）
  *
@@ -37,6 +41,33 @@ export function normalizeBackground(raw: unknown): string {
     ? chars.slice(0, MAX_BACKGROUND_PROMPT_CHARS).join('').replace(/[，,、；;：:\s]+$/, '')
     : text
   return clipped.replace(/[，,、；;。.\s]+$/, '')
+}
+
+/** 读取项目视觉背景（已归一化空白、截断）；无视觉背景返回 '' */
+export async function getDramaVisualBackground(dramaId: number | null | undefined): Promise<string> {
+  if (!dramaId) return ''
+  try {
+    const row = db.select({ visualBackground: schema.dramas.visualBackground })
+      .from(schema.dramas)
+      .where(eq(schema.dramas.id, dramaId))
+      .get()
+    return normalizeBackground(row?.visualBackground)
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 把视觉背景拼到提示词前面（仅视频使用）。
+ * 不套中文 400 字上限：英文翻译通常比中文长，截断会破坏句子。
+ */
+export function withVisualBackground(prompt: string, background: string): string {
+  const base = String(prompt || '').trim()
+  const bg = String(background || '').replace(/\s+/g, ' ').trim()
+  if (!bg) return base
+  if (!base) return bg
+  if (base.startsWith(bg)) return base
+  return `${bg}, ${base}`
 }
 
 /**

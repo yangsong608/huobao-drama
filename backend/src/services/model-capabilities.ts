@@ -26,6 +26,8 @@ export interface VideoModelCapabilities {
   referenceAudios: number
   /** 该模型是否输出原生音频 */
   nativeAudio: boolean
+  /** 是否同时接受首帧与尾帧（AI 过渡片段的硬门槛） */
+  firstLastFrame: boolean
 }
 
 export interface VideoCapabilityOptions {
@@ -50,7 +52,7 @@ function build(
   family: string,
   resolutions: VideoResolutionTier[],
   vendorResolutions: Partial<Record<VideoResolutionTier, string>>,
-  options: Partial<Pick<VideoModelCapabilities, 'minDuration' | 'maxDuration' | 'referenceImages' | 'referenceVideos' | 'referenceAudios' | 'nativeAudio'>> = {},
+  options: Partial<Pick<VideoModelCapabilities, 'minDuration' | 'maxDuration' | 'referenceImages' | 'referenceVideos' | 'referenceAudios' | 'nativeAudio' | 'firstLastFrame'>> = {},
 ): VideoModelCapabilities {
   return {
     family,
@@ -62,6 +64,7 @@ function build(
     referenceVideos: options.referenceVideos ?? 0,
     referenceAudios: options.referenceAudios ?? 0,
     nativeAudio: options.nativeAudio ?? false,
+    firstLastFrame: options.firstLastFrame ?? false,
   }
 }
 
@@ -74,7 +77,7 @@ function seedanceCapability(model: string): VideoModelCapabilities {
       limited ? 'seedance-2.0-fast' : 'seedance-2.0',
       limited ? ['480p', '720p'] : ['480p', '720p', '1080p'],
       { '480p': '480p', '720p': '720p', '1080p': '1080p' },
-      { minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true },
+      { minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true, firstLastFrame: true },
     )
   }
   // Seedance 1.x：仅文生视频/首尾帧，单张图，无参考视频/音频与原生音频
@@ -83,7 +86,7 @@ function seedanceCapability(model: string): VideoModelCapabilities {
     'seedance-1.x',
     ['480p', '720p', '1080p'],
     { '480p': '480p', '720p': '720p', '1080p': '1080p' },
-    { minDuration: 2, maxDuration: 12, referenceImages: isI2v ? 1 : 0, nativeAudio: false },
+    { minDuration: 2, maxDuration: 12, referenceImages: isI2v ? 1 : 0, nativeAudio: false, firstLastFrame: isI2v },
   )
 }
 
@@ -91,7 +94,7 @@ function minimaxCapability(model: string, options: VideoCapabilityOptions = {}):
   const lower = model.toLowerCase()
   if (lower.includes('highspeed')) {
     return build('h3-highspeed', ['720p'], { '720p': '768P' }, {
-      minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true,
+      minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true, firstLastFrame: true,
     })
   }
   // 不能直接 includes('max')：MiniMax 品牌名会误命中 H3-Max
@@ -99,18 +102,18 @@ function minimaxCapability(model: string, options: VideoCapabilityOptions = {}):
     || lower.includes('-lite') || lower.includes('-max')
   if (isLiteOrMax) {
     return build('h3-lite', ['480p', '720p'], { '480p': '480P', '720p': '768P' }, {
-      minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true,
+      minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true, firstLastFrame: true,
     })
   }
   // 本地 shim 有完整 480P 画布，标准 H3 在本地也可选 480p；云端仍只认 768P/2K
   // 音频/视频参考尚未接入 shim，声明为 0，避免任务创建后素材被静默丢弃
   if (options.localShim) {
     return build('h3', ['480p', '720p', '1080p'], { '480p': '480P', '720p': '768P', '1080p': '2K' }, {
-      minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 0, referenceAudios: 0, nativeAudio: true,
+      minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 0, referenceAudios: 0, nativeAudio: true, firstLastFrame: true,
     })
   }
   return build('h3', ['720p', '1080p'], { '720p': '768P', '1080p': '2K' }, {
-    minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true,
+    minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true, firstLastFrame: true,
   })
 }
 
@@ -118,13 +121,13 @@ function aliyunCapability(model: string): VideoModelCapabilities {
   const lower = model.toLowerCase()
   if (lower.startsWith('wan3.0')) {
     return build('wan3.0', ['480p', '720p', '1080p'], { '480p': '480P', '720p': '720P', '1080p': '1080P' }, {
-      minDuration: 2, maxDuration: 30, referenceImages: 10, referenceVideos: 5, referenceAudios: 5, nativeAudio: false,
+      minDuration: 2, maxDuration: 30, referenceImages: 10, referenceVideos: 5, referenceAudios: 5, nativeAudio: true, firstLastFrame: true,
     })
   }
-  // Wan 2.x：文生视频无参考图；i2v 仅首帧
+  // Wan 2.x：文生视频无参考图；i2v 仅首帧（2.2 kf2v 首尾帧适配器尚未接入）
   const isI2v = lower.includes('-i2v')
   return build('wan2.x', ['480p', '720p', '1080p'], { '480p': '480P', '720p': '720P', '1080p': '1080P' }, {
-    minDuration: 5, maxDuration: 10, referenceImages: isI2v ? 1 : 0, nativeAudio: false,
+    minDuration: 5, maxDuration: 10, referenceImages: isI2v ? 1 : 0, nativeAudio: false, firstLastFrame: false,
   })
 }
 
@@ -139,7 +142,7 @@ export function videoModelCapabilities(
   if (providerKey === 'volcengine') {
     return modelKey ? seedanceCapability(modelKey) : build('seedance', ['480p', '720p', '1080p'],
       { '480p': '480p', '720p': '720p', '1080p': '1080p' },
-      { minDuration: 2, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true })
+      { minDuration: 2, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true, firstLastFrame: true })
   }
   if (providerKey === 'minimax') {
     return modelKey ? minimaxCapability(modelKey, options) : minimaxCapability('MiniMax-H3', options)
@@ -148,7 +151,7 @@ export function videoModelCapabilities(
     return modelKey ? aliyunCapability(modelKey) : aliyunCapability('wan3.0-video')
   }
   return build('comfyui', ['480p', '720p', '1080p'], { '480p': '480p', '720p': '720p', '1080p': '1080p' },
-    { minDuration: 2, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: false })
+    { minDuration: 2, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: false, firstLastFrame: true })
 }
 
 /**

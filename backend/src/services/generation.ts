@@ -15,6 +15,7 @@ import { getActiveConfig, getConfigById } from './ai.js'
 import { now } from '../utils/response.js'
 import { downloadFile, fetchImageAsCompressedDataUrl, generateImageThumb, getAbsolutePath, readImageAsCompressedDataUrl, readImageAsDataUrl, saveBase64Image } from '../utils/storage.js'
 import { extractVideoPoster } from '../utils/video-poster.js'
+import { ffmpeg } from '../utils/ffmpeg.js'
 import { getImageAdapter, getVideoAdapter } from './adapters/registry'
 import { imageModelSupportsReferenceImages, imageReferenceLimit } from './model-capabilities.js'
 import { normalizeVideoAudioMode, type VideoAudioMode } from './video-audio.js'
@@ -53,11 +54,16 @@ interface GenerateImageParams {
   configId?: number
 }
 
-interface GenerateVideoParams {
+export interface GenerateVideoParams {
   storyboardId?: number
   dramaId?: number
   /** ComfyUI 整集任务归属集；写入 params 供任务抽屉和成片登记使用 */
   episodeId?: number
+  /** AI 过渡片段：video_transitions.id（与 storyboardId 互斥） */
+  transitionId?: number
+  /** 过渡断点的来源镜头，便于任务抽屉还原 */
+  fromStoryboardId?: number
+  toStoryboardId?: number
   prompt: string
   model?: string
   referenceMode?: string
@@ -73,6 +79,11 @@ interface GenerateVideoParams {
   /** native 原生音画 / ambient 只要环境声（后期配音）/ silent 不要音轨 */
   audioMode?: VideoAudioMode
   duration?: number
+  /** 过渡请求的原始时长与按模型折算后的时长 */
+  durationRequested?: number
+  durationEffective?: number
+  /** 本地 H3 过渡允许低于常规下限的短时长 */
+  allowShortDuration?: boolean
   aspectRatio?: string
   resolution?: string
   quality?: 'preview' | 'final'
@@ -138,8 +149,9 @@ export async function generateImage(params: GenerateImageParams): Promise<number
 
 export async function generateVideo(params: GenerateVideoParams): Promise<number> {
   const storyboardId = params.storyboardId
+  const transitionId = params.transitionId
   const episodeRun = params.comfyTimeline && params.episodeId ? `ep-${params.episodeId}` : ''
-  const submissionKey = storyboardId ? `sb-${storyboardId}` : episodeRun
+  const submissionKey = storyboardId ? `sb-${storyboardId}` : transitionId ? transitionTaskKey(transitionId) : episodeRun
   if (submissionKey && videoSubmissions.has(submissionKey)) throw new Error('该任务正在提交，请勿重复点击')
   if (submissionKey) videoSubmissions.add(submissionKey)
   try {
@@ -148,6 +160,12 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
         .orderBy(desc(schema.sysTask.id)).limit(1)
       if (latest?.status === 'processing') throw new Error('该分镜已有运行中的任务，请等待结果')
       if (latest?.status === 'failed' && params.forceNew !== true) throw new Error('请先恢复原任务；重新生成需确认可能再次计费')
+    }
+    if (transitionId) {
+      const [latest] = await db.select().from(schema.sysTask).where(and(eq(schema.sysTask.type, 'video'), eq(schema.sysTask.transitionId, transitionId)))
+        .orderBy(desc(schema.sysTask.id)).limit(1)
+      if (latest?.status === 'processing') throw new Error('该过渡片段已有运行中的任务，请等待结果')
+      if (latest?.status === 'failed' && params.forceNew !== true) throw new Error('该过渡片段上次生成失败；重试需确认可能再次计费')
     }
     // 指定配置（集锁定）可能已停用/删除/厂商收敛，失效时回退到当前启用配置
     const config = params.configId
@@ -162,11 +180,16 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
 
     const id = await createTask('video', config, {
       storyboardId: params.storyboardId,
+      transitionId: params.transitionId,
       dramaId: params.dramaId,
       prompt: params.prompt,
       model: params.model || config.model,
     }, {
       episodeId: params.episodeId,
+      transitionId: params.transitionId,
+      fromStoryboardId: params.fromStoryboardId,
+      toStoryboardId: params.toStoryboardId,
+      promptKind: params.transitionId ? 'transition' : undefined,
       comfyTimeline: params.comfyTimeline,
       referenceMode: params.referenceMode || 'reference',
       imageUrl: params.imageUrl,
@@ -180,6 +203,9 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
       generateAudio: params.generateAudio === false ? 0 : 1,
       audioMode: params.audioMode || 'native',
       duration: params.duration,
+      durationRequested: params.durationRequested,
+      durationEffective: params.durationEffective,
+      allowShortDuration: params.allowShortDuration === true,
       aspectRatio: params.aspectRatio,
       // 统一存为项目内部格式，各适配器再转换为官方大小写与枚举。
       resolution: normalizeStoredVideoResolution(params.resolution),
@@ -227,6 +253,7 @@ async function createTask(
   config: AIConfig,
   fields: {
     storyboardId?: number
+    transitionId?: number
     dramaId?: number
     sceneId?: number
     characterId?: number
@@ -318,6 +345,7 @@ async function processTask(id: number, config: AIConfig) {
         generateAudio: params.generateAudio,
         audioMode: params.audioMode,
         duration: params.duration,
+        allowShortDuration: params.allowShortDuration,
         aspectRatio: params.aspectRatio,
         resolution: params.resolution,
         quality: params.quality,
@@ -425,9 +453,16 @@ async function markPolling(id: number, taskId: string | undefined) {
 async function failTask(id: number, message: string, code?: string) {
   message = safeTaskError(message)
   logTaskError('SysTask', 'failed', { id, error: message })
+  const [task] = await db.select({ transitionId: schema.sysTask.transitionId }).from(schema.sysTask).where(eq(schema.sysTask.id, id))
   await db.update(schema.sysTask)
     .set({ status: 'failed', errorMsg: safeTaskError(message), ...(code ? { errorCode: code } : {}), updatedAt: now() })
     .where(eq(schema.sysTask.id, id))
+  if (task?.transitionId) {
+    // 只回写本任务关联的过渡记录，避免旧任务把重试后的新状态改成失败
+    await db.update(schema.videoTransitions)
+      .set({ status: 'failed', errorMsg: safeTaskError(message), updatedAt: now() })
+      .where(and(eq(schema.videoTransitions.id, task.transitionId), eq(schema.videoTransitions.sysTaskId, id)))
+  }
 }
 
 type SysTaskRecord = typeof schema.sysTask.$inferSelect
@@ -604,7 +639,21 @@ async function timelineMergeTitle(episodeId: number): Promise<string> {
     : `第${episode?.number ?? episodeId}集 · ComfyUI 整集`
 }
 
-async function handleVideoComplete(record: SysTaskRecord, videoUrl: string, duration: number | null | undefined, videoUrls?: string[]) {
+export function transitionTaskKey(transitionId: number): string {
+  return `tr-${transitionId}`
+}
+
+function probeDurationSeconds(relativePath: string): Promise<number | null> {
+  return new Promise(resolve => {
+    ffmpeg.ffprobe(getAbsolutePath(relativePath), (error, metadata) => {
+      if (error) return resolve(null)
+      const value = Number(metadata?.format?.duration)
+      resolve(Number.isFinite(value) && value > 0 ? Math.round(value * 1000) / 1000 : null)
+    })
+  })
+}
+
+export async function handleVideoComplete(record: SysTaskRecord, videoUrl: string, duration: number | null | undefined, videoUrls?: string[]) {
   const initialParams = parseTaskParams(record.params)
   const timeline = initialParams.comfyTimeline as ComfyTimelineTask | undefined
   const urls = Array.from(new Set([videoUrl, ...(videoUrls || [])]
@@ -620,9 +669,15 @@ async function handleVideoComplete(record: SysTaskRecord, videoUrl: string, dura
     const audioMode = normalizeVideoAudioMode(params.audioMode, params.generateAudio)
     const localPath = record.localPath && fs.existsSync(getAbsolutePath(record.localPath))
       ? record.localPath
-      : timeline
-        ? await downloadTimelineVideos(record, urls, audioMode)
-        : await downloadVideo(videoUrl, record.id, { dramaId: record.dramaId })
+      : record.transitionId
+        ? await downloadVideo(videoUrl, record.id, {
+            dramaId: record.dramaId,
+            subdir: 'transitions',
+            name: `transition-${record.transitionId}`,
+          })
+        : timeline
+          ? await downloadTimelineVideos(record, urls, audioMode)
+          : await downloadVideo(videoUrl, record.id, { dramaId: record.dramaId })
     await db.update(schema.sysTask).set({ localPath, stage: 'saving', updatedAt: now() }).where(eq(schema.sysTask.id, record.id))
     // 云端模型可能忽略 audio_mode；静音任务在落盘后强制去掉音轨，避免后续合片带原声。
     if (audioMode === 'silent') {
@@ -630,6 +685,38 @@ async function handleVideoComplete(record: SysTaskRecord, videoUrl: string, dura
       logTaskProgress('VideoTask', 'silent-strip', { id: record.id, stripped })
     }
     await extractVideoPoster(localPath)
+
+    if (record.transitionId) {
+      const transitionId = record.transitionId
+      const actualDuration = Number(duration) > 0
+        ? Math.round(Number(duration) * 1000) / 1000
+        : await probeDurationSeconds(localPath)
+      // 过渡片段只回写 video_transitions，绝不触碰分镜与成片；旧任务不覆盖更新的过渡结果。
+      db.transaction(tx => {
+        const newer = tx.select({ id: schema.sysTask.id }).from(schema.sysTask)
+          .where(and(
+            eq(schema.sysTask.type, 'video'),
+            eq(schema.sysTask.transitionId, transitionId),
+            gt(schema.sysTask.id, record.id),
+          )).get()
+        if (!newer) {
+          tx.update(schema.videoTransitions).set({
+            status: 'completed',
+            videoUrl: localPath,
+            durationActual: actualDuration ?? null,
+            sysTaskId: record.id,
+            errorMsg: null,
+            completedAt: now(),
+            updatedAt: now(),
+          }).where(eq(schema.videoTransitions.id, transitionId)).run()
+        }
+        tx.update(schema.sysTask).set({
+          localPath, status: 'completed', stage: 'completed', errorCode: null,
+          errorMsg: null, completedAt: now(), updatedAt: now(),
+        }).where(eq(schema.sysTask.id, record.id)).run()
+      })
+      return
+    }
 
     const episodeId = timeline && Number(params.episodeId) > 0 ? Number(params.episodeId) : 0
     const mergeTitle = episodeId ? await timelineMergeTitle(episodeId) : ''

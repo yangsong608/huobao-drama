@@ -70,11 +70,11 @@
     "pipelineStages": 8
   },
   "currentMetrics": {
-    "tsTests": 483,
+    "tsTests": 552,
     "tsFail": 0,
     "mjsPass": 61,
     "mjsFail": 0,
-    "frontendTests": 197,
+    "frontendTests": 207,
     "frontendFail": 0,
     "mcpTools": 61,
     "pipelineStages": 8
@@ -285,7 +285,10 @@
     "音色 UI 收敛为一套（2026-11-04 23:30）：删除独立「音色制作」生产 tab 与 VoiceProfilePanel/VoiceAssetGrid；新增共享 useVoiceProfiles + VoiceProfileCard，配音「音色分配」、剧集资产弹窗、详情素材弹窗三处复用同一状态与组件；制作区保持 资产 | 视频；四语言补 referenceAudioHint/edit/done；前端 195/195、结构 61/61、修改 SFC 编译通过；未 generate/构建/安装/提交，MCP 61、TEMPLATE_VERSION=6、V3-G5 pending",
     "音色共享 UI 桌面包构建与安装（2026-11-04 23:44–23:46）：前端 generate 与 desktop dist 退出码 0；arm64 dmg 174,223,630 bytes / arm64 zip 172,573,419，x64 dmg 191,098,430 / zip 189,605,534，app.asar 18,788,760 bytes（23:45:25）、frontend 61 个 _nuxt 文件；包内 TEMPLATE_VERSION=6，后端含 voice-profile/audio-tracks/comfyui/run/video_config_id，前端 B8kCgc8g.js 含「音色档案」「多轨混音」「ComfyUI 工作流」；旧包备份 /tmp/HuobaoDrama.app.backup-20261104-234612，arm64 安装至 /Applications/HuobaoDrama.app（4.0.10、Mach-O arm64）；按请求只安装未启动，MCP 61、端口 5679/3013 未动，V3-G5 pending",
     "视频提示词音频指令修复（2026-11-05）：根因是四语言模板/技能固定写入「音频：人声清晰靠前……旁白/心声为画外音」且英文漏改，云端原样提交并 generate_audio=true，本地 H3 静音仍沿用旧指令；模板/技能/agents/pipeline-rules 四语言改为不写音频要求行，仅在确有旁白时按时间段写旁白；新增 video-prompt-sanitize 在 tasks 提交与 comfyui-timeline 构建时清洗；本地 H3 SILENT_DIRECTIVE 要求闭口不讲话；新增 desktop workspace-template 存量迁移（幂等、保留用户编辑、TEMPLATE_VERSION 仍 6），本机工作区迁移 5 文件且二次 0 变更；后端 483/483、结构 61/61、前端 197/197、桌面 9/9、local-h3 33/33、drift 123 PASS、typecheck 与 generate 通过",
-    "视频提示词修复后桌面包构建与安装（2026-11-05 01:09）：desktop dist 退出码 0；arm64 dmg 174,227,618 bytes / zip 172,580,024，x64 dmg 191,144,488 / zip 189,612,141，app.asar 18,806,029 bytes，SHA256 ba6a39a9ff3f371ec121ef1f41775cd81b353d224ee77494f035d82bda860f6a；包内与已安装 workspace-template 均无旧音频句、asar 含迁移代码；旧包备份 /tmp/HuobaoDrama.app.backup-20261105-010942，arm64 安装至 /Applications/HuobaoDrama.app（4.0.10、Mach-O arm64）；按请求只安装未启动；真实出片未复验，V3-G5 pending，MCP 61、TEMPLATE_VERSION=6、端口 5679/3013 未动"
+    "视频提示词修复后桌面包构建与安装（2026-11-05 01:09）：desktop dist 退出码 0；arm64 dmg 174,227,618 bytes / zip 172,580,024，x64 dmg 191,144,488 / zip 189,612,141，app.asar 18,806,029 bytes，SHA256 ba6a39a9ff3f371ec121ef1f41775cd81b353d224ee77494f035d82bda860f6a；包内与已安装 workspace-template 均无旧音频句、asar 含迁移代码；旧包备份 /tmp/HuobaoDrama.app.backup-20261105-010942，arm64 安装至 /Applications/HuobaoDrama.app（4.0.10、Mach-O arm64）；按请求只安装未启动；真实出片未复验，V3-G5 pending，MCP 61、TEMPLATE_VERSION=6、端口 5679/3013 未动",
+    "AI 过渡片段提示词视觉分析（2026-11-05）：video_transitions 新增 prompt_source（ai/fallback/manual）并迁移旧库；默认用当前文本模型分析上一镜尾帧+下一镜首帧生成过渡提示词，失败回退文字模板；新增 POST /merge/transitions/:id/analyze 与 PUT /merge/transitions/:id/prompt，prepare/retry 支持 text_config_id/text_model，带 prompt 重试写 manual；修正首尾帧方向并加 transition-v2 指纹前缀；合片弹窗断点行内提供分析/编辑/保存/按提示词重生成，四语言文案齐全；后端 549/549、结构 61/61、drift 123 PASS、typecheck 通过，前端 202/202、build 通过；UI 冒烟（隔离库 + fake 视觉服务 5681）验证分析回填 2 张图、保存为 manual、刷新后保留、失败断点显示 fallback 文案，临时服务与目录已清理；未调用真实视觉/视频服务，未打包安装、未提交，V3-G5 保持 pending",
+    "AI 过渡提示词视觉分析复查（2026-11-05）：独立审查 9 条，修复 prepare 失败被吞（返回 failed/failures，前端区分全失败/部分失败）、旧草稿覆盖新提示词（dirty 状态 + sync）、保存按剧集当前视频配置判本地 H3、手动提示词 1200 字上限、retry 携带当前文本模型、分析后来源徽标即时切换，并补四语言 partialFailed；保留 analyze 不更新来源指纹（避免旧视频失去回退）、未知模型默认允许视觉、prepare 不跳过 pending（保留崩溃恢复）三项设计；同时移除 episode.vue 误加的 TS 泛型恢复构建；复查后 UI 冒烟验证草稿刷新不覆盖、保存 manual、全失败错误提示；后端 552/552、结构 61/61、drift 123 PASS、typecheck 通过，前端 207/207、build 通过；未提交、未打包安装，V3-G5 保持 pending",
+    "分镜参考素材多选与跨集复用（2026-11-05）：多选丢失根因是并发 PUT 整组覆盖，前端同分镜更新改串行合并、后端绑定同步改事务；跨集不可见根因是前端仅加载本集素材且路由拒绝未关联素材，参考面板改项目级合并列表并标注「项目素材」，分镜路由按项目校验并自动补 episode 关联，Agent 上下文返回全项目素材与 linked_to_episode，场景保持单选；后端 556/556、结构 61/61、drift 123 PASS、typecheck 通过，前端 214/214；隔离库 UI 冒烟验证跨集素材可见可绑、连续多选不覆盖、场景单选、刷新保持且自动补本集关联；临时服务与库已清理；未提交、未打包安装，V3-G5 保持 pending"
   ],
-  "updatedAt": "2026-11-05T01:15+08:00"
+  "updatedAt": "2026-11-05T03:45+08:00"
 }

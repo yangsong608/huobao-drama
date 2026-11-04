@@ -250,6 +250,45 @@ export function parseStyleAnalysis(raw: string): StyleAnalysis {
   return { name, description, prompt }
 }
 
+export interface VisionTextRequest {
+  paths: string[]
+  system: string
+  userText: string
+  configId?: number
+  model?: string
+}
+
+export interface VisionTextResult {
+  text: string
+  images: string[]
+  configId: number | null
+  model: string
+  provider: string
+}
+
+/** 通用视觉问答：图片以 data URL 发给当前文本模型，返回原始文本 */
+export async function requestVisionText(request: VisionTextRequest): Promise<VisionTextResult> {
+  const images = request.paths.map(p => String(p || '').trim()).filter(Boolean)
+  if (!images.length) throw new Error('请至少提供 1 张图片')
+
+  const config = await resolveConfig({ configId: request.configId, model: request.model })
+  const model = (request.model || config.model || '').trim()
+  if (!model) throw new Error('文本模型未配置模型名，请到设置页检查')
+  // 图像生成模型只出图不返回文本；纯文本模型也不具备图片理解。
+  // 在发起请求前拦截，避免把 /chat/completions 打到不支持视觉的模型上。
+  if (!textModelSupportsVision(config.provider, model)) {
+    throw new Error(`当前模型 ${model} 不支持图片理解，请改用视觉模型（如 Gemini、GPT 视觉系列、Qwen-VL、豆包视觉模型）`)
+  }
+
+  const loaded = await loadStyleImageDataUrls(images)
+  const payload: VisionPayload = { system: request.system, userText: request.userText, images: loaded }
+  const provider = (config.provider || '').toLowerCase()
+  const text = provider === 'gemini'
+    ? await callGemini(config, model, payload)
+    : await callOpenAiCompatible(config, model, payload)
+  return { text, images, configId: config.id ?? null, model, provider: config.provider }
+}
+
 /** 调用视觉模型分析风格（不落库）；messages 里不带项目信息，纯风格提炼 */
 export async function analyzeStyleFromImages(
   paths: string[],
@@ -259,49 +298,32 @@ export async function analyzeStyleFromImages(
   if (!images.length) throw new Error('请至少上传 1 张参考图')
   if (images.length > MAX_STYLE_IMAGES) throw new Error(`一次最多分析 ${MAX_STYLE_IMAGES} 张参考图`)
 
-  const config = await resolveConfig(options)
-  const model = (options.model || config.model || '').trim()
-  if (!model) throw new Error('文本模型未配置模型名，请到设置页检查')
-  // 图像生成模型只出图不返回文本；纯文本模型也不具备图片理解。
-  // 在发起请求前拦截，避免把 /chat/completions 打到不支持视觉的模型上。
-  if (!textModelSupportsVision(config.provider, model)) {
-    throw new Error(`当前模型 ${model} 不支持图片理解，请改用视觉模型（如 Gemini、GPT 视觉系列、Qwen-VL、豆包视觉模型）`)
-  }
-
-  logTaskStart('StyleAnalysis', 'analyze', {
-    images: images.length,
-    provider: config.provider,
-    model,
-    configId: config.id,
-  })
-
-  const loaded = await loadStyleImageDataUrls(images)
-  const payload: VisionPayload = {
+  logTaskStart('StyleAnalysis', 'analyze', { images: images.length })
+  const result = await requestVisionText({
+    paths: images,
     system: buildSystemPrompt(options.language),
-    userText: buildUserText(loaded.length, options.language),
-    images: loaded,
-  }
-
-  const provider = (config.provider || '').toLowerCase()
-  const raw = provider === 'gemini'
-    ? await callGemini(config, model, payload)
-    : await callOpenAiCompatible(config, model, payload)
+    userText: buildUserText(images.length, options.language),
+    configId: options.configId,
+    model: options.model,
+  })
 
   const analysis = (() => {
     try {
-      return parseStyleAnalysis(raw)
+      return parseStyleAnalysis(result.text)
     } catch (error) {
       // 模型偶尔会输出解释性文字/空内容：把原文留在服务端日志，前端只提示重试
-      console.warn('[style-analysis] unparsable output:', String(raw).slice(0, 1200))
+      console.warn('[style-analysis] unparsable output:', String(result.text).slice(0, 1200))
       throw error
     }
   })()
   logTaskSuccess('StyleAnalysis', 'analyze', {
     name: analysis.name,
     promptChars: analysis.prompt.length,
-    provider: config.provider,
+    provider: result.provider,
+    model: result.model,
+    configId: result.configId,
   })
-  return { analysis, images, configId: config.id ?? null, model }
+  return { analysis, images, configId: result.configId, model: result.model }
 }
 
 /** 风格名 → 唯一 key：custom-<base36 时间>-<随机>，满足 VALUE_PATTERN */

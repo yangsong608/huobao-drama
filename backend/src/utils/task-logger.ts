@@ -108,6 +108,7 @@ function sanitizeValue(value: unknown): unknown {
 }
 
 function truncateString(value: string, edge = 120) {
+  if (value.startsWith('data:') && value.includes(';base64,')) return '[data-url omitted]'
   if (value.length <= edge * 2 + 24) return value
   return `${value.slice(0, edge)}...<trimmed ${value.length} chars>...${value.slice(-edge)}`
 }

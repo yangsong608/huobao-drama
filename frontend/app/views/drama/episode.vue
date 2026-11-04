@@ -681,10 +681,11 @@
                       <span class="video-inspector-label">{{ t('episode.ref.title') }}</span>
                       <span class="tag mono">{{ t('episode.ref.boundCount', { bound: refBindableAssets.filter(a => a.bound).length, total: refBindableAssets.length }) }}</span>
                     </div>
+                    <p class="storyboard-ref-scope-hint">{{ t('episode.ref.scopeHint') }}</p>
                     <div class="storyboard-ref-list is-embedded">
                       <template v-for="g in REF_KINDS" :key="g.kind">
                         <div v-if="refBindableAssets.filter(a => a.kind === g.kind).length" class="storyboard-ref-group">
-                          <div class="storyboard-ref-group-label">{{ g.label }}</div>
+                          <div class="storyboard-ref-group-label">{{ g.label }} <span class="dim">· {{ g.hint }}</span></div>
                           <div
                             v-for="asset in refBindableAssets.filter(a => a.kind === g.kind)"
                             :key="asset.key"
@@ -702,7 +703,10 @@
                               <span v-else>{{ asset.kind === 'scene' ? t('episode.ref.shortScene') : asset.kind === 'prop' ? t('episode.ref.shortProp') : t('episode.ref.shortChar') }}</span>
                             </button>
                             <div class="storyboard-ref-main">
-                              <span class="storyboard-ref-name">{{ asset.name }}</span>
+                              <span class="storyboard-ref-name">
+                                {{ asset.name }}
+                                <span class="storyboard-ref-scope">{{ asset.linked ? '' : t('episode.ref.projectAsset') }}</span>
+                              </span>
                               <span class="storyboard-ref-meta">{{ asset.typeLabel }} · {{ asset.meta }}</span>
                               <span :class="['storyboard-ref-state', asset.bound && asset.ready ? 'is-ready' : '']">
                                 {{ asset.bound ? (asset.ready ? t('episode.ref.usable') : t('episode.ref.notReady')) : t('episode.ref.unbound') }}
@@ -1082,6 +1086,24 @@
               <div class="export-section-head">
                 <span class="export-section-title">{{ t('episode.export.shotAssets') }}</span>
                 <span class="dim" style="font-size:11px">{{ t('episode.export.shotStat', { done: shotVidCount, total: sbs.length, selected: exportSelectedReadyIds.length }) }}</span>
+                <div v-if="exportSelectedReadyIds.length >= 2" :class="['ai-transition-chip', { busy: transitionBusy, unsupported: !transitionSupported }]">
+                  <span class="ai-transition-chip-label">
+                    {{ t('episode.export.aiTransition.summary', { ready: transitionSummary.ready, total: transitionSummary.total }) }}
+                  </span>
+                  <span v-if="transitionBusy" class="ai-transition-chip-state">
+                    <Loader2 :size="10" class="animate-spin" />
+                    {{ t('episode.export.aiTransition.status.processing') }}
+                  </span>
+                  <button
+                    class="btn btn-sm"
+                    :disabled="!transitionSupported || transitionPreparing"
+                    :title="transitionSupported ? null : t('episode.export.aiTransition.unsupported')"
+                    @click="generateMissingTransitions"
+                  >
+                    <Loader2 v-if="transitionPreparing" :size="11" class="animate-spin" />
+                    {{ transitionPreparing ? t('episode.export.aiTransition.preparing') : t('episode.export.aiTransition.generate') }}
+                  </button>
+                </div>
                 <div class="ml-auto flex gap-1">
                   <button class="btn btn-sm" :disabled="!exportReadyIds.length" @click="toggleSelectAllExport">
                     {{ exportSelectedReadyIds.length === exportReadyIds.length && exportReadyIds.length ? t('episode.export.clearSelection') : t('episode.export.selectAllReady') }}
@@ -1203,7 +1225,7 @@
                   <Loader2 v-if="genTaskStateClass(row.status) === 'pending'" :size="18" class="animate-spin" />
                   <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                 </div>
-                <span class="video-task-index">{{ genTaskKindLabel(row.kind) }}</span>
+                <span class="video-task-index">{{ genTaskKindLabel(row.kind, row.transitionId) }}</span>
               </div>
               <div class="video-task-main">
                 <div class="video-task-line">
@@ -1528,9 +1550,9 @@
       <div v-if="previewShot" class="overlay image-viewer-overlay" @click.self="previewShot = null">
         <div class="dialog image-viewer-dialog merge-viewer-dialog">
           <div class="image-viewer-head">
-            <div class="image-viewer-title">{{ t('episode.export.shotPreview', { n: shotNumberOf(previewShot) }) }}</div>
-            <span v-if="previewShot.duration" class="dim" style="font-size:11px">{{ previewShot.duration }}s</span>
-            <a :href="'/' + getVideoUrl(previewShot)" download class="btn btn-sm" style="margin-left:auto">
+            <div class="image-viewer-title">{{ previewShot.previewLabel || t('episode.export.shotPreview', { n: shotNumberOf(previewShot) }) }}</div>
+            <span v-if="previewShot.duration" class="dim" style="font-size:11px">{{ Number(previewShot.duration).toFixed(2).replace(/\.00$/, '') }}s</span>
+            <a :href="'/' + getVideoUrl(previewShot)" :download="previewShot.downloadName || ''" class="btn btn-sm" style="margin-left:auto">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               {{ t('common.download') }}
             </a>
@@ -1656,9 +1678,140 @@
               />
             </label>
             <p class="batch-video-note">{{ t('episode.export.titleNote', { n: mergeDialog.ids.length }) }}</p>
+
+            <div class="ai-transition-block">
+              <label class="ai-transition-toggle">
+                <input
+                  v-model="mergeDialog.useAiTransitions"
+                  type="checkbox"
+                  :disabled="!transitionSupported || !mergeDialogBoundaries.length"
+                />
+                <span>{{ t('episode.export.aiTransition.toggle') }}</span>
+                <span class="dim">
+                  {{ t('episode.export.aiTransition.readyHint', { ready: mergeDialogReadyCount, total: mergeDialogBoundaries.length }) }}
+                </span>
+              </label>
+              <p v-if="!transitionSupported" class="batch-video-note">{{ t('episode.export.aiTransition.unsupported') }}</p>
+              <template v-else>
+                <div v-if="mergeDialogBoundaries.length" class="ai-transition-rows">
+                  <div
+                    v-for="b in mergeDialogBoundaries"
+                    :key="`${b.from_storyboard_id}-${b.to_storyboard_id}`"
+                    class="ai-transition-row"
+                  >
+                    <div class="ai-transition-row-head">
+                      <span class="ai-transition-pair">{{ transitionPairLabel(b) }}</span>
+                      <span :class="['ai-transition-status', transitionStatusClass(b)]">{{ transitionStatusLabel(b) }}</span>
+                      <span v-if="transitionDurationLabel(b)" class="dim ai-transition-duration">{{ transitionDurationLabel(b) }}</span>
+                      <span class="ai-transition-actions">
+                        <button
+                          v-if="b.id"
+                          class="btn btn-sm btn-ghost"
+                          @click="toggleTransitionPrompt(b)"
+                        >
+                          {{ t('episode.export.aiTransition.prompt.toggle') }}
+                        </button>
+                        <button
+                          v-if="b.status === 'completed' && b.video_url && !b.stale"
+                          class="btn btn-sm"
+                          @click="openTransitionPreview(b)"
+                        >
+                          {{ t('episode.export.aiTransition.preview') }}
+                        </button>
+                        <button
+                          v-if="b.status === 'failed' || b.stale"
+                          class="btn btn-sm"
+                          :disabled="transitionPreparing"
+                          @click="retryTransitionItem(b)"
+                        >
+                          {{ t('episode.export.aiTransition.retry') }}
+                        </button>
+                        <button
+                          v-if="b.enabled !== false && (b.status === 'completed' || b.status === 'failed')"
+                          class="btn btn-sm btn-ghost"
+                          :disabled="transitionPreparing"
+                          @click="skipTransitionItem(b)"
+                        >
+                          {{ t('episode.export.aiTransition.skip') }}
+                        </button>
+                      </span>
+                    </div>
+                    <div v-if="b.id && transitionPromptOpen[transitionPromptKey(b)]" class="ai-transition-prompt">
+                      <div class="ai-transition-prompt-head">
+                        <span :class="['ai-transition-prompt-source', transitionPromptSourceClass(b)]">
+                          {{ transitionPromptSourceLabel(b) }}
+                        </span>
+                        <button
+                          class="btn btn-sm btn-ghost"
+                          :disabled="transitionPromptBusy[transitionPromptKey(b)]"
+                          @click="analyzeTransitionItem(b)"
+                        >
+                          {{ transitionPromptBusy[transitionPromptKey(b)]
+                            ? t('episode.export.aiTransition.prompt.analyzing')
+                            : t('episode.export.aiTransition.prompt.analyze') }}
+                        </button>
+                      </div>
+                      <textarea
+                        v-model="transitionPromptDrafts[transitionPromptKey(b)]"
+                        class="input ai-transition-prompt-input"
+                        rows="3"
+                        maxlength="1200"
+                        :placeholder="t('episode.export.aiTransition.prompt.placeholder')"
+                        @input="markTransitionPromptDirty(b)"
+                      />
+                      <div class="ai-transition-prompt-actions">
+                        <button
+                          class="btn btn-sm"
+                          :disabled="transitionPromptBusy[transitionPromptKey(b)]"
+                          @click="saveTransitionPromptItem(b)"
+                        >
+                          {{ t('episode.export.aiTransition.prompt.save') }}
+                        </button>
+                        <button
+                          class="btn btn-sm btn-primary"
+                          :disabled="transitionPromptBusy[transitionPromptKey(b)]
+                            || b.status === 'processing' || b.status === 'pending'"
+                          @click="regenerateTransitionWithPrompt(b)"
+                        >
+                          {{ t('episode.export.aiTransition.prompt.regenerate') }}
+                        </button>
+                      </div>
+                      <p v-if="transitionPromptEffectiveSource(b) === 'fallback'" class="ai-transition-prompt-note">
+                        {{ t('episode.export.aiTransition.prompt.fallbackNote') }}
+                      </p>
+                      <p class="ai-transition-prompt-note">{{ t('episode.export.aiTransition.prompt.hint') }}</p>
+                    </div>
+                  </div>
+                </div>
+                <p v-else class="batch-video-note">{{ t('episode.export.aiTransition.needTwoShots') }}</p>
+                <div class="ai-transition-pickers">
+                  <label class="field">
+                    <span class="field-label">{{ t('episode.export.aiTransition.duration') }}</span>
+                    <select v-model.number="mergeDialog.duration" class="input">
+                      <option v-for="seconds in [2, 3, 4, 5]" :key="seconds" :value="seconds">{{ seconds }}s</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">{{ t('episode.export.aiTransition.audioMode') }}</span>
+                    <select v-model="mergeDialog.audioMode" class="input">
+                      <option value="ambient">{{ t('episode.export.aiTransition.audioAmbient') }}</option>
+                      <option value="silent">{{ t('episode.export.aiTransition.audioSilent') }}</option>
+                    </select>
+                  </label>
+                </div>
+                <p class="batch-video-note">{{ t('episode.export.aiTransition.fallbackHint') }}</p>
+              </template>
+            </div>
           </div>
           <footer class="dialog-foot">
             <button class="btn" @click="mergeDialog.open = false">{{ t('common.cancel') }}</button>
+            <button
+              class="btn"
+              :disabled="!transitionSupported || transitionPreparing || !mergeDialogBoundaries.length"
+              @click="generateMissingTransitions"
+            >
+              {{ t('episode.export.aiTransition.regenerateMissing') }}
+            </button>
             <button class="btn btn-primary" :disabled="!mergeDialog.ids.length" @click="confirmMerge">
               {{ t('episode.export.mergeSelected', { n: mergeDialog.ids.length }) }}
             </button>
@@ -1712,7 +1865,7 @@ import {
   Users, FileText, FolderKanban, Clapperboard, Download, Loader2,
   Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2,
 } from 'lucide-vue-next'
-import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI } from '~/composables/useApi'
+import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
 import { useAgent } from '~/composables/useAgent'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
@@ -1925,14 +2078,31 @@ let genTasksTimer = null
 function openTaskDrawer() {
   taskDrawer.value = true
   loadGenTasks()
+  // 过渡任务没有分镜号，需要断点列表把 transition_id 还原成「S01 尾 → S02 首」
+  void loadTransitions(exportReadyIds.value)
 }
 function closeTaskDrawer() {
   taskDrawer.value = false
 }
 const imageViewer = ref({ open: false, src: '', title: '' })
 const activeMerge = ref(null) // 成片大预览弹窗中正在播放的拼接记录
-const mergeDialog = ref({ open: false, ids: [], title: '' }) // 拼接前命名弹窗
-const previewShot = ref(null) // 导出页镜头素材预览弹窗中正在播放的分镜
+const mergeDialog = ref({
+  open: false,
+  ids: [],
+  title: '',
+  useAiTransitions: false,
+  duration: 3,
+  audioMode: 'ambient',
+}) // 拼接前命名弹窗（含 AI 过渡开关）
+const previewShot = ref(null) // 导出页镜头素材/过渡片段预览弹窗
+const transitionState = ref({ loading: false, boundaries: [], summary: null, provider: null })
+const transitionPreparing = ref(false)
+const transitionPromptOpen = ref({})
+const transitionPromptDrafts = ref({})
+const transitionPromptBusy = ref({})
+const transitionPromptDirty = ref({})
+const transitionPromptAnalyzed = ref({})
+let transitionTimer = null
 function shotNumberOf(sb) {
   const i = sbs.value.findIndex(s => s.id === sb?.id)
   return i >= 0 ? i + 1 : 0
@@ -2252,6 +2422,7 @@ function handleImageViewerKeydown(event) {
   if (event.key !== 'Escape') return
   if (imageViewer.value.open) closeImageViewer()
   else if (assetDetail.value.open) closeAssetDetail()
+  else if (previewShot.value) previewShot.value = null
   else if (taskDrawer.value) closeTaskDrawer()
 }
 
@@ -2262,6 +2433,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleImageViewerKeydown)
   stopGenTasksPolling()
+  stopTransitionPolling()
   if (breakdownTimer) { clearInterval(breakdownTimer); breakdownTimer = null }
 })
 
@@ -2417,6 +2589,24 @@ function isNarratorCharacter(char) {
 }
 
 const visualChars = computed(() => chars.value.filter(c => !isNarratorCharacter(c)))
+// 参考素材从项目级资产池合并：本集已关联资产用本地最新数据覆盖，其他剧集素材也可直接绑定
+function mergeAssetsById(projectAssets, episodeAssets) {
+  const map = new Map()
+  for (const asset of projectAssets) map.set(asset.id, asset)
+  for (const asset of episodeAssets) map.set(asset.id, asset)
+  return [...map.values()]
+}
+const projectVisualChars = computed(() =>
+  (drama.value?.characters || []).filter(c => !c.deleted_at && !c.deletedAt && !isNarratorCharacter(c)),
+)
+const projectSceneList = computed(() => (drama.value?.scenes || []).filter(s => !s.deleted_at && !s.deletedAt))
+const projectPropList = computed(() => (drama.value?.props || []).filter(p => !p.deleted_at && !p.deletedAt))
+const bindableChars = computed(() => mergeAssetsById(projectVisualChars.value, visualChars.value))
+const bindableScenes = computed(() => mergeAssetsById(projectSceneList.value, scenes.value))
+const bindableProps = computed(() => mergeAssetsById(projectPropList.value, propItems.value))
+const episodeCharacterIdSet = computed(() => new Set(chars.value.map(c => c.id)))
+const episodeSceneIdSet = computed(() => new Set(scenes.value.map(s => s.id)))
+const episodePropIdSet = computed(() => new Set(propItems.value.map(p => p.id)))
 // 视频制作双模式：native = 逐分镜生成，comfyui = 整集工作流一次提交
 const episodeVideoMode = computed<'native' | 'comfyui'>(() =>
   (episode.value?.video_mode || episode.value?.videoMode) === 'comfyui' ? 'comfyui' : 'native')
@@ -2955,6 +3145,12 @@ function isEpisodeComfyTask(task) {
 
 function genTaskTargetLabel(task) {
   if (task.type === 'video' && isEpisodeComfyTask(task)) return t('episode.tasks.wholeEpisode')
+  if (task.transition_id) {
+    const boundary = transitionBoundaries.value.find(b => b.id === task.transition_id)
+    return boundary
+      ? t('episode.tasks.transitionPair', { from: boundary.from_number, to: boundary.to_number })
+      : t('episode.tasks.transitionShort', { id: task.transition_id })
+  }
   if (task.storyboard_id) {
     const sb = sbs.value.find(x => x.id === task.storyboard_id)
     return t('episode.tasks.sbN', { n: sb?.storyboard_number ?? sb?.storyboardNumber ?? task.storyboard_id })
@@ -2986,6 +3182,7 @@ const genTaskRows = computed(() => {
     status: t.status || 'processing',
     errorMsg: t.error_msg || '',
     storyboardId: t.storyboard_id,
+    transitionId: t.transition_id || null,
     recoverable: t.type === 'video' && t.error_code !== 'generation_failed' && !!(t.task_id || t.result_url),
     previewUrl: t.local_path || t.result_url || '',
     prompt: t.prompt || '',
@@ -3009,7 +3206,8 @@ const genTaskRows = computed(() => {
   return [...taskRows, ...mergeRows].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
 })
 
-function genTaskKindLabel(kind) {
+function genTaskKindLabel(kind, transitionId = null) {
+  if (transitionId) return t('episode.tasks.transitionKind')
   return kind === 'image' ? t('common.serviceType.image') : kind === 'video' ? t('common.serviceType.video') : t('episode.tasks.mergeKind')
 }
 
@@ -3290,13 +3488,41 @@ const selectedVideoTaskNumber = computed(() => {
   return index >= 0 ? index + 1 : 0
 })
 
+// 同一分镜的更新串行发送并合并：连续点多选素材时，避免旧请求后落地覆盖新数组
+const storyboardUpdateQueues = new Map()
+function queueStoryboardUpdate(id, patch) {
+  let entry = storyboardUpdateQueues.get(id)
+  if (!entry) {
+    entry = { pending: null, running: false }
+    storyboardUpdateQueues.set(id, entry)
+  }
+  entry.pending = { ...(entry.pending || {}), ...patch }
+  if (entry.running) return
+  void flushStoryboardUpdates(id, entry)
+}
+async function flushStoryboardUpdates(id, entry) {
+  entry.running = true
+  while (entry.pending) {
+    const payload = entry.pending
+    entry.pending = null
+    try {
+      await storyboardAPI.update(id, payload)
+    } catch (e) {
+      entry.pending = null
+      toastError(e)
+      break
+    }
+  }
+  entry.running = false
+}
+
 function updateField(sb, field, value) {
   const current = sb[field] ?? sb[toCamel(field)]
   if (current === value) return
   sb[field] = value
   const camelField = toCamel(field)
   if (camelField !== field) sb[camelField] = value
-  storyboardAPI.update(sb.id, { [field]: value }).catch(e => toastError(e))
+  queueStoryboardUpdate(sb.id, { [field]: value })
 }
 
 function toCamel(field) {
@@ -3309,13 +3535,13 @@ function getStoryboardCharacterIds(sb) {
 
 function getStoryboardCharacters(sb) {
   const ids = getStoryboardCharacterIds(sb)
-  return visualChars.value.filter(char => ids.includes(char.id))
+  return bindableChars.value.filter(char => ids.includes(char.id))
 }
 
 function getStoryboardScene(sb) {
   const sceneId = sb?.scene_id || sb?.sceneId
   if (!sceneId) return null
-  return scenes.value.find(s => s.id === sceneId) || null
+  return bindableScenes.value.find(s => s.id === sceneId) || null
 }
 
 function isStoryboardCharacterSelected(sb, charId) {
@@ -3336,7 +3562,7 @@ function getStoryboardPropIds(sb) {
 
 function getStoryboardProps(sb) {
   const ids = getStoryboardPropIds(sb)
-  return propItems.value.filter(p => ids.includes(p.id))
+  return bindableProps.value.filter(p => ids.includes(p.id))
 }
 
 function isStoryboardPropSelected(sb, propId) {
@@ -3414,14 +3640,15 @@ const DEFAULT_REWRITE_RULE = '请读取剧本并改写为格式化剧本，然�
 const DEFAULT_BREAKDOWN_RULE = `请基于当前集剧本拆分分镜，并为每个分镜段落同时生成 video_prompt（视频生成提示词）。
 本次视频模型：{{videoModel}}，请按该模型的特性与时长限制生成 video_prompt。
 
-当前集已有角色：{{characters}}
-当前集已有场景：{{scenes}}
-当前集已有道具：{{props}}
+项目已有角色：{{characters}}
+项目已有场景：{{scenes}}
+项目已有道具：{{props}}
 
 绑定要求：
-- 每个镜头必须根据剧本内容，从上述当前集已有角色中选出出场的角色绑定 character_ids（ID 必须来自上述列表；有角色出场就必须绑定，不要遗漏）
+- 每个镜头必须根据剧本内容，从上述项目已有角色中选出出场的角色绑定 character_ids（ID 必须来自上述列表；有角色出场就必须绑定，不要遗漏）
 - 每个镜头尽量匹配上述已有场景填写 scene_id（ID 必须来自上述列表），不要凭空创造新场景
-- 每个镜头出现关键道具（被使用、交接、特写或在画面中明显可见）时，从上述当前集已有道具中绑定 prop_ids（ID 必须来自上述列表）；没有道具出现可传空数组
+- 每个镜头出现关键道具（被使用、交接、特写或在画面中明显可见）时，从上述项目已有道具中绑定 prop_ids（ID 必须来自上述列表）；没有道具出现可传空数组
+- 上述素材可能来自同项目其他剧集，可直接复用；保存时会自动关联到当前集
 - 只有纯环境空镜头才可以不绑定角色`
 
 async function loadPipelineRules() {
@@ -3579,15 +3806,15 @@ function pollVideoPromptBatch(attempts = 240) {
   setTimeout(() => tick(attempts), 2500)
 }
 function doBreakdown() {
-  const charList = chars.value.length
-    ? chars.value.map(c => `${c.name}(ID:${c.id})`).join('、')
-    : '（当前集还没有角色）'
-  const sceneList = scenes.value.length
-    ? scenes.value.map(s => `${s.location} · ${s.time || '未设时间'}(ID:${s.id})`).join('、')
-    : '（当前集还没有场景）'
-  const propList = propItems.value.length
-    ? propItems.value.map(p => `${p.name}(ID:${p.id})`).join('、')
-    : '（当前集还没有道具）'
+  const charList = bindableChars.value.length
+    ? bindableChars.value.map(c => `${c.name}(ID:${c.id})`).join('、')
+    : '（项目还没有角色）'
+  const sceneList = bindableScenes.value.length
+    ? bindableScenes.value.map(s => `${s.location} · ${s.time || '未设时间'}(ID:${s.id})`).join('、')
+    : '（项目还没有场景）'
+  const propList = bindableProps.value.length
+    ? bindableProps.value.map(p => `${p.name}(ID:${p.id})`).join('、')
+    : '（项目还没有道具）'
   runAgent('storyboard_breaker', renderPipelineRule('storyboards', {
     videoModel: effectiveVideoModelLabel.value,
     characters: charList,
@@ -3882,7 +4109,7 @@ function getShotReferenceImages(sb) {
 // kind 为英文 code（逻辑值）；typeLabel 为显示名（渲染时求值）
 function shotBindableAssets(sb) {
   const out = []
-  for (const char of visualChars.value) {
+  for (const char of bindableChars.value) {
     const imageUrl = char.image_url || char.imageUrl || ''
     out.push({
       key: `character-${char.id}`,
@@ -3893,10 +4120,11 @@ function shotBindableAssets(sb) {
       meta: char.role || t('episode.asset.charPortrait'),
       imageUrl,
       ready: !!imageUrl,
+      linked: episodeCharacterIdSet.value.has(char.id),
       bound: getStoryboardCharacterIds(sb).includes(char.id),
     })
   }
-  for (const scene of scenes.value) {
+  for (const scene of bindableScenes.value) {
     const imageUrl = scene.image_url || scene.imageUrl || ''
     out.push({
       key: `scene-${scene.id}`,
@@ -3907,10 +4135,11 @@ function shotBindableAssets(sb) {
       meta: scene.time || t('episode.asset.sceneImage'),
       imageUrl,
       ready: !!imageUrl,
+      linked: episodeSceneIdSet.value.has(scene.id),
       bound: (sb?.scene_id || sb?.sceneId) === scene.id,
     })
   }
-  for (const prop of propItems.value) {
+  for (const prop of bindableProps.value) {
     const imageUrl = prop.image_url || prop.imageUrl || ''
     out.push({
       key: `prop-${prop.id}`,
@@ -3921,6 +4150,7 @@ function shotBindableAssets(sb) {
       meta: prop.type || t('episode.asset.propSingleImage'),
       imageUrl,
       ready: !!imageUrl,
+      linked: episodePropIdSet.value.has(prop.id),
       bound: getStoryboardPropIds(sb).includes(prop.id),
     })
   }
@@ -3939,13 +4169,24 @@ const boundRefAssets = computed(() => refBindableAssets.value.filter(a => a.boun
 
 // 参考面板分组顺序（kind code 驱动，label 渲染时求值）
 const REF_KINDS = computed(() => ([
-  { kind: 'character', label: t('common.role') },
-  { kind: 'scene', label: t('common.scene') },
-  { kind: 'prop', label: t('common.prop') },
+  { kind: 'character', label: t('common.role'), hint: t('episode.ref.multiSelect') },
+  { kind: 'scene', label: t('common.scene'), hint: t('episode.ref.singleSelect') },
+  { kind: 'prop', label: t('common.prop'), hint: t('episode.ref.multiSelect') },
 ]))
+
+// 绑定其他剧集素材时，同步补进本集资产列表；后端保存分镜时会自动补 episode 关联
+function linkBoundAssetToEpisode(asset) {
+  if (asset.linked) return
+  const target = asset.kind === 'character' ? chars.value : asset.kind === 'scene' ? scenes.value : propItems.value
+  if (target.some(item => item.id === asset.id)) return
+  const source = asset.kind === 'character' ? bindableChars.value : asset.kind === 'scene' ? bindableScenes.value : bindableProps.value
+  const raw = source.find(item => item.id === asset.id)
+  if (raw) target.push(raw)
+}
 
 // 右侧面板切换绑定：场景单选（切换/解绑），角色/道具多选（kind code 判断，不依赖显示文案）
 function toggleShotBind(sb, asset) {
+  if (!asset.bound) linkBoundAssetToEpisode(asset)
   if (asset.kind === 'scene') {
     const current = sb?.scene_id || sb?.sceneId
     updateField(sb, 'scene_id', current === asset.id ? null : asset.id)
@@ -4281,6 +4522,298 @@ function mergeDownloadName(m) {
   const base = String(m?.title || '').replace(/[\\/:*?"<>|]+/g, '_').trim()
   return `${base || t('episode.export.untitled')}.mp4`
 }
+const transitionSummary = computed(() => transitionState.value.summary || {
+  total: 0, ready: 0, missing: 0, pending: 0, processing: 0, failed: 0, skipped: 0,
+})
+const transitionProvider = computed(() => transitionState.value.provider)
+const transitionBusy = computed(() =>
+  (transitionSummary.value.pending || 0) + (transitionSummary.value.processing || 0) > 0)
+const transitionSupported = computed(() => transitionProvider.value?.first_last_frame === true)
+const transitionBoundaries = computed(() => transitionState.value.boundaries || [])
+const missingTransitionCount = computed(() =>
+  (transitionSummary.value.missing || 0) + (transitionSummary.value.failed || 0))
+const mergeDialogBoundaries = computed(() => {
+  const ids = new Set(mergeDialog.value.ids)
+  return transitionBoundaries.value.filter(b =>
+    ids.has(b.from_storyboard_id) && ids.has(b.to_storyboard_id))
+})
+const mergeDialogReadyCount = computed(() =>
+  mergeDialogBoundaries.value.filter(b => b.status === 'completed' && !b.stale).length)
+
+function transitionPairLabel(boundary) {
+  return t('episode.export.aiTransition.pair', {
+    from: boundary?.from_number ?? '?',
+    to: boundary?.to_number ?? '?',
+  })
+}
+function transitionStatusLabel(boundary) {
+  if (boundary?.status === 'completed' && boundary?.stale) return t('episode.export.aiTransition.status.stale')
+  return t(`episode.export.aiTransition.status.${boundary?.status || 'missing'}`)
+}
+function transitionStatusClass(boundary) {
+  if (boundary?.status === 'completed' && !boundary?.stale) return 'ok'
+  if (boundary?.stale || boundary?.status === 'failed') return 'failed'
+  if (boundary?.status === 'processing' || boundary?.status === 'pending') return 'pending'
+  return 'idle'
+}
+function openTransitionPreview(boundary) {
+  if (!boundary?.video_url) return
+  previewShot.value = {
+    id: `transition-${boundary.id}`,
+    video_url: boundary.video_url,
+    duration: Number(boundary.duration_actual) || null,
+    previewLabel: t('episode.export.aiTransition.previewTitle', {
+      from: boundary.from_number,
+      to: boundary.to_number,
+    }),
+    downloadName: `transition-S${boundary.from_number}-S${boundary.to_number}.mp4`,
+  }
+}
+function transitionDurationLabel(boundary) {
+  const actual = Number(boundary?.duration_actual)
+  if (Number.isFinite(actual) && actual > 0) return `${actual.toFixed(2)}s`
+  const effective = Number(boundary?.duration_effective)
+  if (Number.isFinite(effective) && effective > 0) {
+    return t('episode.export.aiTransition.effectiveDuration', { dur: effective })
+  }
+  return ''
+}
+function stopTransitionPolling() {
+  if (transitionTimer) { clearInterval(transitionTimer); transitionTimer = null }
+}
+function applyTransitionData(data) {
+  transitionState.value = {
+    loading: false,
+    boundaries: data?.boundaries || [],
+    summary: data?.summary || null,
+    provider: data?.provider || null,
+  }
+  syncTransitionPromptDrafts()
+}
+async function loadTransitions(ids = exportReadyIds.value) {
+  if (!epId.value) return
+  if (!ids?.length) {
+    transitionState.value = { loading: false, boundaries: [], summary: null, provider: null }
+    stopTransitionPolling()
+    return
+  }
+  try {
+    applyTransitionData(await transitionAPI.list(epId.value, ids))
+    scheduleTransitionPoll(ids)
+  } catch {
+    transitionState.value = { ...transitionState.value, loading: false }
+  }
+}
+function scheduleTransitionPoll(ids) {
+  stopTransitionPolling()
+  if (!transitionBusy.value) return
+  transitionTimer = setInterval(async () => {
+    try {
+      applyTransitionData(await transitionAPI.list(epId.value, ids))
+      if (!transitionBusy.value) stopTransitionPolling()
+    } catch { /* 下一轮继续 */ }
+  }, 3000)
+}
+async function prepareTransitionsFor(ids, options = {}) {
+  if (transitionPreparing.value || !epId.value) return
+  if (!transitionSupported.value) {
+    toast.error(t('episode.export.aiTransition.unsupported'))
+    return
+  }
+  const targets = missingTransitionCount.value
+  if (targets > 0 && !window.confirm(t('episode.export.aiTransition.costHint', { n: targets }))) return
+  transitionPreparing.value = true
+  try {
+    const result = await transitionAPI.prepare(epId.value, {
+      storyboard_ids: ids,
+      mode: 'missing',
+      duration: options.duration || 3,
+      audio_mode: options.audioMode || 'ambient',
+      ...transitionTextModelPayload(),
+    })
+    await loadTransitions(ids)
+    const failedCount = Number(result?.failed || 0)
+    const createdCount = Number(result?.created || 0)
+    if (failedCount > 0) {
+      const message = String(result?.failures?.[0]?.message || t('episode.export.aiTransition.actionFailed'))
+      if (createdCount === 0) toast.error(message)
+      else toast.warning(t('episode.export.aiTransition.partialFailed', { n: failedCount, message }))
+    } else {
+      toast.success(t('episode.export.aiTransition.prepared'))
+    }
+  } catch (e) {
+    toastError(e, { fallback: 'episode.export.aiTransition.actionFailed' })
+  } finally {
+    transitionPreparing.value = false
+  }
+}
+async function generateMissingTransitions() {
+  const ids = mergeDialog.value.open ? mergeDialog.value.ids : exportSelectedReadyIds.value
+  await prepareTransitionsFor(ids, {
+    duration: mergeDialog.value.duration,
+    audioMode: mergeDialog.value.audioMode,
+  })
+}
+async function retryTransitionItem(boundary) {
+  if (!boundary?.id || transitionPreparing.value) return
+  transitionPreparing.value = true
+  try {
+    await transitionAPI.retry(boundary.id, transitionTextModelPayload())
+    toast.success(t('episode.export.aiTransition.retried'))
+    await loadTransitions(mergeDialog.value.open ? mergeDialog.value.ids : exportSelectedReadyIds.value)
+  } catch (e) {
+    toastError(e, { fallback: 'episode.export.aiTransition.actionFailed' })
+  } finally {
+    transitionPreparing.value = false
+  }
+}
+async function skipTransitionItem(boundary) {
+  if (!boundary?.id || transitionPreparing.value) return
+  transitionPreparing.value = true
+  try {
+    await transitionAPI.skip(boundary.id)
+    toast.success(t('episode.export.aiTransition.skippedToast'))
+    await loadTransitions(mergeDialog.value.open ? mergeDialog.value.ids : exportSelectedReadyIds.value)
+  } catch (e) {
+    toastError(e, { fallback: 'episode.export.aiTransition.actionFailed' })
+  } finally {
+    transitionPreparing.value = false
+  }
+}
+function transitionPromptKey(boundary) {
+  return `${boundary?.from_storyboard_id}-${boundary?.to_storyboard_id}`
+}
+function toggleTransitionPrompt(boundary) {
+  const key = transitionPromptKey(boundary)
+  if (!key) return
+  if (transitionPromptOpen.value[key]) {
+    transitionPromptOpen.value = { ...transitionPromptOpen.value, [key]: false }
+    return
+  }
+  if (!(key in transitionPromptDrafts.value) || !transitionPromptDirty.value[key]) {
+    transitionPromptDrafts.value = {
+      ...transitionPromptDrafts.value,
+      [key]: String(boundary?.prompt || ''),
+    }
+  }
+  transitionPromptOpen.value = { ...transitionPromptOpen.value, [key]: true }
+}
+function syncTransitionPromptDrafts() {
+  const next = { ...transitionPromptDrafts.value }
+  for (const boundary of transitionBoundaries.value) {
+    const key = transitionPromptKey(boundary)
+    if (transitionPromptOpen.value[key] && !transitionPromptDirty.value[key]) {
+      next[key] = String(boundary?.prompt || '')
+    }
+  }
+  transitionPromptDrafts.value = next
+}
+function markTransitionPromptDirty(boundary) {
+  const key = transitionPromptKey(boundary)
+  if (!key) return
+  transitionPromptDirty.value = { ...transitionPromptDirty.value, [key]: true }
+  if (transitionPromptAnalyzed.value[key]) {
+    const next = { ...transitionPromptAnalyzed.value }
+    delete next[key]
+    transitionPromptAnalyzed.value = next
+  }
+}
+function markTransitionPromptClean(boundary) {
+  const key = transitionPromptKey(boundary)
+  if (!key) return
+  const dirty = { ...transitionPromptDirty.value }
+  delete dirty[key]
+  transitionPromptDirty.value = dirty
+  const analyzed = { ...transitionPromptAnalyzed.value }
+  delete analyzed[key]
+  transitionPromptAnalyzed.value = analyzed
+}
+function transitionPromptEffectiveSource(boundary) {
+  const key = transitionPromptKey(boundary)
+  if (key && transitionPromptAnalyzed.value[key]) return 'ai'
+  return boundary?.prompt_source || null
+}
+function transitionPromptSourceLabel(boundary) {
+  const source = transitionPromptEffectiveSource(boundary)
+  if (source === 'ai' || source === 'fallback' || source === 'manual') {
+    return t(`episode.export.aiTransition.prompt.source.${source}`)
+  }
+  return t('episode.export.aiTransition.prompt.source.none')
+}
+function transitionPromptSourceClass(boundary) {
+  return `source-${transitionPromptEffectiveSource(boundary) || 'none'}`
+}
+function transitionTextModelPayload() {
+  const configId = chatConfigId()
+  const model = chatModelOverride()
+  return {
+    ...(configId ? { text_config_id: configId } : {}),
+    ...(model ? { text_model: model } : {}),
+  }
+}
+function setTransitionPromptBusy(key, value) {
+  transitionPromptBusy.value = { ...transitionPromptBusy.value, [key]: value }
+}
+function transitionPromptDraftOf(boundary) {
+  return String(transitionPromptDrafts.value[transitionPromptKey(boundary)] ?? '').trim()
+}
+async function analyzeTransitionItem(boundary) {
+  const key = transitionPromptKey(boundary)
+  if (!boundary?.id || transitionPromptBusy.value[key]) return
+  setTransitionPromptBusy(key, true)
+  try {
+    const result = await transitionAPI.analyze(boundary.id, transitionTextModelPayload())
+    transitionPromptDrafts.value = { ...transitionPromptDrafts.value, [key]: String(result?.prompt || '') }
+    transitionPromptDirty.value = { ...transitionPromptDirty.value, [key]: true }
+    transitionPromptAnalyzed.value = { ...transitionPromptAnalyzed.value, [key]: true }
+    toast.success(t('episode.export.aiTransition.prompt.analyzeDone'))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.export.aiTransition.actionFailed' })
+  } finally {
+    setTransitionPromptBusy(key, false)
+  }
+}
+async function saveTransitionPromptItem(boundary) {
+  const key = transitionPromptKey(boundary)
+  if (!boundary?.id || transitionPromptBusy.value[key]) return
+  const prompt = transitionPromptDraftOf(boundary)
+  if (!prompt) {
+    toast.error(t('episode.export.aiTransition.prompt.empty'))
+    return
+  }
+  setTransitionPromptBusy(key, true)
+  try {
+    await transitionAPI.savePrompt(boundary.id, prompt)
+    markTransitionPromptClean(boundary)
+    toast.success(t('episode.export.aiTransition.prompt.saved'))
+    await loadTransitions(mergeDialog.value.open ? mergeDialog.value.ids : exportSelectedReadyIds.value)
+  } catch (e) {
+    toastError(e, { fallback: 'episode.export.aiTransition.actionFailed' })
+  } finally {
+    setTransitionPromptBusy(key, false)
+  }
+}
+async function regenerateTransitionWithPrompt(boundary) {
+  const key = transitionPromptKey(boundary)
+  if (!boundary?.id || transitionPromptBusy.value[key]) return
+  const prompt = transitionPromptDraftOf(boundary)
+  if (!prompt) {
+    toast.error(t('episode.export.aiTransition.prompt.empty'))
+    return
+  }
+  setTransitionPromptBusy(key, true)
+  try {
+    await transitionAPI.retry(boundary.id, { prompt, ...transitionTextModelPayload() })
+    markTransitionPromptClean(boundary)
+    toast.success(t('episode.export.aiTransition.retried'))
+    await loadTransitions(mergeDialog.value.open ? mergeDialog.value.ids : exportSelectedReadyIds.value)
+  } catch (e) {
+    toastError(e, { fallback: 'episode.export.aiTransition.actionFailed' })
+  } finally {
+    setTransitionPromptBusy(key, false)
+  }
+}
+
 function openMergeDialog() {
   if (!exportSelectedReadyIds.value.length) {
     toast.error(t('episode.export.selectFirst'))
@@ -4290,22 +4823,29 @@ function openMergeDialog() {
     open: true,
     ids: [...exportSelectedReadyIds.value],
     title: t('episode.export.defaultTitle', { n: episodeNumber }),
+    useAiTransitions: transitionSummary.value.ready > 0,
+    duration: 3,
+    audioMode: 'ambient',
   }
+  void loadTransitions(mergeDialog.value.ids).then(() => {
+    mergeDialog.value.useAiTransitions = transitionSupported.value && mergeDialogReadyCount.value > 0
+  })
 }
 function confirmMerge() {
   const ids = [...mergeDialog.value.ids]
   const title = mergeDialog.value.title.trim()
+  const useAiTransitions = mergeDialog.value.useAiTransitions && transitionSupported.value
   mergeDialog.value.open = false
-  void doMerge(ids, title)
+  void doMerge(ids, title, useAiTransitions)
 }
-async function doMerge(ids, title) {
+async function doMerge(ids, title, useAiTransitions = false) {
   const storyboardIds = Array.isArray(ids) ? ids : undefined
   if (storyboardIds && !storyboardIds.length) {
     toast.error(t('episode.export.selectFirst'))
     return
   }
   try {
-    await mergeAPI.merge(epId.value, storyboardIds, title)
+    await mergeAPI.merge(epId.value, storyboardIds, title, useAiTransitions)
     toast.success(t('episode.export.mergingToast'))
   } catch (e) {
     toastError(e, { fallback: 'episode.export.mergeFailed' })
@@ -4348,6 +4888,11 @@ async function loadConfigs() {
     textConfigs.value = txtCfgs || []
   } catch (e) { console.error('Failed to load AI configs', e) }
 }
+
+watch([panel, () => exportSelectedReadyIds.value.join(',')], ([current]) => {
+  if (current !== 'export') { stopTransitionPolling(); return }
+  void loadTransitions(exportSelectedReadyIds.value)
+}, { immediate: true })
 
 onMounted(async () => {
   await refresh()
@@ -4982,6 +5527,24 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   letter-spacing: 0.02em;
   padding: 0 2px;
 }
+.storyboard-ref-scope-hint {
+  margin: 2px 0 6px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+.storyboard-ref-scope {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--surface-outline);
+  color: var(--text-3);
+  font-size: 9.5px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+.storyboard-ref-scope:empty { display: none; }
 .storyboard-ref-goto {
   flex-shrink: 0;
   align-self: center;
@@ -7277,5 +7840,110 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
     width: 100%;
   }
 
+}
+
+/* ===== AI 过渡片段（导出页 + 拼接弹窗） ===== */
+.ai-transition-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 4px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--surface-outline);
+  border-radius: 999px;
+  background: var(--bg-hover);
+  font-size: 11px;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+.ai-transition-chip.unsupported { opacity: 0.65; }
+.ai-transition-chip-state { display: inline-flex; align-items: center; gap: 4px; color: var(--text-3); }
+.ai-transition-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--surface-outline);
+}
+.ai-transition-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-1);
+  cursor: pointer;
+}
+.ai-transition-toggle input { accent-color: var(--accent); }
+.ai-transition-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow: auto;
+}
+.ai-transition-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 1px solid var(--surface-outline);
+  border-radius: 6px;
+  background: var(--bg-hover);
+  font-size: 11px;
+}
+.ai-transition-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-transition-pair { min-width: 104px; color: var(--text-1); }
+.ai-transition-status {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-outline);
+  color: var(--text-2);
+}
+.ai-transition-status.ok { color: var(--success); }
+.ai-transition-status.failed { color: var(--error); }
+.ai-transition-status.pending { color: var(--accent); }
+.ai-transition-duration { white-space: nowrap; }
+.ai-transition-actions { display: flex; gap: 4px; margin-left: auto; }
+.ai-transition-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--surface-outline);
+}
+.ai-transition-prompt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ai-transition-prompt-source {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-outline);
+  color: var(--text-2);
+  font-size: 10px;
+}
+.ai-transition-prompt-source.source-ai { color: var(--success); }
+.ai-transition-prompt-source.source-fallback { color: var(--accent); }
+.ai-transition-prompt-source.source-manual { color: var(--text-1); }
+.ai-transition-prompt-input {
+  width: 100%;
+  min-height: 58px;
+  resize: vertical;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.ai-transition-prompt-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.ai-transition-prompt-note { margin: 0; color: var(--text-2); font-size: 10px; line-height: 1.4; }
+.ai-transition-pickers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 </style>

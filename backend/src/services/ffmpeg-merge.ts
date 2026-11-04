@@ -13,11 +13,20 @@ import { ffmpeg, checkFfmpegSuite } from '../utils/ffmpeg.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import { projectSubdirPath, projectStorageRelative } from './project-storage.js'
 import { buildMergeTransitionGraph, computeMergeSourceHash, mergeTransitionStyle } from './merge-plan.js'
+import { prepareTransitionInsertion, type TransitionSnapshotEntry } from './transition-merge.js'
 import { normalizeVideoAudioMode, type VideoAudioMode } from './video-audio.js'
 
 interface MergeClip {
   url: string
   transition: string
+  transitionMs?: number | null
+  transitionId?: number
+}
+
+export interface MergeOptions {
+  useAiTransitions?: boolean
+  /** 过渡片段两端相对上一片的转场时长（毫秒，默认 200） */
+  transitionMs?: number
 }
 
 function toAbsPath(relativePath: string): string {
@@ -29,7 +38,13 @@ function toAbsPath(relativePath: string): string {
  * 优先使用视频生成产物，兼容历史的 composedVideoUrl 数据。
  * 传入 storyboardIds 时只拼接所选镜头（仍按镜号顺序）。
  */
-export async function mergeEpisodeVideos(episodeId: number, dramaId: number, storyboardIds?: number[], title?: string): Promise<number> {
+export async function mergeEpisodeVideos(
+  episodeId: number,
+  dramaId: number,
+  storyboardIds?: number[],
+  title?: string,
+  options: MergeOptions = {},
+): Promise<number> {
   const episode = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
   const audioMode = normalizeVideoAudioMode(episode?.videoAudioMode)
 
@@ -43,11 +58,35 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
   }
 
   // 允许部分拼接:按镜号顺序拼接已生成的镜头,未生成的跳过
-  const clips = storyboards
-    .map(sb => ({ url: sb.videoUrl || sb.composedVideoUrl, transition: sb.transition || 'cut' }))
-    .filter(c => Boolean(c.url)) as MergeClip[]
+  const baseClips = storyboards
+    .map(sb => ({
+      id: sb.id,
+      url: sb.videoUrl || sb.composedVideoUrl || '',
+      transition: sb.transition || 'cut',
+    }))
+    .filter(c => Boolean(c.url))
 
-  if (clips.length === 0) throw new Error('所选镜头还没有可拼接的视频')
+  if (baseClips.length === 0) throw new Error('所选镜头还没有可拼接的视频')
+
+  let clips: MergeClip[] = baseClips.map(({ url, transition }) => ({ url, transition }))
+  let transitionsSnapshot: TransitionSnapshotEntry[] = []
+  let transitionUsed = 0
+  let transitionFallback = 0
+  if (options.useAiTransitions) {
+    const prepared = await prepareTransitionInsertion(episodeId, baseClips, { transitionMs: options.transitionMs })
+    clips = prepared.clips.map(clip => ({
+      url: clip.url,
+      transition: clip.transition || 'cut',
+      transitionMs: clip.transitionMs,
+      transitionId: clip.transitionId,
+    }))
+    transitionsSnapshot = prepared.snapshot
+    transitionUsed = prepared.used
+    transitionFallback = prepared.fallback
+    logTaskStart('MergeTask', 'ai-transitions', {
+      episodeId, used: transitionUsed, fallback: transitionFallback,
+    })
+  }
 
   // 拼接前探测 ffmpeg：二进制损坏时 fluent-ffmpeg 的同步 EFTYPE 会崩掉整个进程，
   // 这里提前拦截并给出可操作的修复指引（路由层会作为 400 返回前端）
@@ -58,13 +97,13 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
 
   // 校验视频文件真实存在:DB 里的 video_url 可能指向已被清理的文件,
   // 直接拼会得到 ffmpeg 的 "No such file or directory" 晦涩报错
-  const missing = clips.filter(c => !fs.existsSync(toAbsPath(c.url)))
+  const missing = baseClips.filter(c => !fs.existsSync(toAbsPath(c.url)))
   if (missing.length > 0) {
-    const nums = missing.map(c => `S${clips.indexOf(c) + 1}`).join('、')
+    const nums = missing.map(c => `S${baseClips.indexOf(c) + 1}`).join('、')
     throw new Error(`镜头 ${nums} 的视频文件已丢失（本地文件不存在），请重新生成这些镜头的视频，或在拼接时取消勾选`)
   }
 
-  const videos = clips.map(c => c.url)
+  const videos = baseClips.map(c => c.url)
 
   logTaskStart('MergeTask', 'episode-merge', { episodeId, dramaId, clips: videos.length })
 
@@ -78,8 +117,14 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
     model: 'ffmpeg-concat-h264-aac',
     status: 'processing',
     scenes: JSON.stringify(videos),
+    transitions: options.useAiTransitions ? JSON.stringify(transitionsSnapshot) : null,
     sourceHash: computeMergeSourceHash(clips, audioMode),
-    mixOptions: JSON.stringify({ audioMode }),
+    mixOptions: JSON.stringify({
+      audioMode,
+      ...(options.useAiTransitions
+        ? { aiTransitions: { requested: true, used: transitionUsed, fallback: transitionFallback } }
+        : {}),
+    }),
     createdAt: ts,
   })
   const mergeId = getInsertId(res)
@@ -106,7 +151,14 @@ async function doMerge(mergeId: number, episodeId: number, dramaId: number, clip
 
   // 分辨率档位真正生效后，同集可能混有 864×480 / 1376×768 / 1920×1088 的镜头。
   // concat 要求各路流参数一致，尺寸不同会拼出花屏/截断，这里先统一到多数派的画布。
-  const preparedVideos = await normalizeCanvasIfNeeded(videos, canvasDir)
+  let preparedVideos = await normalizeCanvasIfNeeded(videos, canvasDir)
+  // AI 过渡片段可能无音轨（Wan 2.2 kf2v / 部分 ComfyUI 工作流）；补静音轨后才能走 xfade。
+  const audioFillDir = clips.some(clip => clip.transitionId) && audioMode !== 'silent'
+    ? path.join(listDir, `audio-${uuid()}`)
+    : null
+  if (audioFillDir) {
+    preparedVideos = await ensureClipAudioTracks(preparedVideos, audioFillDir)
+  }
 
   const listContent = preparedVideos
     .map(v => `file '${toAbsPath(v)}'`)
@@ -135,7 +187,7 @@ async function doMerge(mergeId: number, episodeId: number, dramaId: number, clip
       const hasTransitions = clips.some(clip => mergeTransitionStyle(clip.transition))
       if (hasTransitions) {
         try {
-          await mergeWithTransitions(preparedVideos, clips.map(clip => clip.transition), outputPath)
+          await mergeWithTransitions(preparedVideos, clips, outputPath)
           transitioned = true
         } catch (error: any) {
           console.warn('[Merge] transition merge failed, falling back to concat:', error?.message || error)
@@ -179,6 +231,7 @@ async function doMerge(mergeId: number, episodeId: number, dramaId: number, clip
     // 无论成功失败都清掉 concat 列表与画布归一临时文件，避免 temp 目录堆积
     fs.rmSync(listPath, { force: true })
     fs.rmSync(canvasDir, { recursive: true, force: true })
+    if (audioFillDir) fs.rmSync(audioFillDir, { recursive: true, force: true })
   }
 
   // 获取时长
@@ -287,6 +340,42 @@ function ffprobeHasAudio(file: string): Promise<boolean> {
 async function allClipsHaveAudio(videos: string[]): Promise<boolean> {
   const results = await Promise.all(videos.map(v => ffprobeHasAudio(toAbsPath(v))))
   return results.every(Boolean)
+}
+
+/** 过渡片段无声时补一条静音轨，保证 xfade + acrossfade 路径可用 */
+async function ensureClipAudioTracks(videos: string[], workDir: string): Promise<string[]> {
+  const hasAudio = await Promise.all(videos.map(v => ffprobeHasAudio(toAbsPath(v))))
+  if (hasAudio.every(Boolean)) return videos
+  fs.mkdirSync(workDir, { recursive: true })
+  const output: string[] = []
+  for (let i = 0; i < videos.length; i++) {
+    if (hasAudio[i]) {
+      output.push(videos[i])
+      continue
+    }
+    const target = path.join(workDir, `${i}.mp4`)
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg()
+        .input(toAbsPath(videos[i]))
+        .input('anullsrc=r=48000:cl=stereo')
+        .inputOptions(['-f', 'lavfi'])
+        .outputOptions([
+          '-map', '0:v:0',
+          '-map', '1:a:0',
+          '-c:v', 'copy',
+          '-c:a', 'aac',
+          '-b:a', '192k',
+          '-shortest',
+          '-movflags', '+faststart',
+        ])
+        .output(target)
+        .on('end', () => resolve())
+        .on('error', (err) => reject(err))
+        .run()
+    })
+    output.push(target)
+  }
+  return output
 }
 
 /**
@@ -438,7 +527,7 @@ function probeDurationMs(file: string): Promise<number> {
  * 按分镜 transition 拼接：硬切走 concat，淡入淡出/叠化/划像走 xfade，
  * 音频同步 acrossfade，整片最后做一次 loudnorm。失败由调用方回退 concat。
  */
-async function mergeWithTransitions(videos: string[], transitions: string[], outputPath: string): Promise<void> {
+async function mergeWithTransitions(videos: string[], clips: MergeClip[], outputPath: string): Promise<void> {
   const [durationsMs, size] = await Promise.all([
     Promise.all(videos.map(v => probeDurationMs(toAbsPath(v)))),
     probeVideoSize(toAbsPath(videos[0])),
@@ -447,7 +536,11 @@ async function mergeWithTransitions(videos: string[], transitions: string[], out
   if (durationsMs.some(d => d <= 0)) throw new Error('无法读取镜头时长，不能做转场拼接')
 
   const { graph } = buildMergeTransitionGraph(
-    videos.map((_v, i) => ({ durationMs: durationsMs[i], transition: transitions[i] })),
+    videos.map((_v, i) => ({
+      durationMs: durationsMs[i],
+      transition: clips[i]?.transition,
+      transitionMs: clips[i]?.transitionMs,
+    })),
     size.width,
     size.height,
   )

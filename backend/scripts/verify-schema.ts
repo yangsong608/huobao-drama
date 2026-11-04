@@ -69,7 +69,7 @@ const REQUIRED_COLUMNS: Record<string, string[]> = {
   characters: ['voice_prompt', 'voice_status'],
   video_merges: ['kind', 'source_hash', 'subtitle_url', 'dialogue_track_url', 'bgm_url', 'mix_options'],
   storyboards: ['source_hash', 'transition', 'continuity'],
-  dramas: ['narrator_voice_id', 'bgm_url', 'source_novel_id', 'story_bible'],
+  dramas: ['narrator_voice_id', 'bgm_url', 'source_novel_id', 'story_bible', 'visual_background'],
 }
 
 const db = new Database(dbPath)

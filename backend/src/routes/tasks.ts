@@ -6,11 +6,16 @@ import { generateImage, generateVideo, recoverVideoTask } from '../services/gene
 import { safeTaskError } from '../services/video-download.js'
 import { getActiveConfig, getConfigById } from '../services/ai.js'
 import { getDramaStylePrompt } from '../services/style-preset.js'
-import { getDramaBackground, withDramaBackground } from '../services/drama-background.js'
+import {
+  getDramaBackground,
+  getDramaVisualBackground,
+  withDramaBackground,
+  withVisualBackground,
+} from '../services/drama-background.js'
 import { resolveStoryboardVoiceReferences } from '../services/character-voice-references.js'
 import { resolutionSupportError } from '../services/model-capabilities.js'
 import { normalizeVideoAudioMode } from '../services/video-audio.js'
-import { compileLocalH3Prompt } from '../services/h3-prompt.js'
+import { compileLocalH3Prompt, translateH3Text } from '../services/h3-prompt.js'
 import { stripLegacyAudioInstruction } from '../services/video-prompt-sanitize.js'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
 
@@ -237,17 +242,32 @@ app.post('/', async (c) => {
     })
     logTaskPayload('TaskAPI', 'request body', body)
 
-    // 视频生成时把「项目背景 + 项目视觉风格」注入提示词最前方（与图片侧的自动注入保持一致口径）
-    // 顺序：背景（世界观/时代）→ 风格（画法/色调）→ 分镜提示词
+    // 视频生成只注入「视觉背景 + 项目视觉风格」；剧情背景留给剧本/分镜/资产，避免诱导旁白。
+    // 顺序：视觉背景（场景/光影）→ 风格（画法/色调）→ 分镜提示词
     const promptDramaId = body.drama_id ?? storyboardDramaId ?? null
     let videoPrompt = videoBody?.prompt
+    let visualBackgroundPrompt = ''
     if (type === 'video' && String(videoPrompt || '').trim()) {
-      const [stylePrompt, background] = await Promise.all([
+      const [stylePrompt, visualBackground] = await Promise.all([
         getDramaStylePrompt(promptDramaId),
-        getDramaBackground(promptDramaId),
+        getDramaVisualBackground(promptDramaId),
       ])
       if (stylePrompt) videoPrompt = `${stylePrompt}，\n${videoPrompt}`
-      videoPrompt = withDramaBackground(String(videoPrompt || ''), background)
+      if (visualBackground) {
+        if (localVideoShim) {
+          const translated = await translateH3Text(visualBackground)
+          if (translated) {
+            visualBackgroundPrompt = translated
+          } else {
+            logTaskWarn('TaskAPI', 'visual-background-skipped', {
+              dramaId: promptDramaId,
+              reason: 'translate-failed',
+            })
+          }
+        } else {
+          visualBackgroundPrompt = visualBackground
+        }
+      }
     }
 
     // 旧模板生成的「音频：人声清晰靠前……旁白/心声为画外音」会诱导云端模型生成人声/旁白，
@@ -273,6 +293,11 @@ app.post('/', async (c) => {
         audioMode,
         chars: `${rawPrompt.length}->${videoPrompt.length}`,
       })
+    }
+
+    // 本地 H3 的视觉背景在编译后再前置，避免重复翻译；云端则在拼装阶段已就绪
+    if (type === 'video' && visualBackgroundPrompt) {
+      videoPrompt = withVisualBackground(String(videoPrompt || ''), visualBackgroundPrompt)
     }
 
     // 分镜图等直连图片任务同样带项目背景（资产生图走各自路由，已在路由内注入）

@@ -11,8 +11,10 @@ export const dramas = sqliteTable('dramas', {
   description: text('description'),
   genre: text('genre'),
   style: text('style').default('3d'),
-  /** 项目背景（世界观/时代/地域/主线设定）：资产与视频提示词生成时自动拼接 */
+  /** 项目背景（世界观/时代/地域/主线设定）：资产与剧本生成时自动拼接 */
   background: text('background'),
+  /** 视觉背景（场景/光影/色彩等画面描述）：仅注入视频提示词，避免剧情梗概诱导旁白 */
+  visualBackground: text('visual_background'),
   aspectRatio: text('aspect_ratio').default('16:9'),
   totalEpisodes: integer('total_episodes').default(1),
   totalDuration: integer('total_duration').default(0),
@@ -266,6 +268,8 @@ export const sysTask = sqliteTable('sys_task', {
   errorCode: text('error_code'),
   type: text('type').notNull(), // image | video
   storyboardId: integer('storyboard_id'),
+  /** AI 过渡任务指向 video_transitions.id；此时 storyboard_id 为空 */
+  transitionId: integer('transition_id'),
   dramaId: integer('drama_id'),
   sceneId: integer('scene_id'),
   characterId: integer('character_id'),
@@ -303,6 +307,8 @@ export const videoMerges = sqliteTable('video_merges', {
   kind: text('kind').default('concat'),
   /** 幂等指纹：分镜集合 + 混音参数（V2） */
   sourceHash: text('source_hash'),
+  /** AI 过渡断点快照（JSON）：used/fallback 与时长，scenes 仍只存镜头（V3） */
+  transitions: text('transitions'),
   subtitleUrl: text('subtitle_url'),
   dialogueTrackUrl: text('dialogue_track_url'),
   bgmUrl: text('bgm_url'),
@@ -310,6 +316,42 @@ export const videoMerges = sqliteTable('video_merges', {
   createdAt: text('created_at').notNull(),
   completedAt: text('completed_at'),
   deletedAt: text('deleted_at'),
+})
+
+// AI 过渡片段：相邻两镜断点，一断点一行；同集同断点唯一
+export const videoTransitions = sqliteTable('video_transitions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id'),
+  fromStoryboardId: integer('from_storyboard_id').notNull(),
+  toStoryboardId: integer('to_storyboard_id').notNull(),
+  fromVideoUrl: text('from_video_url'),
+  toVideoUrl: text('to_video_url'),
+  firstFrameUrl: text('first_frame_url'),
+  lastFrameUrl: text('last_frame_url'),
+  /** 来源视频指纹：URL + 文件大小/mtime，用于复用与过期判断 */
+  sourceHash: text('source_hash'),
+  prompt: text('prompt'),
+  /** ai = 视觉模型分析首尾帧生成；fallback = 文字模板回退；manual = 用户编辑后锁定 */
+  promptSource: text('prompt_source'),
+  provider: text('provider'),
+  model: text('model'),
+  configId: integer('config_id'),
+  configBaseUrl: text('config_base_url'),
+  durationRequested: real('duration_requested'),
+  /** 按模型档位折算后的请求时长，落库便于复现 */
+  durationEffective: real('duration_effective'),
+  durationActual: real('duration_actual'),
+  audioMode: text('audio_mode').default('ambient'),
+  status: text('status').default('pending'),
+  videoUrl: text('video_url'),
+  sysTaskId: integer('sys_task_id'),
+  errorMsg: text('error_msg'),
+  /** 0 = 用户跳过该断点 */
+  enabled: integer('enabled', { mode: 'boolean' }).default(true),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  completedAt: text('completed_at'),
 })
 
 export const props = sqliteTable('props', {

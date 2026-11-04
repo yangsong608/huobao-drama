@@ -449,6 +449,12 @@ async function getEpisodeTaskScope(episodeId: number) {
   const dramaProps = await db.select().from(schema.props).where(eq(schema.props.dramaId, ep.dramaId))
   const propIds = new Set(dramaProps.map(p => p.id))
 
+  // 过渡任务不挂分镜，归属键是 video_transitions.episode_id
+  const episodeTransitions = await db.select({ id: schema.videoTransitions.id })
+    .from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, episodeId))
+  const transitionIds = new Set(episodeTransitions.map(row => row.id))
+
   const allTasks = await db.select().from(schema.sysTask).where(eq(schema.sysTask.dramaId, ep.dramaId))
   // 整集 ComfyUI 任务不挂分镜，归属键在 params（episodeId + comfyTimeline）
   const isEpisodeRun = (params: string | null) => {
@@ -465,6 +471,7 @@ async function getEpisodeTaskScope(episodeId: number) {
       (t.sceneId && sceneIds.has(t.sceneId)) ||
       (t.characterId && characterIds.has(t.characterId)) ||
       (t.propId && propIds.has(t.propId)) ||
+      (t.transitionId && transitionIds.has(t.transitionId)) ||
       isEpisodeRun(t.params)
     )
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))

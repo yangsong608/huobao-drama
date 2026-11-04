@@ -70,6 +70,18 @@ test('ambient and silent modes drop audio and narration lines but keep mouth mov
   }
 })
 
+test('short quoted terms keep their text while quote marks are removed', () => {
+  const out = compileH3Prompt('场景：寻找“陆缘”，四周是无尽海。', 'native')
+  assert.match(out, /寻找陆缘/)
+  assert.doesNotMatch(out, /[「」“”]/)
+})
+
+test('unmatched sentence-like quoted dialogue is still removed', () => {
+  const out = compileH3Prompt('0-3秒：林小雨：「早上好。」', 'native')
+  assert.doesNotMatch(out, /早上好/)
+  assert.doesNotMatch(out, /[「」“”]/)
+})
+
 test('unknown hash and at tokens are removed without losing surrounding action', () => {
   const out = compileH3Prompt('#01 镜头：@林小雨推门，#无名角色离开。', 'native')
   assert.match(out, /#01/)

@@ -71,6 +71,31 @@ function insertTask(dramaId: number, storyboardId: number, status: string): numb
   return Number(res.lastInsertRowid)
 }
 
+function insertTransition(dramaId: number, episodeId: number): number {
+  const res = db.insert(schema.videoTransitions).values({
+    episodeId,
+    dramaId,
+    fromStoryboardId: 1,
+    toStoryboardId: 2,
+    status: 'processing',
+    createdAt: ts,
+    updatedAt: ts,
+  }).run()
+  return Number(res.lastInsertRowid)
+}
+
+function insertTransitionTask(dramaId: number, transitionId: number): number {
+  const res = db.insert(schema.sysTask).values({
+    type: 'video',
+    dramaId,
+    transitionId,
+    status: 'processing',
+    createdAt: ts,
+    updatedAt: ts,
+  }).run()
+  return Number(res.lastInsertRowid)
+}
+
 function insertMerge(episodeId: number): number {
   const res = db.insert(schema.videoMerges).values({
     episodeId,
@@ -124,6 +149,27 @@ test('清空只删除当前集已完成/失败任务，保留进行中、其他�
   const listBody = await listResponse.json() as any
   assert.deepEqual(listBody.data.tasks.map((t: any) => t.id), [processingId])
   assert.equal(listBody.data.merges.length, 1)
+})
+
+test('过渡任务按 video_transitions.episode_id 归属到本集任务列表', async () => {
+  const dramaId = insertDrama()
+  const episodeId = insertEpisode(dramaId)
+  const transitionId = insertTransition(dramaId, episodeId)
+  const taskId = insertTransitionTask(dramaId, transitionId)
+
+  const otherEpisodeId = insertEpisode(dramaId)
+  const otherTransitionId = insertTransition(dramaId, otherEpisodeId)
+  const otherTaskId = insertTransitionTask(dramaId, otherTransitionId)
+
+  const response = await app.fetch(new Request(
+    `http://localhost/api/v1/episodes/${episodeId}/generation-tasks`,
+  ))
+  const body = await response.json() as any
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(body.data.tasks.map((t: any) => t.id), [taskId])
+  assert.equal(body.data.tasks[0].transition_id, transitionId)
+  assert.equal(body.data.tasks.some((t: any) => t.id === otherTaskId), false)
 })
 
 test('没有可清空任务时返回 0，不误删进行中任务', async () => {

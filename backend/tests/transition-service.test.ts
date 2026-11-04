@@ -1,0 +1,556 @@
+/**
+ * 过渡服务：断点落库、提交参数、复用/过期、跳过、能力门禁、本地 H3 英文化。
+ */
+import { test, after } from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
+const root = await fs.mkdtemp(path.join(os.tmpdir(), 'huobao-transition-service-'))
+process.env.SQLITE_PATH = path.join(root, 'test.sqlite3')
+process.env.HUOBAO_DATA_DIR = root
+process.env.STORAGE_PATH = path.join(root, 'static')
+process.env.MYSQL_AUTO_IMPORT = 'false'
+
+const { db, schema, getInsertId } = await import('../src/db/index.ts')
+const { eq } = await import('drizzle-orm')
+const {
+  listTransitions,
+  prepareTransitions,
+  retryTransition,
+  skipTransition,
+  analyzeTransitionPrompt,
+  saveTransitionPrompt,
+} = await import('../src/services/transition-service.ts')
+
+const ts = '2026-11-05T00:00:00.000Z'
+let videoCounter = 0
+let submitCounter = 900
+
+after(async () => {
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+async function insertBaseConfig(overrides: Record<string, unknown> = {}) {
+  const res = await db.insert(schema.aiServiceConfigs).values({
+    serviceType: 'video',
+    provider: 'aliyun',
+    name: '测试视频配置',
+    baseUrl: 'https://example.com',
+    apiKey: 'test-key',
+    model: 'wan3.0-video',
+    isActive: true,
+    createdAt: ts,
+    updatedAt: ts,
+    ...overrides,
+  } as any)
+  return getInsertId(res)
+}
+
+async function seedEpisode(options: {
+  videoConfigId?: number | null
+  storyboards?: { number: number; description?: string; continuity?: string; video?: boolean }[]
+} = {}) {
+  const dramaRes = await db.insert(schema.dramas).values({
+    title: `过渡项目-${videoCounter}`,
+    aspectRatio: '16:9',
+    createdAt: ts,
+    updatedAt: ts,
+  })
+  const dramaId = getInsertId(dramaRes)
+  const episodeRes = await db.insert(schema.episodes).values({
+    dramaId,
+    episodeNumber: 1,
+    title: '第1集',
+    resolution: '720p',
+    videoConfigId: options.videoConfigId ?? null,
+    createdAt: ts,
+    updatedAt: ts,
+  })
+  const episodeId = getInsertId(episodeRes)
+  const ids: number[] = []
+  for (const item of options.storyboards ?? [{ number: 1 }, { number: 2 }]) {
+    const videoRel = `static/projects/${dramaId}/videos/sb-${item.number}-${++videoCounter}.mp4`
+    const absolute = path.join(root, videoRel)
+    fsSync.mkdirSync(path.dirname(absolute), { recursive: true })
+    fsSync.writeFileSync(absolute, Buffer.alloc(1024 + videoCounter))
+    const sbRes = await db.insert(schema.storyboards).values({
+      episodeId,
+      storyboardNumber: item.number,
+      sceneId: 1,
+      description: item.description ?? (item.number === 1 ? '林晚站在雨夜街头。' : '林晚推门走进咖啡馆。'),
+      continuity: item.continuity ?? '',
+      movement: '缓慢推近',
+      atmosphere: '冷色调雨夜',
+      videoUrl: item.video === false ? null : videoRel,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+    ids.push(getInsertId(sbRes))
+  }
+  return { dramaId, episodeId, storyboardIds: ids }
+}
+
+function fakeDeps(options: { analyzeError?: Error; failSubmitFor?: number[] } = {}) {
+  const submissions: any[] = []
+  const taskIds: number[] = []
+  const frameCalls: { videoPath: string; position: string; label?: string }[] = []
+  const analyzeCalls: any[] = []
+  return {
+    submissions,
+    taskIds,
+    frameCalls,
+    analyzeCalls,
+    deps: {
+      submit: async (params: any) => {
+        const index = submissions.length
+        submissions.push(params)
+        if (options.failSubmitFor?.includes(index)) throw new Error('本地 H3 过渡提示词仅支持英文')
+        const id = ++submitCounter
+        taskIds.push(id)
+        return id
+      },
+      extractFrame: async (videoPath: string, position: 'first' | 'last', options: any) => {
+        frameCalls.push({ videoPath, position, label: options?.label })
+        const relativePath = `static/projects/1/transitions/frames/fake-${options?.label}-${position}.jpg`
+        const absolutePath = path.join(root, relativePath)
+        fsSync.mkdirSync(path.dirname(absolutePath), { recursive: true })
+        fsSync.writeFileSync(absolutePath, Buffer.alloc(256))
+        return { relativePath, absolutePath, width: 1280, height: 720 }
+      },
+      translate: async (text: string) => `EN: English description of the shot (${text.length} chars)`,
+      analyze: async (input: any) => {
+        analyzeCalls.push(input)
+        if (options.analyzeError) throw options.analyzeError
+        return {
+          prompt: input.localShim
+            ? 'Camera glides forward through the rain as warm cafe light grows in the frame.'
+            : '镜头从雨夜街角平滑推进到咖啡馆门口，雨丝与暖光自然衔接。',
+          configId: input.configId ?? null,
+          model: input.model || 'fake-vision',
+        }
+      },
+    },
+  }
+}
+
+test('prepare 为断点建记录并提交首尾帧任务', async () => {
+  const configId = await insertBaseConfig()
+  const { dramaId, episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, taskIds, frameCalls, deps } = fakeDeps()
+
+  const result = await prepareTransitions({
+    episodeId,
+    storyboardIds,
+    configId,
+    duration: 3,
+    audioMode: 'ambient',
+  }, deps)
+
+  assert.equal(result.created, 1)
+  assert.equal(result.failed, 0)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  assert.equal(row.fromStoryboardId, storyboardIds[0])
+  assert.equal(row.toStoryboardId, storyboardIds[1])
+  assert.equal(row.dramaId, dramaId)
+  assert.equal(row.status, 'processing')
+  assert.equal(row.sysTaskId, taskIds[0])
+  // 断点首帧取上一镜尾帧，断点尾帧取下一镜首帧。
+  assert.match(row.firstFrameUrl || '', /last/)
+  assert.match(row.lastFrameUrl || '', /first/)
+  assert.equal(row.promptSource, 'ai')
+  assert.equal(row.prompt, '镜头从雨夜街角平滑推进到咖啡馆门口，雨丝与暖光自然衔接。')
+  assert.equal(row.durationRequested, 3)
+  assert.equal(row.durationEffective, 3)
+  assert.equal(row.audioMode, 'ambient')
+  assert.equal(row.provider, 'aliyun')
+  assert.equal(row.model, 'wan3.0-video')
+  assert.equal(row.enabled, true)
+  assert.match(row.sourceHash || '', /^[0-9a-f]{64}$/)
+
+  assert.equal(frameCalls.length, 2)
+  assert.equal(frameCalls[0].position, 'last')
+  assert.equal(frameCalls[0].label, `sb-${storyboardIds[0]}`)
+  assert.equal(frameCalls[1].position, 'first')
+  assert.equal(frameCalls[1].label, `sb-${storyboardIds[1]}`)
+
+  assert.equal(submissions.length, 1)
+  assert.equal(submissions[0].transitionId, row.id)
+  assert.equal(submissions[0].episodeId, episodeId)
+  assert.equal(submissions[0].duration, 3)
+  assert.equal(submissions[0].allowShortDuration, false)
+  assert.match(submissions[0].firstFrameUrl, /fake-sb-\d+-last/)
+  assert.match(submissions[0].lastFrameUrl, /fake-sb-\d+-first/)
+  assert.equal(submissions[0].prompt, row.prompt)
+})
+
+test('list 返回缺失/处理中状态与能力摘要', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { deps } = fakeDeps()
+
+  const before = await listTransitions({ episodeId, storyboardIds })
+  assert.equal(before.summary.total, 1)
+  assert.equal(before.summary.missing, 1)
+  assert.equal(before.boundaries[0].status, 'missing')
+  assert.equal(before.provider?.first_last_frame, true)
+
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const afterPrepare = await listTransitions({ episodeId, storyboardIds })
+  assert.equal(afterPrepare.summary.processing, 1)
+  assert.equal(afterPrepare.boundaries[0].status, 'processing')
+  assert.equal(afterPrepare.boundaries[0].promptSource, 'ai')
+  assert.equal(afterPrepare.boundaries[0].prompt, '镜头从雨夜街角平滑推进到咖啡馆门口，雨丝与暖光自然衔接。')
+})
+
+test('运行中的断点再次 prepare 不重复提交也不改写状态', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, taskIds, deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+
+  const second = await prepareTransitions({ episodeId, storyboardIds, duration: 3, mode: 'all' }, deps)
+
+  assert.equal(submissions.length, 1)
+  assert.equal(second.created, 0)
+  assert.equal(second.skipped, 1)
+  const [unchanged] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(unchanged.status, 'processing')
+  assert.equal(unchanged.sysTaskId, taskIds[0])
+  assert.equal(unchanged.errorMsg, null)
+})
+
+test('已完成且来源未变的断点直接复用，不重复提交', async () => {
+  const configId = await insertBaseConfig()
+  const { dramaId, episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  const videoRel = `static/projects/${dramaId}/transitions/transition-${row.id}.mp4`
+  const absolute = path.join(root, videoRel)
+  fsSync.mkdirSync(path.dirname(absolute), { recursive: true })
+  fsSync.writeFileSync(absolute, Buffer.alloc(2048))
+  await db.update(schema.videoTransitions).set({ status: 'completed', videoUrl: videoRel }).where(eq(schema.videoTransitions.id, row.id))
+
+  const result = await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  assert.equal(result.reused, 1)
+  assert.equal(result.created, 0)
+  assert.equal(submissions.length, 1)
+  assert.equal((await listTransitions({ episodeId, storyboardIds })).summary.ready, 1)
+})
+
+test('来源视频变化后重新生成并覆盖原断点', async () => {
+  const configId = await insertBaseConfig()
+  const { dramaId, episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  const oldRel = `static/projects/${dramaId}/transitions/transition-${row.id}.mp4`
+  fsSync.mkdirSync(path.dirname(path.join(root, oldRel)), { recursive: true })
+  fsSync.writeFileSync(path.join(root, oldRel), Buffer.alloc(2048))
+  await db.update(schema.videoTransitions)
+    .set({ status: 'completed', videoUrl: oldRel })
+    .where(eq(schema.videoTransitions.id, row.id))
+  fsSync.appendFileSync(path.join(root, `static/projects/${dramaId}/videos/sb-1-${videoCounter - 1}.mp4`), Buffer.alloc(10))
+
+  const result = await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  assert.equal(result.created, 1)
+  assert.equal(submissions.length, 2)
+  const rows = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].id, row.id)
+  assert.notEqual(rows[0].sourceHash, row.sourceHash)
+})
+
+test('skip 后记录保留但不再参与生成，list 显示 skipped', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  await skipTransition(row.id)
+  const result = await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  assert.equal(result.skipped, 1)
+  assert.equal(submissions.length, 1)
+  const view = await listTransitions({ episodeId, storyboardIds })
+  assert.equal(view.boundaries[0].status, 'skipped')
+  assert.equal(view.summary.skipped, 1)
+})
+
+test('模型不支持首尾帧时拒绝生成且不创建任务', async () => {
+  const configId = await insertBaseConfig({ model: 'wan2.2-i2v-plus' })
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, deps } = fakeDeps()
+
+  await assert.rejects(
+    prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps),
+    /首尾帧/,
+  )
+  assert.equal(submissions.length, 0)
+  const rows = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  assert.equal(rows.length, 0)
+})
+
+test('本地 H3 使用帧网格时长并把提示词限制为英文', async () => {
+  const configId = await insertBaseConfig({
+    provider: 'minimax',
+    model: 'MiniMax-H3',
+    baseUrl: 'http://127.0.0.1:8190',
+  })
+  const { episodeId, storyboardIds } = await seedEpisode({
+    videoConfigId: configId,
+    storyboards: [
+      { number: 1, description: '两人站在天台栏杆旁。', continuity: '保持同一服装。' },
+      { number: 2, description: '两人转身看向城市夜景。', continuity: '' },
+    ],
+  })
+  const { submissions, deps } = fakeDeps()
+  const result = await prepareTransitions({ episodeId, storyboardIds, duration: 3, audioMode: 'silent' }, deps)
+
+  assert.equal(result.created, 1)
+  assert.equal(submissions[0].duration, 3.042)
+  assert.equal(submissions[0].allowShortDuration, true)
+  assert.match(submissions[0].prompt, /Camera glides/)
+  assert.doesNotMatch(submissions[0].prompt, /[\u4e00-\u9fff]/)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  assert.equal(row.promptSource, 'ai')
+})
+
+test('视觉分析失败时回退文字提示词并标记 fallback', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, deps } = fakeDeps({ analyzeError: new Error('当前文本模型不支持图片理解') })
+
+  const result = await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+
+  assert.equal(result.created, 1)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  assert.equal(row.promptSource, 'fallback')
+  assert.match(row.prompt || '', /S1/)
+  assert.match(row.prompt || '', /S2/)
+  assert.equal(submissions[0].prompt, row.prompt)
+})
+
+test('翻译失败时省略描述段落但不把中文送进本地 H3', async () => {
+  const configId = await insertBaseConfig({
+    provider: 'minimax',
+    model: 'MiniMax-H3',
+    baseUrl: 'http://127.0.0.1:8190',
+  })
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, deps } = fakeDeps({ analyzeError: new Error('视觉模型调用失败') })
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, {
+    ...deps,
+    translate: async () => null,
+  })
+
+  assert.equal(submissions.length, 1)
+  assert.doesNotMatch(submissions[0].prompt, /林晚/)
+  assert.match(submissions[0].prompt, /A short cinematic transition shot/)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  assert.equal(row.promptSource, 'fallback')
+})
+
+test('retry 重新提交原断点并拒绝运行中的任务', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, analyzeCalls, deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+
+  await assert.rejects(retryTransition(row.id, {}, deps), /运行中/)
+
+  await db.update(schema.videoTransitions).set({ status: 'failed', errorMsg: '测试失败' }).where(eq(schema.videoTransitions.id, row.id))
+  await retryTransition(row.id, {}, deps)
+  assert.equal(submissions.length, 2)
+  assert.equal(analyzeCalls.length, 2)
+  const [retried] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(retried.status, 'processing')
+  assert.equal(retried.errorMsg, null)
+  assert.equal(retried.promptSource, 'ai')
+})
+
+test('AI 分析使用页面选中的文本模型与断点两帧', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { analyzeCalls, deps } = fakeDeps()
+
+  await prepareTransitions({
+    episodeId,
+    storyboardIds,
+    duration: 3,
+    textConfigId: 42,
+    textModel: 'qwen-vl-max',
+  }, deps)
+
+  assert.equal(analyzeCalls.length, 1)
+  assert.equal(analyzeCalls[0].configId, 42)
+  assert.equal(analyzeCalls[0].model, 'qwen-vl-max')
+  assert.match(analyzeCalls[0].firstFramePath, /fake-sb-\d+-last\.jpg/)
+  assert.match(analyzeCalls[0].lastFramePath, /fake-sb-\d+-first\.jpg/)
+  assert.equal(analyzeCalls[0].prevDescription, '林晚站在雨夜街头。')
+  assert.equal(analyzeCalls[0].nextDescription, '林晚推门走进咖啡馆。')
+  assert.equal(analyzeCalls[0].localShim, false)
+})
+
+test('retry 提交用户修改后的提示词并标记 manual', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, analyzeCalls, deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  await db.update(schema.videoTransitions).set({ status: 'failed' }).where(eq(schema.videoTransitions.id, row.id))
+
+  await retryTransition(row.id, { prompt: '  用户改写的过渡提示词，镜头缓慢横移。  ' }, deps)
+
+  assert.equal(analyzeCalls.length, 1)
+  assert.equal(submissions.at(-1).prompt, '用户改写的过渡提示词，镜头缓慢横移。')
+  const [retried] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(retried.prompt, '用户改写的过渡提示词，镜头缓慢横移。')
+  assert.equal(retried.promptSource, 'manual')
+})
+
+test('来源视频变化后沿用用户手动提示词，不重新分析', async () => {
+  const configId = await insertBaseConfig()
+  const { dramaId, episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, analyzeCalls, deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  const videoRel = `static/projects/${dramaId}/transitions/transition-${row.id}.mp4`
+  fsSync.mkdirSync(path.dirname(path.join(root, videoRel)), { recursive: true })
+  fsSync.writeFileSync(path.join(root, videoRel), Buffer.alloc(2048))
+  await db.update(schema.videoTransitions)
+    .set({ status: 'completed', videoUrl: videoRel, prompt: '用户锁定的提示词', promptSource: 'manual' })
+    .where(eq(schema.videoTransitions.id, row.id))
+
+  const boards = await db.select().from(schema.storyboards).where(eq(schema.storyboards.episodeId, episodeId))
+  const fromVideo = boards.find(board => board.id === row.fromStoryboardId)?.videoUrl
+  fsSync.appendFileSync(path.join(root, String(fromVideo)), Buffer.alloc(10))
+
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+
+  assert.equal(analyzeCalls.length, 1)
+  assert.equal(submissions.at(-1).prompt, '用户锁定的提示词')
+  const [regenerated] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(regenerated.promptSource, 'manual')
+  assert.equal(regenerated.prompt, '用户锁定的提示词')
+})
+
+test('analyze 复用已有帧返回 AI 提示词但不落库', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { frameCalls, analyzeCalls, deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  const framesBefore = frameCalls.length
+  const callsBefore = analyzeCalls.length
+
+  const result = await analyzeTransitionPrompt(row.id, { textConfigId: 9, textModel: 'vision-v2' }, deps)
+
+  assert.equal(result.promptSource, 'ai')
+  assert.equal(result.prompt, '镜头从雨夜街角平滑推进到咖啡馆门口，雨丝与暖光自然衔接。')
+  assert.equal(result.model, 'vision-v2')
+  assert.equal(frameCalls.length, framesBefore)
+  assert.equal(analyzeCalls.length, callsBefore + 1)
+  assert.equal(analyzeCalls.at(-1).configId, 9)
+  const [unchanged] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(unchanged.prompt, row.prompt)
+  assert.equal(unchanged.promptSource, 'ai')
+})
+
+test('analyze 在视觉分析失败时向上抛出可读错误', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  const broken = fakeDeps({ analyzeError: new Error('当前文本模型不支持图片理解，请在设置中启用视觉模型') })
+
+  await assert.rejects(analyzeTransitionPrompt(row.id, {}, broken.deps), /不支持图片理解/)
+})
+
+test('save 保存手动提示词，拒绝空值与本地 H3 中文', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+
+  await saveTransitionPrompt(row.id, { prompt: '  用户自定义的过渡提示词  ' })
+  const [saved] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(saved.prompt, '用户自定义的过渡提示词')
+  assert.equal(saved.promptSource, 'manual')
+  await assert.rejects(saveTransitionPrompt(row.id, { prompt: '   ' }), /不能为空/)
+
+  const localConfigId = await insertBaseConfig({
+    provider: 'minimax',
+    model: 'MiniMax-H3',
+    baseUrl: 'http://127.0.0.1:8190',
+  })
+  const local = await seedEpisode({ videoConfigId: localConfigId })
+  await prepareTransitions({ episodeId: local.episodeId, storyboardIds: local.storyboardIds, duration: 3 }, deps)
+  const [localRow] = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, local.episodeId))
+  await assert.rejects(saveTransitionPrompt(localRow.id, { prompt: '镜头缓慢横移的中文提示词' }), /英文/)
+})
+
+test('prepare 返回每个失败断点的原因，不把失败吞成成功', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({
+    videoConfigId: configId,
+    storyboards: [{ number: 1 }, { number: 2 }, { number: 3 }],
+  })
+  const { deps } = fakeDeps({ failSubmitFor: [0] })
+
+  const result = await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+
+  assert.equal(result.created, 1)
+  assert.equal(result.failed, 1)
+  assert.equal(result.failures.length, 1)
+  assert.equal(result.failures[0].fromStoryboardId, storyboardIds[0])
+  assert.equal(result.failures[0].toStoryboardId, storyboardIds[1])
+  assert.match(result.failures[0].message, /英文/)
+})
+
+test('save 按剧集当前视频配置判断本地 H3，而不是历史行来源', async () => {
+  const localConfigId = await insertBaseConfig({
+    provider: 'minimax',
+    model: 'MiniMax-H3',
+    baseUrl: 'http://127.0.0.1:8190',
+  })
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: localConfigId })
+  const { deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, episodeId))
+  await db.update(schema.videoTransitions).set({
+    configId: null,
+    provider: 'aliyun',
+    configBaseUrl: 'https://example.com',
+  }).where(eq(schema.videoTransitions.id, row.id))
+
+  await assert.rejects(saveTransitionPrompt(row.id, { prompt: '镜头缓慢横移的中文提示词' }), /英文/)
+})
+
+test('retry 拒绝超过 1200 字的手动提示词', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, episodeId))
+  await db.update(schema.videoTransitions).set({ status: 'failed' })
+    .where(eq(schema.videoTransitions.id, row.id))
+
+  await assert.rejects(
+    retryTransition(row.id, { prompt: '雨'.repeat(1201) }, deps),
+    /1200/,
+  )
+})

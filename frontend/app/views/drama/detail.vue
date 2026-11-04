@@ -37,6 +37,13 @@
           </span>
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
         </button>
+        <button class="bg-line" :title="t('detail.background.visualEditTitle')" @click="openBackground">
+          <span class="bg-line-label">{{ t('detail.background.visualLabel') }}</span>
+          <span :class="['bg-line-text', { empty: !drama.visual_background }]">
+            {{ drama.visual_background || t('detail.background.visualEmpty') }}
+          </span>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        </button>
       </div>
       <button class="btn head-action" :title="t('narrator.entryTitle')" @click="narratorOpen = true">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
@@ -701,17 +708,29 @@
             <textarea
               v-model="backgroundDraft"
               class="textarea"
-              rows="5"
+              rows="4"
               maxlength="400"
               :placeholder="t('detail.background.placeholder')"
               :disabled="backgroundSaving"
             />
             <span class="field-hint">{{ t('detail.background.hint') }}</span>
           </label>
+          <label class="field">
+            <span class="field-label">{{ t('detail.background.visualField') }}</span>
+            <textarea
+              v-model="visualBackgroundDraft"
+              class="textarea"
+              rows="4"
+              maxlength="400"
+              :placeholder="t('detail.background.visualPlaceholder')"
+              :disabled="backgroundSaving"
+            />
+            <span class="field-hint">{{ t('detail.background.visualHint') }}</span>
+          </label>
           <p class="field-hint">{{ t('detail.background.note') }}</p>
         </div>
         <div class="dialog-foot">
-          <span class="dialog-foot-copy">{{ backgroundDraft.trim().length }}/400</span>
+          <span class="dialog-foot-copy">{{ backgroundDraft.trim().length }}/400 · {{ visualBackgroundDraft.trim().length }}/400</span>
           <button class="btn" @click="closeBackground">{{ t('common.cancel') }}</button>
           <button class="btn btn-primary" :disabled="backgroundSaving" @click="saveBackground">
             {{ backgroundSaving ? t('detail.background.saving') : t('common.save') }}
@@ -907,15 +926,17 @@ async function resetStorage() {
   }
 }
 
-// ─── 项目背景（世界观/时代/地域）───────────────────────────
-// 只存项目维度；生成资产图与视频时由后端自动前置拼接，已有资产的 final_prompt 不受影响。
+// ─── 项目背景 / 视觉背景（项目维度）─────────────────────────
+// 项目背景用于剧本、分镜与资产图；视觉背景只用于视频提示词，避免剧情梗概诱导旁白。
 const backgroundDialog = ref(false)
 const backgroundDraft = ref('')
+const visualBackgroundDraft = ref('')
 const backgroundSaving = ref(false)
 
 function openBackground() {
   if (!drama.value) return
   backgroundDraft.value = drama.value.background || ''
+  visualBackgroundDraft.value = drama.value.visual_background || ''
   backgroundDialog.value = true
 }
 
@@ -927,10 +948,14 @@ function closeBackground() {
 async function saveBackground() {
   if (backgroundSaving.value) return
   const value = backgroundDraft.value.trim()
+  const visualValue = visualBackgroundDraft.value.trim()
   backgroundSaving.value = true
   try {
-    await dramaAPI.update(dramaId, { background: value })
-    if (drama.value) drama.value.background = value || null
+    await dramaAPI.update(dramaId, { background: value, visual_background: visualValue })
+    if (drama.value) {
+      drama.value.background = value || null
+      drama.value.visual_background = visualValue || null
+    }
     backgroundDialog.value = false
     toast.success(t('detail.background.saved'))
   } catch (e) {

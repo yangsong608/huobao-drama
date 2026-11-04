@@ -22,34 +22,25 @@ async function validateVideoPromptVoices(prompt: string | undefined, dramaId: nu
 }
 
 async function syncStoryboardCharacters(storyboardId: number, characterIds: number[]) {
-  await db.delete(schema.storyboardCharacters)
-    .where(eq(schema.storyboardCharacters.storyboardId, storyboardId))
-
-
-  const uniqueIds = [...new Set(characterIds.filter(Boolean))]
-  if (!uniqueIds.length) return
-
-  for (const characterId of uniqueIds) {
-    await db.insert(schema.storyboardCharacters).values({
-      storyboardId,
-      characterId,
-    })
-  }
+  const uniqueIds = [...new Set((characterIds || []).filter(Boolean))]
+  db.transaction((tx) => {
+    tx.delete(schema.storyboardCharacters)
+      .where(eq(schema.storyboardCharacters.storyboardId, storyboardId)).run()
+    for (const characterId of uniqueIds) {
+      tx.insert(schema.storyboardCharacters).values({ storyboardId, characterId }).run()
+    }
+  })
 }
 
 async function syncStoryboardProps(storyboardId: number, propIds: number[]) {
-  await db.delete(schema.storyboardProps)
-    .where(eq(schema.storyboardProps.storyboardId, storyboardId))
-
-  const uniqueIds = [...new Set(propIds.filter(Boolean))]
-  if (!uniqueIds.length) return
-
-  for (const propId of uniqueIds) {
-    await db.insert(schema.storyboardProps).values({
-      storyboardId,
-      propId,
-    })
-  }
+  const uniqueIds = [...new Set((propIds || []).filter(Boolean))]
+  db.transaction((tx) => {
+    tx.delete(schema.storyboardProps)
+      .where(eq(schema.storyboardProps.storyboardId, storyboardId)).run()
+    for (const propId of uniqueIds) {
+      tx.insert(schema.storyboardProps).values({ storyboardId, propId }).run()
+    }
+  })
 }
 
 async function getEpisodeSceneIds(episodeId: number) {
@@ -116,7 +107,7 @@ function requireIds(context: ToolContext): { episodeId: number; dramaId: number 
 
 const readStoryboardContext = createTool({
   id: 'read_storyboard_context',
-  description: 'Read the screenplay, characters, scenes, and props for storyboard breakdown.',
+  description: 'Read the screenplay and all project characters, scenes, and props for storyboard breakdown. Items not yet linked to this episode are still reusable; saving a storyboard links them automatically.',
   inputSchema: z.object({}),
   execute: async (_input, context) => {
     const ids = requireIds(context)
@@ -150,7 +141,6 @@ const readStoryboardContext = createTool({
 
     const characters = chars
       .filter(c => !c.deletedAt)
-      .filter(c => !linkedCharacterIds.size || linkedCharacterIds.has(c.id))
       .map(c => ({
         id: c.id,
         name: c.name,
@@ -160,13 +150,13 @@ const readStoryboardContext = createTool({
         styling: c.styling || '',
         image_url: c.imageUrl || '',
         reference_images: c.referenceImages || '',
+        linked_to_episode: linkedCharacterIds.has(c.id),
         has_voice: Boolean(c.voiceAudioUrl?.trim()),
         voice_reference: c.voiceAudioUrl?.trim() ? `#${c.name}` : null,
       }))
 
     const scenes = scns
       .filter(s => !s.deletedAt)
-      .filter(s => !linkedSceneIds.size || linkedSceneIds.has(s.id))
       .map(s => ({
         id: s.id,
         location: s.location,
@@ -174,18 +164,19 @@ const readStoryboardContext = createTool({
         prompt: s.prompt || '',
         lighting: s.lighting || '',
         image_url: s.imageUrl || '',
+        linked_to_episode: linkedSceneIds.has(s.id),
         storyboard_count: s.storyboardCount || 0,
       }))
 
     const props = prps
       .filter(p => !p.deletedAt)
-      .filter(p => !linkedPropIds.size || linkedPropIds.has(p.id))
       .map(p => ({
         id: p.id,
         name: p.name,
         type: p.type || '',
         description: p.description || '',
         image_url: p.imageUrl || '',
+        linked_to_episode: linkedPropIds.has(p.id),
       }))
 
     const existingStoryboardPayload = await Promise.all(existingStoryboards

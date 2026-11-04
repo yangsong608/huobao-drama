@@ -40,7 +40,7 @@ const VALID_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'])
  * 目标是不是本地兼容层（自建 ComfyUI 的 mm-shim）。
  * 只有本地层才认识下面的扩展字段；官方云端按官方 schema 走。
  */
-function isLocalShim(baseUrl: string): boolean {
+export function isLocalShim(baseUrl: string): boolean {
   const raw = (baseUrl || '').trim()
   if (!raw) return true // baseUrl 留空时走相对路径，只可能是本地兼容层
   for (const candidate of [raw, `http://${raw}`]) {
@@ -120,7 +120,7 @@ export class MiniMaxVideoAdapter implements VideoProviderAdapter {
     const body: any = {
       model,
       content,
-      duration: this.normalizeDuration(record.duration),
+      duration: this.normalizeDuration(record.duration, record.allowShortDuration === true && isLocalShim(config.baseUrl)),
       resolution: this.normalizeResolution(config, model, record.resolution),
     }
 
@@ -212,11 +212,12 @@ export class MiniMaxVideoAdapter implements VideoProviderAdapter {
     return task.content?.url || task.video_url || null
   }
 
-  private normalizeDuration(duration?: number | null): number {
-    const parsed = Math.round(Number(duration || 5))
-    if (!Number.isFinite(parsed)) return 5
-    // MiniMax H3 支持 4-15 秒
-    return Math.min(15, Math.max(4, parsed))
+  private normalizeDuration(duration?: number | null, allowShortDuration = false): number {
+    const value = Number(duration ?? 5)
+    if (!Number.isFinite(value)) return 5
+    // 过渡片段按本地 shim 的帧网格下发，保留小数；普通生成仍取整并守住 4 秒下限
+    if (allowShortDuration) return Math.min(15, Math.max(1, Math.round(value * 1000) / 1000))
+    return Math.min(15, Math.max(4, Math.round(value)))
   }
 
   /**

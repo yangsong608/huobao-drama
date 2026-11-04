@@ -10,19 +10,14 @@ const TRANSITIONS = new Set(['cut', 'fade', 'dissolve', 'wipe'])
 const normalizeTransition = (value: unknown) => (TRANSITIONS.has(String(value)) ? String(value) : 'cut')
 
 async function syncStoryboardCharacters(storyboardId: number, characterIds: number[]) {
-  await db.delete(schema.storyboardCharacters)
-    .where(eq(schema.storyboardCharacters.storyboardId, storyboardId))
-
-
   const uniqueIds = [...new Set((characterIds || []).filter(Boolean))]
-  if (!uniqueIds.length) return
-
-  for (const characterId of uniqueIds) {
-    await db.insert(schema.storyboardCharacters).values({
-      storyboardId,
-      characterId,
-    })
-  }
+  db.transaction((tx) => {
+    tx.delete(schema.storyboardCharacters)
+      .where(eq(schema.storyboardCharacters.storyboardId, storyboardId)).run()
+    for (const characterId of uniqueIds) {
+      tx.insert(schema.storyboardCharacters).values({ storyboardId, characterId }).run()
+    }
+  })
 }
 
 async function getStoryboardCharacterIds(storyboardId: number) {
@@ -32,18 +27,14 @@ async function getStoryboardCharacterIds(storyboardId: number) {
 }
 
 async function syncStoryboardProps(storyboardId: number, propIds: number[]) {
-  await db.delete(schema.storyboardProps)
-    .where(eq(schema.storyboardProps.storyboardId, storyboardId))
-
   const uniqueIds = [...new Set((propIds || []).filter(Boolean))]
-  if (!uniqueIds.length) return
-
-  for (const propId of uniqueIds) {
-    await db.insert(schema.storyboardProps).values({
-      storyboardId,
-      propId,
-    })
-  }
+  db.transaction((tx) => {
+    tx.delete(schema.storyboardProps)
+      .where(eq(schema.storyboardProps.storyboardId, storyboardId)).run()
+    for (const propId of uniqueIds) {
+      tx.insert(schema.storyboardProps).values({ storyboardId, propId }).run()
+    }
+  })
 }
 
 async function getStoryboardPropIds(storyboardId: number) {
@@ -52,7 +43,12 @@ async function getStoryboardPropIds(storyboardId: number) {
   return links.map(link => link.propId)
 }
 
-async function validateStoryboardBindings(episodeId: number, sceneId: number | null | undefined, characterIds: number[] | undefined, propIds?: number[] | undefined) {
+/** 分镜绑定校验：允许选用同项目（含其他剧集）素材，并自动补关联到当前集；返回错误文案 */
+async function ensureStoryboardBindings(episodeId: number, sceneId: number | null | undefined, characterIds: number[] | undefined, propIds?: number[] | undefined): Promise<string | null> {
+  const [episode] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
+  if (!episode) return '剧集不存在'
+  const dramaId = episode.dramaId
+
   const sceneLinks = await db.select().from(schema.episodeScenes)
     .where(eq(schema.episodeScenes.episodeId, episodeId))
   const episodeSceneIds = new Set(sceneLinks.map(link => link.sceneId))
@@ -62,20 +58,34 @@ async function validateStoryboardBindings(episodeId: number, sceneId: number | n
   const propLinks = await db.select().from(schema.episodeProps)
     .where(eq(schema.episodeProps.episodeId, episodeId))
   const episodePropIds = new Set(propLinks.map(link => link.propId))
+  const ts = now()
 
   if (sceneId != null && !episodeSceneIds.has(sceneId)) {
-    throw new Error('scene_id 必须来自当前集已关联场景')
+    const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, sceneId))
+    if (!scene || scene.dramaId !== dramaId || scene.deletedAt) {
+      return `scene_id ${sceneId} 必须来自当前项目`
+    }
+    await db.insert(schema.episodeScenes).values({ episodeId, sceneId, createdAt: ts })
   }
 
-  const invalidCharacterIds = (characterIds || []).filter(id => !episodeCharacterIds.has(id))
-  if (invalidCharacterIds.length) {
-    throw new Error('character_ids 必须来自当前集已关联角色')
+  for (const characterId of [...new Set((characterIds || []).filter(Boolean))]) {
+    if (episodeCharacterIds.has(characterId)) continue
+    const [character] = await db.select().from(schema.characters).where(eq(schema.characters.id, characterId))
+    if (!character || character.dramaId !== dramaId || character.deletedAt) {
+      return `character_id ${characterId} 必须来自当前项目`
+    }
+    await db.insert(schema.episodeCharacters).values({ episodeId, characterId, createdAt: ts })
   }
 
-  const invalidPropIds = (propIds || []).filter(id => !episodePropIds.has(id))
-  if (invalidPropIds.length) {
-    throw new Error('prop_ids 必须来自当前集已关联道具')
+  for (const propId of [...new Set((propIds || []).filter(Boolean))]) {
+    if (episodePropIds.has(propId)) continue
+    const [prop] = await db.select().from(schema.props).where(eq(schema.props.id, propId))
+    if (!prop || prop.dramaId !== dramaId || prop.deletedAt) {
+      return `prop_id ${propId} 必须来自当前项目`
+    }
+    await db.insert(schema.episodeProps).values({ episodeId, propId, createdAt: ts })
   }
+  return null
 }
 
 // POST /storyboards
@@ -89,7 +99,8 @@ app.post('/', async (c) => {
     characterIds: body.character_ids,
   })
   logTaskPayload('StoryboardAPI', 'create body', body)
-  await validateStoryboardBindings(body.episode_id, body.scene_id, body.character_ids, body.prop_ids)
+  const bindingError = await ensureStoryboardBindings(body.episode_id, body.scene_id, body.character_ids, body.prop_ids)
+  if (bindingError) return badRequest(c, bindingError)
   const res = await db.insert(schema.storyboards).values({
     episodeId: body.episode_id,
     storyboardNumber: body.storyboard_number || 1,
@@ -147,12 +158,13 @@ app.put('/:id', async (c) => {
     if (snakeKey in body) updates[camelKey] = snakeKey === 'transition' ? normalizeTransition(body.transition) : body[snakeKey]
   }
 
-  await validateStoryboardBindings(
+  const bindingError = await ensureStoryboardBindings(
     storyboard.episodeId,
     'scene_id' in body ? body.scene_id : storyboard.sceneId,
     'character_ids' in body ? body.character_ids : await getStoryboardCharacterIds(id),
     'prop_ids' in body ? body.prop_ids : await getStoryboardPropIds(id),
   )
+  if (bindingError) return badRequest(c, bindingError)
 
   await db.update(schema.storyboards).set(updates).where(eq(schema.storyboards.id, id))
   if ('character_ids' in body) await syncStoryboardCharacters(id, body.character_ids || [])

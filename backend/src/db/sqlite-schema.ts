@@ -14,6 +14,7 @@ export const sqliteSchemaStatements = [
     genre TEXT,
     style TEXT DEFAULT '3d',
     background TEXT,
+    visual_background TEXT,
     aspect_ratio TEXT DEFAULT '16:9',
     total_episodes INTEGER DEFAULT 1,
     total_duration INTEGER DEFAULT 0,
@@ -261,6 +262,41 @@ export const sqliteSchemaStatements = [
     completed_at TEXT,
     deleted_at TEXT
   )`,
+
+  // AI 过渡片段：相邻两镜的断点记录，一断点一行
+  `CREATE TABLE IF NOT EXISTS video_transitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER,
+    from_storyboard_id INTEGER NOT NULL,
+    to_storyboard_id INTEGER NOT NULL,
+    from_video_url TEXT,
+    to_video_url TEXT,
+    first_frame_url TEXT,
+    last_frame_url TEXT,
+    source_hash TEXT,
+    prompt TEXT,
+    prompt_source TEXT,
+    provider TEXT,
+    model TEXT,
+    config_id INTEGER,
+    config_base_url TEXT,
+    duration_requested REAL,
+    duration_effective REAL,
+    duration_actual REAL,
+    audio_mode TEXT DEFAULT 'ambient',
+    status TEXT DEFAULT 'pending',
+    video_url TEXT,
+    sys_task_id INTEGER,
+    error_msg TEXT,
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_video_transitions_boundary ON video_transitions (episode_id, from_storyboard_id, to_storyboard_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_video_transitions_episode ON video_transitions (episode_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_video_transitions_status ON video_transitions (status)`,
 
   `CREATE TABLE IF NOT EXISTS props (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -709,9 +745,10 @@ export function initSqliteSchema(sqlite: Database.Database) {
   }
   // 兼容已安装的桌面版；仅增加任务恢复元数据，不改写历史生成结果。
   const taskColumns = new Set((sqlite.prepare('PRAGMA table_info(sys_task)').all() as { name: string }[]).map(c => c.name))
-  for (const [name, type] of Object.entries({ config_id: 'INTEGER', config_base_url: 'TEXT', stage: 'TEXT', error_code: 'TEXT' })) {
+  for (const [name, type] of Object.entries({ config_id: 'INTEGER', config_base_url: 'TEXT', stage: 'TEXT', error_code: 'TEXT', transition_id: 'INTEGER' })) {
     if (!taskColumns.has(name)) sqlite.exec(`ALTER TABLE sys_task ADD COLUMN ${name} ${type}`)
   }
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_sys_task_transition_id ON sys_task (transition_id)')
   // 角色音色由用户上传；旧库补充可空字段，不修改已有角色和图片。
   const characterColumns = new Set((sqlite.prepare('PRAGMA table_info(characters)').all() as { name: string }[]).map(c => c.name))
   for (const name of ['voice_audio_url', 'voice_audio_name']) {
@@ -725,6 +762,8 @@ export function initSqliteSchema(sqlite: Database.Database) {
   if (!dramaColumns.has('storage_dir')) sqlite.exec('ALTER TABLE dramas ADD COLUMN storage_dir TEXT')
   // 项目背景（世界观/时代/地域），提示词生成时自动拼接；旧库补列，历史项目为空不受影响。
   if (!dramaColumns.has('background')) sqlite.exec('ALTER TABLE dramas ADD COLUMN background TEXT')
+  // 视觉背景（场景/光影/色彩），仅注入视频提示词；旧库补列，历史项目为空不受影响。
+  if (!dramaColumns.has('visual_background')) sqlite.exec('ALTER TABLE dramas ADD COLUMN visual_background TEXT')
   // 全自动流水线状态：旧库补列；历史集 automation_status 为 null，按「未启用自动化」处理。
   const episodeColumns = new Set((sqlite.prepare('PRAGMA table_info(episodes)').all() as { name: string }[]).map(c => c.name))
   const episodeAutomationColumns: Record<string, string> = {
@@ -768,10 +807,14 @@ export function initSqliteSchema(sqlite: Database.Database) {
     dialogue_track_url: 'TEXT',
     bgm_url: 'TEXT',
     mix_options: 'TEXT',
+    transitions: 'TEXT',
   }
   for (const [name, type] of Object.entries(mergeV2Columns)) {
     if (!mergeColumns.has(name)) sqlite.exec(`ALTER TABLE video_merges ADD COLUMN ${name} ${type}`)
   }
+  // 过渡提示词来源：旧库补列；历史提示词保留，来源为空按旧记录展示。
+  const transitionColumns = new Set((sqlite.prepare('PRAGMA table_info(video_transitions)').all() as { name: string }[]).map(c => c.name))
+  if (!transitionColumns.has('prompt_source')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN prompt_source TEXT')
   // 分镜内容指纹：台词抽取幂等
   const storyboardColumns = new Set((sqlite.prepare('PRAGMA table_info(storyboards)').all() as { name: string }[]).map(c => c.name))
   if (!storyboardColumns.has('source_hash')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN source_hash TEXT')

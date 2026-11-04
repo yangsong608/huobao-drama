@@ -71,6 +71,7 @@ app.post('/', async (c) => {
     genre: body.genre,
     style: body.style,
     background: String(body.background ?? '').trim() || null,
+    visualBackground: String(body.visual_background ?? '').trim() || null,
     aspectRatio: body.aspect_ratio || '16:9',
     tags: body.tags ? JSON.stringify(body.tags) : null,
     metadata: body.metadata,
@@ -249,6 +250,10 @@ app.put('/:id', async (c) => {
   if (body.background !== undefined) {
     const raw = String(body.background ?? '').trim()
     updates.background = raw ? raw : null
+  }
+  if (body.visual_background !== undefined) {
+    const raw = String(body.visual_background ?? '').trim()
+    updates.visualBackground = raw ? raw : null
   }
   if (body.aspect_ratio !== undefined) updates.aspectRatio = body.aspect_ratio
   if (body.status !== undefined) updates.status = body.status

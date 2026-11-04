@@ -87,6 +87,17 @@ export function applyWorkflowPlaceholders(
   return walk(workflow) as Record<string, unknown>
 }
 
+/** 过渡任务门禁：工作流必须同时声明首帧与尾帧占位符，否则生成结果只有单帧起点 */
+export function assertComfyFirstLastFrameWorkflow(workflow: Record<string, unknown>): void {
+  const text = JSON.stringify(workflow)
+  if (!text.includes('__LAST_FRAME__')) {
+    throw new Error('当前 ComfyUI 工作流未使用 LAST_FRAME 占位符，无法生成首尾帧过渡。请在 LoadImage 节点上使用 {{LAST_FRAME}}，或改用 H3/云端模型。')
+  }
+  if (!/__FIRST_FRAME__|__IMAGE__|__IMAGE_1__/.test(text)) {
+    throw new Error('当前 ComfyUI 工作流未使用 FIRST_FRAME 或 IMAGE 占位符，无法接收过渡首帧。请在 LoadImage 节点上使用 {{FIRST_FRAME}}，或改用 H3/云端模型。')
+  }
+}
+
 export function comfyHeaders(config: AIConfig): Record<string, string> {
   const headers: Record<string, string> = {}
   if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`

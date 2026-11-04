@@ -472,13 +472,24 @@ export const uploadAPI = {
   audio: (f: File, dramaId?: number) => uploadReq<{ url: string; path: string }>('/upload/audio', f, dramaId),
 }
 export const mergeAPI = {
-  merge: (epId: number, storyboardIds?: number[], title?: string) => api.post(`/merge/episodes/${epId}/merge`, {
+  merge: (epId: number, storyboardIds?: number[], title?: string, useAiTransitions = false) => api.post(`/merge/episodes/${epId}/merge`, {
     ...(storyboardIds?.length ? { storyboard_ids: storyboardIds } : {}),
     ...(title?.trim() ? { title: title.trim() } : {}),
+    ...(useAiTransitions ? { use_ai_transitions: true } : {}),
   }),
   status: (epId: number) => api.get(`/merge/episodes/${epId}/merge`),
   list: (epId: number) => api.get<any[]>(`/merge/episodes/${epId}/merges`),
   del: (id: number) => api.del(`/merge/merges/${id}`),
+}
+export const transitionAPI = {
+  list: (epId: number, storyboardIds?: number[]) => api.get<any>(`/merge/episodes/${epId}/transitions${
+    storyboardIds?.length ? `?storyboard_ids=${storyboardIds.join(',')}` : ''
+  }`),
+  prepare: (epId: number, payload: Record<string, any>) => api.post<any>(`/merge/episodes/${epId}/transitions/prepare`, payload),
+  retry: (id: number, payload: Record<string, any> = {}) => api.post<any>(`/merge/transitions/${id}/retry`, payload),
+  analyze: (id: number, payload: Record<string, any> = {}) => api.post<any>(`/merge/transitions/${id}/analyze`, payload),
+  savePrompt: (id: number, prompt: string) => api.put<any>(`/merge/transitions/${id}/prompt`, { prompt }),
+  skip: (id: number) => api.post<any>(`/merge/transitions/${id}/skip`, {}),
 }
 export const aiConfigAPI = {
   list: (t?: string) => api.get(`/ai-configs${t ? `?service_type=${t}` : ''}`),

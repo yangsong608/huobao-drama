@@ -70,11 +70,29 @@ test('Wan 3.0 exposes all tiers and more references than Wan 2.x', () => {
   assert.equal(wan3.referenceImages, 10)
   assert.equal(wan3.minDuration, 2)
   assert.equal(wan3.maxDuration, 30)
+  // Wan 3.0 的 parameters.audio 默认 true，必须按原生音频模型对待
+  assert.equal(wan3.nativeAudio, true)
 
   const wan2i2v = videoModelCapabilities('aliyun', 'wan2.2-i2v-plus')
   assert.equal(wan2i2v.referenceImages, 1)
   const wan2t2v = videoModelCapabilities('aliyun', 'wan2.2-t2v-plus')
   assert.equal(wan2t2v.referenceImages, 0)
+})
+
+test('first/last frame support follows real model families', () => {
+  // 首尾帧过渡依赖模型同时接受首帧与尾帧
+  assert.equal(videoModelCapabilities('aliyun', 'wan3.0-video').firstLastFrame, true)
+  assert.equal(videoModelCapabilities('aliyun', 'wan2.2-i2v-plus').firstLastFrame, false)
+  assert.equal(videoModelCapabilities('aliyun', 'wan2.2-t2v-plus').firstLastFrame, false)
+
+  assert.equal(videoModelCapabilities('volcengine', 'doubao-seedance-2-0-260128').firstLastFrame, true)
+  assert.equal(videoModelCapabilities('volcengine', 'doubao-seedance-2-5-260901').firstLastFrame, true)
+  assert.equal(videoModelCapabilities('volcengine', 'doubao-seedance-1-0-lite-i2v-250428').firstLastFrame, true)
+  assert.equal(videoModelCapabilities('volcengine', 'doubao-seedance-1-0-lite-t2v-250428').firstLastFrame, false)
+
+  assert.equal(videoModelCapabilities('minimax', 'MiniMax-H3').firstLastFrame, true)
+  assert.equal(videoModelCapabilities('minimax', 'MiniMax-H3', { localShim: true }).firstLastFrame, true)
+  assert.equal(videoModelCapabilities('comfyui', 'comfyui-video').firstLastFrame, true)
 })
 
 test('videoResolutionTiers preserves a stored tier the new model no longer supports', () => {

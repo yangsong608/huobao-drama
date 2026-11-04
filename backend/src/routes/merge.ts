@@ -3,10 +3,34 @@ import { and, desc, eq, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { success, badRequest, now } from '../utils/response.js'
 import { mergeEpisodeVideos } from '../services/ffmpeg-merge.js'
+import {
+  analyzeTransitionPrompt,
+  getTransition,
+  listTransitions,
+  prepareTransitions,
+  retryTransition,
+  saveTransitionPrompt,
+  skipTransition,
+} from '../services/transition-service.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 
 const app = new Hono()
+
+function optionalPositiveId(value: unknown, field: string): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${field} 无效`)
+  return parsed
+}
+
+function optionalModel(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+async function readJsonBody(c: any): Promise<any> {
+  try { return await c.req.json() } catch { return {} }
+}
 
 // POST /episodes/:id/merge — 拼接镜头视频(body.storyboard_ids 可选,只拼所选)
 app.post('/episodes/:id/merge', async (c) => {
@@ -16,19 +40,25 @@ app.post('/episodes/:id/merge', async (c) => {
 
   let storyboardIds: number[] | undefined
   let title = ''
+  let useAiTransitions = false
   try {
     const body = await c.req.json()
     if (Array.isArray(body?.storyboard_ids)) {
       storyboardIds = body.storyboard_ids.map(Number).filter(Boolean)
     }
     if (typeof body?.title === 'string') title = body.title.trim().slice(0, 80)
+    useAiTransitions = body?.use_ai_transitions === true
   } catch { /* 无 body 时拼接全部 */ }
 
   const mergeTitle = title || `第 ${ep.episodeNumber} 集成片`
 
   try {
-    logTaskStart('MergeAPI', 'episode-merge', { episodeId, dramaId: ep.dramaId, storyboardIds, title: mergeTitle })
-    const mergeId = await mergeEpisodeVideos(episodeId, ep.dramaId, storyboardIds, mergeTitle)
+    logTaskStart('MergeAPI', 'episode-merge', {
+      episodeId, dramaId: ep.dramaId, storyboardIds, title: mergeTitle, useAiTransitions,
+    })
+    const mergeId = await mergeEpisodeVideos(
+      episodeId, ep.dramaId, storyboardIds, mergeTitle, { useAiTransitions },
+    )
     logTaskSuccess('MergeAPI', 'episode-merge', { episodeId, mergeId })
     return success(c, { merge_id: mergeId, status: 'processing' })
   } catch (err: any) {
@@ -56,6 +86,180 @@ app.get('/episodes/:id/merges', async (c) => {
     .where(and(eq(schema.videoMerges.episodeId, episodeId), isNull(schema.videoMerges.deletedAt)))
   merges.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
   return success(c, merges.slice(0, 30).map(toSnakeCase))
+})
+
+// GET /episodes/:id/transitions — AI 过渡断点列表（按镜头顺序返回，含缺失断点）
+app.get('/episodes/:id/transitions', async (c) => {
+  const episodeId = Number(c.req.param('id'))
+  const raw = c.req.query('storyboard_ids')
+  const storyboardIds = raw
+    ? raw.split(',').map(value => Number(value.trim())).filter(id => Number.isInteger(id) && id > 0)
+    : undefined
+  try {
+    const view = await listTransitions({ episodeId, storyboardIds })
+    return success(c, {
+      boundaries: view.boundaries.map(toSnakeCase),
+      summary: view.summary,
+      provider: view.provider,
+    })
+  } catch (error: any) {
+    return badRequest(c, error?.message || '读取 AI 过渡状态失败')
+  }
+})
+
+// POST /episodes/:id/transitions/prepare — 为缺失/过期断点创建生成任务（不等待完成）
+app.post('/episodes/:id/transitions/prepare', async (c) => {
+  const episodeId = Number(c.req.param('id'))
+  let body: any = {}
+  try { body = await c.req.json() } catch { body = {} }
+
+  const storyboardIds = Array.isArray(body?.storyboard_ids)
+    ? body.storyboard_ids.map(Number).filter((id: number) => Number.isInteger(id) && id > 0)
+    : undefined
+  const mode = body?.mode === undefined ? 'missing' : String(body.mode)
+  if (mode !== 'missing' && mode !== 'all') return badRequest(c, 'mode 只能是 missing 或 all')
+
+  const rawConfigId = body?.config_id
+  const configId = rawConfigId === undefined || rawConfigId === null || rawConfigId === ''
+    ? undefined
+    : Number(rawConfigId)
+  if (configId !== undefined && (!Number.isInteger(configId) || configId <= 0)) {
+    return badRequest(c, 'config_id 无效')
+  }
+
+  const rawDuration = body?.duration
+  const duration = rawDuration === undefined || rawDuration === null || rawDuration === ''
+    ? undefined
+    : Number(rawDuration)
+  if (duration !== undefined && (!Number.isFinite(duration) || duration < 1 || duration > 30)) {
+    return badRequest(c, 'duration 必须是 1-30 之间的数字')
+  }
+
+  const rawAudioMode = body?.audio_mode
+  if (rawAudioMode !== undefined && rawAudioMode !== null && rawAudioMode !== ''
+    && rawAudioMode !== 'ambient' && rawAudioMode !== 'silent') {
+    return badRequest(c, 'audio_mode 只能是 ambient 或 silent')
+  }
+
+  const model = typeof body?.model === 'string' && body.model.trim() ? body.model.trim() : undefined
+
+  let textConfigId: number | undefined
+  let textModel: string | undefined
+  try {
+    textConfigId = optionalPositiveId(body?.text_config_id, 'text_config_id')
+    textModel = optionalModel(body?.text_model)
+  } catch (error: any) {
+    return badRequest(c, error.message)
+  }
+
+  try {
+    const result = await prepareTransitions({
+      episodeId,
+      storyboardIds,
+      mode,
+      configId,
+      model,
+      duration,
+      audioMode: rawAudioMode || undefined,
+      textConfigId,
+      textModel,
+    })
+    return success(c, {
+      boundaries: result.boundaries.map(toSnakeCase),
+      summary: result.summary,
+      provider: result.provider,
+      created: result.created,
+      reused: result.reused,
+      failed: result.failed,
+      skipped: result.skipped,
+      failures: result.failures.map(item => ({
+        from_storyboard_id: item.fromStoryboardId,
+        to_storyboard_id: item.toStoryboardId,
+        message: item.message,
+      })),
+    })
+  } catch (error: any) {
+    return badRequest(c, error?.message || '创建 AI 过渡片段失败')
+  }
+})
+
+// POST /transitions/:id/retry — 按原配置重试单个断点；可带用户改写后的提示词与文本模型
+app.post('/transitions/:id/retry', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return badRequest(c, '过渡片段不存在')
+  const body = await readJsonBody(c)
+  let textConfigId: number | undefined
+  try {
+    textConfigId = optionalPositiveId(body?.text_config_id, 'text_config_id')
+  } catch (error: any) {
+    return badRequest(c, error.message)
+  }
+  const prompt = typeof body?.prompt === 'string' && body.prompt.trim() ? body.prompt : undefined
+  try {
+    await retryTransition(id, {
+      prompt,
+      textConfigId,
+      textModel: optionalModel(body?.text_model),
+    })
+    const row = await getTransition(id)
+    return success(c, row ? toSnakeCase(row) : null)
+  } catch (error: any) {
+    return badRequest(c, error?.message || '重试过渡片段失败')
+  }
+})
+
+// POST /transitions/:id/analyze — 用视觉模型重新分析断点两帧，返回提示词（不落库）
+app.post('/transitions/:id/analyze', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return badRequest(c, '过渡片段不存在')
+  const body = await readJsonBody(c)
+  let textConfigId: number | undefined
+  try {
+    textConfigId = optionalPositiveId(body?.text_config_id, 'text_config_id')
+  } catch (error: any) {
+    return badRequest(c, error.message)
+  }
+  try {
+    const result = await analyzeTransitionPrompt(id, {
+      textConfigId,
+      textModel: optionalModel(body?.text_model),
+    })
+    return success(c, {
+      prompt: result.prompt,
+      prompt_source: result.promptSource,
+      config_id: result.configId,
+      model: result.model,
+    })
+  } catch (error: any) {
+    return badRequest(c, error?.message || 'AI 分析过渡提示词失败')
+  }
+})
+
+// PUT /transitions/:id/prompt — 保存用户编辑后的提示词，下次重新生成沿用
+app.put('/transitions/:id/prompt', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return badRequest(c, '过渡片段不存在')
+  const body = await readJsonBody(c)
+  const prompt = typeof body?.prompt === 'string' ? body.prompt : ''
+  try {
+    await saveTransitionPrompt(id, { prompt })
+    const row = await getTransition(id)
+    return success(c, row ? toSnakeCase(row) : null)
+  } catch (error: any) {
+    return badRequest(c, error?.message || '保存过渡提示词失败')
+  }
+})
+
+// POST /transitions/:id/skip — 跳过该断点（保留记录与文件，合片回退原转场）
+app.post('/transitions/:id/skip', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return badRequest(c, '过渡片段不存在')
+  try {
+    await skipTransition(id)
+    return success(c, { id, enabled: false })
+  } catch (error: any) {
+    return badRequest(c, error?.message || '跳过过渡片段失败')
+  }
 })
 
 // DELETE /merges/:id — 软删除成片记录（保留磁盘文件，避免误删后无法恢复）

@@ -4,6 +4,7 @@ import {
   MAX_TRANSITION_MS,
   MIN_TRANSITION_MS,
   buildMergeTransitionGraph,
+  computeMergeSourceHash,
   mergeTransitionDurationMs,
   mergeTransitionStyle,
 } from '../src/services/merge-plan.js'
@@ -50,4 +51,39 @@ test('相邻镜头过短时退化为硬切，避免 xfade 吞掉画面', () => {
   ], 1280, 720)
   assert.match(graph, /concat=n=2:v=1:a=0/)
   assert.equal(usedTransitions.length, 0)
+})
+
+test('过渡片段两端使用显式 transitionMs 覆盖 20% 规则', () => {
+  const { graph, totalMs, usedTransitions } = buildMergeTransitionGraph([
+    { durationMs: 10_000, transition: 'cut' },
+    { durationMs: 3_000, transition: 'fade', transitionMs: 200 },
+    { durationMs: 10_000, transition: 'fade', transitionMs: 200 },
+  ], 1920, 1080)
+
+  assert.match(graph, /\[v0\]\[v1\]xfade=transition=fade:duration=0\.200:offset=9\.800\[v1x\]/)
+  assert.match(graph, /\[v1x\]\[v2\]xfade=transition=fade:duration=0\.200:offset=12\.600\[v2x\]/)
+  assert.equal(usedTransitions.length, 2)
+  assert.equal(totalMs, 10_000 + 3_000 - 200 + 10_000 - 200)
+})
+
+test('显式转场时长越界时退化为硬切', () => {
+  const tooShort = buildMergeTransitionGraph([
+    { durationMs: 10_000, transition: 'cut' },
+    { durationMs: 3_000, transition: 'fade', transitionMs: 100 },
+  ], 1280, 720)
+  assert.match(tooShort.graph, /concat=n=2:v=1:a=0/)
+  assert.equal(tooShort.usedTransitions.length, 0)
+
+  const tooLong = buildMergeTransitionGraph([
+    { durationMs: 10_000, transition: 'cut' },
+    { durationMs: 3_000, transition: 'fade', transitionMs: 2_000 },
+  ], 1280, 720)
+  assert.match(tooLong.graph, /concat=n=2:v=1:a=0/)
+  assert.equal(tooLong.usedTransitions.length, 0)
+})
+
+test('合片缓存键包含显式转场时长', () => {
+  const a = computeMergeSourceHash([{ url: 'a.mp4', transition: 'cut' }, { url: 'b.mp4', transition: 'fade', transitionMs: 200 }], 'native')
+  const b = computeMergeSourceHash([{ url: 'a.mp4', transition: 'cut' }, { url: 'b.mp4', transition: 'fade', transitionMs: 300 }], 'native')
+  assert.notEqual(a, b)
 })

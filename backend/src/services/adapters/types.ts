@@ -116,6 +116,8 @@ export interface VideoGenerationRecord {
   /** 声音模式：native 原生音画；ambient 只要环境声（后期配音）；silent 不要音轨 */
   audioMode?: 'native' | 'ambient' | 'silent' | null
   duration?: number | null
+  /** AI 过渡片段：本地 H3 允许低于常规 4 秒下限的短时长 */
+  allowShortDuration?: boolean | null
   aspectRatio?: string | null
   resolution?: string | null
   /** 本地 H3 质量档：preview 4 步快速预览，final 8 步交付 */
