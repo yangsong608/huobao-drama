@@ -1306,6 +1306,11 @@
                 <BaseSelect v-model="cfgForm.provider_settings.quality" :options="h3QualityOptions" />
                 <span class="field-hint">{{ t('settings.cfg.h3QualityHint') }}</span>
               </label>
+              <label class="field cfg-check">
+                <input v-model="cfgForm.provider_settings.h3_gateway" type="checkbox" />
+                <span>{{ t('settings.cfg.h3Gateway') }}</span>
+              </label>
+              <span class="field-hint">{{ t('settings.cfg.h3GatewayHint') }}</span>
               <div class="cfg-setting-grid">
                 <label class="field">
                   <span class="field-label">{{ t('settings.cfg.negativePrompt') }}</span>
@@ -1791,7 +1796,7 @@ const CFG_SETTING_KEYS = computed(() => {
   }
   if (type === 'image' && provider === 'aliyun') return ['prompt_extend', 'watermark', 'negative_prompt', 'seed']
   if (type === 'image' && provider === 'volcengine') return ['output_format', 'response_format', 'watermark', 'seed']
-  if (type === 'video' && provider === 'minimax') return ['quality', 'negative_prompt', 'seed']
+  if (type === 'video' && provider === 'minimax') return ['quality', 'negative_prompt', 'seed', 'h3_gateway']
   return []
 })
 // 模型标签编辑器：首位即默认模型；输入框支持回车添加、逗号/换行批量粘贴
@@ -1875,8 +1880,9 @@ function emptyProviderSettings() {
     watermark: false,
     output_format: 'jpeg',
     response_format: 'url',
-    // 本地 H3 质量档
+    // 本地 H3 质量档 / 自建网关标识
     quality: 'preview',
+    h3_gateway: false,
   }
 }
 

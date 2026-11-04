@@ -13,7 +13,7 @@ import { stripVideoAudio } from '../utils/video-audio-track.js'
 import { prepareReferenceAudio, resolveReferenceAudioUrls } from './reference-audio.js'
 import { getActiveConfig, getConfigById } from './ai.js'
 import { now } from '../utils/response.js'
-import { downloadFile, fetchImageAsCompressedDataUrl, generateImageThumb, getAbsolutePath, readImageAsCompressedDataUrl, readImageAsDataUrl, saveBase64Image } from '../utils/storage.js'
+import { downloadFile, fetchImageAsCompressedDataUrl, generateImageThumb, getAbsolutePath, readImageAsCompressedDataUrl, saveBase64Image } from '../utils/storage.js'
 import { extractVideoPoster } from '../utils/video-poster.js'
 import { ffmpeg } from '../utils/ffmpeg.js'
 import { getImageAdapter, getVideoAdapter } from './adapters/registry'
@@ -892,14 +892,36 @@ async function normalizeVideoReferenceUrl(value: string | null | undefined): Pro
   if (raw.startsWith('static/') || raw.startsWith('/static/')) {
     const localPath = raw.startsWith('/static/') ? raw.slice(1) : raw
     try {
-      // 视频参考图直接编码原文件，保留原始尺寸、格式、透明通道和画质。
-      return readImageAsDataUrl(localPath)
+      // 自建网关运行在服务器上，本机静态路径必须内联成 data URL 才拿得到；
+      // 压到 1024 长边既保留 H3 参考细节，也避免请求体超限。
+      return await readImageAsCompressedDataUrl(localPath, VIDEO_REFERENCE_COMPRESSION)
     } catch (err) {
       logTaskWarn('VideoTask', 'reference-read-failed', { path: localPath, error: (err as Error).message })
       return null
     }
   }
+  // 云端厂商与远程网关都访问不到用户本机 loopback 地址，同样内联为 data URL
+  if (isLoopbackHttpUrl(raw)) {
+    try {
+      return await fetchImageAsCompressedDataUrl(raw, VIDEO_REFERENCE_COMPRESSION)
+    } catch (err) {
+      logTaskWarn('VideoTask', 'reference-fetch-failed', { url: redactUrl(raw), error: (err as Error).message })
+      return null
+    }
+  }
   return raw
+}
+
+const VIDEO_REFERENCE_COMPRESSION = { maxWidth: 1024, maxHeight: 1024, quality: 80 }
+
+function isLoopbackHttpUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+    return ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(url.hostname)
+  } catch {
+    return false
+  }
 }
 
 async function normalizeVideoReferenceUrls(refs: string[] | null | undefined): Promise<string[]> {

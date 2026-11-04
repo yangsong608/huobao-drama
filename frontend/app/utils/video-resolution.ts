@@ -23,7 +23,7 @@ export type VideoResolutionKey = VideoResolutionTier
 const TIER_ORDER: VideoResolutionKey[] = ['480p', '720p', '1080p']
 const TIER_NAME_KEY: Record<VideoResolutionKey, string> = { '480p': 'smooth', '720p': 'hd', '1080p': 'uhd' }
 
-/** 本地 MiniMax 兼容层（mm-shim）：只有它能渲染官方档位之外的 480P 画布 */
+/** 本地 MiniMax 兼容层（mm-shim / 本机桥接）：只有它能渲染官方档位之外的 480P 画布 */
 export function isLocalMinimaxBaseUrl(baseUrl?: string | null): boolean {
   const raw = String(baseUrl || '').trim()
   if (!raw) return true
@@ -39,12 +39,26 @@ export function isLocalMinimaxBaseUrl(baseUrl?: string | null): boolean {
   return false
 }
 
-/** 从配置推导能力选项：仅 minimax + 本地地址时开放 480p */
-export function videoCapabilityOptions(
-  config?: { provider?: string | null; baseUrl?: string | null; base_url?: string | null } | null,
-): VideoCapabilityOptions {
+interface H3ConfigLike {
+  provider?: string | null
+  baseUrl?: string | null
+  base_url?: string | null
+  provider_settings?: Record<string, unknown> | null
+  settings?: Record<string, unknown> | null
+}
+
+/** 自建 H3 网关靠显式标识识别；旧本机桥接地址继续兼容 */
+export function isLocalH3Config(config?: H3ConfigLike | null): boolean {
+  if (!config || String(config.provider || '').toLowerCase() !== 'minimax') return false
+  const settings = config.provider_settings ?? config.settings ?? {}
+  if (settings.h3_gateway === true) return true
+  return isLocalMinimaxBaseUrl(config.base_url ?? config.baseUrl)
+}
+
+/** 从配置推导能力选项：仅 minimax + 本地 H3/自建网关时开放 480p */
+export function videoCapabilityOptions(config?: H3ConfigLike | null): VideoCapabilityOptions {
   if (!config || String(config.provider || '').toLowerCase() !== 'minimax') return {}
-  return { localShim: isLocalMinimaxBaseUrl(config.base_url ?? config.baseUrl) }
+  return { localShim: isLocalH3Config(config) }
 }
 
 /** 厂商未知时按 Seedance 档位兜底（历史行为） */

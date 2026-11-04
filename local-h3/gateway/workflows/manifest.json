@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "video": {
+    "modes": {
+      "t2v": {
+        "workflow": "video_t2v.json",
+        "task_type": "t2v — 文生视频(Text to Video)"
+      },
+      "fl2v": {
+        "workflow": "video_fl2v.json",
+        "task_type": "fl2v — 首尾帧生视频(First-Last Frame)"
+      },
+      "r2v": {
+        "workflow": "video_r2v.json",
+        "task_type": "r2v — 参考主体生视频(Reference to Video)"
+      }
+    },
+    "quality_presets": {
+      "preview": {
+        "lora": "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+        "steps": 4
+      },
+      "final": {
+        "lora": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        "steps": 8
+      }
+    },
+    "default_quality": "preview",
+    "default_cfg": 1.0,
+    "cfg_range": [0.5, 5.0],
+    "ref_max_cap": 1024,
+    "max_reference_images": 9,
+    "frame_rate": 24,
+    "negative": "bad video, distorted face, extra fingers, text, watermark, subtitles, muffled speech, distorted audio, loud background music",
+    "audio": {
+      "directives": {
+        "native": "Audio: clear, intelligible Mandarin dialogue with accurate lip sync, natural ambience, no voice-over narration unless the prompt explicitly describes an off-screen narrator, no background music, no subtitles, no captions, no on-screen text.",
+        "ambient": "Audio: ambient sound only, no intelligible speech, no dialogue, no voice-over, no background music; characters may move their mouths and gesture as if speaking, but their speech must stay unintelligible. No subtitles, no captions, no on-screen text.",
+        "silent": "Audio: silent video, no audio track at all; no speech, no dialogue, no voice-over, no ambience, no sound effects, no background music; characters do not speak and keep their mouths closed. No subtitles, no captions, no on-screen text."
+      },
+      "global_prompts": {
+        "native": "Natural synchronized audio: clear, intelligible Mandarin dialogue with accurate lip sync, natural ambience, no voice-over narration unless the prompt explicitly describes an off-screen narrator, no background music, no subtitles, no on-screen text.",
+        "ambient": "Audio: ambient sound only, no intelligible speech, no dialogue, no voice-over, no background music; characters may move their mouths and gesture as if speaking, but their speech must stay unintelligible. No subtitles, no captions, no on-screen text.",
+        "silent": "Audio: silent video, no audio track at all; no speech, no dialogue, no voice-over, no ambience, no sound effects, no background music; characters do not speak and keep their mouths closed. No subtitles, no captions, no on-screen text."
+      }
+    }
+  },
+  "image": {
+    "modes": {
+      "t2i": { "workflow": "image_t2i.json" },
+      "i2i": { "workflow": "image_i2i.json" }
+    },
+    "models": ["qwen-image"],
+    "negative": "低质量，模糊，噪点，压缩伪影，过曝，畸变，多余手指，多余肢体，畸形脸，水印，签名，低分辨率",
+    "default_size": [1024, 1024],
+    "edit_denoise": 0.6,
+    "max_edit_refs": 1
+  }
+}

@@ -270,7 +270,17 @@ export function buildComfyViewUrl(config: AIConfig, item: ComfyOutputItem): stri
     subfolder: item.subfolder || '',
     type: item.type || 'output',
   })
+  // 网关的 /view 下载不带 Authorization（前端直连），baseUrl 指向 /comfyui 时用 token 查询参数鉴权
+  if (config.apiKey && isComfyGatewayBase(config.baseUrl)) params.set('token', config.apiKey)
   return `${joinProviderUrl(config.baseUrl, '', '/view')}?${params.toString()}`
+}
+
+function isComfyGatewayBase(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).pathname.replace(/\/+$/, '').endsWith('/comfyui')
+  } catch {
+    return false
+  }
 }
 
 export function comfySeed(settings: ComfyUiSettings): number {

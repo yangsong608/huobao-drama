@@ -1,0 +1,21 @@
+[Unit]
+Description=Huobao H3 Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=huobao-h3
+Group=huobao-h3
+EnvironmentFile=/etc/huobao-h3-gateway.env
+ExecStart=/usr/bin/python3 /opt/huobao-h3-gateway/h3_gateway.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/huobao-h3-gateway
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

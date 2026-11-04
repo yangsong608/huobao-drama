@@ -14,6 +14,7 @@ import {
 } from '../services/drama-background.js'
 import { resolveStoryboardVoiceReferences } from '../services/character-voice-references.js'
 import { resolutionSupportError } from '../services/model-capabilities.js'
+import { isLocalShimConfig } from '../services/adapters/minimax-video.js'
 import { normalizeVideoAudioMode } from '../services/video-audio.js'
 import { compileLocalH3Prompt, translateH3Text } from '../services/h3-prompt.js'
 import { stripLegacyAudioInstruction } from '../services/video-prompt-sanitize.js'
@@ -84,25 +85,6 @@ function normalizeVideoRequest(body: any) {
     watermark: body.watermark ?? parameters.watermark,
     official_media: media,
   }
-}
-
-/** 本地 MiniMax 兼容层：官方只有 768P/2K，本地 shim 可用自有画布渲染 480P */
-function isLocalMinimaxShim(
-  config: { provider?: string; baseUrl?: string } | null | undefined,
-): boolean {
-  if (String(config?.provider || '').toLowerCase() !== 'minimax') return false
-  const raw = String(config?.baseUrl || '').trim()
-  if (!raw) return true
-  for (const candidate of [raw, `http://${raw}`]) {
-    try {
-      const url = new URL(candidate)
-      if (['127.0.0.1', 'localhost', '::1', '[::1]'].includes(url.hostname)) return true
-      if (url.port === '8190') return true
-    } catch {
-      // 继续尝试下一种写法
-    }
-  }
-  return false
 }
 
 function validateVideoRequest(body: any, provider?: string, options: { localShim?: boolean } = {}): string | null {
@@ -205,7 +187,7 @@ app.post('/', async (c) => {
       const effectiveConfig = configId
         ? (await getConfigById(configId)) ?? await getActiveConfig('video')
         : await getActiveConfig('video')
-      localVideoShim = isLocalMinimaxShim(effectiveConfig)
+      localVideoShim = isLocalShimConfig(effectiveConfig)
       const validationError = validateVideoRequest(videoBody, effectiveConfig?.provider, { localShim: localVideoShim })
       if (validationError) return badRequest(c, validationError)
       // 模型级分辨率：mini/fast 最高 720p、H3-Highspeed 仅 768P 等，创建任务前直接拒绝；

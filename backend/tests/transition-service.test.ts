@@ -17,6 +17,7 @@ process.env.MYSQL_AUTO_IMPORT = 'false'
 const { db, schema, getInsertId } = await import('../src/db/index.ts')
 const { eq } = await import('drizzle-orm')
 const {
+  deleteTransition,
   listTransitions,
   prepareTransitions,
   retryTransition,
@@ -637,4 +638,193 @@ test('并发 prepare 对同一失败断点只提交一次', async () => {
   const rows = await db.select().from(schema.videoTransitions)
     .where(eq(schema.videoTransitions.episodeId, episodeId))
   assert.equal(rows.length, 1)
+})
+
+test('prepare 只处理勾选的断点，未勾选断点保持缺失', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({
+    videoConfigId: configId,
+    storyboards: [{ number: 1 }, { number: 2 }, { number: 3 }],
+  })
+  const { submissions, deps } = fakeDeps()
+
+  const result = await prepareTransitions({
+    episodeId,
+    storyboardIds,
+    duration: 3,
+    boundaries: [{
+      fromStoryboardId: storyboardIds[1],
+      toStoryboardId: storyboardIds[2],
+    }],
+  }, deps)
+
+  assert.equal(result.created, 1)
+  assert.equal(submissions.length, 1)
+  const rows = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, episodeId))
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].fromStoryboardId, storyboardIds[1])
+  assert.equal(rows[0].toStoryboardId, storyboardIds[2])
+
+  const view = await listTransitions({ episodeId, storyboardIds })
+  assert.equal(view.summary.processing, 1)
+  assert.equal(view.summary.missing, 1)
+  assert.equal(view.boundaries.find(item => item.fromStoryboardId === storyboardIds[0])?.status, 'missing')
+})
+
+test('prepare 拒绝空勾选，避免误把全部断点当目标', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, deps } = fakeDeps()
+
+  await assert.rejects(
+    prepareTransitions({ episodeId, storyboardIds, duration: 3, boundaries: [] }, deps),
+    /至少勾选一个过渡断点/,
+  )
+  assert.equal(submissions.length, 0)
+})
+
+test('list 全集模式包含非相邻断点的历史片段，子集模式只返回子集断点', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({
+    videoConfigId: configId,
+    storyboards: [{ number: 1 }, { number: 2 }, { number: 3 }],
+  })
+  const { deps } = fakeDeps()
+  await prepareTransitions({
+    episodeId,
+    storyboardIds: [storyboardIds[0], storyboardIds[2]],
+    duration: 3,
+  }, deps)
+
+  const full = await listTransitions({ episodeId })
+  const pairs = full.boundaries.map(b => `${b.fromStoryboardId}:${b.toStoryboardId}`).sort()
+  assert.deepEqual(pairs, [
+    `${storyboardIds[0]}:${storyboardIds[1]}`,
+    `${storyboardIds[0]}:${storyboardIds[2]}`,
+    `${storyboardIds[1]}:${storyboardIds[2]}`,
+  ].sort())
+  const extra = full.boundaries.find(b =>
+    b.fromStoryboardId === storyboardIds[0] && b.toStoryboardId === storyboardIds[2])
+  assert.ok(extra, '跨镜生成的历史片段应出现在全集列表')
+  assert.equal(extra.fromNumber, 1)
+  assert.equal(extra.toNumber, 3)
+  assert.notEqual(extra.id, null)
+
+  const scoped = await listTransitions({
+    episodeId,
+    storyboardIds: [storyboardIds[0], storyboardIds[2]],
+  })
+  assert.deepEqual(
+    scoped.boundaries.map(b => `${b.fromStoryboardId}:${b.toStoryboardId}`),
+    [`${storyboardIds[0]}:${storyboardIds[2]}`],
+  )
+})
+
+test('delete 不删除仍被其他断点引用的首尾帧缓存', async () => {
+  const configId = await insertBaseConfig()
+  const { dramaId, episodeId, storyboardIds } = await seedEpisode({
+    videoConfigId: configId,
+    storyboards: [{ number: 1 }, { number: 2 }, { number: 3 }],
+  })
+  const { deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const rows = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, episodeId))
+  const target = rows.find(row => row.fromStoryboardId === storyboardIds[0])!
+  const videoRel = `static/projects/${dramaId}/transitions/shared-video.mp4`
+  const sharedFirstRel = `static/projects/${dramaId}/transitions/frames/shared-first.jpg`
+  const ownLastRel = `static/projects/${dramaId}/transitions/frames/own-last.jpg`
+  const siblingVideoRel = `static/projects/${dramaId}/transitions/sibling-video.mp4`
+  const siblingLastRel = `static/projects/${dramaId}/transitions/frames/sibling-last.jpg`
+  for (const rel of [videoRel, sharedFirstRel, ownLastRel, siblingVideoRel, siblingLastRel]) {
+    fsSync.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
+    fsSync.writeFileSync(path.join(root, rel), Buffer.alloc(512))
+  }
+  await db.update(schema.videoTransitions).set({
+    status: 'completed',
+    videoUrl: videoRel,
+    firstFrameUrl: sharedFirstRel,
+    lastFrameUrl: ownLastRel,
+  }).where(eq(schema.videoTransitions.id, target.id))
+  await db.insert(schema.videoTransitions).values({
+    episodeId,
+    dramaId,
+    fromStoryboardId: storyboardIds[0],
+    toStoryboardId: storyboardIds[2],
+    status: 'completed',
+    enabled: true,
+    videoUrl: siblingVideoRel,
+    firstFrameUrl: sharedFirstRel,
+    lastFrameUrl: siblingLastRel,
+    createdAt: ts,
+    updatedAt: ts,
+  })
+
+  await deleteTransition(target.id)
+
+  assert.equal(fsSync.existsSync(path.join(root, videoRel)), false, '自有视频应删除')
+  assert.equal(fsSync.existsSync(path.join(root, ownLastRel)), false, '自有尾帧应删除')
+  assert.equal(fsSync.existsSync(path.join(root, sharedFirstRel)), true, '共享首帧必须保留')
+  assert.equal((await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, episodeId))).length, 2)
+})
+
+test('delete 待生成记录也拒绝删除，避免任务完成后留下孤儿文件', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, episodeId))
+  await db.update(schema.videoTransitions).set({ status: 'pending' })
+    .where(eq(schema.videoTransitions.id, row.id))
+
+  await assert.rejects(deleteTransition(row.id), /运行中/)
+  assert.equal((await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.id, row.id))).length, 1)
+})
+
+test('delete 删除过渡记录与本地文件，运行中拒绝删除', async () => {
+  const configId = await insertBaseConfig()
+  const { dramaId, episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, episodeId))
+  const videoRel = `static/projects/${dramaId}/transitions/delete-video.mp4`
+  const firstRel = `static/projects/${dramaId}/transitions/frames/delete-first.jpg`
+  const lastRel = `static/projects/${dramaId}/transitions/frames/delete-last.jpg`
+  for (const rel of [videoRel, firstRel, lastRel]) {
+    fsSync.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
+    fsSync.writeFileSync(path.join(root, rel), Buffer.alloc(512))
+  }
+  await db.update(schema.videoTransitions).set({
+    status: 'completed',
+    videoUrl: videoRel,
+    firstFrameUrl: firstRel,
+    lastFrameUrl: lastRel,
+  }).where(eq(schema.videoTransitions.id, row.id))
+
+  await deleteTransition(row.id)
+
+  assert.equal((await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.id, row.id))).length, 0)
+  for (const rel of [videoRel, firstRel, lastRel]) {
+    assert.equal(fsSync.existsSync(path.join(root, rel)), false, `${rel} 应被删除`)
+  }
+  await assert.rejects(deleteTransition(row.id), /不存在/)
+
+  const processingEpisode = await seedEpisode({ videoConfigId: configId })
+  const processingDeps = fakeDeps()
+  await prepareTransitions({
+    episodeId: processingEpisode.episodeId,
+    storyboardIds: processingEpisode.storyboardIds,
+    duration: 3,
+  }, processingDeps.deps)
+  const [processing] = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, processingEpisode.episodeId))
+  await assert.rejects(deleteTransition(processing.id), /运行中/)
+  assert.equal((await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.id, processing.id))).length, 1)
 })

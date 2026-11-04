@@ -248,6 +248,14 @@ test('prepare 路由校验剧集、参数与模型配置', async () => {
   assert.equal(badTextConfig.status, 400)
   assert.match((await badTextConfig.json() as any).message, /text_config_id/)
 
+  const emptyBoundaries = await post({ boundaries: [] })
+  assert.equal(emptyBoundaries.status, 400)
+  assert.match((await emptyBoundaries.json() as any).message, /boundaries/)
+
+  const badBoundaries = await post({ boundaries: [{ from_storyboard_id: 'x', to_storyboard_id: 2 }] })
+  assert.equal(badBoundaries.status, 400)
+  assert.match((await badBoundaries.json() as any).message, /boundaries/)
+
   const noConfig = await post({ text_config_id: 3, text_model: 'qwen-vl-max' })
   assert.equal(noConfig.status, 400)
   assert.match((await noConfig.json() as any).message, /未配置视频模型/)
@@ -409,4 +417,47 @@ test('merge 按 use_ai_transitions 写入过渡快照，关闭时保持旧行为
   const disabledRow = await waitMergeRow(Number(disabledBody.data.merge_id))
   assert.equal(disabledRow.transitions, null)
   assert.equal(JSON.parse(disabledRow.mixOptions).aiTransitions, undefined)
+})
+
+test('DELETE 过渡片段删除记录与本地文件，运行中与缺失拒绝', async () => {
+  const dramaId = insertDrama()
+  const episodeId = insertEpisode(dramaId)
+  const urls = [1, 2].map(n => `static/projects/${dramaId}/videos/s${n}.mp4`)
+  urls.forEach(url => writeStatic(url))
+  const [s1, s2] = urls.map((url, index) => insertStoryboard(episodeId, index + 1, url))
+
+  const videoUrl = `static/projects/${dramaId}/transitions/delete.mp4`
+  const firstFrameUrl = `static/projects/${dramaId}/transitions/frames/first.jpg`
+  const lastFrameUrl = `static/projects/${dramaId}/transitions/frames/last.jpg`
+  for (const file of [videoUrl, firstFrameUrl, lastFrameUrl]) writeStatic(file)
+  const rowId = insertTransitionRow(episodeId, dramaId, s1, s2, {
+    status: 'completed',
+    videoUrl,
+    firstFrameUrl,
+    lastFrameUrl,
+  })
+
+  const response = await app.fetch(new Request(
+    `http://localhost/api/v1/merge/transitions/${rowId}`, { method: 'DELETE' },
+  ))
+  assert.equal(response.status, 200)
+  assert.equal((await response.json() as any).data.id, rowId)
+  assert.equal(db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.id, rowId)).get(), undefined)
+  for (const file of [videoUrl, firstFrameUrl, lastFrameUrl]) {
+    assert.equal(fsSync.existsSync(path.join(root, file)), false, `${file} 应被删除`)
+  }
+
+  const processingId = insertTransitionRow(episodeId, dramaId, s1, s2, { status: 'processing' })
+  const blocked = await app.fetch(new Request(
+    `http://localhost/api/v1/merge/transitions/${processingId}`, { method: 'DELETE' },
+  ))
+  assert.equal(blocked.status, 400)
+  assert.match((await blocked.json() as any).message, /运行中/)
+
+  const missing = await app.fetch(new Request(
+    'http://localhost/api/v1/merge/transitions/99999', { method: 'DELETE' },
+  ))
+  assert.equal(missing.status, 400)
+  assert.match((await missing.json() as any).message, /不存在/)
 })

@@ -55,6 +55,15 @@ export function isLocalShim(baseUrl: string): boolean {
   return false
 }
 
+/**
+ * 本地 H3 判定：显式 h3_gateway 标识优先，兼容旧的本机桥接地址。
+ * 远程自建网关不靠端口猜测，必须由用户在配置里勾选。
+ */
+export function isLocalShimConfig(config: AIConfig | null | undefined): boolean {
+  if (!config || String(config.provider || '').toLowerCase() !== 'minimax') return false
+  return config.settings?.h3_gateway === true || isLocalShim(config.baseUrl)
+}
+
 function parseUrlArray(raw?: string | null): string[] {
   if (!raw) return []
   try {
@@ -120,7 +129,7 @@ export class MiniMaxVideoAdapter implements VideoProviderAdapter {
     const body: any = {
       model,
       content,
-      duration: this.normalizeDuration(record.duration, record.allowShortDuration === true && isLocalShim(config.baseUrl)),
+      duration: this.normalizeDuration(record.duration, record.allowShortDuration === true && isLocalShimConfig(config)),
       resolution: this.normalizeResolution(config, model, record.resolution),
     }
 
@@ -132,7 +141,7 @@ export class MiniMaxVideoAdapter implements VideoProviderAdapter {
 
     // 本地 shim 扩展：官方 resolution 只有 768P / 2K，480p 与 720p 会被压成同一档；
     // 图生视频又不带 ratio，竖屏项目无从得知比例。补两个自有字段，云端请求不受影响。
-    if (isLocalShim(config.baseUrl)) {
+    if (isLocalShimConfig(config)) {
       const tier = (record.resolution || '').trim().toLowerCase()
       if (tier) body.resolution_tier = tier
       const aspectRatio = (record.aspectRatio || '').trim()
@@ -228,7 +237,7 @@ export class MiniMaxVideoAdapter implements VideoProviderAdapter {
    * 官方不支持的档位明确报错；本地 shim 的 480p 由自有画布渲染。
    */
   private normalizeResolution(config: AIConfig, model: string, resolution?: string | null): string {
-    const capability = videoModelCapabilities('minimax', model, { localShim: isLocalShim(config.baseUrl) })
+    const capability = videoModelCapabilities('minimax', model, { localShim: isLocalShimConfig(config) })
     const requested = videoResolutionTier(resolution)
     if (requested && !capability.resolutions.includes(requested)) {
       const options = capability.resolutions.map(tier => capability.vendorResolutions[tier] || tier).join(' / ')

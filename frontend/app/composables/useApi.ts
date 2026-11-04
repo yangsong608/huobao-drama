@@ -490,6 +490,7 @@ export const transitionAPI = {
   analyze: (id: number, payload: Record<string, any> = {}) => api.post<any>(`/merge/transitions/${id}/analyze`, payload),
   savePrompt: (id: number, prompt: string) => api.put<any>(`/merge/transitions/${id}/prompt`, { prompt }),
   skip: (id: number) => api.post<any>(`/merge/transitions/${id}/skip`, {}),
+  del: (id: number) => api.del(`/merge/transitions/${id}`),
 }
 export const aiConfigAPI = {
   list: (t?: string) => api.get(`/ai-configs${t ? `?service_type=${t}` : ''}`),

@@ -5,6 +5,7 @@ import { success, badRequest, now } from '../utils/response.js'
 import { mergeEpisodeVideos } from '../services/ffmpeg-merge.js'
 import {
   analyzeTransitionPrompt,
+  deleteTransition,
   getTransition,
   listTransitions,
   prepareTransitions,
@@ -116,6 +117,24 @@ app.post('/episodes/:id/transitions/prepare', async (c) => {
   const storyboardIds = Array.isArray(body?.storyboard_ids)
     ? body.storyboard_ids.map(Number).filter((id: number) => Number.isInteger(id) && id > 0)
     : undefined
+
+  let boundaries: Array<{ fromStoryboardId: number; toStoryboardId: number }> | undefined
+  if (body?.boundaries !== undefined) {
+    if (!Array.isArray(body.boundaries) || body.boundaries.length === 0) {
+      return badRequest(c, 'boundaries 不能为空')
+    }
+    boundaries = []
+    for (const item of body.boundaries) {
+      const fromStoryboardId = Number(item?.from_storyboard_id)
+      const toStoryboardId = Number(item?.to_storyboard_id)
+      if (!Number.isInteger(fromStoryboardId) || fromStoryboardId <= 0
+        || !Number.isInteger(toStoryboardId) || toStoryboardId <= 0) {
+        return badRequest(c, 'boundaries 无效')
+      }
+      boundaries.push({ fromStoryboardId, toStoryboardId })
+    }
+  }
+
   const mode = body?.mode === undefined ? 'missing' : String(body.mode)
   if (mode !== 'missing' && mode !== 'all') return badRequest(c, 'mode 只能是 missing 或 all')
 
@@ -156,6 +175,7 @@ app.post('/episodes/:id/transitions/prepare', async (c) => {
     const result = await prepareTransitions({
       episodeId,
       storyboardIds,
+      boundaries,
       mode,
       configId,
       model,
@@ -259,6 +279,18 @@ app.post('/transitions/:id/skip', async (c) => {
     return success(c, { id, enabled: false })
   } catch (error: any) {
     return badRequest(c, error?.message || '跳过过渡片段失败')
+  }
+})
+
+// DELETE /transitions/:id — 删除过渡片段及其本地视频/首尾帧文件
+app.delete('/transitions/:id', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return badRequest(c, '过渡片段不存在')
+  try {
+    await deleteTransition(id)
+    return success(c, { id })
+  } catch (error: any) {
+    return badRequest(c, error?.message || '删除过渡片段失败')
   }
 })
 

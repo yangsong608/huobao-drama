@@ -1162,6 +1162,45 @@
                 </div>
               </div>
             </div>
+
+            <!-- 镜头素材下方:已生成的过渡镜头 -->
+            <div class="export-section">
+              <div class="export-section-head">
+                <span class="export-section-title">{{ t('episode.export.aiTransition.cardsTitle') }}</span>
+                <span class="dim" style="font-size:11px">{{ t('episode.export.aiTransition.cardsStat', { n: transitionCards.length }) }}</span>
+                <span v-if="transitionCards.length" class="dim ml-auto" style="font-size:11px">{{ t('episode.export.aiTransition.cardHint') }}</span>
+              </div>
+              <div v-if="transitionCards.length" class="ai-transition-cards">
+                <button
+                  v-for="b in transitionCards"
+                  :key="b.id"
+                  type="button"
+                  class="ai-transition-card"
+                  @click="openTransitionDetail(b)"
+                >
+                  <div class="ai-transition-card-thumb">
+                    <img
+                      v-if="b.first_frame_url"
+                      :src="'/' + b.first_frame_url"
+                      :alt="transitionPairLabel(b)"
+                      loading="lazy"
+                    />
+                    <div v-else class="ai-transition-card-empty">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                    </div>
+                    <span :class="['ai-transition-status', transitionStatusClass(b)]">{{ transitionStatusLabel(b) }}</span>
+                    <span v-if="b.status === 'completed' && !b.stale && b.video_url" class="ai-transition-card-play">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                    </span>
+                  </div>
+                  <div class="ai-transition-card-line">
+                    <span class="truncate">{{ transitionPairLabel(b) }}</span>
+                    <span v-if="transitionDurationLabel(b)" class="dim">{{ transitionDurationLabel(b) }}</span>
+                  </div>
+                </button>
+              </div>
+              <div v-else class="export-merge-empty">{{ t('episode.export.aiTransition.cardsEmpty') }}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1573,6 +1612,120 @@
         </div>
       </div>
 
+      <div v-if="transitionDetailBoundary" class="overlay" @click.self="closeTransitionDetail">
+        <div class="dialog transition-detail-dialog">
+          <header class="dialog-head">
+            <div class="image-viewer-title">{{ t('episode.export.aiTransition.detailTitle') }}</div>
+            <span :class="['ai-transition-status', transitionStatusClass(transitionDetailBoundary)]">
+              {{ transitionStatusLabel(transitionDetailBoundary) }}
+            </span>
+            <span class="dim" style="font-size:11px">{{ transitionPairLabel(transitionDetailBoundary) }}</span>
+            <span v-if="transitionDurationLabel(transitionDetailBoundary)" class="dim" style="font-size:11px">
+              {{ transitionDurationLabel(transitionDetailBoundary) }}
+            </span>
+            <button class="btn btn-ghost btn-icon" style="margin-left:auto" @click="closeTransitionDetail">
+              <X :size="14" />
+            </button>
+          </header>
+          <div class="dialog-body transition-detail-body">
+            <div v-if="transitionDetailBoundary.video_url" class="transition-detail-video">
+              <video
+                :key="transitionDetailBoundary.video_url"
+                :src="'/' + transitionDetailBoundary.video_url"
+                :poster="posterOf('/' + transitionDetailBoundary.video_url) || undefined"
+                controls
+                playsinline
+              />
+            </div>
+            <div v-else-if="transitionDetailBoundary.error_msg" class="transition-detail-error">
+              {{ mapError(transitionDetailBoundary.error_msg) }}
+            </div>
+            <div v-if="transitionDetailBoundary.first_frame_url || transitionDetailBoundary.last_frame_url" class="transition-detail-frames">
+              <button
+                v-if="transitionDetailBoundary.first_frame_url"
+                type="button"
+                class="transition-detail-frame"
+                @click="openImageViewer('/' + transitionDetailBoundary.first_frame_url, t('episode.export.aiTransition.firstFrame'))"
+              >
+                <img :src="'/' + transitionDetailBoundary.first_frame_url" :alt="t('episode.export.aiTransition.firstFrame')" loading="lazy" />
+                <span>{{ t('episode.export.aiTransition.firstFrame') }}</span>
+              </button>
+              <button
+                v-if="transitionDetailBoundary.last_frame_url"
+                type="button"
+                class="transition-detail-frame"
+                @click="openImageViewer('/' + transitionDetailBoundary.last_frame_url, t('episode.export.aiTransition.lastFrame'))"
+              >
+                <img :src="'/' + transitionDetailBoundary.last_frame_url" :alt="t('episode.export.aiTransition.lastFrame')" loading="lazy" />
+                <span>{{ t('episode.export.aiTransition.lastFrame') }}</span>
+              </button>
+            </div>
+            <p v-if="transitionDetailBoundary.first_frame_url || transitionDetailBoundary.last_frame_url" class="ai-transition-prompt-note">
+              {{ t('episode.export.aiTransition.framesHint') }}
+            </p>
+            <div class="ai-transition-prompt transition-detail-prompt">
+              <div class="ai-transition-prompt-head">
+                <span :class="['ai-transition-prompt-source', transitionPromptSourceClass(transitionDetailBoundary)]">
+                  {{ transitionPromptSourceLabel(transitionDetailBoundary) }}
+                </span>
+                <button
+                  class="btn btn-sm btn-ghost"
+                  :disabled="transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)]"
+                  @click="analyzeTransitionItem(transitionDetailBoundary)"
+                >
+                  {{ transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)]
+                    ? t('episode.export.aiTransition.prompt.analyzing')
+                    : t('episode.export.aiTransition.prompt.analyze') }}
+                </button>
+              </div>
+              <textarea
+                v-model="transitionPromptDrafts[transitionPromptKey(transitionDetailBoundary)]"
+                class="input ai-transition-prompt-input"
+                rows="4"
+                maxlength="1200"
+                :disabled="transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)]"
+                :aria-label="t('episode.export.aiTransition.prompt.label')"
+                :placeholder="t('episode.export.aiTransition.prompt.placeholder')"
+                @input="markTransitionPromptDirty(transitionDetailBoundary)"
+              />
+              <div class="ai-transition-prompt-actions">
+                <button
+                  class="btn btn-sm"
+                  :disabled="transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)]"
+                  @click="saveTransitionPromptItem(transitionDetailBoundary)"
+                >
+                  {{ t('episode.export.aiTransition.prompt.save') }}
+                </button>
+                <button
+                  class="btn btn-sm btn-primary"
+                  :disabled="transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)]
+                    || transitionDetailBoundary.status === 'processing' || transitionDetailBoundary.status === 'pending'"
+                  @click="regenerateTransitionWithPrompt(transitionDetailBoundary)"
+                >
+                  {{ t('episode.export.aiTransition.prompt.regenerate') }}
+                </button>
+              </div>
+              <p v-if="transitionPromptEffectiveSource(transitionDetailBoundary) === 'fallback'" class="ai-transition-prompt-note">
+                {{ t('episode.export.aiTransition.prompt.fallbackNote') }}
+              </p>
+              <p class="ai-transition-prompt-note">{{ t('episode.export.aiTransition.prompt.hint') }}</p>
+            </div>
+          </div>
+          <footer class="dialog-foot">
+            <button
+              class="btn btn-ghost transition-detail-delete"
+              :disabled="transitionDetailBoundary.status === 'processing' || transitionDetailBoundary.status === 'pending'"
+              :title="transitionDetailBoundary.status === 'processing' || transitionDetailBoundary.status === 'pending' ? t('episode.export.aiTransition.processingHint') : null"
+              @click="askDeleteTransition(transitionDetailBoundary)"
+            >
+              <Trash2 :size="12" />
+              {{ t('episode.export.aiTransition.delete') }}
+            </button>
+            <button class="btn" style="margin-left:auto" @click="closeTransitionDetail">{{ t('common.close') }}</button>
+          </footer>
+        </div>
+      </div>
+
       <div v-if="activeMerge" class="overlay image-viewer-overlay" @click.self="activeMerge = null">
         <div class="dialog image-viewer-dialog merge-viewer-dialog">
           <div class="image-viewer-head">
@@ -1691,6 +1844,9 @@
                 <span class="dim">
                   {{ t('episode.export.aiTransition.readyHint', { ready: mergeDialogReadyCount, total: mergeDialogBoundaries.length }) }}
                 </span>
+                <span class="dim">
+                  {{ t('episode.export.aiTransition.selectedHint', { n: mergeDialogSelectedCount, total: mergeDialogBoundaries.length }) }}
+                </span>
               </label>
               <p v-if="!transitionSupported" class="batch-video-note">{{ t('episode.export.aiTransition.unsupported') }}</p>
               <template v-else>
@@ -1701,6 +1857,14 @@
                     class="ai-transition-row"
                   >
                     <div class="ai-transition-row-head">
+                      <label class="ai-transition-pick" :title="t('episode.export.aiTransition.pickHint')">
+                        <input
+                          type="checkbox"
+                          :checked="isMergeBoundarySelected(b)"
+                          :aria-label="transitionPairLabel(b)"
+                          @change="toggleMergeBoundary(b)"
+                        />
+                      </label>
                       <span class="ai-transition-pair">{{ transitionPairLabel(b) }}</span>
                       <span :class="['ai-transition-status', transitionStatusClass(b)]">{{ transitionStatusLabel(b) }}</span>
                       <span v-if="transitionDurationLabel(b)" class="dim ai-transition-duration">{{ transitionDurationLabel(b) }}</span>
@@ -1818,7 +1982,7 @@
             <button class="btn" @click="mergeDialog.open = false">{{ t('common.cancel') }}</button>
             <button
               class="btn"
-              :disabled="!transitionSupported || transitionPreparing || transitionBusy || !mergeDialogBoundaries.length"
+              :disabled="!transitionSupported || transitionPreparing || transitionBusy || !mergeDialogSelectedCount"
               @click="generateMissingTransitions"
             >
               {{ t('episode.export.aiTransition.regenerateMissing') }}
@@ -1847,6 +2011,16 @@
         :loading="clearTasks.loading"
         @confirm="confirmClearGenTasks"
         @cancel="clearTasks.open = false"
+      />
+
+      <ConfirmDialog
+        :open="transitionDelete.open"
+        :title="t('episode.export.aiTransition.deleteTitle')"
+        :message="t('episode.export.aiTransition.deleteMessage', { pair: transitionDeletePair })"
+        :confirm-text="t('episode.export.aiTransition.deleteConfirm')"
+        :loading="transitionDelete.loading"
+        @confirm="confirmDeleteTransition"
+        @cancel="transitionDelete.open = false"
       />
     </main>
     </div>
@@ -1880,7 +2054,7 @@ import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propA
 import { startTour, autoTour } from '~/composables/useTour'
 import { useAgent } from '~/composables/useAgent'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
-import { episodeResolutionKey, isLocalMinimaxBaseUrl, videoResolutionKey, videoResolutionOptions, videoResolutionProvider, videoResolutionVendor } from '~/utils/video-resolution'
+import { episodeResolutionKey, isLocalH3Config, videoResolutionKey, videoResolutionOptions, videoResolutionProvider, videoResolutionVendor } from '~/utils/video-resolution'
 import { videoModelCapabilities } from '~/utils/model-capabilities'
 import { createStoryboardUpdateQueue } from '~/utils/storyboard-update-queue'
 import { toastError, mapError, MODERATION_RE } from '~/composables/useToast'
@@ -2091,7 +2265,7 @@ function openTaskDrawer() {
   taskDrawer.value = true
   loadGenTasks()
   // 过渡任务没有分镜号，需要断点列表把 transition_id 还原成「S01 尾 → S02 首」
-  void loadTransitions(exportReadyIds.value)
+  void loadTransitions()
 }
 function closeTaskDrawer() {
   taskDrawer.value = false
@@ -2104,11 +2278,15 @@ const mergeDialog = ref({
   title: '',
   useAiTransitions: false,
   useAiTransitionsTouched: false,
+  selectedBoundaries: [],
+  boundariesTouched: false,
   duration: 3,
   audioMode: 'ambient',
-}) // 拼接前命名弹窗（含 AI 过渡开关）
+}) // 拼接前命名弹窗（含 AI 过渡开关与断点勾选）
 const previewShot = ref(null) // 导出页镜头素材/过渡片段预览弹窗
-const transitionState = ref({ loading: false, boundaries: [], summary: null, provider: null })
+const transitionDetail = ref({ open: false, id: null }) // 过渡镜头详情弹窗
+const transitionDelete = ref({ open: false, loading: false, id: null })
+const transitionState = ref({ loading: false, boundaries: [], provider: null })
 const transitionPreparing = ref(false)
 const transitionPromptOpen = ref({})
 const transitionPromptDrafts = ref({})
@@ -2764,9 +2942,8 @@ const selectedVideoConfig = computed(() => {
     .filter(config => config.is_active)
     .sort((a, b) => (b.priority || 0) - (a.priority || 0))[0]
 })
-// 本地 minimax shim 可渲染 480P；云端同模型仍只认 768P/2K
-const videoLocalShim = computed(() => selectedVideoConfig.value?.provider === 'minimax'
-  && isLocalMinimaxBaseUrl(selectedVideoConfig.value?.base_url || selectedVideoConfig.value?.baseUrl))
+// 本地 H3 / 自建网关可渲染 480P；云端同模型仍只认 768P/2K
+const videoLocalShim = computed(() => isLocalH3Config(selectedVideoConfig.value))
 const videoCapabilityOpts = computed(() => ({ localShim: videoLocalShim.value }))
 const isWan3Video = computed(() => selectedVideoConfig.value?.provider === 'aliyun'
   || bareModelName(videoModel.value).startsWith('wan3.0-video'))
@@ -4541,21 +4718,100 @@ function mergeDownloadName(m) {
   const base = String(m?.title || '').replace(/[\\/:*?"<>|]+/g, '_').trim()
   return `${base || t('episode.export.untitled')}.mp4`
 }
-const transitionSummary = computed(() => transitionState.value.summary || {
-  total: 0, ready: 0, missing: 0, pending: 0, processing: 0, failed: 0, skipped: 0,
+const transitionBoundaries = computed(() => transitionState.value.boundaries || [])
+function summarizeTransitionBoundaries(boundaries) {
+  const summary = {
+    total: boundaries.length, ready: 0, missing: 0, pending: 0, processing: 0, failed: 0, skipped: 0,
+  }
+  for (const item of boundaries) {
+    if (item.status === 'completed' && !item.stale && item.video_url) summary.ready++
+    else if (item.status === 'skipped') summary.skipped++
+    else if (item.status === 'failed') summary.failed++
+    else if (item.status === 'processing') summary.processing++
+    else if (item.status === 'pending') summary.pending++
+    else summary.missing++
+  }
+  return summary
+}
+const transitionBoundaryIndex = computed(() => {
+  const index = new Map()
+  for (const boundary of transitionBoundaries.value) {
+    index.set(transitionPromptKey(boundary), boundary)
+  }
+  return index
 })
+function storyboardNumberOf(sb) {
+  const value = Number(sb?.storyboard_number ?? sb?.storyboardNumber)
+  return Number.isFinite(value) && value > 0 ? value : 0
+}
+function transitionBoundaryForPair(fromId, toId) {
+  const existing = transitionBoundaryIndex.value.get(`${fromId}-${toId}`)
+  if (existing) return existing
+  const from = sbs.value.find(sb => sb.id === fromId)
+  const to = sbs.value.find(sb => sb.id === toId)
+  return {
+    id: null,
+    index: 0,
+    from_storyboard_id: fromId,
+    to_storyboard_id: toId,
+    from_number: storyboardNumberOf(from) || '?',
+    to_number: storyboardNumberOf(to) || '?',
+    status: 'missing',
+    enabled: true,
+    stale: false,
+    supported: transitionSupported.value,
+    prompt: null,
+    prompt_source: null,
+    video_url: null,
+    first_frame_url: null,
+    last_frame_url: null,
+    duration_requested: null,
+    duration_effective: null,
+    duration_actual: null,
+    audio_mode: null,
+    provider: null,
+    model: null,
+    sys_task_id: null,
+    error_msg: null,
+    completed_at: null,
+  }
+}
+/** 按勾选镜头的相邻顺序取断点；跨镜勾选时也要能对齐历史片段。 */
+function transitionBoundariesFor(ids) {
+  const wanted = new Set(ids || [])
+  const ordered = sbs.value
+    .filter(sb => wanted.has(sb.id) && hasVid(sb))
+    .sort((a, b) => storyboardNumberOf(a) - storyboardNumberOf(b) || a.id - b.id)
+  const boundaries = []
+  for (let i = 1; i < ordered.length; i++) {
+    boundaries.push(transitionBoundaryForPair(ordered[i - 1].id, ordered[i].id))
+  }
+  return boundaries
+}
+const exportTransitionBoundaries = computed(() => transitionBoundariesFor(exportSelectedReadyIds.value))
+const transitionSummary = computed(() => summarizeTransitionBoundaries(exportTransitionBoundaries.value))
+const allTransitionSummary = computed(() => summarizeTransitionBoundaries(transitionBoundaries.value))
 const transitionProvider = computed(() => transitionState.value.provider)
 const transitionBusy = computed(() =>
-  (transitionSummary.value.pending || 0) + (transitionSummary.value.processing || 0) > 0)
+  (allTransitionSummary.value.pending || 0) + (allTransitionSummary.value.processing || 0) > 0)
 const transitionSupported = computed(() => transitionProvider.value?.first_last_frame === true)
-const transitionBoundaries = computed(() => transitionState.value.boundaries || [])
-const mergeDialogBoundaries = computed(() => {
-  const ids = new Set(mergeDialog.value.ids)
-  return transitionBoundaries.value.filter(b =>
-    ids.has(b.from_storyboard_id) && ids.has(b.to_storyboard_id))
-})
+const mergeDialogBoundaries = computed(() => transitionBoundariesFor(mergeDialog.value.ids))
 const mergeDialogReadyCount = computed(() =>
   mergeDialogBoundaries.value.filter(b => b.status === 'completed' && !b.stale).length)
+const mergeDialogSelectedCount = computed(() => selectedBoundaryPayload().length)
+const transitionCards = computed(() =>
+  transitionBoundaries.value
+    .filter(b => b.id != null)
+    .sort((a, b) => (Number(a.from_number) || 0) - (Number(b.from_number) || 0)
+      || (Number(a.to_number) || 0) - (Number(b.to_number) || 0)))
+const transitionDetailBoundary = computed(() => {
+  if (!transitionDetail.value.open) return null
+  return transitionBoundaries.value.find(b => b.id === transitionDetail.value.id) || null
+})
+const transitionDeleteBoundary = computed(() =>
+  transitionBoundaries.value.find(b => b.id === transitionDelete.value.id) || null)
+const transitionDeletePair = computed(() =>
+  transitionDeleteBoundary.value ? transitionPairLabel(transitionDeleteBoundary.value) : '')
 
 function transitionPairLabel(boundary) {
   return t('episode.export.aiTransition.pair', {
@@ -4572,6 +4828,62 @@ function transitionStatusClass(boundary) {
   if (boundary?.stale || boundary?.status === 'failed') return 'failed'
   if (boundary?.status === 'processing' || boundary?.status === 'pending') return 'pending'
   return 'idle'
+}
+function isMergeBoundarySelected(boundary) {
+  return mergeDialog.value.selectedBoundaries.includes(transitionPromptKey(boundary))
+}
+function toggleMergeBoundary(boundary) {
+  const key = transitionPromptKey(boundary)
+  const selected = new Set(mergeDialog.value.selectedBoundaries)
+  if (selected.has(key)) selected.delete(key)
+  else selected.add(key)
+  mergeDialog.value = {
+    ...mergeDialog.value,
+    selectedBoundaries: [...selected],
+    boundariesTouched: true,
+  }
+}
+function selectedBoundaryPayload() {
+  if (!mergeDialog.value.open) return []
+  return mergeDialogBoundaries.value
+    .filter(item => isMergeBoundarySelected(item))
+    .map(item => ({
+      from_storyboard_id: item.from_storyboard_id,
+      to_storyboard_id: item.to_storyboard_id,
+    }))
+}
+function openTransitionDetail(boundary) {
+  if (!boundary?.id) return
+  transitionDetail.value = { open: true, id: boundary.id }
+  const key = transitionPromptKey(boundary)
+  if (!(key in transitionPromptDrafts.value) || !transitionPromptDirty.value[key]) {
+    transitionPromptDrafts.value = {
+      ...transitionPromptDrafts.value,
+      [key]: String(boundary.prompt || ''),
+    }
+  }
+}
+function closeTransitionDetail() {
+  transitionDetail.value = { open: false, id: null }
+}
+function askDeleteTransition(boundary) {
+  if (!boundary?.id) return
+  transitionDelete.value = { open: true, loading: false, id: boundary.id }
+}
+async function confirmDeleteTransition() {
+  const id = transitionDelete.value.id
+  if (!id) return
+  transitionDelete.value = { ...transitionDelete.value, loading: true }
+  try {
+    await transitionAPI.del(id)
+    toast.success(t('episode.export.aiTransition.deleted'))
+    transitionDelete.value = { open: false, loading: false, id: null }
+    if (transitionDetail.value.id === id) closeTransitionDetail()
+    await loadTransitions()
+  } catch (e) {
+    toastError(e, { fallback: 'episode.export.aiTransition.deleteFailed' })
+    transitionDelete.value = { ...transitionDelete.value, loading: false }
+  }
 }
 function openTransitionPreview(boundary) {
   if (!boundary?.video_url) return
@@ -4602,31 +4914,25 @@ function applyTransitionData(data) {
   transitionState.value = {
     loading: false,
     boundaries: data?.boundaries || [],
-    summary: data?.summary || null,
     provider: data?.provider || null,
   }
   syncTransitionPromptDrafts()
 }
-async function loadTransitions(ids = exportReadyIds.value) {
+async function loadTransitions() {
   if (!epId.value) return
   const seq = ++transitionRequestSeq
-  if (!ids?.length) {
-    transitionState.value = { loading: false, boundaries: [], summary: null, provider: null }
-    stopTransitionPolling()
-    return
-  }
   try {
-    const data = await transitionAPI.list(epId.value, ids)
+    const data = await transitionAPI.list(epId.value)
     if (seq !== transitionRequestSeq) return
     applyTransitionData(data)
-    scheduleTransitionPoll(ids, seq)
+    scheduleTransitionPoll(seq)
   } catch (e) {
     if (seq !== transitionRequestSeq) return
     transitionState.value = { ...transitionState.value, loading: false }
     toastError(e, { fallback: 'episode.export.aiTransition.loadFailed' })
   }
 }
-function scheduleTransitionPoll(ids, seq) {
+function scheduleTransitionPoll(seq) {
   stopTransitionPolling()
   if (!transitionBusy.value) return
   // 离开导出页后旧轮询不再复活
@@ -4634,18 +4940,19 @@ function scheduleTransitionPoll(ids, seq) {
   transitionTimer = setInterval(async () => {
     if (seq !== transitionRequestSeq) { stopTransitionPolling(); return }
     try {
-      const data = await transitionAPI.list(epId.value, ids)
+      const data = await transitionAPI.list(epId.value)
       if (seq !== transitionRequestSeq) return
       applyTransitionData(data)
       if (!transitionBusy.value) stopTransitionPolling()
     } catch { /* 下一轮继续 */ }
   }, 3000)
 }
-function transitionTargetCount(ids) {
-  const idSet = new Set(ids || [])
-  return transitionBoundaries.value.filter(b =>
-    idSet.has(b.from_storyboard_id)
-    && idSet.has(b.to_storyboard_id)
+function transitionTargetCount(ids, boundaries = null) {
+  const selected = boundaries
+    ? new Set(boundaries.map(item => `${item.from_storyboard_id}-${item.to_storyboard_id}`))
+    : null
+  return transitionBoundariesFor(ids).filter(b =>
+    (!selected || selected.has(transitionPromptKey(b)))
     && (b.status === 'missing' || b.status === 'failed' || (b.status === 'completed' && b.stale)))
     .length
 }
@@ -4655,7 +4962,12 @@ async function prepareTransitionsFor(ids, options = {}) {
     toast.error(t('episode.export.aiTransition.unsupported'))
     return
   }
-  const targets = transitionTargetCount(ids)
+  const boundaries = Array.isArray(options.boundaries) ? options.boundaries : null
+  if (boundaries && boundaries.length === 0) {
+    toast.warning(t('episode.export.aiTransition.needBoundary'))
+    return
+  }
+  const targets = transitionTargetCount(ids, boundaries)
   if (targets > 0 && !window.confirm(t('episode.export.aiTransition.costHint', { n: targets }))) return
   transitionPreparing.value = true
   try {
@@ -4664,9 +4976,10 @@ async function prepareTransitionsFor(ids, options = {}) {
       mode: 'missing',
       duration: options.duration || 3,
       audio_mode: options.audioMode || 'ambient',
+      ...(boundaries ? { boundaries } : {}),
       ...transitionTextModelPayload(),
     })
-    await loadTransitions(ids)
+    await loadTransitions()
     const failedCount = Number(result?.failed || 0)
     const createdCount = Number(result?.created || 0)
     if (failedCount > 0) {
@@ -4684,9 +4997,11 @@ async function prepareTransitionsFor(ids, options = {}) {
 }
 async function generateMissingTransitions() {
   const ids = mergeDialog.value.open ? mergeDialog.value.ids : exportSelectedReadyIds.value
+  const boundaries = mergeDialog.value.open ? selectedBoundaryPayload() : null
   await prepareTransitionsFor(ids, {
     duration: mergeDialog.value.duration,
     audioMode: mergeDialog.value.audioMode,
+    boundaries,
   })
 }
 async function retryTransitionItem(boundary) {
@@ -4695,7 +5010,7 @@ async function retryTransitionItem(boundary) {
   try {
     await transitionAPI.retry(boundary.id, transitionTextModelPayload())
     toast.success(t('episode.export.aiTransition.retried'))
-    await loadTransitions(mergeDialog.value.open ? mergeDialog.value.ids : exportSelectedReadyIds.value)
+    await loadTransitions()
   } catch (e) {
     toastError(e, { fallback: 'episode.export.aiTransition.actionFailed' })
   } finally {
@@ -4708,7 +5023,7 @@ async function skipTransitionItem(boundary) {
   try {
     await transitionAPI.skip(boundary.id)
     toast.success(t('episode.export.aiTransition.skippedToast'))
-    await loadTransitions(mergeDialog.value.open ? mergeDialog.value.ids : exportSelectedReadyIds.value)
+    await loadTransitions()
   } catch (e) {
     toastError(e, { fallback: 'episode.export.aiTransition.actionFailed' })
   } finally {
@@ -4734,9 +5049,12 @@ function toggleTransitionPrompt(boundary) {
 }
 function syncTransitionPromptDrafts() {
   const next = { ...transitionPromptDrafts.value }
+  const detailKey = transitionDetailBoundary.value
+    ? transitionPromptKey(transitionDetailBoundary.value)
+    : ''
   for (const boundary of transitionBoundaries.value) {
     const key = transitionPromptKey(boundary)
-    if (transitionPromptOpen.value[key] && !transitionPromptDirty.value[key]) {
+    if ((transitionPromptOpen.value[key] || key === detailKey) && !transitionPromptDirty.value[key]) {
       next[key] = String(boundary?.prompt || '')
     }
   }
@@ -4823,7 +5141,7 @@ async function saveTransitionPromptItem(boundary) {
     await transitionAPI.savePrompt(boundary.id, prompt)
     if (transitionPromptDraftOf(boundary) === prompt) markTransitionPromptClean(boundary)
     toast.success(t('episode.export.aiTransition.prompt.saved'))
-    await loadTransitions(mergeDialog.value.open ? mergeDialog.value.ids : exportSelectedReadyIds.value)
+    await loadTransitions()
   } catch (e) {
     toastError(e, { fallback: 'episode.export.aiTransition.actionFailed' })
   } finally {
@@ -4843,7 +5161,7 @@ async function regenerateTransitionWithPrompt(boundary) {
     await transitionAPI.retry(boundary.id, { prompt, ...transitionTextModelPayload() })
     if (transitionPromptDraftOf(boundary) === prompt) markTransitionPromptClean(boundary)
     toast.success(t('episode.export.aiTransition.retried'))
-    await loadTransitions(mergeDialog.value.open ? mergeDialog.value.ids : exportSelectedReadyIds.value)
+    await loadTransitions()
   } catch (e) {
     toastError(e, { fallback: 'episode.export.aiTransition.actionFailed' })
   } finally {
@@ -4856,16 +5174,22 @@ function openMergeDialog() {
     toast.error(t('episode.export.selectFirst'))
     return
   }
+  const ids = [...exportSelectedReadyIds.value]
   mergeDialog.value = {
     open: true,
-    ids: [...exportSelectedReadyIds.value],
+    ids,
     title: t('episode.export.defaultTitle', { n: episodeNumber }),
     useAiTransitions: transitionSummary.value.ready > 0,
     useAiTransitionsTouched: false,
+    selectedBoundaries: transitionBoundariesFor(ids).map(transitionPromptKey),
+    boundariesTouched: false,
     duration: 3,
     audioMode: 'ambient',
   }
-  void loadTransitions(mergeDialog.value.ids).then(() => {
+  void loadTransitions().then(() => {
+    if (!mergeDialog.value.boundariesTouched) {
+      mergeDialog.value.selectedBoundaries = mergeDialogBoundaries.value.map(transitionPromptKey)
+    }
     if (mergeDialog.value.useAiTransitionsTouched) return
     mergeDialog.value.useAiTransitions = transitionSupported.value && mergeDialogReadyCount.value > 0
   })
@@ -4928,13 +5252,13 @@ async function loadConfigs() {
   } catch (e) { console.error('Failed to load AI configs', e) }
 }
 
-watch([panel, () => exportSelectedReadyIds.value.join(',')], ([current]) => {
+watch(panel, (current) => {
   if (current !== 'export') {
     transitionRequestSeq++
     stopTransitionPolling()
     return
   }
-  void loadTransitions(exportSelectedReadyIds.value)
+  void loadTransitions()
 }, { immediate: true })
 
 onMounted(async () => {
@@ -7918,6 +8242,14 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   cursor: pointer;
 }
 .ai-transition-toggle input { accent-color: var(--accent); }
+.ai-transition-pick { display: flex; align-items: center; }
+.ai-transition-pick input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 .ai-transition-rows {
   display: flex;
   flex-direction: column;
@@ -7984,6 +8316,135 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 .ai-transition-prompt-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .ai-transition-prompt-note { margin: 0; color: var(--text-2); font-size: 10px; line-height: 1.4; }
+.merge-title-dialog { width: min(760px, calc(100vw - 48px)); }
+.ai-transition-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+.ai-transition-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+.ai-transition-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-card);
+}
+.ai-transition-card-thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--media-surface);
+}
+.ai-transition-card-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ai-transition-card-thumb .ai-transition-status {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+.ai-transition-card-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text-3);
+}
+.ai-transition-card-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.22);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.15s var(--ease-out);
+}
+.ai-transition-card:hover .ai-transition-card-play { opacity: 1; }
+.ai-transition-card-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-1);
+}
+.transition-detail-dialog { width: min(760px, calc(100vw - 48px)); }
+.transition-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.transition-detail-video {
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
+.transition-detail-video video {
+  display: block;
+  width: 100%;
+  max-height: 46vh;
+  background: #000;
+}
+.transition-detail-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--error-bg);
+  color: var(--error);
+  font-size: 12px;
+}
+.transition-detail-frames { display: flex; gap: 10px; }
+.transition-detail-frame {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--surface-outline);
+  border-radius: 8px;
+  background: var(--bg-hover);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.15s var(--ease-out);
+}
+.transition-detail-frame:hover { border-color: var(--border-strong); }
+.transition-detail-frame img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 5px;
+  background: var(--media-surface);
+}
+.transition-detail-prompt {
+  padding: 10px;
+  border: 1px solid var(--surface-outline);
+  border-radius: 8px;
+}
+.transition-detail-delete { color: var(--error); }
+.transition-detail-delete:hover:not(:disabled) { background: var(--error-bg); }
 .ai-transition-pickers {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -21,7 +21,7 @@ import {
   type TransitionBoundary,
 } from './transition-plan.js'
 import { generateVideo, type GenerateVideoParams } from './generation.js'
-import { isLocalShim } from './adapters/minimax-video.js'
+import { isLocalShim, isLocalShimConfig } from './adapters/minimax-video.js'
 import { assertComfyFirstLastFrameWorkflow, parseComfyWorkflow } from './adapters/comfyui.js'
 import { translateH3Text } from './h3-prompt.js'
 import {
@@ -31,9 +31,16 @@ import {
 } from './transition-prompt.js'
 import type { AIConfig } from './adapters/types'
 
+export interface TransitionBoundarySelection {
+  fromStoryboardId: number
+  toStoryboardId: number
+}
+
 export interface PrepareTransitionsParams {
   episodeId: number
   storyboardIds: number[]
+  /** 只处理勾选的断点；为空数组视为无效，避免误把全部断点当目标 */
+  boundaries?: TransitionBoundarySelection[]
   mode?: 'missing' | 'all'
   configId?: number
   model?: string
@@ -194,7 +201,7 @@ async function resolveVideoConfig(configId?: number, lockedConfigId?: number | n
 }
 
 function localShimFor(config: AIConfig): boolean {
-  return String(config.provider).toLowerCase() === 'minimax' && isLocalShim(config.baseUrl)
+  return isLocalShimConfig(config)
 }
 
 function capabilityFor(config: AIConfig, model: string) {
@@ -697,6 +704,12 @@ export async function prepareTransitions(
   const duration = Math.max(1, Number(params.duration) || 3)
   const audioMode = params.audioMode === 'silent' ? 'silent' : 'ambient'
   const mode = params.mode === 'all' ? 'all' : 'missing'
+  if (params.boundaries && params.boundaries.length === 0) {
+    throw new Error('请至少勾选一个过渡断点')
+  }
+  const selected = params.boundaries?.length
+    ? new Set(params.boundaries.map(item => `${item.fromStoryboardId}:${item.toStoryboardId}`))
+    : null
 
   let created = 0
   let reused = 0
@@ -705,6 +718,7 @@ export async function prepareTransitions(
   const failures: TransitionSubmitFailure[] = []
 
   for (const boundary of context.boundaries) {
+    if (selected && !selected.has(`${boundary.fromStoryboardId}:${boundary.toStoryboardId}`)) continue
     const from = storyboardById(context, boundary.fromStoryboardId)
     const to = storyboardById(context, boundary.toStoryboardId)
     if (!from || !to) continue
@@ -794,6 +808,30 @@ export async function listTransitions(params: {
     const hash = from && to ? hashFor(from, to) : ''
     return toView(boundary, byKey.get(`${boundary.fromStoryboardId}:${boundary.toStoryboardId}`), supported, hash)
   })
+  // 全集模式补上非相邻断点的历史片段（例如曾只勾选 S1/S3 生成的 S1→S3），
+  // 否则这些片段在镜头素材的管理区永远不可见、也无法删除。
+  if (!params.storyboardIds?.length) {
+    const known = new Set(context.boundaries.map(b => `${b.fromStoryboardId}:${b.toStoryboardId}`))
+    const latest = new Map<string, TransitionRow>()
+    for (const row of rows) {
+      const key = `${row.fromStoryboardId}:${row.toStoryboardId}`
+      if (known.has(key)) continue
+      const current = latest.get(key)
+      if (!current || row.id > current.id) latest.set(key, row)
+    }
+    for (const row of latest.values()) {
+      const from = storyboardById(context, row.fromStoryboardId)
+      const to = storyboardById(context, row.toStoryboardId)
+      if (!from || !to) continue
+      boundaries.push(toView({
+        index: 0,
+        fromStoryboardId: row.fromStoryboardId,
+        toStoryboardId: row.toStoryboardId,
+        fromNumber: from.storyboardNumber,
+        toNumber: to.storyboardNumber,
+      }, row, supported, hashFor(from, to)))
+    }
+  }
 
   const capability = config ? capabilityFor(config, model) : null
   return {
@@ -886,6 +924,10 @@ export async function analyzeTransitionPrompt(
     deps,
   })
   const analyze = deps.analyze ?? analyzeTransitionPromptFromFrames
+  const videoConfig = await resolveVideoConfig(row.configId ?? undefined, episode.videoConfigId)
+  const localShim = videoConfig
+    ? localShimFor(videoConfig)
+    : String(row.provider || '').toLowerCase() === 'minimax' && isLocalShim(String(row.configBaseUrl || ''))
   const result = await analyze({
     firstFramePath: frames.firstFrame.relativePath,
     lastFramePath: frames.lastFrame.relativePath,
@@ -895,7 +937,7 @@ export async function analyzeTransitionPrompt(
     nextDescription: String(to.description || ''),
     continuity: String(from.continuity || to.continuity || '').trim(),
     sameScene: !!from.sceneId && from.sceneId === to.sceneId,
-    localShim: String(row.provider || '').toLowerCase() === 'minimax' && isLocalShim(String(row.configBaseUrl || '')),
+    localShim,
     configId: options.textConfigId,
     model: options.textModel,
   })
@@ -946,6 +988,56 @@ export async function skipTransition(id: number): Promise<void> {
     .set({ enabled: false, status: 'skipped', updatedAt: now() })
     .where(eq(schema.videoTransitions.id, id))
   logTaskProgress('Transition', 'skipped', { id, episodeId: row.episodeId })
+}
+
+function removeLocalFile(relativePath: string | null | undefined) {
+  if (!relativePath || !relativePath.startsWith('static/')) return
+  try {
+    fs.rmSync(getAbsolutePath(relativePath), { force: true })
+  } catch {
+    // 文件已不存在或存储根不可写时，记录仍应可删除
+  }
+}
+
+/** 删除过渡片段：运行中的任务先拒绝，避免任务完成后回写孤儿记录。 */
+export async function deleteTransition(id: number): Promise<void> {
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, id))
+  if (!row) throw new Error('过渡片段不存在')
+  if (row.status === 'processing' || row.status === 'pending') {
+    throw new Error('过渡片段正在运行中，请等待结果')
+  }
+  // 条件删除防止查询后被并发 prepare/retry 重新领取。
+  const deleted = await db.delete(schema.videoTransitions)
+    .where(and(
+      eq(schema.videoTransitions.id, id),
+      ne(schema.videoTransitions.status, 'processing'),
+      ne(schema.videoTransitions.status, 'pending'),
+    ))
+    .returning({ id: schema.videoTransitions.id })
+    .get()
+  if (!deleted) {
+    const [current] = await db.select({ id: schema.videoTransitions.id })
+      .from(schema.videoTransitions).where(eq(schema.videoTransitions.id, id))
+    if (current) throw new Error('过渡片段正在运行中，请等待结果')
+    throw new Error('过渡片段不存在')
+  }
+  // 首尾帧按镜头缓存，可能被其他断点共用；仅清理不再被引用的文件。
+  const siblings = await db.select({
+    videoUrl: schema.videoTransitions.videoUrl,
+    firstFrameUrl: schema.videoTransitions.firstFrameUrl,
+    lastFrameUrl: schema.videoTransitions.lastFrameUrl,
+  }).from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, row.episodeId))
+  const referenced = new Set<string>()
+  for (const sibling of siblings) {
+    for (const relativePath of [sibling.videoUrl, sibling.firstFrameUrl, sibling.lastFrameUrl]) {
+      if (relativePath) referenced.add(relativePath)
+    }
+  }
+  for (const relativePath of [row.videoUrl, row.firstFrameUrl, row.lastFrameUrl]) {
+    if (relativePath && !referenced.has(relativePath)) removeLocalFile(relativePath)
+  }
+  logTaskProgress('Transition', 'deleted', { id, episodeId: row.episodeId })
 }
 
 /** 合片前取可用过渡：已完成、启用、指纹一致且文件存在 */

@@ -74,5 +74,6 @@ test('同名模型的不同配置可区分，且本地 H3 可选择 480p', () =>
   // 分辨率工具把本地 shim 标记传给能力表
   assert.match(videoResolution, /isLocalMinimaxBaseUrl/)
   assert.match(videoResolution, /localShim/)
-  assert.match(page, /isLocalMinimaxBaseUrl\(selectedVideoConfig\.value/)
+  assert.match(page, /isLocalH3Config\(selectedVideoConfig\.value\)/)
+  assert.match(page, /videoCapabilityOpts\.value,\s*\n\s*\)\.map/)
 })
