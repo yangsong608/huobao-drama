@@ -18,6 +18,7 @@ import { now } from '../utils/response.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import { projectStorageRelative, projectSubdirPath } from './project-storage.js'
 import { mergeEpisodeVideos } from './ffmpeg-merge.js'
+import { prepareTransitionInsertion } from './transition-merge.js'
 import { computeMergeSourceHash } from './merge-plan.js'
 import { normalizeVideoAudioMode, resolveDubbingOriginalAudio } from './video-audio.js'
 import { buildTimeline, scaleClipsToDuration, type TimelineLine } from './timeline.js'
@@ -112,6 +113,17 @@ interface EnsureMergedResult {
   remixed: boolean
 }
 
+/** 合片快照非空说明上次合并请求过 AI 过渡（即使断点全部回退也会记录原因）。 */
+function hasAiTransitionSnapshot(transitions: string | null | undefined): boolean {
+  if (!transitions) return false
+  try {
+    const value = JSON.parse(transitions)
+    return Array.isArray(value) && value.length > 0
+  } catch {
+    return false
+  }
+}
+
 /**
  * 确保合片与当前镜头集合一致；不一致时重新合并并等待完成。
  * 配音前必须先走这一步，否则时间轴会整体偏移。
@@ -149,10 +161,17 @@ export async function ensureMergedVideo(
     .sort((a, b) => (b.id || 0) - (a.id || 0))[0]
 
   // 合片缓存必须跟随音频模式：切到 silent 后旧成片仍带原声，必须重合。
-  const expectedHash = computeMergeSourceHash(
-    clips.map((c) => ({ url: c.videoUrl, transition: c.transition })),
-    audioMode,
-  )
+  // 旧合片用过 AI 过渡时，重新合并也必须带上过渡片段，否则每次配音都会把过渡版替换成纯切镜版。
+  const useAiTransitions = hasAiTransitionSnapshot(latest?.transitions)
+  const mergeStoryboards = clips.map(c => ({
+    id: c.storyboardId,
+    url: c.videoUrl,
+    transition: c.transition,
+  }))
+  const mergeClips = useAiTransitions
+    ? (await prepareTransitionInsertion(episodeId, mergeStoryboards)).clips
+    : mergeStoryboards
+  const expectedHash = computeMergeSourceHash(mergeClips, audioMode)
   const staleHash = Boolean(latest?.mergedUrl) && latest?.sourceHash !== expectedHash
 
   let videoUrl = latest?.mergedUrl || ''
@@ -160,11 +179,15 @@ export async function ensureMergedVideo(
   let durationMs = videoPath && fs.existsSync(videoPath) ? await probeDurationMs(videoPath) : 0
   let remixed = false
 
-  if (!videoPath || !fs.existsSync(videoPath) || Math.abs(durationMs - sum) > Math.max(1000, sum * 0.05) || staleHash) {
+  // AI 过渡会让成片时长大于镜头时长之和，时长校验只适用于纯切镜合片；过渡版以来源指纹为准。
+  const durationMismatch = !useAiTransitions
+    && Math.abs(durationMs - sum) > Math.max(1000, sum * 0.05)
+
+  if (!videoPath || !fs.existsSync(videoPath) || durationMismatch || staleHash) {
     options.onProgress?.(staleHash
       ? `音频模式（${audioMode}）或镜头已变化，正在重新合并`
       : `合片与镜头不一致（${Math.round(durationMs / 1000)}s / ${Math.round(sum / 1000)}s），正在重新合并`)
-    const mergeId = await mergeEpisodeVideos(episodeId, dramaId)
+    const mergeId = await mergeEpisodeVideos(episodeId, dramaId, undefined, undefined, { useAiTransitions })
     const deadline = Date.now() + 10 * 60 * 1000
     for (;;) {
       const row = db.select().from(schema.videoMerges).where(eq(schema.videoMerges.id, mergeId)).get()

@@ -1096,7 +1096,7 @@
                   </span>
                   <button
                     class="btn btn-sm"
-                    :disabled="!transitionSupported || transitionPreparing"
+                    :disabled="!transitionSupported || transitionPreparing || transitionBusy"
                     :title="transitionSupported ? null : t('episode.export.aiTransition.unsupported')"
                     @click="generateMissingTransitions"
                   >
@@ -1685,6 +1685,7 @@
                   v-model="mergeDialog.useAiTransitions"
                   type="checkbox"
                   :disabled="!transitionSupported || !mergeDialogBoundaries.length"
+                  @change="mergeDialog.useAiTransitionsTouched = true"
                 />
                 <span>{{ t('episode.export.aiTransition.toggle') }}</span>
                 <span class="dim">
@@ -1727,6 +1728,14 @@
                           {{ t('episode.export.aiTransition.retry') }}
                         </button>
                         <button
+                          v-if="b.status === 'skipped'"
+                          class="btn btn-sm"
+                          :disabled="transitionPreparing"
+                          @click="retryTransitionItem(b)"
+                        >
+                          {{ t('episode.export.aiTransition.resume') }}
+                        </button>
+                        <button
                           v-if="b.enabled !== false && (b.status === 'completed' || b.status === 'failed')"
                           class="btn btn-sm btn-ghost"
                           :disabled="transitionPreparing"
@@ -1756,6 +1765,8 @@
                         class="input ai-transition-prompt-input"
                         rows="3"
                         maxlength="1200"
+                        :disabled="transitionPromptBusy[transitionPromptKey(b)]"
+                        :aria-label="t('episode.export.aiTransition.prompt.label')"
                         :placeholder="t('episode.export.aiTransition.prompt.placeholder')"
                         @input="markTransitionPromptDirty(b)"
                       />
@@ -1807,7 +1818,7 @@
             <button class="btn" @click="mergeDialog.open = false">{{ t('common.cancel') }}</button>
             <button
               class="btn"
-              :disabled="!transitionSupported || transitionPreparing || !mergeDialogBoundaries.length"
+              :disabled="!transitionSupported || transitionPreparing || transitionBusy || !mergeDialogBoundaries.length"
               @click="generateMissingTransitions"
             >
               {{ t('episode.export.aiTransition.regenerateMissing') }}
@@ -1871,6 +1882,7 @@ import { useAgent } from '~/composables/useAgent'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
 import { episodeResolutionKey, isLocalMinimaxBaseUrl, videoResolutionKey, videoResolutionOptions, videoResolutionProvider, videoResolutionVendor } from '~/utils/video-resolution'
 import { videoModelCapabilities } from '~/utils/model-capabilities'
+import { createStoryboardUpdateQueue } from '~/utils/storyboard-update-queue'
 import { toastError, mapError, MODERATION_RE } from '~/composables/useToast'
 import LocaleSwitcher from '~/components/LocaleSwitcher.vue'
 import EpisodeDeliveryDialog from '~/components/EpisodeDeliveryDialog.vue'
@@ -2091,6 +2103,7 @@ const mergeDialog = ref({
   ids: [],
   title: '',
   useAiTransitions: false,
+  useAiTransitionsTouched: false,
   duration: 3,
   audioMode: 'ambient',
 }) // 拼接前命名弹窗（含 AI 过渡开关）
@@ -2103,6 +2116,7 @@ const transitionPromptBusy = ref({})
 const transitionPromptDirty = ref({})
 const transitionPromptAnalyzed = ref({})
 let transitionTimer = null
+let transitionRequestSeq = 0
 function shotNumberOf(sb) {
   const i = sbs.value.findIndex(s => s.id === sb?.id)
   return i >= 0 ? i + 1 : 0
@@ -2428,10 +2442,13 @@ function handleImageViewerKeydown(event) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleImageViewerKeydown)
+  window.addEventListener('beforeunload', warnPendingStoryboardUpdates)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleImageViewerKeydown)
+  window.removeEventListener('beforeunload', warnPendingStoryboardUpdates)
+  flushPendingStoryboardUpdates()
   stopGenTasksPolling()
   stopTransitionPolling()
   if (breakdownTimer) { clearInterval(breakdownTimer); breakdownTimer = null }
@@ -3488,32 +3505,34 @@ const selectedVideoTaskNumber = computed(() => {
   return index >= 0 ? index + 1 : 0
 })
 
-// 同一分镜的更新串行发送并合并：连续点多选素材时，避免旧请求后落地覆盖新数组
-const storyboardUpdateQueues = new Map()
-function queueStoryboardUpdate(id, patch) {
-  let entry = storyboardUpdateQueues.get(id)
-  if (!entry) {
-    entry = { pending: null, running: false }
-    storyboardUpdateQueues.set(id, entry)
+// 同一分镜的更新串行发送并合并；失败重试耗尽后按服务端数据回滚界面
+const {
+  queue: queueStoryboardUpdate,
+  hasPending: hasPendingStoryboardUpdates,
+  flushPending: flushPendingStoryboardUpdates,
+} = createStoryboardUpdateQueue({
+  update: (id, payload) => storyboardAPI.update(id, payload),
+  onError: e => toastError(e, { fallback: 'episode.sb.saveFailed' }),
+  onRollback: resyncStoryboards,
+})
+async function resyncStoryboards() {
+  const ep = episode.value
+  if (!ep?.id) return
+  try {
+    sbs.value = await episodeAPI.storyboards(ep.id)
+    const currentId = selectedSb.value?.id
+    selectedSb.value = sbs.value.find(sb => sb.id === currentId) || sbs.value[0] || null
+    try { chars.value = await episodeAPI.characters(ep.id) } catch {}
+    try { scenes.value = await episodeAPI.scenes(ep.id) } catch {}
+    try { propItems.value = await episodeAPI.props(ep.id) } catch {}
+  } catch (error) {
+    console.error('Failed to resync storyboards', error)
   }
-  entry.pending = { ...(entry.pending || {}), ...patch }
-  if (entry.running) return
-  void flushStoryboardUpdates(id, entry)
 }
-async function flushStoryboardUpdates(id, entry) {
-  entry.running = true
-  while (entry.pending) {
-    const payload = entry.pending
-    entry.pending = null
-    try {
-      await storyboardAPI.update(id, payload)
-    } catch (e) {
-      entry.pending = null
-      toastError(e)
-      break
-    }
-  }
-  entry.running = false
+function warnPendingStoryboardUpdates(event) {
+  if (!hasPendingStoryboardUpdates()) return
+  event.preventDefault()
+  event.returnValue = ''
 }
 
 function updateField(sb, field, value) {
@@ -4530,8 +4549,6 @@ const transitionBusy = computed(() =>
   (transitionSummary.value.pending || 0) + (transitionSummary.value.processing || 0) > 0)
 const transitionSupported = computed(() => transitionProvider.value?.first_last_frame === true)
 const transitionBoundaries = computed(() => transitionState.value.boundaries || [])
-const missingTransitionCount = computed(() =>
-  (transitionSummary.value.missing || 0) + (transitionSummary.value.failed || 0))
 const mergeDialogBoundaries = computed(() => {
   const ids = new Set(mergeDialog.value.ids)
   return transitionBoundaries.value.filter(b =>
@@ -4592,27 +4609,45 @@ function applyTransitionData(data) {
 }
 async function loadTransitions(ids = exportReadyIds.value) {
   if (!epId.value) return
+  const seq = ++transitionRequestSeq
   if (!ids?.length) {
     transitionState.value = { loading: false, boundaries: [], summary: null, provider: null }
     stopTransitionPolling()
     return
   }
   try {
-    applyTransitionData(await transitionAPI.list(epId.value, ids))
-    scheduleTransitionPoll(ids)
-  } catch {
+    const data = await transitionAPI.list(epId.value, ids)
+    if (seq !== transitionRequestSeq) return
+    applyTransitionData(data)
+    scheduleTransitionPoll(ids, seq)
+  } catch (e) {
+    if (seq !== transitionRequestSeq) return
     transitionState.value = { ...transitionState.value, loading: false }
+    toastError(e, { fallback: 'episode.export.aiTransition.loadFailed' })
   }
 }
-function scheduleTransitionPoll(ids) {
+function scheduleTransitionPoll(ids, seq) {
   stopTransitionPolling()
   if (!transitionBusy.value) return
+  // 离开导出页后旧轮询不再复活
+  if (panel.value !== 'export') return
   transitionTimer = setInterval(async () => {
+    if (seq !== transitionRequestSeq) { stopTransitionPolling(); return }
     try {
-      applyTransitionData(await transitionAPI.list(epId.value, ids))
+      const data = await transitionAPI.list(epId.value, ids)
+      if (seq !== transitionRequestSeq) return
+      applyTransitionData(data)
       if (!transitionBusy.value) stopTransitionPolling()
     } catch { /* 下一轮继续 */ }
   }, 3000)
+}
+function transitionTargetCount(ids) {
+  const idSet = new Set(ids || [])
+  return transitionBoundaries.value.filter(b =>
+    idSet.has(b.from_storyboard_id)
+    && idSet.has(b.to_storyboard_id)
+    && (b.status === 'missing' || b.status === 'failed' || (b.status === 'completed' && b.stale)))
+    .length
 }
 async function prepareTransitionsFor(ids, options = {}) {
   if (transitionPreparing.value || !epId.value) return
@@ -4620,7 +4655,7 @@ async function prepareTransitionsFor(ids, options = {}) {
     toast.error(t('episode.export.aiTransition.unsupported'))
     return
   }
-  const targets = missingTransitionCount.value
+  const targets = transitionTargetCount(ids)
   if (targets > 0 && !window.confirm(t('episode.export.aiTransition.costHint', { n: targets }))) return
   transitionPreparing.value = true
   try {
@@ -4685,7 +4720,6 @@ function transitionPromptKey(boundary) {
 }
 function toggleTransitionPrompt(boundary) {
   const key = transitionPromptKey(boundary)
-  if (!key) return
   if (transitionPromptOpen.value[key]) {
     transitionPromptOpen.value = { ...transitionPromptOpen.value, [key]: false }
     return
@@ -4710,7 +4744,6 @@ function syncTransitionPromptDrafts() {
 }
 function markTransitionPromptDirty(boundary) {
   const key = transitionPromptKey(boundary)
-  if (!key) return
   transitionPromptDirty.value = { ...transitionPromptDirty.value, [key]: true }
   if (transitionPromptAnalyzed.value[key]) {
     const next = { ...transitionPromptAnalyzed.value }
@@ -4720,7 +4753,6 @@ function markTransitionPromptDirty(boundary) {
 }
 function markTransitionPromptClean(boundary) {
   const key = transitionPromptKey(boundary)
-  if (!key) return
   const dirty = { ...transitionPromptDirty.value }
   delete dirty[key]
   transitionPromptDirty.value = dirty
@@ -4760,9 +4792,14 @@ function transitionPromptDraftOf(boundary) {
 async function analyzeTransitionItem(boundary) {
   const key = transitionPromptKey(boundary)
   if (!boundary?.id || transitionPromptBusy.value[key]) return
+  const draftAtStart = transitionPromptDraftOf(boundary)
   setTransitionPromptBusy(key, true)
   try {
     const result = await transitionAPI.analyze(boundary.id, transitionTextModelPayload())
+    if (transitionPromptDraftOf(boundary) !== draftAtStart) {
+      toast.warning(t('episode.export.aiTransition.prompt.draftKept'))
+      return
+    }
     transitionPromptDrafts.value = { ...transitionPromptDrafts.value, [key]: String(result?.prompt || '') }
     transitionPromptDirty.value = { ...transitionPromptDirty.value, [key]: true }
     transitionPromptAnalyzed.value = { ...transitionPromptAnalyzed.value, [key]: true }
@@ -4784,7 +4821,7 @@ async function saveTransitionPromptItem(boundary) {
   setTransitionPromptBusy(key, true)
   try {
     await transitionAPI.savePrompt(boundary.id, prompt)
-    markTransitionPromptClean(boundary)
+    if (transitionPromptDraftOf(boundary) === prompt) markTransitionPromptClean(boundary)
     toast.success(t('episode.export.aiTransition.prompt.saved'))
     await loadTransitions(mergeDialog.value.open ? mergeDialog.value.ids : exportSelectedReadyIds.value)
   } catch (e) {
@@ -4804,7 +4841,7 @@ async function regenerateTransitionWithPrompt(boundary) {
   setTransitionPromptBusy(key, true)
   try {
     await transitionAPI.retry(boundary.id, { prompt, ...transitionTextModelPayload() })
-    markTransitionPromptClean(boundary)
+    if (transitionPromptDraftOf(boundary) === prompt) markTransitionPromptClean(boundary)
     toast.success(t('episode.export.aiTransition.retried'))
     await loadTransitions(mergeDialog.value.open ? mergeDialog.value.ids : exportSelectedReadyIds.value)
   } catch (e) {
@@ -4824,10 +4861,12 @@ function openMergeDialog() {
     ids: [...exportSelectedReadyIds.value],
     title: t('episode.export.defaultTitle', { n: episodeNumber }),
     useAiTransitions: transitionSummary.value.ready > 0,
+    useAiTransitionsTouched: false,
     duration: 3,
     audioMode: 'ambient',
   }
   void loadTransitions(mergeDialog.value.ids).then(() => {
+    if (mergeDialog.value.useAiTransitionsTouched) return
     mergeDialog.value.useAiTransitions = transitionSupported.value && mergeDialogReadyCount.value > 0
   })
 }
@@ -4890,7 +4929,11 @@ async function loadConfigs() {
 }
 
 watch([panel, () => exportSelectedReadyIds.value.join(',')], ([current]) => {
-  if (current !== 'export') { stopTransitionPolling(); return }
+  if (current !== 'export') {
+    transitionRequestSeq++
+    stopTransitionPolling()
+    return
+  }
   void loadTransitions(exportSelectedReadyIds.value)
 }, { immediate: true })
 

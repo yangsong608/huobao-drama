@@ -132,3 +132,38 @@ test('旧库的过渡表补齐 prompt_source，历史提示词保持原样', () 
   assert.equal(row.status, 'completed')
   db.close()
 })
+
+test('旧库剧集素材关联去重后建立唯一索引', () => {
+  const db = new Database(path.join(root, 'legacy-episode-assets.sqlite3'))
+  db.exec(`
+    CREATE TABLE episode_characters (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      episode_id INTEGER NOT NULL,
+      character_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    INSERT INTO episode_characters (episode_id, character_id, created_at) VALUES
+      (1, 7, '2026-01-01T00:00:00.000Z'),
+      (1, 7, '2026-01-01T00:00:01.000Z');
+  `)
+
+  initSqliteSchema(db)
+
+  const links = db.prepare('SELECT episode_id, character_id FROM episode_characters').all() as any[]
+  assert.equal(links.length, 1)
+  assert.equal(links[0].character_id, 7)
+  for (const [table, column] of [
+    ['episode_characters', 'character_id'],
+    ['episode_scenes', 'scene_id'],
+    ['episode_props', 'prop_id'],
+  ]) {
+    const indexes = db.prepare(`PRAGMA index_list(${table})`).all() as { name: string; unique: number }[]
+    const unique = indexes.find(index => index.name === `idx_${table}_unique`)
+    assert.equal(unique?.unique, 1, `${table} missing unique index`)
+    db.prepare(`INSERT OR IGNORE INTO ${table} (episode_id, ${column}, created_at) VALUES (1, 7, '2026-01-01T00:00:02.000Z')`).run()
+    assert.throws(() => {
+      db.prepare(`INSERT INTO ${table} (episode_id, ${column}, created_at) VALUES (1, 7, '2026-01-01T00:00:03.000Z')`).run()
+    })
+  }
+  db.close()
+})

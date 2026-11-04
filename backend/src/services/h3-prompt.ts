@@ -161,6 +161,8 @@ export async function translateH3Text(
   try {
     const translated = normalizeTranslation(await (options.translate ?? defaultTranslate)(source))
     if (!translated) throw new Error('翻译结果为空')
+    // 翻译模型可能原样回显或只译了一部分；中文送进本地 H3 会被烧进画面。
+    if (CJK_RE.test(translated)) throw new Error('翻译结果仍包含中文')
     if (translationCache.size >= CACHE_LIMIT) {
       translationCache.delete(translationCache.keys().next().value as string)
     }

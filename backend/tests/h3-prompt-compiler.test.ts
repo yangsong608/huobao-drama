@@ -6,6 +6,7 @@ const {
   compileLocalH3Prompt,
   clearH3TranslationCache,
   H3_TRANSLATOR_SYSTEM,
+  translateH3Text,
 } = await import('../src/services/h3-prompt.ts')
 
 const SHOT = [
@@ -127,4 +128,22 @@ test('translator instructions forbid dialogue text and subtitle sources', () => 
   assert.match(H3_TRANSLATOR_SYSTEM, /<Picture N>/)
   assert.match(H3_TRANSLATOR_SYSTEM, /subtitles/i)
   assert.match(H3_TRANSLATOR_SYSTEM, /never write dialogue/i)
+})
+
+test('visual background translation that echoes Chinese is rejected', async () => {
+  clearH3TranslationCache()
+  const echoed = await translateH3Text('雨夜咖啡馆，暖黄灯光', {
+    translate: async () => '雨夜咖啡馆，暖黄灯光',
+  })
+  assert.equal(echoed, null)
+
+  const partial = await translateH3Text('雨夜咖啡馆，暖黄灯光', {
+    translate: async () => 'Rainy night cafe, 暖黄灯光',
+  })
+  assert.equal(partial, null)
+
+  const translated = await translateH3Text('雨夜咖啡馆，暖黄灯光', {
+    translate: async () => 'Rainy night cafe with warm amber lighting',
+  })
+  assert.equal(translated, 'Rainy night cafe with warm amber lighting')
 })

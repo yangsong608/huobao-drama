@@ -65,7 +65,7 @@ async function ensureStoryboardBindings(episodeId: number, sceneId: number | nul
     if (!scene || scene.dramaId !== dramaId || scene.deletedAt) {
       return `scene_id ${sceneId} 必须来自当前项目`
     }
-    await db.insert(schema.episodeScenes).values({ episodeId, sceneId, createdAt: ts })
+    await db.insert(schema.episodeScenes).values({ episodeId, sceneId, createdAt: ts }).onConflictDoNothing()
   }
 
   for (const characterId of [...new Set((characterIds || []).filter(Boolean))]) {
@@ -74,7 +74,7 @@ async function ensureStoryboardBindings(episodeId: number, sceneId: number | nul
     if (!character || character.dramaId !== dramaId || character.deletedAt) {
       return `character_id ${characterId} 必须来自当前项目`
     }
-    await db.insert(schema.episodeCharacters).values({ episodeId, characterId, createdAt: ts })
+    await db.insert(schema.episodeCharacters).values({ episodeId, characterId, createdAt: ts }).onConflictDoNothing()
   }
 
   for (const propId of [...new Set((propIds || []).filter(Boolean))]) {
@@ -83,7 +83,7 @@ async function ensureStoryboardBindings(episodeId: number, sceneId: number | nul
     if (!prop || prop.dramaId !== dramaId || prop.deletedAt) {
       return `prop_id ${propId} 必须来自当前项目`
     }
-    await db.insert(schema.episodeProps).values({ episodeId, propId, createdAt: ts })
+    await db.insert(schema.episodeProps).values({ episodeId, propId, createdAt: ts }).onConflictDoNothing()
   }
   return null
 }

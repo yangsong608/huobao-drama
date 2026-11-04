@@ -5,8 +5,8 @@
  * 已完成且来源指纹一致的断点直接复用，避免重复计费。
  */
 import fs from 'node:fs'
-import { and, desc, eq } from 'drizzle-orm'
-import { db, getInsertId, schema } from '../db/index.js'
+import { and, desc, eq, ne } from 'drizzle-orm'
+import { db, schema } from '../db/index.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import { now } from '../utils/response.js'
 import { logTaskError, logTaskProgress, logTaskWarn } from '../utils/task-logger.js'
@@ -489,42 +489,140 @@ interface SubmitRowInput {
   deps: TransitionDeps
 }
 
-async function submitBoundary(input: SubmitRowInput): Promise<{ rowId: number; row: TransitionRow }> {
+interface TransitionOutputSnapshot {
+  status: string
+  videoUrl: string | null
+  sourceHash: string | null
+  firstFrameUrl: string | null
+  lastFrameUrl: string | null
+  durationRequested: number | null
+  durationEffective: number | null
+  durationActual: number | null
+  audioMode: string | null
+  provider: string | null
+  model: string | null
+  configId: number | null
+  configBaseUrl: string | null
+  sysTaskId: number | null
+  completedAt: string | null
+  enabled: boolean | null
+}
+
+/** 已完成的过渡片段在新任务成功前必须保留，失败重试不能把可用回退删掉。 */
+function outputSnapshot(row: TransitionRow): TransitionOutputSnapshot | null {
+  if (row.status !== 'completed' || !videoFileExists(row.videoUrl)) return null
+  return {
+    status: 'completed',
+    videoUrl: row.videoUrl,
+    sourceHash: row.sourceHash,
+    firstFrameUrl: row.firstFrameUrl,
+    lastFrameUrl: row.lastFrameUrl,
+    durationRequested: row.durationRequested,
+    durationEffective: row.durationEffective,
+    durationActual: row.durationActual,
+    audioMode: row.audioMode,
+    provider: row.provider,
+    model: row.model,
+    configId: row.configId,
+    configBaseUrl: row.configBaseUrl,
+    sysTaskId: row.sysTaskId,
+    completedAt: row.completedAt,
+    enabled: row.enabled,
+  }
+}
+
+/**
+ * 提交前先原子领取断点：并发 prepare/retry 只有一个请求能拿到行。
+ * 新行直接以 processing 写入，唯一索引冲突说明另一请求已在处理。
+ */
+async function claimBoundary(input: {
+  existing?: TransitionRow
+  context: EpisodeContext
+  boundary: TransitionBoundary
+}): Promise<{ rowId: number; previous: TransitionOutputSnapshot | null } | null> {
+  const ts = now()
+  if (input.existing) {
+    const claimed = await db.update(schema.videoTransitions).set({
+      status: 'processing',
+      sysTaskId: null,
+      errorMsg: null,
+      updatedAt: ts,
+    }).where(and(
+      eq(schema.videoTransitions.id, input.existing.id),
+      ne(schema.videoTransitions.status, 'processing'),
+    )).returning({ id: schema.videoTransitions.id }).get()
+    if (!claimed) return null
+    return { rowId: claimed.id, previous: outputSnapshot(input.existing) }
+  }
+
+  const inserted = await db.insert(schema.videoTransitions).values({
+    episodeId: input.context.episode.id,
+    dramaId: input.context.episode.dramaId,
+    fromStoryboardId: input.boundary.fromStoryboardId,
+    toStoryboardId: input.boundary.toStoryboardId,
+    status: 'processing',
+    enabled: true,
+    createdAt: ts,
+    updatedAt: ts,
+  }).onConflictDoNothing().returning({ id: schema.videoTransitions.id }).get()
+  if (!inserted) return null
+  return { rowId: inserted.id, previous: null }
+}
+
+async function restoreAfterFailure(rowId: number, previous: TransitionOutputSnapshot | null, message: string) {
+  if (previous) {
+    await db.update(schema.videoTransitions).set({
+      ...previous,
+      errorMsg: message,
+      updatedAt: now(),
+    }).where(eq(schema.videoTransitions.id, rowId))
+    return
+  }
+  await db.update(schema.videoTransitions).set({
+    status: 'failed',
+    sysTaskId: null,
+    errorMsg: message,
+    updatedAt: now(),
+  }).where(eq(schema.videoTransitions.id, rowId))
+}
+
+async function submitBoundary(input: SubmitRowInput): Promise<{ rowId: number; row: TransitionRow } | null> {
   const { context, boundary, config, model, localShim, duration, audioMode, deps } = input
   const from = storyboardById(context, boundary.fromStoryboardId)
   const to = storyboardById(context, boundary.toStoryboardId)
   if (!from || !to) throw new Error('过渡断点的镜头不在本集，请刷新后重试')
 
   const hash = hashFor(from, to)
-  const frames = await ensureBoundaryFrames({
-    context,
-    from,
-    to,
-    existing: input.existing,
-    reusable: input.existing?.sourceHash === hash,
-    deps,
-  })
-  const { firstFrame, lastFrame } = frames
-  const { prompt, promptSource } = await resolveBoundaryPrompt({
-    context,
-    boundary,
-    from,
-    to,
-    frames,
-    localShim,
-    existing: input.existing,
-    manualPrompt: input.promptOptions?.manualPrompt,
-    textConfigId: input.promptOptions?.textConfigId,
-    textModel: input.promptOptions?.textModel,
-    deps,
-  })
-  const durationRequested = Math.max(1, Number(duration) || 3)
-  const durationEffective = effectiveTransitionDuration(config.provider, model, durationRequested, { localShim })
-  const ts = now()
+  const claim = await claimBoundary({ existing: input.existing, context, boundary })
+  if (!claim) return null
+  const { rowId, previous } = claim
 
-  let rowId: number
-  if (input.existing) {
-    rowId = input.existing.id
+  try {
+    const frames = await ensureBoundaryFrames({
+      context,
+      from,
+      to,
+      existing: input.existing,
+      reusable: input.existing?.sourceHash === hash,
+      deps,
+    })
+    const { firstFrame, lastFrame } = frames
+    const { prompt, promptSource } = await resolveBoundaryPrompt({
+      context,
+      boundary,
+      from,
+      to,
+      frames,
+      localShim,
+      existing: input.existing,
+      manualPrompt: input.promptOptions?.manualPrompt,
+      textConfigId: input.promptOptions?.textConfigId,
+      textModel: input.promptOptions?.textModel,
+      deps,
+    })
+    const durationRequested = Math.max(1, Number(duration) || 3)
+    const durationEffective = effectiveTransitionDuration(config.provider, model, durationRequested, { localShim })
+
     await db.update(schema.videoTransitions).set({
       fromVideoUrl: String(from.videoUrl),
       toVideoUrl: String(to.videoUrl),
@@ -539,44 +637,11 @@ async function submitBoundary(input: SubmitRowInput): Promise<{ rowId: number; r
       configBaseUrl: config.baseUrl,
       durationRequested,
       durationEffective,
-      durationActual: null,
       audioMode,
-      status: 'pending',
-      videoUrl: null,
-      errorMsg: null,
-      completedAt: null,
       enabled: true,
-      updatedAt: ts,
+      updatedAt: now(),
     }).where(eq(schema.videoTransitions.id, rowId))
-  } else {
-    const res = await db.insert(schema.videoTransitions).values({
-      episodeId: context.episode.id,
-      dramaId: context.episode.dramaId,
-      fromStoryboardId: boundary.fromStoryboardId,
-      toStoryboardId: boundary.toStoryboardId,
-      fromVideoUrl: String(from.videoUrl),
-      toVideoUrl: String(to.videoUrl),
-      firstFrameUrl: firstFrame.relativePath,
-      lastFrameUrl: lastFrame.relativePath,
-      sourceHash: hash,
-      prompt,
-      promptSource,
-      provider: config.provider,
-      model,
-      configId: config.id ?? null,
-      configBaseUrl: config.baseUrl,
-      durationRequested,
-      durationEffective,
-      audioMode,
-      status: 'pending',
-      enabled: true,
-      createdAt: ts,
-      updatedAt: ts,
-    })
-    rowId = getInsertId(res)
-  }
 
-  try {
     const submit = deps.submit ?? ((params: GenerateVideoParams) => generateVideo(params))
     const taskId = await submit({
       transitionId: rowId,
@@ -592,6 +657,9 @@ async function submitBoundary(input: SubmitRowInput): Promise<{ rowId: number; r
       durationRequested,
       durationEffective,
       allowShortDuration: localShim,
+      // 提示词已按首尾帧写好，云端扩写会改坏画面约束；水印也不该出现在过渡片段里。
+      promptExtend: false,
+      watermark: false,
       audioMode,
       aspectRatio: context.drama?.aspectRatio || undefined,
       resolution: context.episode.resolution || undefined,
@@ -605,9 +673,7 @@ async function submitBoundary(input: SubmitRowInput): Promise<{ rowId: number; r
     return { rowId, row }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    await db.update(schema.videoTransitions)
-      .set({ status: 'failed', errorMsg: message, updatedAt: now() })
-      .where(eq(schema.videoTransitions.id, rowId))
+    await restoreAfterFailure(rowId, previous, message)
     throw error
   }
 }
@@ -664,7 +730,7 @@ export async function prepareTransitions(
     }
 
     try {
-      await submitBoundary({
+      const submitted = await submitBoundary({
         context,
         boundary,
         config,
@@ -676,6 +742,10 @@ export async function prepareTransitions(
         promptOptions: { textConfigId: params.textConfigId, textModel: params.textModel },
         deps,
       })
+      if (!submitted) {
+        skipped++
+        continue
+      }
       created++
       logTaskProgress('Transition', 'submitted', {
         episodeId: params.episodeId,
@@ -755,7 +825,8 @@ export async function retryTransition(
   if (!episode) throw new Error('剧集不存在')
   const config = await resolveVideoConfig(row.configId ?? undefined, episode.videoConfigId)
   if (!config) throw new Error('原视频服务配置已删除或停用，请重新选择模型后再生成')
-  const model = row.model || config.model
+  // 配置被替换后旧模型可能不属于新服务商；此时按新配置重新取模型，避免把旧模型发错渠道。
+  const model = config.id && config.id === row.configId && row.model ? row.model : config.model
   assertTransitionCapability(config, model)
 
   const context = await loadEpisodeContext(row.episodeId)
@@ -764,7 +835,7 @@ export async function retryTransition(
   if (!boundary) throw new Error('过渡断点的镜头已不完整，请重新生成镜头后再试')
 
   const audioMode = row.audioMode === 'silent' ? 'silent' : 'ambient'
-  await submitBoundary({
+  const submitted = await submitBoundary({
     context,
     boundary,
     config,
@@ -780,6 +851,7 @@ export async function retryTransition(
     },
     deps,
   })
+  if (!submitted) throw new Error('过渡片段正在运行中，请等待结果')
 }
 
 /**

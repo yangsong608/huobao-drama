@@ -181,6 +181,9 @@ test('prepare 为断点建记录并提交首尾帧任务', async () => {
   assert.equal(submissions[0].episodeId, episodeId)
   assert.equal(submissions[0].duration, 3)
   assert.equal(submissions[0].allowShortDuration, false)
+  // 过渡提示词已按首尾帧写好，禁止云端扩写改坏画面约束
+  assert.equal(submissions[0].promptExtend, false)
+  assert.equal(submissions[0].watermark, false)
   assert.match(submissions[0].firstFrameUrl, /fake-sb-\d+-last/)
   assert.match(submissions[0].lastFrameUrl, /fake-sb-\d+-first/)
   assert.equal(submissions[0].prompt, row.prompt)
@@ -553,4 +556,85 @@ test('retry 拒绝超过 1200 字的手动提示词', async () => {
     retryTransition(row.id, { prompt: '雨'.repeat(1201) }, deps),
     /1200/,
   )
+})
+
+test('配置被替换后 retry 改用新配置的模型，不沿用旧模型', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, episodeId))
+  await db.update(schema.videoTransitions).set({ status: 'failed' })
+    .where(eq(schema.videoTransitions.id, row.id))
+  await db.update(schema.aiServiceConfigs).set({ isActive: false })
+  const localConfigId = await insertBaseConfig({
+    provider: 'minimax',
+    model: 'MiniMax-H3',
+    baseUrl: 'http://127.0.0.1:8190',
+  })
+
+  const retry = fakeDeps()
+  await retryTransition(row.id, {}, retry.deps)
+
+  assert.equal(retry.submissions.length, 1)
+  assert.equal(retry.submissions[0].model, 'MiniMax-H3')
+  assert.equal(retry.submissions[0].configId, localConfigId)
+  const [retried] = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(retried.model, 'MiniMax-H3')
+  assert.equal(retried.configId, localConfigId)
+})
+
+test('retry 提交失败时保留已完成的过渡片段作为回退', async () => {
+  const configId = await insertBaseConfig()
+  const { dramaId, episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, episodeId))
+  const videoRel = `static/projects/${dramaId}/transitions/transition-${row.id}.mp4`
+  fsSync.mkdirSync(path.dirname(path.join(root, videoRel)), { recursive: true })
+  fsSync.writeFileSync(path.join(root, videoRel), Buffer.alloc(4096))
+  await db.update(schema.videoTransitions).set({
+    status: 'completed',
+    videoUrl: videoRel,
+    durationActual: 2.8,
+    completedAt: ts,
+    errorMsg: null,
+  }).where(eq(schema.videoTransitions.id, row.id))
+
+  const broken = fakeDeps({ failSubmitFor: [0] })
+  await assert.rejects(retryTransition(row.id, {}, broken.deps), /英文/)
+
+  const [after] = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(after.status, 'completed')
+  assert.equal(after.videoUrl, videoRel)
+  assert.equal(after.durationActual, 2.8)
+  assert.equal(after.sourceHash, row.sourceHash)
+  assert.ok(fsSync.existsSync(path.join(root, videoRel)))
+})
+
+test('并发 prepare 对同一失败断点只提交一次', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const first = fakeDeps({ failSubmitFor: [0] })
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, first.deps)
+  const [failed] = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, episodeId))
+  assert.equal(failed.status, 'failed')
+
+  const retry = fakeDeps()
+  const [a, b] = await Promise.all([
+    prepareTransitions({ episodeId, storyboardIds, duration: 3 }, retry.deps),
+    prepareTransitions({ episodeId, storyboardIds, duration: 3 }, retry.deps),
+  ])
+
+  assert.equal(retry.submissions.length, 1)
+  assert.equal(a.created + b.created, 1)
+  assert.equal(a.skipped + b.skipped, 1)
+  const rows = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, episodeId))
+  assert.equal(rows.length, 1)
 })

@@ -6,6 +6,7 @@ import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import fsSync from 'node:fs'
+import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -148,4 +149,34 @@ test('旧过渡任务不能覆盖更新的完成结果', { skip: !suite.ffmpeg |
   assert.equal(transition.status, 'completed')
   const [oldTask] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, seeded.taskId))
   assert.equal(oldTask.status, 'completed')
+})
+
+test('过渡下载文件名包含任务号，新任务不会覆盖旧任务文件', { skip: !suite.ffmpeg || !suite.ffprobe }, async () => {
+  const seeded = await seedTransitionTask()
+  const source = makeVideo(`static/projects/${seeded.dramaId}/videos/remote.mp4`)
+  const bytes = fsSync.readFileSync(path.join(root, source))
+  const server = http.createServer((_req, res) => {
+    res.setHeader('content-type', 'video/mp4')
+    res.setHeader('content-length', String(bytes.length))
+    res.end(bytes)
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const { port } = server.address() as { port: number }
+    await db.update(schema.sysTask).set({ localPath: null }).where(eq(schema.sysTask.id, seeded.taskId))
+    const [record] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, seeded.taskId))
+    await handleVideoComplete(record, `http://127.0.0.1:${port}/remote.mp4`, 3)
+
+    const [transition] = await db.select().from(schema.videoTransitions)
+      .where(eq(schema.videoTransitions.id, seeded.transitionId))
+    assert.match(
+      String(transition.videoUrl),
+      new RegExp(`transition-${seeded.transitionId}-task-${seeded.taskId}\\.mp4$`),
+    )
+    const [task] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, seeded.taskId))
+    assert.equal(task.localPath, transition.videoUrl)
+    assert.ok(fsSync.existsSync(path.join(root, String(transition.videoUrl))))
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  }
 })

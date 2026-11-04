@@ -554,6 +554,7 @@ function closeCreate() {
   // 参考图只服务于本次风格提炼；关闭后清空，已生成的风格仍保留在风格库
   styleRefImages.value = []
   form.value.background = ''
+  form.value.visual_background = ''
 }
 
 async function create() {

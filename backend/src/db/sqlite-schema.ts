@@ -859,6 +859,15 @@ export function initSqliteSchema(sqlite: Database.Database) {
   if (!novelColumns.has('world_map')) sqlite.exec('ALTER TABLE novels ADD COLUMN world_map TEXT')
   if (!novelColumns.has('background')) sqlite.exec('ALTER TABLE novels ADD COLUMN background TEXT')
   if (!novelColumns.has('writing_style')) sqlite.exec('ALTER TABLE novels ADD COLUMN writing_style TEXT')
+  // 剧集素材关联：先清掉旧库可能存在的重复行，再建唯一索引，防止并发自动关联重复写入。
+  for (const [table, assetColumn] of [
+    ['episode_characters', 'character_id'],
+    ['episode_scenes', 'scene_id'],
+    ['episode_props', 'prop_id'],
+  ]) {
+    sqlite.exec(`DELETE FROM ${table} WHERE id NOT IN (SELECT MIN(id) FROM ${table} GROUP BY episode_id, ${assetColumn})`)
+    sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_${table}_unique ON ${table} (episode_id, ${assetColumn})`)
+  }
   const insertSeed = sqlite.prepare(SEED_SQL)
   const upgradeSeed = sqlite.prepare(UPGRADE_SQL)
   const removeSeed = sqlite.prepare(REMOVE_SQL)

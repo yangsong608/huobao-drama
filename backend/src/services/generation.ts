@@ -673,7 +673,8 @@ export async function handleVideoComplete(record: SysTaskRecord, videoUrl: strin
         ? await downloadVideo(videoUrl, record.id, {
             dramaId: record.dramaId,
             subdir: 'transitions',
-            name: `transition-${record.transitionId}`,
+            // 任务号入文件名：新旧任务重试不会互相覆盖同一路径。
+            name: `transition-${record.transitionId}-task-${record.id}`,
           })
         : timeline
           ? await downloadTimelineVideos(record, urls, audioMode)

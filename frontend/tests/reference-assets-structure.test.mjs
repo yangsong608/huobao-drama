@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 const episode = readFileSync(new URL('../app/views/drama/episode.vue', import.meta.url), 'utf8')
+const updateQueue = readFileSync(new URL('../app/utils/storyboard-update-queue.ts', import.meta.url), 'utf8')
 const locales = ['zh', 'en', 'ja', 'ko'].map(lang => [
   lang,
   JSON.parse(readFileSync(new URL(`../app/locales/${lang}.json`, import.meta.url), 'utf8')),
@@ -34,9 +35,11 @@ test('绑定其他集素材时本地同步关联，下一次刷新后仍可见',
 })
 
 test('分镜更新按镜头串行合并，避免并发覆盖多选结果', () => {
-  assert.match(episode, /const storyboardUpdateQueues = new Map\(\)/)
-  assert.match(episode, /function queueStoryboardUpdate/)
-  assert.match(episode, /queueStoryboardUpdate\(sb\.id, \{ \[field\]: value \}\)/)
+  assert.match(episode, /createStoryboardUpdateQueue\(\{/)
+  assert.match(episode, /queue: queueStoryboardUpdate/)
+  assert.match(updateQueue, /const entries = new Map/)
+  assert.match(updateQueue, /entry\.pending = \{ \.\.\.payload, \.\.\.\(entry\.pending \|\| \{\}\) \}/)
+  assert.match(updateQueue, /entry\.attempts >= MAX_ATTEMPTS/)
   assert.doesNotMatch(episode, /storyboardAPI\.update\(sb\.id, \{ \[field\]: value \}\)\.catch/)
 })
 
