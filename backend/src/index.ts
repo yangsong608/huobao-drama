@@ -44,6 +44,7 @@ import { markInterruptedAutomations, setAutomationApp } from './services/automat
 import { markInterruptedNovelJobs } from './services/novel-job-runner.js'
 import { migrateUploadedVoices } from './services/voice-profile.js'
 import { startQueueWorker } from './services/queue-worker.js'
+import { refreshFfmpegConfig } from './utils/ffmpeg.js'
 import { DATA_ROOT } from './utils/paths.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -147,6 +148,9 @@ await markInterruptedAutomations()
 markInterruptedNovelJobs()
 // V1 已上传的角色音色迁移为 character_voices（幂等，失败不影响启动）
 migrateUploadedVoices()
+
+// 应用设置中的自定义 FFmpeg 目录（db 已注入读取器），启动即生效
+refreshFfmpegConfig()
 
 // MCP / 自动化都通过内部 app.fetch 调 REST，先注入实例
 setMcpMainApp(app)

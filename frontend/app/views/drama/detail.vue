@@ -339,7 +339,6 @@
                     <span class="afp-label">{{ t('episode.asset.finalPromptTurnaround') }}</span>
                     <span :class="['afp-text', !m.finalPrompt && 'dim']">{{ m.finalPrompt || t('episode.asset.finalPromptAutoTurnaround') }}</span>
                   </div>
-                  <CharacterVoice :character="m" @updated="updateCharacterVoice" />
                 </div>
               </article>
             </div>
@@ -466,15 +465,6 @@
                     <strong>{{ editTarget.kindKey === 'character' ? (editTarget.role || t('common.role')) : editTarget.kindKey === 'prop' ? (editTarget.type || t('common.prop')) : (editTarget.time || t('episode.asset.noTime')) }}</strong>
                   </div>
                 </div>
-                <div v-if="editTarget.kindKey === 'character'" class="voice-stack">
-                  <VoiceProfilePanel
-                    :key="'vp-' + editTarget.id"
-                    :character="editTarget"
-                    :drama-id="dramaId"
-                    @updated="updateCharacterVoice"
-                  />
-                  <CharacterVoice :key="editTarget.id" :character="editTarget" @updated="updateCharacterVoice" />
-                </div>
               </aside>
 
               <!-- 右侧：编辑信息 -->
@@ -544,6 +534,25 @@
                   </label>
                 </div>
               </section>
+            </div>
+
+            <div v-if="editTarget.kindKey === 'character'" class="mat-detail-voice-row">
+              <div class="mat-detail-section-title">
+                <span>{{ t('episode.voice.title') }}</span>
+                <span class="dim">{{ t('episode.voice.desc') }}</span>
+              </div>
+              <VoiceProfileCard
+                :key="'voice-card-' + editTarget.id"
+                scope="character"
+                :drama-id="dramaId"
+                :episode-id="firstEpisodeId"
+                :character-id="editTarget.id"
+                :name="editTarget.name"
+                :character="editTarget"
+                reference-audio
+                :video-ref-url="editTarget.voice_audio_url || editTarget.voiceAudioUrl || ''"
+                @reference-updated="updateCharacterVoice"
+              />
             </div>
 
             <!-- 最终提示词：可生成 / 重新生成 / 手动编辑 -->
@@ -2258,12 +2267,13 @@ onMounted(() => {
   line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* 角色音色：音色档案在上，直传参考音在下，共用一条分隔线 */
-.voice-stack {
-  display: flex; flex-direction: column; gap: 12px; min-width: 0;
-  border-top: 1px solid var(--surface-outline); padding-top: 12px; margin-top: 4px;
+/* 角色音色：全宽横跨预览与编辑两栏，避免挤在窄预览列里 */
+.mat-detail-voice-row {
+  min-width: 0;
+  display: flex; flex-direction: column; gap: 10px;
+  border-top: 1px solid var(--surface-outline); padding-top: 14px; margin-top: 18px;
 }
-.voice-stack :deep(.character-voice) { margin-top: 0; padding-top: 0; }
+.mat-detail-voice-row :deep(.character-voice) { margin-top: 0; padding-top: 0; }
 
 /* 编辑区域 */
 .mat-detail-edit-grid {

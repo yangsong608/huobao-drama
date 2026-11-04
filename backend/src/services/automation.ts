@@ -391,6 +391,7 @@ async function previewVoiceSamples(dramaId: number, episodeId: number, voiceIds:
         text,
         voice: {
           externalVoiceId: voice.externalVoiceId || undefined,
+          voicePrompt: voice.voicePrompt || undefined,
           designInstruct: voice.designInstruct || undefined,
           refAudioUrl: voice.refAudioUrl || undefined,
           refText: voice.refText || undefined,

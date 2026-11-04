@@ -46,6 +46,7 @@ function toVoiceRef(voice: ReturnType<typeof getVoice>): VoiceRef {
   if (!voice) return {}
   return {
     externalVoiceId: voice.externalVoiceId || undefined,
+    voicePrompt: voice.voicePrompt || undefined,
     designInstruct: voice.designInstruct || undefined,
     refAudioUrl: voice.refAudioUrl || undefined,
     refText: voice.refText || undefined,

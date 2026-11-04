@@ -3,7 +3,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 const settingsPage = readFileSync(new URL('../app/pages/settings.vue', import.meta.url), 'utf8')
-const voicePanel = readFileSync(new URL('../app/components/VoiceProfilePanel.vue', import.meta.url), 'utf8')
+const voiceCard = readFileSync(new URL('../app/components/VoiceProfileCard.vue', import.meta.url), 'utf8')
+const voiceFields = readFileSync(new URL('../app/components/VoiceAssetFields.vue', import.meta.url), 'utf8')
+const voiceStore = readFileSync(new URL('../app/composables/useVoiceProfiles.ts', import.meta.url), 'utf8')
 const resolutionUtil = readFileSync(new URL('../app/utils/video-resolution.ts', import.meta.url), 'utf8')
 const capabilityUtil = readFileSync(new URL('../app/utils/model-capabilities.ts', import.meta.url), 'utf8')
 
@@ -62,12 +64,13 @@ test('provider settings are validated and merged on save without dropping unknow
   assert.match(settingsPage, /JSON\.stringify\(merged\.workflow, null, 2\)/)
 })
 
-test('voice profile exposes an external voice ID for cloud TTS providers', () => {
-  assert.match(voicePanel, /v-model="externalIdDraft"/)
-  assert.match(voicePanel, /t\('voiceProfile\.externalVoiceId'\)/)
-  assert.match(voicePanel, /t\('voiceProfile\.externalVoiceIdHint'\)/)
-  assert.match(voicePanel, /voiceProfileAPI\.update\(props\.character\.id, \{ external_voice_id: next \|\| null \}\)/)
-  assert.match(voicePanel, /toast\.success\(t\('voiceProfile\.externalVoiceIdSaved'\)\)/)
+test('shared voice card exposes an external voice ID for cloud TTS providers', () => {
+  assert.match(voiceFields, /v-model="draft\.externalVoiceId"/)
+  assert.match(voiceFields, /t\('voiceProfile\.externalVoiceId'\)/)
+  assert.match(voiceFields, /t\('voiceProfile\.externalVoiceIdHint'\)/)
+  assert.match(voiceStore, /external_voice_id: draft\.externalVoiceId\.trim\(\) \|\| null/)
+  assert.match(voiceStore, /toast\.success\(t\('episode\.voice\.saved'\)\)/)
+  assert.match(voiceCard, /<VoiceAssetFields/)
 })
 
 test('ComfyUI uses the shared resolution tiers', () => {

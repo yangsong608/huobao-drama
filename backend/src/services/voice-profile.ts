@@ -8,7 +8,7 @@
  */
 import fs from 'fs'
 import path from 'path'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, or } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { STORAGE_ROOT } from '../utils/paths.js'
@@ -172,6 +172,22 @@ export function activateVoice(characterId: number, voiceId: number): { active_vo
       })
       .where(eq(schema.characters.id, characterId))
       .run()
+    tx.update(schema.storyboardLines)
+      .set({
+        voiceId: null,
+        status: 'pending',
+        audioUrl: null,
+        audioDurationMs: null,
+        audioHash: null,
+        error: null,
+        updatedAt: now(),
+      })
+      .where(and(
+        eq(schema.storyboardLines.characterId, characterId),
+        eq(schema.storyboardLines.dramaId, voice.dramaId),
+        or(eq(schema.storyboardLines.voiceLocked, false), isNull(schema.storyboardLines.voiceLocked)),
+      ))
+      .run()
   })
   return { active_voice_id: voiceId }
 }
@@ -186,6 +202,21 @@ export function deactivateVoice(characterId: number): { active_voice_id: null } 
     tx.update(schema.characters)
       .set({ voicePrompt: null, voiceStatus: null, updatedAt: now() })
       .where(eq(schema.characters.id, characterId))
+      .run()
+    tx.update(schema.storyboardLines)
+      .set({
+        voiceId: null,
+        status: 'pending',
+        audioUrl: null,
+        audioDurationMs: null,
+        audioHash: null,
+        error: null,
+        updatedAt: now(),
+      })
+      .where(and(
+        eq(schema.storyboardLines.characterId, characterId),
+        or(eq(schema.storyboardLines.voiceLocked, false), isNull(schema.storyboardLines.voiceLocked)),
+      ))
       .run()
   })
   return { active_voice_id: null }
@@ -303,7 +334,25 @@ export function getNarratorVoice(dramaId: number): VoiceRow | null {
 
 export function setNarratorVoice(dramaId: number, voiceId: number | null): VoiceRow | null {
   if (voiceId === null) {
-    db.update(schema.dramas).set({ narratorVoiceId: null, updatedAt: now() }).where(eq(schema.dramas.id, dramaId)).run()
+    db.transaction((tx) => {
+      tx.update(schema.dramas).set({ narratorVoiceId: null, updatedAt: now() }).where(eq(schema.dramas.id, dramaId)).run()
+      tx.update(schema.storyboardLines)
+        .set({
+          voiceId: null,
+          status: 'pending',
+          audioUrl: null,
+          audioDurationMs: null,
+          audioHash: null,
+          error: null,
+          updatedAt: now(),
+        })
+        .where(and(
+          eq(schema.storyboardLines.dramaId, dramaId),
+          isNull(schema.storyboardLines.characterId),
+          or(eq(schema.storyboardLines.voiceLocked, false), isNull(schema.storyboardLines.voiceLocked)),
+        ))
+        .run()
+    })
     return null
   }
   const voice = getVoice(voiceId)
@@ -322,6 +371,22 @@ export function setNarratorVoice(dramaId: number, voiceId: number | null): Voice
     tx.update(schema.dramas)
       .set({ narratorVoiceId: voiceId, updatedAt: now() })
       .where(eq(schema.dramas.id, dramaId))
+      .run()
+    tx.update(schema.storyboardLines)
+      .set({
+        voiceId: null,
+        status: 'pending',
+        audioUrl: null,
+        audioDurationMs: null,
+        audioHash: null,
+        error: null,
+        updatedAt: now(),
+      })
+      .where(and(
+        eq(schema.storyboardLines.dramaId, dramaId),
+        isNull(schema.storyboardLines.characterId),
+        or(eq(schema.storyboardLines.voiceLocked, false), isNull(schema.storyboardLines.voiceLocked)),
+      ))
       .run()
   })
   return getVoice(voiceId)

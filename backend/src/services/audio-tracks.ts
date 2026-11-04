@@ -281,6 +281,7 @@ export async function createVoiceClip(episodeId: number, input: VoiceClipInput) 
       text,
       voice: {
         externalVoiceId: voice.externalVoiceId || undefined,
+        voicePrompt: voice.voicePrompt || undefined,
         designInstruct: voice.designInstruct || undefined,
         refAudioUrl: voice.refAudioUrl || undefined,
         refText: voice.refText || undefined,

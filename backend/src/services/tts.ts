@@ -33,6 +33,9 @@ import { buildCloudSpeechRequest, parseCloudAudioResponse, type CloudTtsOptions 
 
 export interface VoiceRef {
   externalVoiceId?: string | null
+  /** 中文音色提示词：用户可编辑的主描述，本地 191 VoiceDesign 直接消费 */
+  voicePrompt?: string | null
+  /** VoiceDesign 指令；为空时由 voicePrompt 兜底 */
   designInstruct?: string | null
   refAudioUrl?: string | null
   refText?: string | null
@@ -214,6 +217,7 @@ export function buildCacheKey(
     provider,
     normalizeSpeakText(params.text),
     params.voice.externalVoiceId || '',
+    params.voice.voicePrompt || '',
     params.voice.designInstruct || '',
     String(params.speed ?? 1),
     params.emotion || '',
@@ -491,7 +495,7 @@ async function buildRequest(
       voice: params.voice.externalVoiceId || config.settings.defaultVoiceId,
       speed: params.speed,
       emotion: params.emotion || config.settings.emotion,
-      instructions: params.voice.designInstruct,
+      instructions: params.voice.designInstruct || params.voice.voicePrompt,
       language: params.language || config.settings.language,
     })
   }
@@ -500,8 +504,8 @@ async function buildRequest(
   const base191 = isQwen191BaseModel(opts.model)
   // 191 的 /v1/audio/speech 没有 speed 参数，约定外的字段可能被严格校验拒绝
   const speed = qwen191 ? undefined : params.speed
-  // 191 Base 只认固定参考音色，instruct 必须为空
-  const instruct = base191 ? undefined : params.voice.designInstruct
+  // 191 Base 只认固定参考音色，instruct 必须为空；其余模型优先用用户可编辑的中文提示词
+  const instruct = base191 ? undefined : (params.voice.voicePrompt || params.voice.designInstruct || undefined)
   const voice191Base = base191 ? 'synthetic-reference' : undefined
   const seed = config.settings.seed
   const maxNewTokens = config.settings.maxNewTokens ?? (qwen191 ? 2048 : undefined)
@@ -529,7 +533,7 @@ async function buildRequest(
       maxNewTokens,
     })
   }
-  if (params.voice.designInstruct) {
+  if (params.voice.designInstruct || params.voice.voicePrompt) {
     // 191 的 VoiceDesign 复用 /v1/audio/speech + instruct，没有独立的 /design 端点
     if (qwen191) {
       return buildSpeechRequest(opts, {
@@ -545,7 +549,7 @@ async function buildRequest(
     }
     return buildDesignRequest(opts, {
       text,
-      voiceDescription: params.voice.designInstruct,
+      voiceDescription: params.voice.designInstruct || params.voice.voicePrompt || '',
       model: opts.model,
       language: params.language,
       speed: params.speed,
@@ -554,5 +558,5 @@ async function buildRequest(
   if (params.voice.refAudioUrl) {
     throw new TtsError('not_found', '当前语音服务不支持参考音频克隆（191 无上传接口），请为音色绑定内置音色 ID 或设计描述')
   }
-  throw new TtsError('protocol_error', '音色缺少 externalVoiceId / designInstruct / refAudioUrl')
+  throw new TtsError('protocol_error', '音色缺少 externalVoiceId / voicePrompt / designInstruct / refAudioUrl')
 }

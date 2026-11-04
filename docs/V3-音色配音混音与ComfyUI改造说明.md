@@ -180,16 +180,19 @@ const bedVolume = options.originalAudio === 'mute' ? 0.03 : ...
 
 ## 五、Phase B：音色资产化
 
-### B1. 新增「音色」资产 tab
+### B1. 音色入口：配音阶段「音色分配」为唯一工作台
 
-- 视频制作区新增 tab：`资产 | 音色 | 视频`（顺序可按现有信息架构微调），复用 `prodTabDefs`。
+- 不新增独立「音色」资产 tab；制作区保持 `资产 | 视频`。历史本地状态里的独立音色页自动迁移到配音阶段第 2 步。
+- 音色工作台固定在配音阶段第 2 步「音色分配」，旁白单独一组卡片，与角色卡同构。
+- 同一套实现复用到三处入口：配音「音色分配」、剧集页资产制作弹窗、剧集详情页素材弹窗；数据统一走 `useVoiceProfiles`，UI 统一走 `VoiceProfileCard`。
 - 卡片即音色资产，每张卡显示：
   - 角色/旁白、音色名、激活状态、`gender/age_range/emotion/speed`；
-  - `voice_prompt` 中文提示词（默认展开，可编辑）；
+  - `voice_prompt` 中文提示词（编辑区展开，可保存）；
   - `design_instruct` 英文指令（折叠）；
-  - 试听按钮、状态、失败原因、最近使用；
-  - 操作：生成/重新生成、设为当前、复制给其他角色、删除。
-- 旁白单独一组卡片，与角色卡同构。
+  - 试听按钮、状态、失败原因、视频参考同步状态；
+  - 操作：生成/重新生成、设为当前、同步为视频参考、复制给其他角色、删除。
+- 角色卡内保留独立「参考音频」子块（`CharacterVoice`），用于直接上传/试听生视频参考音，与音色版本同步链路区分。
+- 旧 `VoiceProfilePanel.vue`、`VoiceAssetGrid.vue` 删除，不再保留第二套音色 UI。
 
 ### B2. 提示词生成与编辑前置
 
@@ -380,7 +383,7 @@ const bedVolume = options.originalAudio === 'mute' ? 0.03 : ...
 | 阶段 | 交付 | 必须通过 |
 |---|---|---|
 | A | mute=0、silent 贯通、合片去音轨、缓存失效、云产物兜底 | 后端单测 + ffprobe 集成 + 前端结构测试 |
-| B | 音色 tab、卡片、提示词、复制池、逐句音色 | 后端路由测试 + 前端结构测试 + 四语言键 |
+| B | 音色分配卡片、提示词、复制池、逐句音色 | 后端路由测试 + 前端结构测试 + 四语言键 |
 | C | 轨道表、N 轨混音、时间轴编辑、范围试听、语音轨 | 混音集成测试 + 前端交互冒烟 |
 | D | 模式 tab、timeline 映射、整集执行、下载/拼接、ComfyUI 窗口 | 适配器单测 + 映射快照测试 + 端到端执行 |
 
@@ -437,11 +440,12 @@ const bedVolume = options.originalAudio === 'mute' ? 0.03 : ...
 - `backend/src/routes/voices.ts`：新增 `POST /voices/:id/clone`（`character_id | scope=narrator`、`activate`、`name`）。
 - `backend/src/routes/lines.ts`：`voice_id` 校验存在且同项目；文本或音色变化即清空旧合成并置 `pending`；支持 `voice_start_ms` / `voice_duration_ms`。
 - 前端：
-  - 新增 `VoiceAssetGrid.vue` / `VoiceAssetFields.vue`：角色/旁白分组卡片，展示并编辑 `voice_prompt`、`design_instruct`，支持版本切换、试听、激活、复制给其他角色/旁白、批量生成。
-  - `episode.vue` 制作区 tab 改为 `资产 | 音色 | 视频`。
+  - 新增共享 `useVoiceProfiles.ts`（模块级音色状态与全部 API 调用）与 `VoiceProfileCard.vue`（角色/旁白同构卡片，展示并编辑 `voice_prompt`、`design_instruct`、外部音色 ID，支持版本切换、试听、激活、同步为视频参考、复制给其他角色/旁白）。
+  - `VoiceAssetFields.vue` 作为卡片内字段编辑子组件；`CharacterVoice.vue` 仅作为卡片内参考音频子块保留；`VoiceProfilePanel.vue`、`VoiceAssetGrid.vue` 删除。
+  - 配音阶段「音色分配」、`episode.vue` 资产弹窗、`detail.vue` 素材弹窗统一挂载 `VoiceProfileCard`；制作区保持 `资产 | 视频`，不设独立音色 tab。
   - `LineList.vue` 每行音色下拉（自动/本角色/旁白/项目其他音色），跨角色标黄提示。
-  - `DubbingStage.vue` 增加选中台词批量分配音色；`useDubbingSession.ts` 暴露 `allVoiceOptions` 与 `assignVoiceToLines`。
-- 测试：`voice-reuse-line-assignment.test.ts`（复制隔离、逐句/批量分配、跨角色校验）、`voice-asset-cards-structure.test.mjs`（卡片、字段、tab 与四语言键）。
+  - `DubbingStage.vue` 增加选中台词批量分配音色；`useDubbingSession.ts` 消费 `useVoiceProfiles`，暴露 `allVoiceOptions` 与 `assignVoiceToLines`。
+- 测试：`voice-reuse-line-assignment.test.ts`（复制隔离、逐句/批量分配、跨角色校验）、`voice-asset-cards-structure.test.mjs` 与 `character-voice-ui-structure.test.mjs`（共享卡片、三处入口、版本/同步/参考音频、无独立音色 tab 与四语言键）。
 
 ### 11.3 Phase C：多轨混音与时间段合成
 
@@ -486,3 +490,13 @@ const bedVolume = options.originalAudio === 'mute' ? 0.03 : ...
 - 已执行 `nuxt generate`（Node 24.21.0）与 `desktop npm run dist`，均退出码 0；arm64 dmg 174,214,137 bytes，已安装 `/Applications/HuobaoDrama.app`（4.0.10、`TEMPLATE_VERSION=6`），按用户要求安装后未启动。
 - 约束保持：MCP 61、`TEMPLATE_VERSION=6`、端口 5679/3013 未动、V3-G5 仍 pending。
 - 已知边界：范围试听与最终导出共用同一混音图，但尚未做「试听 vs 成片」波形级自动化比对；环境声/音效仅支持上传与曲库，不接文本生成音效。
+
+### 11.6 视频提示词音频指令收口（2026-11-05）
+
+- 背景：豆包 Seedance 任务 #232 在无对白/旁白提示词下仍输出独白，定位为模板固定写入的「音频：人声清晰靠前……旁白/心声为画外音」被云端原样提交并伴随 `generate_audio=true`；本地 H3 静音模式也因旧指令继续张口。
+- 模板与技能：`prompt_generator`、`storyboard_breaker`、`skills/prompt-generator/video-prompt/SKILL` 四语言统一不再输出音频要求行/音色/混音指令；只有本镜确有旁白时，才在对应时间段写「旁白（画外音…）：…」。`agents/index.ts`、`pipeline-rules.ts` 与桌面随包模板同步。
+- 运行时清洗：新增 `backend/src/services/video-prompt-sanitize.ts`，只移除旧模板特征整行与残留「旁白/心声为画外音」子句，保留用户主动写的对白/旁白；`routes/tasks.ts` 覆盖全部视频任务提交，`comfyui-timeline.ts` 覆盖整集工作流 segment；发生替换时记录 `legacy-audio-line-stripped` 日志。
+- 静音语义：云端 silent 仍 `generate_audio=false` 并在落盘后去音轨；本地 H3 `SILENT_DIRECTIVE` 显式要求 `characters do not speak and keep their mouths closed`，`ambient` 保留说话口型以便后期对轨；native 仅在提示词明确描述旁白时允许旁白。
+- 存量工作区：新增 `desktop/src/workspace-template.ts`，模板版本相同也扫描 `workspace/prompts|skills` 的 `.md` 并替换已知旧音频句，保留用户其他编辑、幂等；`TEMPLATE_VERSION` 维持 6。本机工作区迁移 5 个文件，二次执行 0 变更。
+- 验证：后端 483/483、结构 61/61、drift 123 PASS、typecheck 通过；前端 197/197、generate 通过；桌面 9/9；本地 H3 33/33；arm64/x64 dmg+zip 重打并安装（只安装未启动）。
+- 边界：静音只保证音轨与闭口指令，不保证所有模型完全不产生口型；未复验真实出片，V3-G5 保持 pending。

@@ -1,43 +1,85 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 const root = new URL('..', import.meta.url)
 const read = (path) => readFileSync(new URL(path, root), 'utf8')
+const exists = (path) => existsSync(new URL(path, root))
 
 const episode = read('app/views/drama/episode.vue')
-const grid = read('app/components/VoiceAssetGrid.vue')
+const card = read('app/components/VoiceProfileCard.vue')
 const fields = read('app/components/VoiceAssetFields.vue')
 const lineList = read('app/components/LineList.vue')
 const dubbingStage = read('app/components/DubbingStage.vue')
 const session = read('app/composables/useDubbingSession.ts')
+const store = read('app/composables/useVoiceProfiles.ts')
 
 function locale(name) {
   return JSON.parse(read(`app/locales/${name}.json`))
 }
 
-test('episode production area exposes a voice card tab', () => {
-  assert.match(episode, /\['assets', 'voices', 'videos'\]/)
-  assert.match(episode, /v-if="prodTab === 'voices'"/)
-  assert.match(episode, /<VoiceAssetGrid/)
-  assert.match(episode, /episode\.prod\.voices/)
+test('production area no longer exposes a standalone voice tab', () => {
+  assert.doesNotMatch(episode, /\['assets', 'voices', 'videos'\]/)
+  assert.doesNotMatch(episode, /prodTab === 'voices'/)
+  assert.doesNotMatch(episode, /<VoiceAssetGrid/)
+  assert.doesNotMatch(episode, /prod:voices/)
+  assert.equal(exists('app/components/VoiceAssetGrid.vue'), false)
+  assert.equal(exists('app/components/VoiceProfilePanel.vue'), false)
 })
 
-test('voice asset grid renders narrator and character cards with version control', () => {
-  assert.match(grid, /voiceProfileAPI\.list/)
-  assert.match(grid, /voiceProfileAPI\.narrator\.get/)
-  assert.match(grid, /class="voice-card is-narrator"/)
-  assert.match(grid, /<VoiceAssetFields/)
-  assert.match(grid, /class="voice-version"/)
-  assert.match(grid, /selectVersion\(group, \$event\)/)
-  assert.match(grid, /voiceProfileAPI\.cloneTo/)
-  assert.match(grid, /generateMissing/)
-  assert.match(grid, /voiceProfileAPI\.sampleById/)
+test('dubbing voice assignment step mounts the shared voice profile card', () => {
+  assert.match(dubbingStage, /<VoiceProfileCard/)
+  assert.match(dubbingStage, /scope="narrator"/)
+  assert.match(dubbingStage, /scope="character"/)
+  assert.match(dubbingStage, /:line-count="narratorLineCount"/)
+  assert.match(dubbingStage, /:line-count="speaker\.lineCount"/)
+  assert.match(dubbingStage, /generateMissingVoices/)
 })
 
-test('voice asset fields edit prompt and design instruct on the card', () => {
+test('shared card edits profile, version, sync and reference audio in one place', () => {
+  assert.match(card, /useVoiceProfiles/)
+  assert.match(card, /<VoiceAssetFields/)
+  assert.match(card, /<CharacterVoice/)
+  assert.match(card, /v-if="versions\.length > 1"/)
+  assert.match(card, /v-model="selectedId"/)
+  assert.match(card, /class="vpc-version"/)
+  assert.match(card, /const syncState = computed/)
+  assert.match(card, /voiceProfile\.syncStateSynced/)
+  assert.match(card, /voiceProfile\.syncStateStale/)
+  assert.match(card, /voiceProfile\.syncHintStale/)
+  assert.match(card, /voiceProfile\.capabilityHint/)
+  assert.match(card, /referenceAudio/)
+})
+
+test('shared store owns every voice API call used by all entries', () => {
+  for (const call of [
+    'voiceProfileAPI.list',
+    'voiceProfileAPI.narrator.get',
+    'voiceProfileAPI.narrator.generate',
+    'voiceProfileAPI.narrator.bind',
+    'voiceProfileAPI.generate',
+    'voiceProfileAPI.updateById',
+    'voiceProfileAPI.sampleById',
+    'voiceProfileAPI.activateById',
+    'voiceProfileAPI.cloneTo',
+    'voiceProfileAPI.removeById',
+    'voiceProfileAPI.sync',
+    'voiceProfileAPI.clone',
+  ]) {
+    assert.match(store, new RegExp(call.replace('.', '\\.')), `store missing ${call}`)
+  }
+  assert.match(store, /external_voice_id/)
+  assert.match(store, /const groups = ref<VoiceProfileList\[\]>\(\[\]\)/)
+  assert.match(store, /async function persistVoice/)
+  assert.match(store, /async function generateFromDraft/)
+  assert.match(store, /voice_prompt: draft\.voicePrompt/)
+  assert.match(store, /return audition\(fresh\)/)
+})
+
+test('voice fields edit prompt, design instruct, external id and metadata', () => {
   assert.match(fields, /v-model="draft\.voicePrompt"/)
   assert.match(fields, /v-model="draft\.designInstruct"/)
+  assert.match(fields, /v-model="draft\.externalVoiceId"/)
   assert.match(fields, /<details/)
   assert.match(fields, /voice\.gender/)
   assert.match(fields, /voice\.ageRange/)
@@ -60,13 +102,31 @@ test('dubbing stage offers batch voice assignment over selected lines', () => {
   assert.match(dubbingStage, /:voice-groups="voiceProfiles"/)
 })
 
-test('dubbing session exposes flat voice options for assignment', () => {
+test('dubbing session consumes the shared voice store instead of owning voice state', () => {
+  assert.match(session, /useVoiceProfiles/)
   assert.match(session, /const allVoiceOptions = computed/)
   assert.match(session, /async function assignVoiceToLines/)
   assert.match(session, /voice_id: voiceId/)
+  assert.doesNotMatch(session, /const voiceProfiles = ref/)
+  assert.doesNotMatch(session, /async function generateCharacterVoice/)
 })
 
-test('voice cards and line assignment keys exist in all four locales', () => {
+test('generate step re-synthesizes all lines with their current voices', () => {
+  assert.match(dubbingStage, /@click="resynthesizeAll"/)
+  assert.match(dubbingStage, /window\.confirm\(t\('workbench\.resynthesizeAllConfirm'\)\)/)
+  assert.match(dubbingStage, /synthesizeAll\(true\)/)
+  assert.match(session, /async function synthesizeAll\(force = false\)/)
+  assert.match(session, /dubbingAPI\.synthesizeAll\(episodeId, force\)/)
+  assert.doesNotMatch(dubbingStage, /@click="synthesizeAll"/)
+  assert.match(dubbingStage, /@updated="onVoiceChanged"/)
+  for (const name of ['zh', 'en', 'ja', 'ko']) {
+    const messages = locale(name)
+    assert.ok(messages.workbench?.resynthesizeAll, `${name} missing workbench.resynthesizeAll`)
+    assert.ok(messages.workbench?.resynthesizeAllConfirm, `${name} missing workbench.resynthesizeAllConfirm`)
+  }
+})
+
+test('voice cards, shared editor and line assignment keys exist in all four locales', () => {
   for (const name of ['zh', 'en', 'ja', 'ko']) {
     const messages = locale(name)
     for (const key of [
@@ -82,11 +142,20 @@ test('voice cards and line assignment keys exist in all four locales', () => {
       'cloneNarrator',
       'batchSummary',
       'statusReady',
+      'referenceAudioHint',
+      'generateVoice',
+      'generatingVoice',
+      'rewritePrompt',
+      'promptHint',
+      'designInstructAdvancedHint',
     ]) {
       assert.ok(messages.episode?.voice?.[key], `${name} missing episode.voice.${key}`)
     }
     for (const key of ['voiceAuto', 'voiceOwnGroup', 'voiceOtherGroup', 'voiceCross', 'voiceAssignHint', 'batchSelectHint', 'batchAssign']) {
       assert.ok(messages.workbench?.[key], `${name} missing workbench.${key}`)
+    }
+    for (const key of ['edit', 'done', 'saveAndGenerate', 'dirtyHint']) {
+      assert.ok(messages.voiceProfile?.[key], `${name} missing voiceProfile.${key}`)
     }
   }
 })

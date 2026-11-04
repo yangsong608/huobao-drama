@@ -63,6 +63,13 @@ export function compileH3Prompt(prompt: string, audioMode: VideoAudioMode = 'nat
   // 音色参考标记只对云端厂商有意义，本地 shim 不接收音频参考
   text = text.replace(/（音色参考音频\s*\d+）/g, '').replace(/音色参考音频\s*\d+/g, '')
 
+  // 模板音频行里的「旁白/心声为画外音」是条件说明（有旁白时才适用），不代表本镜真有旁白，
+  // 先移除，避免下面的旁白规则把它编译成画外音指令
+  text = text.replace(/[；;]?\s*旁白\s*[\/／]\s*心声为画外音[^。\n]*。?/g, '')
+
+  // 环境声交给模型自然生成，不把混音指令「压低」写进提示词
+  text = text.replace(/环境音压低/g, '环境音自然')
+
   // 旁白：原生模式保留画外音描述；ambient/silent 由后期配音，画面不需要旁白
   const narration = /(?:旁白\s*[（(]画外音[）)]|画外音|旁白)\s*(?:说|讲述|念白)?\s*[：:]?\s*[「“"]([^」”"]*)[」”"]/g
   text = text.replace(narration, audioMode === 'native' ? 'Off-screen narrator speaks in Mandarin, mouth moving' : '')

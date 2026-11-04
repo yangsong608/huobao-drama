@@ -31,6 +31,35 @@ test('deterministic compiler removes subtitle sources and rewrites structure', (
   assert.doesNotMatch(out, /早上好|三年前的冬天/)
 })
 
+const GENERIC_AUDIO_LINE_SHOT = [
+  '人物：@图片1林小雨',
+  '场景：@图片1包子铺门前',
+  '音频：人声清晰靠前，环境音压低，无背景音乐；旁白/心声为画外音，不张口。',
+  '0-3秒：@图片1包子铺门前，@图片1林小雨抬头。',
+].join('\n')
+
+test('generic audio line without narration does not become an off-screen narrator', () => {
+  const out = compileH3Prompt(GENERIC_AUDIO_LINE_SHOT, 'native')
+  assert.match(out, /^Audio: .*环境音自然/m)
+  assert.doesNotMatch(out, /环境音压低/)
+  assert.doesNotMatch(out, /Off-screen narrator/)
+  assert.doesNotMatch(out, /旁白|画外音/)
+})
+
+test('generic audio line plus real narration yields exactly one narrator action', () => {
+  const prompt = [
+    '人物：@图片2林小雨',
+    '场景：@图片1包子铺门前',
+    '音频：人声清晰靠前，环境音压低，无背景音乐；旁白/心声为画外音，不张口。',
+    '0-3秒：@图片2林小雨抬头。',
+    '3-6秒：旁白（画外音）：「三年前的冬天，她第一次来到这里。」',
+  ].join('\n')
+  const out = compileH3Prompt(prompt, 'native')
+  assert.equal((out.match(/Off-screen narrator/g) || []).length, 1)
+  assert.match(out, /^Audio: .*环境音自然/m)
+  assert.doesNotMatch(out, /环境音压低|旁白\/心声/)
+})
+
 test('ambient and silent modes drop audio and narration lines but keep mouth movement', () => {
   for (const mode of ['ambient', 'silent'] as const) {
     const out = compileH3Prompt(SHOT, mode)

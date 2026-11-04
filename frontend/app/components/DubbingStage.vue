@@ -140,92 +140,26 @@
             <button class="btn btn-primary btn-sm" type="button" @click="goStep(0)">{{ t('workbench.stepLines') }}</button>
           </div>
           <div v-else class="dub-voice-list">
-            <article
+            <VoiceProfileCard
               v-if="narratorLineCount"
-              :class="['dub-voice-card', { 'is-missing': narratorMissingVoice, 'is-playing': playingSample === 'narrator' }]"
-            >
-              <div class="dub-voice-main">
-                <div class="dub-voice-head">
-                  <strong>{{ t('workbench.narrator') }}</strong>
-                  <span class="tag">{{ t('workbench.narration') }}</span>
-                  <span class="dub-voice-count">{{ t('workbench.speakerLines', { n: narratorLineCount }) }}</span>
-                </div>
-                <div class="dub-voice-meta">
-                  <template v-if="narratorVoice">
-                    <span class="dub-voice-name">{{ narratorVoice.name }}</span>
-                    <span :class="['dub-voice-state', narratorVoice.status === 'ready' ? 'is-ready' : '']">
-                      {{ narratorVoice.status === 'ready' ? t('workbench.voiceReady') : narratorVoice.status }}
-                    </span>
-                  </template>
-                  <span v-else class="is-warn">{{ t('workbench.voiceNone') }}</span>
-                </div>
-              </div>
-              <div class="dub-voice-actions">
-                <button
-                  v-if="narratorVoice"
-                  class="btn btn-sm"
-                  type="button"
-                  :disabled="playingSample === 'narrator'"
-                  @click="auditionNarratorVoice"
-                >
-                  <Play :size="11" />
-                  {{ t('workbench.voiceAudition') }}
-                </button>
-                <button
-                  class="btn btn-sm"
-                  type="button"
-                  :disabled="narratorBusy"
-                  @click="generateNarratorVoice(!!narratorVoice)"
-                >
-                  <Loader2 v-if="narratorBusy" :size="11" class="animate-spin" />
-                  {{ narratorVoice ? t('workbench.voiceRegenerate') : t('workbench.voiceGenerate') }}
-                </button>
-              </div>
-            </article>
-
-            <article
+              scope="narrator"
+              :drama-id="dramaId"
+              :episode-id="episodeId"
+              :name="t('workbench.narrator')"
+              :line-count="narratorLineCount"
+              @updated="onVoiceChanged"
+            />
+            <VoiceProfileCard
               v-for="speaker in dialogueSpeakers"
               :key="speaker.characterId"
-              :class="['dub-voice-card', { 'is-missing': !speaker.voice, 'is-playing': playingSample === speaker.characterId }]"
-            >
-              <div class="dub-voice-main">
-                <div class="dub-voice-head">
-                  <strong>{{ speaker.name }}</strong>
-                  <span class="tag">{{ t('common.role') }}</span>
-                  <span class="dub-voice-count">{{ t('workbench.speakerLines', { n: speaker.lineCount }) }}</span>
-                </div>
-                <div class="dub-voice-meta">
-                  <template v-if="speaker.voice">
-                    <span class="dub-voice-name">{{ speaker.voice.name }}</span>
-                    <span :class="['dub-voice-state', speaker.voice.status === 'ready' ? 'is-ready' : '']">
-                      {{ speaker.voice.status === 'ready' ? t('workbench.voiceReady') : speaker.voice.status }}
-                    </span>
-                  </template>
-                  <span v-else class="is-warn">{{ t('workbench.voiceMissingHint') }}</span>
-                </div>
-              </div>
-              <div class="dub-voice-actions">
-                <button
-                  v-if="speaker.voice"
-                  class="btn btn-sm"
-                  type="button"
-                  :disabled="playingSample === speaker.characterId"
-                  @click="auditionCharacterVoice(speaker)"
-                >
-                  <Play :size="11" />
-                  {{ t('workbench.voiceAudition') }}
-                </button>
-                <button
-                  class="btn btn-sm"
-                  type="button"
-                  :disabled="voiceBusyIds.includes(speaker.characterId)"
-                  @click="generateCharacterVoice(speaker.characterId, !!speaker.voice)"
-                >
-                  <Loader2 v-if="voiceBusyIds.includes(speaker.characterId)" :size="11" class="animate-spin" />
-                  {{ speaker.voice ? t('workbench.voiceRegenerate') : t('workbench.voiceGenerate') }}
-                </button>
-              </div>
-            </article>
+              scope="character"
+              :drama-id="dramaId"
+              :episode-id="episodeId"
+              :character-id="speaker.characterId"
+              :name="speaker.name"
+              :line-count="speaker.lineCount"
+              @updated="onVoiceChanged"
+            />
           </div>
           <div class="dub-next-bar">
             <span class="dub-next-copy">
@@ -265,10 +199,18 @@
                 {{ t('workbench.retryFailed') }}
               </button>
               <button
+                class="btn btn-sm"
+                type="button"
+                :disabled="synthesizing || !lines.length"
+                @click="resynthesizeAll"
+              >
+                {{ t('workbench.resynthesizeAll') }}
+              </button>
+              <button
                 class="btn btn-sm is-primary"
                 type="button"
                 :disabled="synthesizing || !lines.length"
-                @click="synthesizeAll"
+                @click="synthesizeAll()"
               >
                 <Loader2 v-if="synthesizing" :size="11" class="animate-spin" />
                 {{ t('workbench.synthesizeAll') }}
@@ -316,7 +258,7 @@
                       <Loader2 v-if="loading" :size="11" class="animate-spin" />
                       {{ t('workbench.refreshTimeline') }}
                     </button>
-                    <button class="btn btn-sm" type="button" :disabled="!readyCount" @click="synthesizeAll">
+                    <button class="btn btn-sm" type="button" :disabled="!readyCount" @click="synthesizeAll()">
                       {{ t('workbench.synthesizeAll') }}
                     </button>
                   </div>
@@ -488,12 +430,10 @@
           <template v-if="selectedLine">
             #{{ selectedLine.lineNo }} · {{ selectedLine.speakerName || t('workbench.narrator') }}
           </template>
-          <template v-else-if="sampleLabel">{{ sampleLabel }}</template>
           <template v-else>{{ t('workbench.selectedLine') }}</template>
         </div>
         <div class="dub-player-text">
           <template v-if="selectedLine">{{ selectedLine.text }}</template>
-          <template v-else-if="sampleLabel">{{ t('workbench.playingSample', { name: sampleLabel }) }}</template>
           <template v-else>{{ t('workbench.noSelectedLine') }}</template>
         </div>
       </div>
@@ -583,8 +523,6 @@ const {
   voiceTotalCount,
   allVoiceOptions,
   voiceLoading,
-  voiceBusyIds,
-  narratorBusy,
   voiceGeneratingAll,
   timelineCues,
   timelineTotalMs,
@@ -603,11 +541,7 @@ const {
   startDub,
   stopDub,
   exportSubtitle,
-  generateCharacterVoice,
   generateMissingVoices,
-  generateNarratorVoice,
-  auditionCharacter,
-  auditionNarrator,
 } = session
 
 const stepDefs = computed(() => [
@@ -634,6 +568,14 @@ function goStep(index: number) {
   if (index === 3) void loadTimeline()
 }
 function nextStep() { goStep(currentStep.value + 1) }
+function resynthesizeAll() {
+  if (!lines.value.length) return
+  if (!window.confirm(t('workbench.resynthesizeAllConfirm'))) return
+  void synthesizeAll(true)
+}
+async function onVoiceChanged() {
+  await Promise.all([load(), loadVoices()])
+}
 
 const lineFilter = ref<'all' | 'noVoice' | 'long' | 'empty'>('all')
 const lineFilters = computed(() => [
@@ -697,8 +639,6 @@ async function retryFailed() {
 const player = ref<HTMLAudioElement | null>(null)
 const previewRef = ref<{ seekTo: (ms: number) => void } | null>(null)
 const selectedLine = ref<StoryboardLine | null>(null)
-const playingSample = ref<number | 'narrator' | null>(null)
-const sampleLabel = ref('')
 
 function mediaUrl(url: string) {
   return url.startsWith('/') || /^https?:\/\//i.test(url) ? url : `/${url}`
@@ -706,26 +646,8 @@ function mediaUrl(url: string) {
 function playLine(line: StoryboardLine) {
   if (!line.audioUrl || !player.value) return
   selectedLine.value = line
-  playingSample.value = null
-  sampleLabel.value = ''
   player.value.src = mediaUrl(line.audioUrl)
   void player.value.play().catch(() => {})
-}
-function playSample(url: string, label: string, id: number | 'narrator') {
-  if (!url || !player.value) return
-  selectedLine.value = null
-  playingSample.value = id
-  sampleLabel.value = label
-  player.value.src = mediaUrl(url)
-  void player.value.play().catch(() => {})
-}
-async function auditionCharacterVoice(speaker: { characterId: number; name: string }) {
-  const url = await auditionCharacter(speaker.characterId)
-  if (url) playSample(url, speaker.name, speaker.characterId)
-}
-async function auditionNarratorVoice() {
-  const url = await auditionNarrator()
-  if (url) playSample(url, t('workbench.narrator'), 'narrator')
 }
 function locateLine(line: StoryboardLine) {
   const cue = timelineCues.value.find(item => item.lineId === line.id)
@@ -817,22 +739,6 @@ watch(() => props.step, step => {
 .dub-next-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 2px; }
 .dub-next-copy { flex: 1; min-width: 0; font-size: 11px; color: var(--text-3); line-height: 1.5; }
 .dub-voice-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-.dub-voice-card {
-  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-  border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-1);
-}
-.dub-voice-card.is-missing { border-color: rgba(196, 138, 27, .38); background: rgba(196, 138, 27, .05); }
-.dub-voice-card.is-playing { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
-.dub-voice-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.dub-voice-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.dub-voice-head strong { font-size: 12.5px; color: var(--text-0); }
-.dub-voice-count { margin-left: auto; font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.dub-voice-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-2); flex-wrap: wrap; }
-.dub-voice-name { color: var(--text-1); font-weight: 600; }
-.dub-voice-state { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: var(--overlay-track); color: var(--text-2); }
-.dub-voice-state.is-ready { color: var(--success); background: var(--success-bg); }
-.dub-voice-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
-.is-warn { color: #8a5a00; }
 .dub-generation-summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-2); }
 .dub-hint { margin: 0; font-size: 11px; line-height: 1.6; color: var(--text-3); }
 .dub-progress { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-2); }

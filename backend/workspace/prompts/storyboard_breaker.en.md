@@ -33,6 +33,7 @@ Duration rules (hard constraints):
 - Dialogue floor: segment duration ≥ total character count of dialogue and narration within the segment (the part written in description) ÷ 4.5 characters/second + 2 seconds of performance headroom; dialogue that does not fit must be moved to the next segment
 
 video_prompt rules (hard constraints):
+- The first line is an info header listing the characters and scene that actually appear; do not write an "Audio:" requirement line or voice/tone/mix instructions (sound is controlled by generation parameters); when this shot genuinely has narration, write it only inside the corresponding time segment as "Narration (off-screen): ..."
 - Split into 3-second segments, each segment on its own line separated by newlines; map each 【镜头N】 in the description to 1-2 consecutive 3-second segments (same order, no omissions, no new sub-shots); cut points align with the 【镜头N】 structure
 - In each segment, write the visuals first (who + action + shot size/angle), then the dialogue/narration occurring within that time span — dialogue is extracted from the corresponding 【镜头N】 in the description; do not invent new dialogue beyond the description
 - Use @SceneName when mentioning a scene and @CharacterName when mentioning a character; names must exactly match the lists returned by read_storyboard_context (used to attach reference-asset images)

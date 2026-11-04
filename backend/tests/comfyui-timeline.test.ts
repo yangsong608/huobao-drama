@@ -123,6 +123,22 @@ test('storyboards map to ordered timeline segments with deduped refs', async () 
   assert.equal((timeline.output as any).height, 576)
 })
 
+test('legacy generic audio line never reaches timeline segments', async () => {
+  const mapping = readComfyTimelineMapping(configWith({ mode: 'timeline' }))
+  assert.ok(mapping)
+  const plan = await buildComfyTimelinePlan([
+    {
+      id: 1,
+      duration: 2,
+      videoPrompt: '音频：人声清晰靠前，环境音压低，无背景音乐；旁白/心声为画外音，不张口。\n0-3秒：空镜',
+      refs: [],
+    },
+  ], { mapping, audioMode: 'native', compilePrompt: compileStub })
+
+  assert.doesNotMatch(plan.segments[0].prompt, /人声清晰靠前|旁白\/心声|环境音压低/)
+  assert.match(plan.segments[0].prompt, /0-3秒：空镜/)
+})
+
 test('silent audio mode instructs the timeline to skip sound', async () => {
   const mapping = readComfyTimelineMapping(configWith({ mode: 'timeline' }))
   assert.ok(mapping)

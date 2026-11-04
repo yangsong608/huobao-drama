@@ -12,9 +12,13 @@ import {
   getNovelSettings,
   setNovelSettings,
   NovelSettingsValidationError,
+  getMediaSettings,
+  setMediaSettings,
   CONTENT_LANGUAGES,
   type ContentLanguage,
 } from '../services/app-settings.js'
+import { getFfmpegStatus } from '../utils/ffmpeg.js'
+import { MediaPathValidationError } from '../utils/media-paths.js'
 import { success, badRequest } from '../utils/response.js'
 
 const app = new Hono()
@@ -61,6 +65,27 @@ app.put('/dubbing', async (c) => {
     return badRequest(c, '请求体必须是对象')
   }
   return success(c, { defaults: await setDubbingDefaults(body) })
+})
+
+async function mediaPayload() {
+  return { settings: getMediaSettings(), status: await getFfmpegStatus() }
+}
+
+// GET /media — FFmpeg 目录设置与当前解析/探测状态
+app.get('/media', async (c) => {
+  return success(c, await mediaPayload())
+})
+
+// PUT /media — 保存目录（空字符串 = 自动）；无效目录仍落库，由 status 明确报告不可用
+app.put('/media', async (c) => {
+  const body = await c.req.json().catch(() => null)
+  try {
+    setMediaSettings(body)
+  } catch (error) {
+    if (error instanceof MediaPathValidationError) return badRequest(c, error.message)
+    throw error
+  }
+  return success(c, await mediaPayload())
 })
 
 // GET /novel — 小说生成设置（flat novel.* 键；不含任何 API Key）

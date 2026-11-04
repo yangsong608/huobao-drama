@@ -18,6 +18,7 @@ import { registerMigrationIpc } from './migrate'
 import { registerUpdater, markQuitting } from './updater'
 import { createStartupLog, redactStartupLog, waitForBackend } from './startup'
 import { resolveRuntimeResources } from './runtime-resources'
+import { migrateLegacyAudioInstructions } from './workspace-template'
 
 // 主进程打 CJS 产物，__dirname 天然可用（import.meta.url 在 CJS 下为 undefined）
 declare const __dirname: string
@@ -165,12 +166,15 @@ export function normCase(p: string): string {
  * 例外：prompts/ 随版本升级强制覆盖——prompt 与代码内 DEFAULT_PROMPTS 同源迭代
  * （设置页有「恢复默认」，且编辑场景少）；skills/ 保持只增不覆盖（可能有用户新建）
  */
-function syncWorkspaceTemplate(templateDir: string, destDir: string) {
+function syncWorkspaceTemplate(templateDir: string, destDir: string): string[] {
   const marker = path.join(destDir, '.template-version')
-  if (fs.existsSync(marker) && fs.readFileSync(marker, 'utf8').trim() === TEMPLATE_VERSION) return
-  fs.cpSync(templateDir, destDir, { recursive: true, force: false, errorOnExist: false })
-  fs.cpSync(path.join(templateDir, 'prompts'), path.join(destDir, 'prompts'), { recursive: true, force: true })
-  fs.writeFileSync(marker, TEMPLATE_VERSION)
+  if (!(fs.existsSync(marker) && fs.readFileSync(marker, 'utf8').trim() === TEMPLATE_VERSION)) {
+    fs.cpSync(templateDir, destDir, { recursive: true, force: false, errorOnExist: false })
+    fs.cpSync(path.join(templateDir, 'prompts'), path.join(destDir, 'prompts'), { recursive: true, force: true })
+    fs.writeFileSync(marker, TEMPLATE_VERSION)
+  }
+  // 版本号不变时也要清理存量旧音频指令，否则老用户会继续生成旁白/独白
+  return migrateLegacyAudioInstructions(destDir)
 }
 
 function resolveResourceDir(): string {
@@ -318,7 +322,10 @@ async function bootstrap() {
       ? path.join(userData, 'workspace')
       : templateDir
     startupLog.write('preparing workspace')
-    if (app.isPackaged) syncWorkspaceTemplate(templateDir, currentWorkspaceDir)
+    if (app.isPackaged) {
+      const migrated = syncWorkspaceTemplate(templateDir, currentWorkspaceDir)
+      if (migrated.length) startupLog.write(`workspace legacy audio prompt migrated: ${migrated.length} file(s)`)
+    }
 
     currentFrontendDist = app.isPackaged
       ? path.join(runtimeResourcesDir, 'frontend')

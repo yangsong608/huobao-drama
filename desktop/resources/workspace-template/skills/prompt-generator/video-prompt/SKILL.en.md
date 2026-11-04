@@ -22,7 +22,7 @@ Header rules:
 - Only list the characters who actually appear in this storyboard segment and the bound scene — do not list those who do not appear
 - When a prop has a notable appearance, it may be appended to the header (e.g. `; Props: @Letter`)
 - The header is its own line, ending with a period, followed by the time segments
-- Immediately after the header, add a standalone audio direction line: `Audio: dialogue/narration clear and forward, ambience low, no background music; narration/inner voice is off-screen, mouth not moving.`
+- Do not write an "Audio:" requirement line or voice/tone/mix instructions (sound is controlled by generation parameters); when this shot genuinely has narration, write it only inside the corresponding time segment as `Narration (off-screen, Mandarin, calm pace): ...`
 
 Split into 3-second segments, each segment on its own line separated by newlines, with time ranges continuous and adjoining (no overlaps, no gaps).
 

@@ -17,7 +17,7 @@ process.env.STORAGE_PATH = path.join(root, 'static')
 process.env.MYSQL_AUTO_IMPORT = 'false'
 
 const { db, schema } = await import('../src/db/index.ts')
-const { cloneVoice, createVoice, getVoice, activateVoice } = await import('../src/services/voice-profile.ts')
+const { cloneVoice, createVoice, getVoice, activateVoice, setNarratorVoice } = await import('../src/services/voice-profile.ts')
 const { default: linesRoute } = await import('../src/routes/lines.ts')
 
 const app = new Hono()
@@ -129,8 +129,100 @@ test('台词改派音色会作废旧音频并等待重合成', async () => {
 
   const row = db.select().from(schema.storyboardLines).all().find((item) => item.id === line.id)!
   assert.equal(row.voiceId, newVoice.id)
+  assert.equal(row.voiceLocked, true)
   assert.equal(row.status, 'pending')
   assert.equal(row.audioUrl, null)
   assert.equal(row.audioDurationMs, null)
   assert.equal(row.audioHash, null)
+})
+
+test('切换激活音色：未锁定台词自动跟随新音色，锁定台词保留指定音色', () => {
+  const [character] = db.insert(schema.characters).values({
+    dramaId: 1, name: '阿七', role: '船工', createdAt: ts, updatedAt: ts,
+  }).returning().all()
+  const oldVoice = makeVoice(character.id, '旧版声线')
+  const newVoice = makeVoice(character.id, '新版声线')
+  activateVoice(character.id, oldVoice.id)
+
+  const lineValues = {
+    episodeId: episode.id,
+    dramaId: 1,
+    storyboardId: storyboard.id,
+    speakerType: 'dialogue',
+    speakerName: '阿七',
+    characterId: character.id,
+    text: '起锚。',
+    speakText: '起锚。',
+    voiceId: oldVoice.id,
+    status: 'ready',
+    audioUrl: 'static/tts/old.wav',
+    audioDurationMs: 800,
+    audioHash: 'old-hash',
+    createdAt: ts,
+    updatedAt: ts,
+  }
+  const [autoLine] = db.insert(schema.storyboardLines).values({
+    ...lineValues, lineNo: 2, voiceLocked: false,
+  }).returning().all()
+  const [lockedLine] = db.insert(schema.storyboardLines).values({
+    ...lineValues, lineNo: 3, voiceLocked: true,
+  }).returning().all()
+
+  activateVoice(character.id, newVoice.id)
+
+  const rows = db.select().from(schema.storyboardLines).all()
+  const autoAfter = rows.find((item) => item.id === autoLine.id)!
+  const lockedAfter = rows.find((item) => item.id === lockedLine.id)!
+  assert.equal(autoAfter.voiceId, null)
+  assert.equal(autoAfter.status, 'pending')
+  assert.equal(autoAfter.audioUrl, null)
+  assert.equal(autoAfter.audioHash, null)
+  assert.equal(lockedAfter.voiceId, oldVoice.id)
+  assert.equal(lockedAfter.voiceLocked, true)
+  assert.equal(lockedAfter.audioUrl, 'static/tts/old.wav')
+})
+
+test('切换旁白音色：未锁定旁白台词解绑并作废音频，锁定保留', () => {
+  const oldNarrator = createVoice({
+    dramaId: 1, characterId: null, scope: 'narrator', name: '旁白旧版', source: 'design', status: 'ready',
+  })
+  const newNarrator = createVoice({
+    dramaId: 1, characterId: null, scope: 'narrator', name: '旁白新版', source: 'design', status: 'ready',
+  })
+  setNarratorVoice(1, oldNarrator.id)
+
+  const narration = {
+    episodeId: episode.id,
+    dramaId: 1,
+    storyboardId: storyboard.id,
+    speakerType: 'narration',
+    speakerName: '旁白',
+    characterId: null,
+    text: '夜色渐深。',
+    speakText: '夜色渐深。',
+    voiceId: oldNarrator.id,
+    status: 'ready',
+    audioUrl: 'static/tts/narrator.wav',
+    audioDurationMs: 700,
+    audioHash: 'narrator-hash',
+    createdAt: ts,
+    updatedAt: ts,
+  }
+  const [autoLine] = db.insert(schema.storyboardLines).values({
+    ...narration, lineNo: 4, voiceLocked: false,
+  }).returning().all()
+  const [lockedLine] = db.insert(schema.storyboardLines).values({
+    ...narration, lineNo: 5, voiceLocked: true,
+  }).returning().all()
+
+  setNarratorVoice(1, newNarrator.id)
+
+  const rows = db.select().from(schema.storyboardLines).all()
+  const autoAfter = rows.find((item) => item.id === autoLine.id)!
+  const lockedAfter = rows.find((item) => item.id === lockedLine.id)!
+  assert.equal(autoAfter.voiceId, null)
+  assert.equal(autoAfter.status, 'pending')
+  assert.equal(autoAfter.audioUrl, null)
+  assert.equal(lockedAfter.voiceId, oldNarrator.id)
+  assert.equal(lockedAfter.audioUrl, 'static/tts/narrator.wav')
 })

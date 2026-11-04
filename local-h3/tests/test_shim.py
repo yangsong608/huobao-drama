@@ -38,11 +38,28 @@ class AudioDirectiveTest(unittest.TestCase):
         self.assertEqual(shim.with_audio_directive("", "ambient"), shim.AMBIENT_DIRECTIVE)
         self.assertEqual(shim.with_audio_directive("", "silent"), shim.SILENT_DIRECTIVE)
 
+    def test_native_directive_does_not_request_voice_over(self):
+        directive = shim.AUDIO_DIRECTIVE.lower()
+        self.assertNotIn("and voice-over narration", directive)
+        self.assertIn("no voice-over narration unless the prompt explicitly describes an off-screen narrator", directive)
+        self.assertIn("natural ambience", directive)
+        self.assertIn("mandarin dialogue", directive)
+
+    def test_global_prompt_matches_native_voice_over_policy(self):
+        global_prompt = shim.GLOBAL_PROMPT.lower()
+        self.assertNotIn("and voice-over narration", global_prompt)
+        self.assertIn("no voice-over narration unless the prompt explicitly describes an off-screen narrator", global_prompt)
+
     def test_all_directives_forbid_subtitles(self):
         for directive in (shim.AUDIO_DIRECTIVE, shim.AMBIENT_DIRECTIVE, shim.SILENT_DIRECTIVE):
             self.assertIn("no subtitles", directive.lower())
         self.assertIn("mouth", shim.AMBIENT_DIRECTIVE.lower())
         self.assertNotIn("do not speak", shim.AMBIENT_DIRECTIVE.lower())
+
+    def test_silent_directive_keeps_mouths_closed(self):
+        directive = shim.SILENT_DIRECTIVE.lower()
+        self.assertIn("do not speak", directive)
+        self.assertIn("mouths closed", directive)
 
 
 class ContentParseTest(unittest.TestCase):

@@ -11,6 +11,7 @@ import { resolveStoryboardVoiceReferences } from '../services/character-voice-re
 import { resolutionSupportError } from '../services/model-capabilities.js'
 import { normalizeVideoAudioMode } from '../services/video-audio.js'
 import { compileLocalH3Prompt } from '../services/h3-prompt.js'
+import { stripLegacyAudioInstruction } from '../services/video-prompt-sanitize.js'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
 
 const app = new Hono()
@@ -247,6 +248,19 @@ app.post('/', async (c) => {
       ])
       if (stylePrompt) videoPrompt = `${stylePrompt}，\n${videoPrompt}`
       videoPrompt = withDramaBackground(String(videoPrompt || ''), background)
+    }
+
+    // 旧模板生成的「音频：人声清晰靠前……旁白/心声为画外音」会诱导云端模型生成人声/旁白，
+    // 模板已移除；存量分镜在提交前统一清掉，云端与本地 H3 同一口径
+    if (type === 'video' && String(videoPrompt || '').trim()) {
+      const rawPrompt = String(videoPrompt)
+      videoPrompt = stripLegacyAudioInstruction(rawPrompt)
+      if (videoPrompt !== rawPrompt) {
+        logTaskProgress('TaskAPI', 'legacy-audio-line-stripped', {
+          storyboardId: body.storyboard_id,
+          chars: `${rawPrompt.length}->${videoPrompt.length}`,
+        })
+      }
     }
 
     // 本地 H3 把中文正文当字幕烧进画面：提交前统一转英文结构，对白只留口型动作

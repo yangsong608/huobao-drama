@@ -129,7 +129,7 @@ lines.put('/:id', async (c) => {
     ...(body.speaker_type !== undefined ? { speakerType: String(body.speaker_type) } : {}),
     ...(body.character_id !== undefined ? { characterId: body.character_id ? Number(body.character_id) : null } : {}),
     ...(body.speaker_name !== undefined ? { speakerName: String(body.speaker_name) } : {}),
-    ...(body.voice_id !== undefined ? { voiceId: nextVoiceId } : {}),
+    ...(body.voice_id !== undefined ? { voiceId: nextVoiceId, voiceLocked: nextVoiceId !== null } : {}),
     ...(body.voice_locked !== undefined ? { voiceLocked: Boolean(body.voice_locked) } : {}),
     ...(body.start_ms !== undefined ? { startMs: body.start_ms === null ? null : Number(body.start_ms) } : {}),
     ...(body.voice_start_ms !== undefined ? {
@@ -162,6 +162,7 @@ lines.post('/:id/synthesize', async (c) => {
       text: row.speakText || row.text,
       voice: {
         externalVoiceId: voice.externalVoiceId || undefined,
+        voicePrompt: voice.voicePrompt || undefined,
         designInstruct: voice.designInstruct || undefined,
         refAudioUrl: voice.refAudioUrl || undefined,
         refText: voice.refText || undefined,

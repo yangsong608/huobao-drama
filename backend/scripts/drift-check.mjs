@@ -94,7 +94,7 @@ const TASK_ARTIFACTS = {
     'backend/src/services/voice-design.ts',
     'backend/src/services/text-call.ts',
   ],
-  'M1-5': ['frontend/app/components/VoiceProfilePanel.vue'],
+  'M1-5': ['frontend/app/components/VoiceProfileCard.vue'],
   'M2-1': ['backend/src/services/dialogue-lines.ts'],
   'M2-2': ['backend/src/routes/lines.ts'],
   'M2-6': [

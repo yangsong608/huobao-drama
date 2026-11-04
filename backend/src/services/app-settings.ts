@@ -9,6 +9,11 @@
 import { eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
+import {
+  MEDIA_FFMPEG_DIR_KEY,
+  MediaPathValidationError,
+  normalizeFfmpegDir,
+} from '../utils/media-paths.js'
 
 export const CONTENT_LANGUAGES = ['zh', 'en', 'ja', 'ko'] as const
 export type ContentLanguage = typeof CONTENT_LANGUAGES[number]
@@ -523,4 +528,42 @@ export function setNovelSettings(patch: unknown): NovelSettings {
       .run()
   }
   return next
+}
+
+// ---------------------------------------------------------------------------
+// 媒体工具（设置「通用 → 媒体工具」）
+// ---------------------------------------------------------------------------
+
+export interface MediaSettings {
+  /** 自定义 FFmpeg 目录；空 = 自动（环境变量 / 内置 / PATH） */
+  ffmpegDir: string
+}
+
+export function getMediaSettings(): MediaSettings {
+  const row = db.select().from(schema.appSettings)
+    .where(eq(schema.appSettings.key, MEDIA_FFMPEG_DIR_KEY))
+    .get()
+  try {
+    return { ffmpegDir: normalizeFfmpegDir(row?.value ?? '') }
+  } catch {
+    return { ffmpegDir: '' }
+  }
+}
+
+/** 部分更新；非法类型/相对路径抛 MediaPathValidationError，由路由转 400 */
+export function setMediaSettings(patch: unknown): MediaSettings {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new MediaPathValidationError('请求体必须是对象')
+  }
+  const input = patch as Record<string, unknown>
+  if (!('ffmpegDir' in input)) return getMediaSettings()
+  const ffmpegDir = normalizeFfmpegDir(input.ffmpegDir)
+  db.insert(schema.appSettings)
+    .values({ key: MEDIA_FFMPEG_DIR_KEY, value: ffmpegDir, updatedAt: now() })
+    .onConflictDoUpdate({
+      target: schema.appSettings.key,
+      set: { value: ffmpegDir, updatedAt: now() },
+    })
+    .run()
+  return { ffmpegDir }
 }

@@ -48,7 +48,7 @@ export const DEFAULT_PIPELINE_RULES: Record<PipelineRuleKey, string> = {
 - 段落时长 × 4 字/秒 = 该段台词 + 旁白可容纳的字数上限（再留 1 秒气口）。例：12 秒最多约 44 个汉字；超出必须拆成两个段落，不得靠加快语速硬塞
 - 旁白、回忆、心里活动统一写成「旁白（画外音）：内容」，不要写成角色开口说；画面中该角色不张口`,
   video_prompts: `请为分镜 #{{shotNumber}}(ID:{{storyboardId}})生成视频提示词(video_prompt)。视频模型:{{videoModel}},请根据该模型的特性和时长限制生成。
-请先调用 read_storyboard_context 获取该分镜的画面描述(含【镜头N】子镜头与台词/旁白)、氛围、时长以及 continuity（承接上一镜的尾动作/视线/站位）和 sound_effect（本镜环境声）,据此生成 video_prompt(第一行是信息头：列出该分镜出场的人物与场景，用 @角色名/@场景名 引用；第二行单独写声音要求「音频：人声清晰靠前，环境音压低，无背景音乐；旁白/心声为画外音，不张口。」；之后按 3 秒分段换行、用 @角色名/@场景名/@道具名 引用参考素材；开头 0-1 秒承接上一镜的尾部动作，结尾留 2-3 秒可剪辑的尾部动作或空镜；段落内允许多镜头切镜，段与段可以是不同景别/角度/对象，但不跨场景，切镜点对齐分镜 description 的【镜头N】结构),然后调用 update_storyboard 保存到分镜 ID:{{storyboardId}}。update_storyboard 参数只传 storyboard_id 和 video_prompt 两个键,不要回传该分镜的其他任何字段,不要重新拆分整集。
+请先调用 read_storyboard_context 获取该分镜的画面描述(含【镜头N】子镜头与台词/旁白)、氛围、时长以及 continuity（承接上一镜的尾动作/视线/站位）和 sound_effect（本镜环境声）,据此生成 video_prompt(第一行是信息头：列出该分镜出场的人物与场景，用 @角色名/@场景名 引用；不要写「音频：」要求行或音色/混音指令（声音由生成参数控制）；之后按 3 秒分段换行、用 @角色名/@场景名/@道具名 引用参考素材；开头 0-1 秒承接上一镜的尾部动作，结尾留 2-3 秒可剪辑的尾部动作或空镜；段落内允许多镜头切镜，段与段可以是不同景别/角度/对象，但不跨场景，切镜点对齐分镜 description 的【镜头N】结构),然后调用 update_storyboard 保存到分镜 ID:{{storyboardId}}。update_storyboard 参数只传 storyboard_id 和 video_prompt 两个键,不要回传该分镜的其他任何字段,不要重新拆分整集。
 
 语音预算（硬约束）：
 - 每个 3 秒段最多 12 个汉字的台词/旁白；长句按语义拆到相邻段，不得把整段旁白塞进一句

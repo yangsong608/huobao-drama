@@ -9,6 +9,7 @@
  */
 import type { AIConfig } from './adapters/types'
 import { compileH3Prompt } from './h3-prompt.js'
+import { stripLegacyAudioInstruction } from './video-prompt-sanitize.js'
 import type { VideoAudioMode } from './video-audio.js'
 
 export interface ComfyTimelineFrameGrid {
@@ -256,7 +257,8 @@ export async function buildComfyTimelinePlan(
       if (name && !nameToPicture.has(name)) nameToPicture.set(name, index + 1)
     }
 
-    const rewritten = rewritePictureRefs(String(sb.videoPrompt || '').trim(), nameToPicture)
+    const sanitized = stripLegacyAudioInstruction(String(sb.videoPrompt || '').trim())
+    const rewritten = rewritePictureRefs(sanitized, nameToPicture)
     const prompt = String(await compile(rewritten)).trim()
     const desired = Math.max(1, Math.round((Number(sb.duration) || 5) * mapping.fps))
     const frameCount = alignTimelineFrames(desired, mapping.frameGrid)

@@ -378,7 +378,6 @@
                     <span class="afp-label">{{ t('episode.asset.finalPromptTurnaround') }}</span>
                     <span :class="['afp-text', !(c.final_prompt || c.finalPrompt) && 'dim']">{{ c.final_prompt || c.finalPrompt || t('episode.asset.finalPromptAutoTurnaround') }}</span>
                   </div>
-                  <CharacterVoice :character="c" @updated="updateCharacterVoice" />
                 </div>
               </article>
             </div>
@@ -499,11 +498,6 @@
             </div>
             <div v-else class="asset-props-empty">{{ t('episode.asset.propsEmpty') }}</div>
             </template>
-          </div>
-
-          <!-- Sub: Voice Assets（音色档案卡片化，跨集复用） -->
-          <div v-if="prodTab === 'voices'" class="prod-content">
-            <VoiceAssetGrid :drama-id="dramaId" :episode-id="epId" @updated="onVoiceAssetUpdated" />
           </div>
 
           <!-- Sub: Video Production（分镜拆分 + 视频生成 合并） -->
@@ -1342,17 +1336,6 @@
                   <p v-if="assetDetailRefs.length" class="asset-ref-hint">{{ t('episode.asset.refHint') }}</p>
                   <p v-else class="asset-ref-hint">{{ t('episode.asset.refEmpty') }}</p>
                 </div>
-
-                <div v-if="assetDetail.type === 'character'" class="voice-stack">
-                  <VoiceProfilePanel
-                    :key="`voice-profile-${assetDetailItem.id}`"
-                    :character="assetDetailItem"
-                    :drama-id="dramaId"
-                    :episode-id="epId"
-                    @updated="updateCharacterVoice"
-                  />
-                  <CharacterVoice :key="assetDetailItem.id" :character="assetDetailItem" @updated="updateCharacterVoice" />
-                </div>
               </aside>
 
               <section class="asset-detail-editor-panel">
@@ -1413,6 +1396,25 @@
                 </div>
 
               </section>
+            </div>
+
+            <div v-if="assetDetail.type === 'character' && assetDetailItem" class="asset-detail-voice-row">
+              <div class="asset-detail-section-title">
+                <span>{{ t('episode.voice.title') }}</span>
+                <span class="dim">{{ t('episode.voice.desc') }}</span>
+              </div>
+              <VoiceProfileCard
+                :key="`voice-card-${assetDetailItem.id}`"
+                scope="character"
+                :drama-id="dramaId"
+                :episode-id="epId"
+                :character-id="assetDetailItem.id"
+                :name="assetDetailItem.name"
+                :character="assetDetailItem"
+                reference-audio
+                :video-ref-url="assetDetailItem.voice_audio_url || assetDetailItem.voiceAudioUrl || ''"
+                @reference-updated="updateCharacterVoice"
+              />
             </div>
 
             <section class="asset-detail-prompt-panel">
@@ -1812,11 +1814,13 @@ async function loadExportMerges() {
 const scriptStep = ref(storedPanel ? (storedPanel.scriptStep === 0 ? 0 : 1) : 0)
 // 旧版本地存储的 'storyboard' 子步骤已并入 'videos'（视频制作）
 const storedProdTab = storedPanel?.prodTab === 'storyboard' ? 'videos' : storedPanel?.prodTab
-const prodTab = ref(['assets', 'voices', 'videos'].includes(storedProdTab) ? storedProdTab : 'assets')
+// 旧的独立「音色」生产页已并入配音阶段的音色分配，历史本地状态迁移到该步骤。
+const legacyVoicePanel = Boolean(storedProdTab) && !['assets', 'videos'].includes(String(storedProdTab))
+const prodTab = ref(['assets', 'videos'].includes(storedProdTab) ? storedProdTab : 'assets')
 // 配音阶段的 5 个子步骤（与 DubbingStage 内部顺序一致）
 const DUB_STEP_KEYS = ['lines', 'voices', 'generate', 'preview', 'export']
 const storedDubStep = Number(storedPanel?.dubStep)
-const dubStep = ref(Number.isInteger(storedDubStep) && storedDubStep >= 0 && storedDubStep < DUB_STEP_KEYS.length ? storedDubStep : 0)
+const dubStep = ref(legacyVoicePanel ? 1 : (Number.isInteger(storedDubStep) && storedDubStep >= 0 && storedDubStep < DUB_STEP_KEYS.length ? storedDubStep : 0))
 const dubSummary = ref(null)
 function onDubSummary(payload) { dubSummary.value = payload }
 function openDubbingStage() { panel.value = 'dubbing' }
@@ -1962,10 +1966,6 @@ function updateCharacterVoice(id, voice) {
   const patch = { ...voice, voiceAudioUrl: voice.voice_audio_url, voiceAudioName: voice.voice_audio_name }
   const character = chars.value.find(item => item.id === id)
   if (character) Object.assign(character, patch)
-}
-async function onVoiceAssetUpdated() {
-  if (!epId.value) return
-  try { chars.value = await episodeAPI.characters(epId.value) } catch { /* 静默 */ }
 }
 const assetDetailDraft = ref({ appearance: '', styling: '', prompt: '', lighting: '', description: '' })
 // 最终提示词手动编辑：dirty 时才随保存提交，避免无修改保存误清空 Agent 生成的提示词
@@ -3082,7 +3082,6 @@ const assetReadyCount = computed(() => charImgCount.value + sceneImgCount.value 
 
 const prodTabDefs = computed(() => [
   { id: 'assets', label: t('episode.prod.assets'), icon: FolderKanban, badge: assetTotalCount.value ? `${assetReadyCount.value}/${assetTotalCount.value}` : '' },
-  { id: 'voices', label: t('episode.prod.voices'), icon: Mic, badge: '' },
   { id: 'videos', label: t('episode.prod.videos'), icon: Clapperboard, badge: sbs.value.length ? `${shotVidCount.value}/${sbs.value.length}` : '' },
 ])
 
@@ -3108,7 +3107,6 @@ const sidebarSections = computed(() => ([
     label: t('episode.stage.production'),
     items: [
       { key: 'prod:assets', label: t('episode.prod.assets'), desc: '', icon: Users },
-      { key: 'prod:voices', label: t('episode.prod.voices'), desc: '', icon: Mic },
       { key: 'prod:videos', label: t('episode.prod.videos'), desc: '', icon: Clapperboard },
     ],
   },
@@ -6578,12 +6576,17 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 @keyframes asset-ref-spin { to { transform: rotate(360deg); } }
 .asset-ref-hint { margin: 0; color: var(--text-3); font-size: 10.5px; line-height: 1.5; }
-/* 角色音色：音色档案在上，直传参考音在下，共用一条分隔线 */
-.voice-stack {
-  display: flex; flex-direction: column; gap: 12px; min-width: 0;
-  border-top: 1px solid var(--surface-outline); padding-top: 12px; margin-top: 4px;
+/* 角色音色：全宽横跨预览与编辑两栏，避免挤在窄预览列里 */
+.asset-detail-voice-row {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--surface-outline);
+  padding-top: 14px;
+  margin-top: 14px;
 }
-.voice-stack :deep(.character-voice) { margin-top: 0; padding-top: 0; }
+.asset-detail-voice-row :deep(.character-voice) { margin-top: 0; padding-top: 0; }
 .asset-ref-chip {
   font-size: 10px;
   font-weight: 700;

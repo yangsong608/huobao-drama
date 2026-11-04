@@ -135,7 +135,7 @@ cd 工具/huobao-drama/frontend && nohup npm run dev > /tmp/hb_frontend.log 2>&1
 | `resolution` | `768P` / `2K`（也接受 `480p` 等档位名） | 官方字段；缺省按 480p |
 | **`resolution_tier`** | `480p` / `720p` / `1080p` | **自有扩展**，优先于 resolution；火宝在本地配置下会自动发 |
 | **`aspect_ratio`** | `16:9` / `9:16` / `4:3` / `21:9` | **自有扩展**，竖屏必带；火宝会自动发 |
-| **`audio_mode`** | `native` / `ambient` / `silent` | `ambient` = 只要环境声（给后期 TTS 让路）；`silent` = 完全不要音轨；`native` 不写扩展字段 |
+| **`audio_mode`** | `native` / `ambient` / `silent` | `ambient` = 只要环境声（给后期 TTS 让路）；`silent` = 完全不要音轨并要求角色闭口不讲话；`native` 按提示词生成对白/环境声，只有提示词明确描述画外音旁白时才生成旁白 |
 | **`quality`** | `preview` / `final` | **自有扩展**：`preview` = 4 步 turbo 快速预览，`final` = 8 步 LoRA 交付；缺省 `preview` |
 | **`negative_prompt`** | 字符串 | **自有扩展**：空值用桥接内置质量兜底词 |
 | **`seed`** | 整数 | **自有扩展**：固定种子便于复现；缺省随机 |
@@ -153,6 +153,7 @@ cd 工具/huobao-drama/frontend && nohup npm run dev > /tmp/hb_frontend.log 2>&1
 > 火宝选中本地视频配置后：分辨率下拉会出现 480p，并自动带上比例与声音模式；
 > 不传档位时桥接按 480p 兜底。720p 比 480p 慢约 2–2.5 倍，1080p 再慢，交付建议用 `quality=final`（8 步 LoRA）。
 > 环境声/静音模式会先删除提示词里已有的 `音频：` / `Audio:` 行，再注入对应英文指令。
+> native 模式不会无条件要求旁白：提示词没有真正的旁白描述时，只生成对白与环境声。
 > 设置页的 minimax 视频配置可直接选质量档、填负向提示词与固定种子；这些字段只在本地 shim 发送。
 
 ### 图片桥（8191）

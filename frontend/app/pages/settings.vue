@@ -70,6 +70,67 @@
               </div>
             </div>
           </section>
+
+          <!-- 媒体工具（FFmpeg） -->
+          <section class="card svc-group">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
+                <span class="svc-group-title">{{ t('settings.general.mediaTitle') }}</span>
+                <div class="svc-group-sub">{{ t('settings.general.mediaSub') }}</div>
+              </div>
+              <button v-if="desktopBridge" class="btn btn-sm ml-auto" :disabled="mediaSaving" @click="pickFfmpegDir">
+                <HardDrive :size="13" /> {{ t('settings.general.mediaChoose') }}
+              </button>
+            </div>
+            <div class="config-row">
+              <div class="provider-badge" style="background:var(--accent-bg);color:var(--accent)"><HardDrive :size="15" /></div>
+              <div class="config-main">
+                <div class="config-line"><span class="config-name">{{ t('settings.general.ffmpegDir') }}</span></div>
+                <div class="config-sub">{{ t('settings.general.ffmpegDirNote') }}</div>
+              </div>
+              <div class="media-dir-actions">
+                <input
+                  v-model="mediaFfmpegDir"
+                  class="input mono media-dir-input"
+                  type="text"
+                  spellcheck="false"
+                  :placeholder="t('settings.general.ffmpegDirPlaceholder')"
+                />
+                <button class="btn btn-primary btn-sm" :disabled="mediaSaving" @click="saveMediaSettings">
+                  <Loader2 v-if="mediaSaving" :size="13" class="animate-spin" />
+                  {{ t('settings.general.mediaSave') }}
+                </button>
+                <button class="btn btn-sm" :disabled="mediaSaving" @click="restoreMediaAuto">{{ t('settings.general.mediaAuto') }}</button>
+              </div>
+            </div>
+            <template v-if="mediaStatus">
+              <div class="config-row">
+                <div class="provider-badge style-badge"><HardDrive :size="15" /></div>
+                <div class="config-main">
+                  <div class="config-line">
+                    <span class="config-name mono">ffmpeg</span>
+                    <span class="tag" :class="{ 'tag-accent': mediaStatus.ffmpeg.available }">{{ mediaStatus.ffmpeg.available ? t('settings.general.mediaAvailable') : t('settings.general.mediaUnavailableTag') }}</span>
+                    <span class="tag">{{ t(MEDIA_SOURCE_LABELS[mediaStatus.ffmpeg.source] || 'settings.general.mediaSourceNone') }}</span>
+                  </div>
+                  <div class="config-sub mono truncate">{{ mediaStatus.ffmpeg.path || '—' }}</div>
+                  <div v-if="mediaStatus.ffmpeg.version" class="config-sub mono truncate">{{ mediaStatus.ffmpeg.version }}</div>
+                </div>
+              </div>
+              <div class="config-row">
+                <div class="provider-badge style-badge"><HardDrive :size="15" /></div>
+                <div class="config-main">
+                  <div class="config-line">
+                    <span class="config-name mono">ffprobe</span>
+                    <span class="tag" :class="{ 'tag-accent': mediaStatus.ffprobe.available }">{{ mediaStatus.ffprobe.available ? t('settings.general.mediaAvailable') : t('settings.general.mediaUnavailableTag') }}</span>
+                    <span class="tag">{{ t(MEDIA_SOURCE_LABELS[mediaStatus.ffprobe.source] || 'settings.general.mediaSourceNone') }}</span>
+                  </div>
+                  <div class="config-sub mono truncate">{{ mediaStatus.ffprobe.path || '—' }}</div>
+                  <div v-if="mediaStatus.ffprobe.version" class="config-sub mono truncate">{{ mediaStatus.ffprobe.version }}</div>
+                </div>
+              </div>
+            </template>
+            <p class="config-empty">{{ t('settings.general.ffmpegDirHint') }}</p>
+          </section>
         </div>
 
         <!-- ===== AI 服务配置 ===== -->
@@ -2701,6 +2762,7 @@ onMounted(() => {
   loadStylePresets()
   loadMcp()
   loadPipelineRules()
+  loadMediaSettings()
   if (tab.value === 'dubbing') loadDubbing()
   if (tab.value === 'novel') loadNovel()
 })
@@ -2751,6 +2813,7 @@ async function loadStorage() {
 watch(tab, (active) => {
   if (active === 'storage') loadStorage()
   else stopUsagePoll()
+  if (active === 'general') loadMediaSettings()
   if (active === 'dubbing') loadDubbing()
 })
 
@@ -2788,6 +2851,66 @@ function formatBytes(n) {
   if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(0)} MB`
   if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`
   return `${n} B`
+}
+
+// ===== 媒体工具（FFmpeg 目录） =====
+const MEDIA_SOURCE_LABELS = {
+  custom: 'settings.general.mediaSourceCustom',
+  env: 'settings.general.mediaSourceEnv',
+  static: 'settings.general.mediaSourceStatic',
+  path: 'settings.general.mediaSourcePath',
+  none: 'settings.general.mediaSourceNone',
+}
+
+const mediaFfmpegDir = ref('')
+const mediaStatus = ref(null)
+const mediaSaving = ref(false)
+
+function applyMediaPayload(payload) {
+  mediaFfmpegDir.value = payload?.settings?.ffmpegDir || ''
+  mediaStatus.value = payload?.status || null
+}
+
+async function loadMediaSettings() {
+  try {
+    applyMediaPayload(await settingsAPI.media())
+  } catch (e) {
+    toastError(e, { fallback: 'settings.general.mediaLoadFailed' })
+  }
+}
+
+async function saveMediaSettings() {
+  if (mediaSaving.value) return
+  mediaSaving.value = true
+  try {
+    applyMediaPayload(await settingsAPI.saveMedia(mediaFfmpegDir.value.trim()))
+    if (mediaStatus.value?.ffmpeg?.available && mediaStatus.value?.ffprobe?.available) {
+      toast.success(t('settings.general.mediaSaved'))
+    } else {
+      toast.warning(t('settings.general.mediaUnavailable'))
+    }
+  } catch (e) {
+    toastError(e, { fallback: 'settings.general.mediaSaveFailed' })
+  } finally {
+    mediaSaving.value = false
+  }
+}
+
+async function restoreMediaAuto() {
+  if (mediaSaving.value) return
+  mediaFfmpegDir.value = ''
+  await saveMediaSettings()
+}
+
+async function pickFfmpegDir() {
+  if (!desktopBridge) return
+  const res = await desktopBridge.pickDirectory()
+  if (res.canceled) return
+  if (!res.ok || !res.path) {
+    toastError(res.error, { fallback: 'settings.general.mediaPickFailed' })
+    return
+  }
+  mediaFfmpegDir.value = res.path
 }
 
 // ===== 应用内更新（桌面版走 Electron 桥；服务器/Docker 走后端 server-update 路由） =====
@@ -3131,6 +3254,10 @@ onBeforeUnmount(stopUsagePoll)
 .lang-option:hover { color: var(--text-0); }
 .lang-option.on { background: var(--seg-active-bg); color: var(--text-0); box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
 .lang-option:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--button-focus); }
+
+/* ===== FFmpeg 目录（通用 tab） ===== */
+.media-dir-actions { display: flex; align-items: center; gap: 8px; flex: 1 1 360px; min-width: 0; }
+.media-dir-input { flex: 1; min-width: 0; }
 
 /* 按服务类型分组的配置卡 */
 .sections { display: flex; flex-direction: column; gap: 16px; }

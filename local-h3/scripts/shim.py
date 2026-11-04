@@ -133,13 +133,15 @@ def resume_worker(task_id, pid):
 
 NEG = "bad video, distorted face, extra fingers, text, watermark, subtitles, muffled speech, distorted audio, loud background music"
 
-# 全局音频指令：H3 音画同生成，旁白/对白清晰度只能在这里下要求。
+# 全局音频指令：H3 音画同生成，对白/环境音只能在这里下要求。
+# 只有提示词里真的描述了画外音旁白时才允许旁白，否则模型会自行加旁白。
 # 明确「无背景音乐」是给后期 BGM 留空间，避免模型自带音乐盖住人声。
 # 注意：分段模式下节点只用 segments[].prompt，global_prompt 只是兜底，
 # 所以真正生效的是下面 with_audio_directive 拼进每段提示词的那一行。
 AUDIO_DIRECTIVE = (
-    "Audio: clear, intelligible Mandarin dialogue and voice-over narration, "
-    "natural ambience, no background music, no subtitles, no captions, no on-screen text."
+    "Audio: clear, intelligible Mandarin dialogue with accurate lip sync, natural ambience, "
+    "no voice-over narration unless the prompt explicitly describes an off-screen narrator, "
+    "no background music, no subtitles, no captions, no on-screen text."
 )
 # 后期配音模式：不生成可辨识人声，但保留说话口型，方便后期对轨
 AMBIENT_DIRECTIVE = (
@@ -151,12 +153,13 @@ AMBIENT_DIRECTIVE = (
 # 静音模式：连音轨都不要（CreateVideo 也不接 audio 输入），留给后期整轨配音
 SILENT_DIRECTIVE = (
     "Audio: silent video, no audio track at all; no speech, no dialogue, no voice-over, "
-    "no ambience, no sound effects, no background music. "
+    "no ambience, no sound effects, no background music; characters do not speak and keep their mouths closed. "
     "No subtitles, no captions, no on-screen text."
 )
 GLOBAL_PROMPT = (
-    "Natural synchronized audio: clear, intelligible Mandarin dialogue and voice-over narration, "
-    "accurate lip sync, subtle natural ambience, no background music, no subtitles, no on-screen text."
+    "Natural synchronized audio: clear, intelligible Mandarin dialogue with accurate lip sync, "
+    "natural ambience, no voice-over narration unless the prompt explicitly describes an off-screen narrator, "
+    "no background music, no subtitles, no on-screen text."
 )
 # 提示词里可能已带中文「音频：」或英文 Audio 行，ambient/silent 必须整行替换
 AUDIO_LINE_RE = re.compile(r"(?im)^\s*(?:音频|audio)\s*[：:].*(?:\n|$)")

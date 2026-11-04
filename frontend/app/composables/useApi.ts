@@ -266,6 +266,26 @@ export interface NovelSettings {
   promptVersion: string
 }
 
+export type FfmpegSource = 'custom' | 'env' | 'static' | 'path' | 'none'
+
+export interface FfmpegBinaryStatus {
+  path: string | null
+  source: FfmpegSource
+  available: boolean
+  version: string | null
+}
+
+export interface FfmpegStatus {
+  ffmpegDir: string
+  ffmpeg: FfmpegBinaryStatus
+  ffprobe: FfmpegBinaryStatus
+}
+
+export interface MediaSettingsPayload {
+  settings: { ffmpegDir: string }
+  status: FfmpegStatus
+}
+
 export interface DubState {
   status: 'idle' | 'running' | 'done' | 'failed' | 'stopped'
   progress: number
@@ -507,6 +527,8 @@ export const settingsAPI = {
   saveDubbing: (patch: Partial<DubbingDefaults>) => api.put<{ defaults: DubbingDefaults }>('/settings/dubbing', patch),
   novel: () => api.get<{ settings: NovelSettings }>('/settings/novel'),
   saveNovel: (patch: Partial<NovelSettings>) => api.put<{ settings: NovelSettings }>('/settings/novel', patch),
+  media: () => api.get<MediaSettingsPayload>('/settings/media'),
+  saveMedia: (ffmpegDir: string) => api.put<MediaSettingsPayload>('/settings/media', { ffmpegDir }),
 }
 
 // MCP 服务：开关、端口、访问 token

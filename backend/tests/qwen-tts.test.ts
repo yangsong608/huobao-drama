@@ -237,6 +237,10 @@ describe('合成与缓存', () => {
     const c = buildCacheKey({ text: '你好', voice: { externalVoiceId: 'v2' } }, 'm')
     assert.notEqual(a, b)
     assert.notEqual(a, c)
+    assert.notEqual(
+      buildCacheKey({ text: '你好', voice: { voicePrompt: '清亮少年' } }, 'm'),
+      buildCacheKey({ text: '你好', voice: { voicePrompt: '低沉中年' } }, 'm'),
+    )
   })
 
   it('缓存 key 覆盖默认音色、格式、采样率与豆包资源 ID', () => {
@@ -329,6 +333,25 @@ describe('合成与缓存', () => {
     assert.equal(request.body.instruct, '十四岁少年，阳光清亮')
     assert.ok(!('voice_description' in request.body))
     assert.equal(request.body.model, 'qwen3-tts-voicedesign')
+  })
+
+  it('191 VoiceDesign 优先使用用户编辑的中文音色提示词', async () => {
+    const cfg: AudioConfig = {
+      ...config,
+      baseUrl,
+      model: 'qwen3-tts-voicedesign',
+      settings: { concurrency: 1, retryDelaysMs: [0] },
+    }
+    const before = speechBodies.length
+    await synthesize(
+      {
+        text: '提示词优先试音',
+        voice: { voicePrompt: '低沉沙哑的中年男声，语速沉稳', designInstruct: 'stale english instruction' },
+      },
+      { config: cfg, cacheDir: tmpDir },
+    )
+    const [request] = speechBodies.slice(before)
+    assert.equal(request.body.instruct, '低沉沙哑的中年男声，语速沉稳')
   })
 
   it('191 Base 模型不带 instruct 与 speed', async () => {

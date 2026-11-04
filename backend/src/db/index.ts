@@ -9,6 +9,8 @@ import * as schema from './schema.js'
 import { initSqliteSchema } from './sqlite-schema.js'
 import { maybeAutoImportMysql } from './mysql-import.js'
 import { setProjectStorageSettingsLoader } from '../services/project-storage.js'
+import { MEDIA_FFMPEG_DIR_KEY } from '../utils/media-paths.js'
+import { setFfmpegDirLoader } from '../utils/ffmpeg.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // src/db → 上三级为仓库根（与 utils/paths.ts 的推断层级一致）
@@ -56,4 +58,13 @@ setProjectStorageSettingsLoader((dramaId) => {
     .where(eq(schema.dramas.id, dramaId))
     .get()
   return row?.storageDir ?? null
+})
+
+// FFmpeg 自定义目录同样走 loader 注入，避免 utils/ffmpeg 直接依赖 db。
+setFfmpegDirLoader(() => {
+  const row = db.select({ value: schema.appSettings.value })
+    .from(schema.appSettings)
+    .where(eq(schema.appSettings.key, MEDIA_FFMPEG_DIR_KEY))
+    .get()
+  return row?.value ?? ''
 })

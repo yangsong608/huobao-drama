@@ -70,11 +70,11 @@
     "pipelineStages": 8
   },
   "currentMetrics": {
-    "tsTests": 466,
+    "tsTests": 483,
     "tsFail": 0,
     "mjsPass": 61,
     "mjsFail": 0,
-    "frontendTests": 190,
+    "frontendTests": 197,
     "frontendFail": 0,
     "mcpTools": 61,
     "pipelineStages": 8
@@ -279,7 +279,13 @@
     "本地 H3 收口与集视频配置联动（2026-11-04 20:46–20:55）：提交 87df4ae 已推送 origin/main；上传链路压缩/哈希缓存/600 秒超时/重试与超时恢复，修复慢上行 2.6–3MB PNG 参考图导致的生成超时；顶部视频选择恢复自 video_config_id 并在切换时写回所属配置、驱动分辨率集合，后端 PUT 校验 video_config_id；任务抽屉按集清空 completed/failed 任务；191 Qwen TTS seed/max_new_tokens 与 500 字切分；后端 434/434、结构 61/61、前端 166/166、local-h3 30/30、drift 123 PASS、typecheck 通过；frontend generate + desktop dist 退出码 0，arm64 dmg 174,175,561 bytes / arm64 zip 172,534,828 / x64 dmg 191,067,570 / x64 zip 189,567,040，app.asar 18,696,647 bytes；旧包备份 /tmp/HuobaoDrama.app.backup-20261104-205352，arm64 安装至 /Applications/HuobaoDrama.app（4.0.10、Mach-O arm64、TEMPLATE_VERSION=6）；启动冒烟端口 58412，health、/、/settings/、/api/v1/dramas 均 200，MCP tool_count=61，剧集 8 的 3 集 video_config_id=2，DELETE generation-tasks 对不存在剧集返回 404 证明路由在位；应用保持运行；真实 H3/云服务出片未复验，V3-G5 保持 pending",
     "音色/静音原声/多轨混音 A/B/C（2026-11-04）：A 将 mute 床音量归零并跳过 sidechain，剧集 silent 强制覆盖配音原声，合片按镜头+转场+音频模式 hash 失效重算，silent 合片走 -an 无音轨路径，云视频 silent 落盘后强制去音轨；B 新增 voice clone（同项目复制提示词/参考音频并默认激活，不改源）、音色资产 tab（角色/旁白卡片、提示词与英文指令编辑、版本切换、试听、复制、批量生成）、逐句与批量音色分配及跨角色提示；C 新增 episode_audio_tracks/episode_audio_clips 与台词 voice_start_ms/voice_duration_ms，N 轨混音图（原声+对话+BGM+环境声/音效/额外语音，solo/mute/ducking/loop、淡入淡出）、时间段试听、语音轨 TTS 生成与缓存签名；手动时间轴不再 atempo 压缩、溢出按整片计算；后端 453/453、结构 61/61、前端 184/184、typecheck 通过；未构建/安装/提交，MCP 61、TEMPLATE_VERSION=6、V3-G5 pending；Phase D（ComfyUI 双模式）未实施",
     "Phase D（ComfyUI 原生/工作流双模式）完成：集 video_mode/comfyui_config_id/comfyui_workflow_json；timeline_mapping 与 E12 默认映射；整集预览/提交/多输出拼接/成片登记；前端模式 tab 与只读工作流面板；后端 466/466、前端 190/190、drift 123 PASS；V3-G5 保持 pending。",
-    "A/B/C/D 桌面包构建与安装（2026-11-04 22:40–22:48）：frontend generate 与 desktop dist 退出码 0；arm64 dmg 174,214,137 bytes / arm64 zip 172,571,696 / x64 dmg 191,084,017 / x64 zip 189,603,812，app.asar 18,782,401 bytes（22:46:35）、frontend 60 文件；_nuxt/D2Y9a33Z.js 含「提交整集」「ComfyUI 工作流」，后端含 /comfyui/run；旧包备份 /tmp/HuobaoDrama.app.backup-20261104-224802，arm64 安装至 /Applications/HuobaoDrama.app（4.0.10、Mach-O arm64、TEMPLATE_VERSION=6）；按用户要求只安装未启动；V3-G5 不变"
+    "A/B/C/D 桌面包构建与安装（2026-11-04 22:40–22:48）：frontend generate 与 desktop dist 退出码 0；arm64 dmg 174,214,137 bytes / arm64 zip 172,571,696 / x64 dmg 191,084,017 / x64 zip 189,603,812，app.asar 18,782,401 bytes（22:46:35）、frontend 60 文件；_nuxt/D2Y9a33Z.js 含「提交整集」「ComfyUI 工作流」，后端含 /comfyui/run；旧包备份 /tmp/HuobaoDrama.app.backup-20261104-224802，arm64 安装至 /Applications/HuobaoDrama.app（4.0.10、Mach-O arm64、TEMPLATE_VERSION=6）；按用户要求只安装未启动；V3-G5 不变",
+    "设置页通用新增 FFmpeg 目录配置（media.ffmpegDir）：解析链 设置 > FFMPEG_BIN/FFPROBE_BIN > 内置 > PATH，保存即生效；后端 472/472、前端 193/193、结构 61/61、drift 123 通过",
+    "FFmpeg 目录配置桌面包构建与安装（2026-11-04 22:57–22:59）：frontend generate 与 desktop dist 退出码 0；arm64 dmg 174,213,527 bytes / zip 172,574,638，x64 dmg 191,107,884 / zip 189,606,753，app.asar 18,788,760 bytes；包内 TEMPLATE_VERSION=6、后端含 /media 与 media.ffmpegDir、前端含「媒体工具（FFmpeg）」；旧包备份 /tmp/HuobaoDrama.app.backup-20261104-225930，arm64 安装至 /Applications/HuobaoDrama.app（4.0.10、arm64），按用户要求只安装未启动",
+    "音色 UI 收敛为一套（2026-11-04 23:30）：删除独立「音色制作」生产 tab 与 VoiceProfilePanel/VoiceAssetGrid；新增共享 useVoiceProfiles + VoiceProfileCard，配音「音色分配」、剧集资产弹窗、详情素材弹窗三处复用同一状态与组件；制作区保持 资产 | 视频；四语言补 referenceAudioHint/edit/done；前端 195/195、结构 61/61、修改 SFC 编译通过；未 generate/构建/安装/提交，MCP 61、TEMPLATE_VERSION=6、V3-G5 pending",
+    "音色共享 UI 桌面包构建与安装（2026-11-04 23:44–23:46）：前端 generate 与 desktop dist 退出码 0；arm64 dmg 174,223,630 bytes / arm64 zip 172,573,419，x64 dmg 191,098,430 / zip 189,605,534，app.asar 18,788,760 bytes（23:45:25）、frontend 61 个 _nuxt 文件；包内 TEMPLATE_VERSION=6，后端含 voice-profile/audio-tracks/comfyui/run/video_config_id，前端 B8kCgc8g.js 含「音色档案」「多轨混音」「ComfyUI 工作流」；旧包备份 /tmp/HuobaoDrama.app.backup-20261104-234612，arm64 安装至 /Applications/HuobaoDrama.app（4.0.10、Mach-O arm64）；按请求只安装未启动，MCP 61、端口 5679/3013 未动，V3-G5 pending",
+    "视频提示词音频指令修复（2026-11-05）：根因是四语言模板/技能固定写入「音频：人声清晰靠前……旁白/心声为画外音」且英文漏改，云端原样提交并 generate_audio=true，本地 H3 静音仍沿用旧指令；模板/技能/agents/pipeline-rules 四语言改为不写音频要求行，仅在确有旁白时按时间段写旁白；新增 video-prompt-sanitize 在 tasks 提交与 comfyui-timeline 构建时清洗；本地 H3 SILENT_DIRECTIVE 要求闭口不讲话；新增 desktop workspace-template 存量迁移（幂等、保留用户编辑、TEMPLATE_VERSION 仍 6），本机工作区迁移 5 文件且二次 0 变更；后端 483/483、结构 61/61、前端 197/197、桌面 9/9、local-h3 33/33、drift 123 PASS、typecheck 与 generate 通过",
+    "视频提示词修复后桌面包构建与安装（2026-11-05 01:09）：desktop dist 退出码 0；arm64 dmg 174,227,618 bytes / zip 172,580,024，x64 dmg 191,144,488 / zip 189,612,141，app.asar 18,806,029 bytes，SHA256 ba6a39a9ff3f371ec121ef1f41775cd81b353d224ee77494f035d82bda860f6a；包内与已安装 workspace-template 均无旧音频句、asar 含迁移代码；旧包备份 /tmp/HuobaoDrama.app.backup-20261105-010942，arm64 安装至 /Applications/HuobaoDrama.app（4.0.10、Mach-O arm64）；按请求只安装未启动；真实出片未复验，V3-G5 pending，MCP 61、TEMPLATE_VERSION=6、端口 5679/3013 未动"
   ],
-  "updatedAt": "2026-11-04T22:48+08:00"
+  "updatedAt": "2026-11-05T01:15+08:00"
 }

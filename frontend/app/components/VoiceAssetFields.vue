@@ -9,9 +9,10 @@
       <textarea
         v-model="draft.voicePrompt"
         class="voice-textarea"
-        rows="4"
+        rows="5"
         :placeholder="t('episode.voice.promptPlaceholder')"
       />
+      <small class="voice-hint">{{ t('episode.voice.promptHint') }}</small>
     </label>
     <div class="voice-meta">
       <span v-if="voice.gender" class="voice-meta-item">{{ t('episode.voice.gender') }} {{ voice.gender }}</span>
@@ -33,21 +34,20 @@
         rows="3"
         :placeholder="t('episode.voice.designInstructHint')"
       />
+      <small class="voice-hint">{{ t('episode.voice.designInstructAdvancedHint') }}</small>
     </details>
+    <label class="voice-field">
+      <span>{{ t('voiceProfile.externalVoiceId') }}</span>
+      <input v-model="draft.externalVoiceId" class="voice-input" :placeholder="t('voiceProfile.externalVoiceIdPlaceholder')" />
+      <small class="voice-hint">{{ t('voiceProfile.externalVoiceIdHint') }}</small>
+    </label>
   </div>
 </template>
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import type { VoiceProfile } from '~/composables/useApi'
-
-export interface VoiceDraft {
-  name: string
-  voicePrompt: string
-  designInstruct: string
-  speed: number
-  emotion: string
-}
+import type { VoiceDraft } from '~/composables/useVoiceProfiles'
 
 defineProps<{
   voice: VoiceProfile
@@ -77,4 +77,5 @@ const { t } = useI18n()
 .voice-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--text-3); }
 .voice-meta-item { display: inline-flex; align-items: center; gap: 5px; }
 .voice-details summary { cursor: pointer; font-size: 11px; color: var(--text-3); margin-bottom: 5px; }
+.voice-hint { font-size: 10px; line-height: 1.5; color: var(--text-3); }
 </style>

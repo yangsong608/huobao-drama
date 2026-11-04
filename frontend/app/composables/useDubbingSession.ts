@@ -6,15 +6,14 @@ import {
   dubbingAPI,
   episodeAPI,
   settingsAPI,
-  voiceProfileAPI,
   type DubState,
   type DubbingDefaults,
   type StoryboardLine,
   type TimelineCue,
   type VoiceProfile,
-  type VoiceProfileList,
 } from '~/composables/useApi'
 import { toastError } from '~/composables/useToast'
+import { useVoiceProfiles } from '~/composables/useVoiceProfiles'
 
 /**
  * 配音会话：抽屉快速试听与左侧「配音」阶段共用同一份数据与动作。
@@ -50,12 +49,15 @@ export function useDubbingSession(options: {
   const timelineCues = ref<TimelineCue[]>([])
   const timelineTotalMs = ref(0)
   const videoUrl = ref('')
-  const voiceProfiles = ref<VoiceProfileList[]>([])
-  const narratorVoice = ref<VoiceProfile | null>(null)
-  const voiceLoading = ref(false)
-  const voiceBusyIds = ref<number[]>([])
-  const narratorBusy = ref(false)
-  const voiceGeneratingAll = ref(false)
+  // 音色数据统一来自 useVoiceProfiles：配音步骤、资产弹窗、角色详情共用同一份状态。
+  const voiceStore = useVoiceProfiles({
+    dramaId: () => options.dramaId(),
+    episodeId: () => options.episodeId(),
+  })
+  const voiceProfiles = voiceStore.groups
+  const narratorVoice = voiceStore.activeNarrator
+  const voiceLoading = voiceStore.loading
+  const voiceGeneratingAll = voiceStore.batchRunning
   let defaultsAppliedFor: number | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -212,18 +214,7 @@ export function useDubbingSession(options: {
   }
 
   async function loadVoices() {
-    const dramaId = options.dramaId()
-    voiceLoading.value = true
-    try {
-      const [list, narrator] = await Promise.all([
-        voiceProfileAPI.list(dramaId).catch(() => null),
-        voiceProfileAPI.narrator.get(dramaId).catch(() => null),
-      ])
-      voiceProfiles.value = Array.isArray(list?.characters) ? list.characters : []
-      narratorVoice.value = narrator || null
-    } finally {
-      voiceLoading.value = false
-    }
+    await voiceStore.load(true)
   }
 
   async function loadTimeline() {
@@ -319,12 +310,12 @@ export function useDubbingSession(options: {
     }
   }
 
-  async function synthesizeAll() {
+  async function synthesizeAll(force = false) {
     const episodeId = options.episodeId()
     if (!episodeId) return
     synthesizing.value = true
     try {
-      const result: any = await dubbingAPI.synthesizeAll(episodeId)
+      const result: any = await dubbingAPI.synthesizeAll(episodeId, force)
       serviceError.value = ''
       await Promise.all([load(), loadTimeline()])
       toast.success(t('workbench.synthDone', { ok: result?.ok ?? 0, failed: result?.failed ?? 0 }))
@@ -432,87 +423,10 @@ export function useDubbingSession(options: {
     }
   }
 
-  async function generateCharacterVoice(characterId: number, force = false) {
-    if (voiceBusyIds.value.includes(characterId)) return
-    voiceBusyIds.value = [...voiceBusyIds.value, characterId]
-    try {
-      await voiceProfileAPI.generate(characterId, {
-        force,
-        episode_id: options.episodeId() || undefined,
-      })
-      await Promise.all([loadVoices(), load()])
-      toast.success(t('workbench.voiceGenerated'))
-    } catch (error) {
-      if (!noteServiceError(error)) toastError(error)
-    } finally {
-      voiceBusyIds.value = voiceBusyIds.value.filter(id => id !== characterId)
-    }
-  }
-
   async function generateMissingVoices() {
-    if (voiceGeneratingAll.value) return
     const targets = missingVoiceSpeakers.value.map(speaker => speaker.characterId)
-    if (!targets.length) {
-      toast.success(t('workbench.voiceAllReady'))
-      return
-    }
-    voiceGeneratingAll.value = true
-    try {
-      for (const characterId of targets) {
-        if (voiceBusyIds.value.includes(characterId)) continue
-        voiceBusyIds.value = [...voiceBusyIds.value, characterId]
-        try {
-          await voiceProfileAPI.generate(characterId, { episode_id: options.episodeId() || undefined })
-        } catch (error) {
-          if (!noteServiceError(error)) toastError(error)
-        } finally {
-          voiceBusyIds.value = voiceBusyIds.value.filter(id => id !== characterId)
-        }
-      }
-      await Promise.all([loadVoices(), load()])
-      toast.success(t('workbench.voiceGenerated'))
-    } finally {
-      voiceGeneratingAll.value = false
-    }
-  }
-
-  async function generateNarratorVoice(force = false) {
-    if (narratorBusy.value) return
-    narratorBusy.value = true
-    try {
-      await voiceProfileAPI.narrator.generate(options.dramaId(), force)
-      await Promise.all([loadVoices(), load()])
-      toast.success(t('workbench.voiceGenerated'))
-    } catch (error) {
-      if (!noteServiceError(error)) toastError(error)
-    } finally {
-      narratorBusy.value = false
-    }
-  }
-
-  async function auditionCharacter(characterId: number) {
-    const voice = activeVoiceFor(characterId)
-    if (!voice) {
-      toast.error(t('workbench.voiceGenerateFirst'))
-      return null
-    }
-    try {
-      const result = await voiceProfileAPI.sample(characterId, { voice_id: voice.id })
-      return result.sample_url
-    } catch (error) {
-      if (!noteServiceError(error)) toastError(error)
-      return null
-    }
-  }
-
-  async function auditionNarrator() {
-    try {
-      const result = await voiceProfileAPI.narrator.sample(options.dramaId())
-      return result.sample_url
-    } catch (error) {
-      if (!noteServiceError(error)) toastError(error)
-      return null
-    }
+    await voiceStore.generateMissing(targets)
+    await load()
   }
 
   function dispose() {
@@ -547,8 +461,6 @@ export function useDubbingSession(options: {
     voiceProfiles,
     narratorVoice,
     voiceLoading,
-    voiceBusyIds,
-    narratorBusy,
     voiceGeneratingAll,
     busy,
     readyCount,
@@ -589,11 +501,7 @@ export function useDubbingSession(options: {
     startDub,
     stopDub,
     exportSubtitle,
-    generateCharacterVoice,
     generateMissingVoices,
-    generateNarratorVoice,
-    auditionCharacter,
-    auditionNarrator,
     dispose,
   }
 }
