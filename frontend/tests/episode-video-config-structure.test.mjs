@@ -29,11 +29,14 @@ test('episode load restores the top selection from video_config_id', () => {
   assert.match(page, /:default-label="defaultVideoModelLabel"/)
 })
 
-test('top video selection writes the owning config back to the episode', () => {
-  // 选中项自带 configId，切换配置时 PUT episodes.video_config_id
+test('top video selection writes the owning config back to the matching episode field', () => {
+  // 选中项自带 configId；ComfyUI 写 comfyui_config_id，其他视频配置写 video_config_id
   assert.match(page, /const configId = ownerConfigId\(videoModelOptions\.value, key\)/)
-  assert.match(page, /episodeAPI\.update\(epId\.value, \{ video_config_id: configId \}\)/)
-  assert.match(page, /episode\.value\.video_config_id = configId/)
+  assert.match(page, /const targetConfig = videoConfigs\.value\.find\(config => config\.id === configId\)/)
+  assert.match(page, /const comfyTarget = isComfyConfig\(targetConfig\)/)
+  assert.match(page, /comfyTarget \? \{ comfyui_config_id: configId \} : \{ video_config_id: configId \}/)
+  assert.match(page, /if \(comfyTarget\) episode\.value\.comfyui_config_id = configId/)
+  assert.match(page, /else episode\.value\.video_config_id = configId/)
   // 串行写回，只落最后一次选择；失败回滚选择与锁定值
   assert.match(page, /videoConfigWriteQueue/)
   assert.match(page, /if \(seq !== videoConfigWriteSeq\) return/)
@@ -44,7 +47,9 @@ test('top video selection writes the owning config back to the episode', () => {
 
 test('resolution options follow the selected video config', () => {
   assert.match(page, /const selectedVideoConfig = computed\(\(\) => \{/)
-  assert.match(page, /videoConfigs\.value\.find\(config => config\.id === selected\.configId\)/)
+  // 双模式：先按当前模式过滤配置，再按选中项的 configId 定位
+  assert.match(page, /const videoModelConfigs = computed\(\(\) => isComfyVideoMode\.value \? comfyConfigs\.value : nativeVideoConfigs\.value\)/)
+  assert.match(page, /videoModelConfigs\.value\.find\(config => config\.id === selected\.configId\)/)
   assert.match(page, /const resolutionOptions = computed\(\(\) => videoResolutionOptions\(/)
   assert.match(page, /resolutionProvider\.value,/)
   assert.match(page, /resolutionModel\.value,/)

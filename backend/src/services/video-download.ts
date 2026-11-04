@@ -27,14 +27,20 @@ export async function downloadVideo(url: string, taskId: number, options: {
   timeoutMs?: number
   retryDelayMs?: number
   maxBytes?: number
+  /** 存储子目录（默认 videos）；整集 ComfyUI 使用 videos/comfyui */
+  subdir?: string
+  /** 文件名（不含扩展名，默认 task-<id>） */
+  name?: string
 } = {}): Promise<string> {
   const parsed = new URL(url)
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new VideoDownloadError('download_url', 'Invalid video URL protocol')
   const projectRoot = isValidDramaId(options.dramaId) ? getProjectStorageRoot(options.dramaId) : null
   const root = options.root ?? projectRoot ?? STORAGE_ROOT
-  const dir = path.join(root, 'videos')
+  const subdir = options.subdir || 'videos'
+  const baseName = options.name || `task-${taskId}`
+  const dir = path.join(root, subdir)
   await fs.promises.mkdir(dir, { recursive: true })
-  const partial = path.join(dir, `task-${taskId}.part`)
+  const partial = path.join(dir, `${baseName}.part`)
   const attempts = options.attempts ?? 3
   const maxBytes = options.maxBytes ?? 512 * 1024 * 1024
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -62,11 +68,11 @@ export async function downloadVideo(url: string, taskId: number, options: {
       const mp4 = head.length >= 12 && head.toString('ascii', 4, 8) === 'ftyp'
       const webm = head.length >= 4 && head.readUInt32BE(0) === 0x1a45dfa3
       if (!mp4 && !webm) throw new VideoDownloadError('download_format', 'Response is not an MP4 or WebM video')
-      const name = `task-${taskId}.${webm ? 'webm' : 'mp4'}`
+      const name = `${baseName}.${webm ? 'webm' : 'mp4'}`
       await fs.promises.rename(partial, path.join(dir, name))
       return projectRoot
-        ? projectStorageRelative(options.dramaId as number, 'videos', name)
-        : `static/videos/${name}`
+        ? projectStorageRelative(options.dramaId as number, subdir, name)
+        : `static/${subdir}/${name}`
     } catch (error) {
       await fs.promises.rm(partial, { force: true })
       const retryable = error instanceof VideoDownloadError ? error.retryable

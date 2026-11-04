@@ -33,6 +33,31 @@ test('planned_start_ms 是镜头内相对时间，不会被当成整集绝对时
   assert.equal(r.cues[0].startMs, 3000)
 })
 
+test('手动绝对起点与占位时长覆盖自动排布', () => {
+  const r = buildTimeline({
+    clips: [clip(1, 3000), clip(2, 3000)],
+    lines: [
+      { ...line(1, 1, 1000), startOverrideMs: 1200, durationOverrideMs: 400 },
+      { ...line(2, 1, 1000), startOverrideMs: 5000 },
+    ],
+    totalDurationMs: 6000,
+  })
+  assert.equal(r.cues[0].startMs, 1200)
+  assert.equal(r.cues[0].endMs, 1600)
+  assert.equal(r.cues[1].startMs, 5000)
+  assert.equal(r.cues[1].endMs, 6000)
+})
+
+test('手动起点越过片尾的台词被跳过并记录', () => {
+  const r = buildTimeline({
+    clips: [clip(1, 3000)],
+    lines: [{ ...line(1, 1, 1000), startOverrideMs: 4000 }],
+    totalDurationMs: 3000,
+  })
+  assert.equal(r.cues.length, 0)
+  assert.deepEqual(r.skippedLineIds, [1])
+})
+
 test('首句至少留 250ms 呼吸，同镜内不重叠', () => {
   const r = buildTimeline({
     clips: [clip(1, 8000)],

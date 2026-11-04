@@ -41,6 +41,9 @@ export const sqliteSchemaStatements = [
     thumbnail TEXT,
     image_config_id INTEGER,
     video_config_id INTEGER,
+    video_mode TEXT DEFAULT 'native',
+    comfyui_config_id INTEGER,
+    comfyui_workflow_json TEXT,
     resolution TEXT DEFAULT '720p',
     auto_pipeline INTEGER DEFAULT 0,
     automation_status TEXT,
@@ -368,6 +371,8 @@ export const sqliteSchemaStatements = [
     planned_end_ms INTEGER,
     start_ms INTEGER,
     end_ms INTEGER,
+    voice_start_ms INTEGER,
+    voice_duration_ms INTEGER,
     audio_url TEXT,
     audio_duration_ms INTEGER,
     audio_hash TEXT,
@@ -381,6 +386,42 @@ export const sqliteSchemaStatements = [
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE (storyboard_id, line_no)
+  )`,
+
+  // 成片附加音轨与时间段片段（V3 多轨混音）
+  `CREATE TABLE IF NOT EXISTS episode_audio_tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'ambience',
+    name TEXT NOT NULL,
+    volume REAL DEFAULT 1.0,
+    muted INTEGER DEFAULT 0,
+    solo INTEGER DEFAULT 0,
+    ducking INTEGER DEFAULT 1,
+    loop INTEGER DEFAULT 0,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS episode_audio_clips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id INTEGER NOT NULL,
+    episode_id INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    source_start_ms INTEGER DEFAULT 0,
+    fade_in_ms INTEGER DEFAULT 0,
+    fade_out_ms INTEGER DEFAULT 0,
+    source_url TEXT,
+    text TEXT,
+    voice_id INTEGER,
+    audio_url TEXT,
+    status TEXT DEFAULT 'ready',
+    error TEXT,
+    line_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
   )`,
 
   // 宫格图：一次生成 N 格，再按坐标切分
@@ -736,6 +777,10 @@ export function initSqliteSchema(sqlite: Database.Database) {
   if (!storyboardColumns.has('source_hash')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN source_hash TEXT')
   if (!storyboardColumns.has('transition')) sqlite.exec("ALTER TABLE storyboards ADD COLUMN transition TEXT DEFAULT 'cut'")
   if (!storyboardColumns.has('continuity')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN continuity TEXT')
+  // 台词时间段覆盖：旧库补列；为空时仍按分镜时长自动排布。
+  const lineColumns = new Set((sqlite.prepare('PRAGMA table_info(storyboard_lines)').all() as { name: string }[]).map(c => c.name))
+  if (!lineColumns.has('voice_start_ms')) sqlite.exec('ALTER TABLE storyboard_lines ADD COLUMN voice_start_ms INTEGER')
+  if (!lineColumns.has('voice_duration_ms')) sqlite.exec('ALTER TABLE storyboard_lines ADD COLUMN voice_duration_ms INTEGER')
   // 项目级旁白音色与默认 BGM
   if (!dramaColumns.has('narrator_voice_id')) sqlite.exec('ALTER TABLE dramas ADD COLUMN narrator_voice_id INTEGER')
   if (!dramaColumns.has('bgm_url')) sqlite.exec('ALTER TABLE dramas ADD COLUMN bgm_url TEXT')
@@ -749,6 +794,16 @@ export function initSqliteSchema(sqlite: Database.Database) {
     source_stale: 'INTEGER DEFAULT 0',
   }
   for (const [name, type] of Object.entries(novelEpisodeColumns)) {
+    if (!episodeColumns.has(name)) sqlite.exec(`ALTER TABLE episodes ADD COLUMN ${name} ${type}`)
+  }
+
+  // ===== V3-D 视频制作双模式：旧库补列，默认原生模式 =====
+  const videoModeColumns: Record<string, string> = {
+    video_mode: "TEXT DEFAULT 'native'",
+    comfyui_config_id: 'INTEGER',
+    comfyui_workflow_json: 'TEXT',
+  }
+  for (const [name, type] of Object.entries(videoModeColumns)) {
     if (!episodeColumns.has(name)) sqlite.exec(`ALTER TABLE episodes ADD COLUMN ${name} ${type}`)
   }
   // 小说故事坐标：旧库先加列再回填，避免被新库默认值 first 覆盖历史作品。

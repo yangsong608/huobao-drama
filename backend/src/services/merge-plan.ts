@@ -2,6 +2,7 @@
  * 成片拼接的纯计算部分：按分镜 transition 生成 xfade/acrossfade/concat 滤镜图。
  * 实际 ffmpeg 执行留在 ffmpeg-merge.ts，便于单测转场时长与 offset。
  */
+import { createHash } from 'node:crypto'
 
 export type MergeTransition = 'cut' | 'fade' | 'dissolve' | 'wipe'
 
@@ -83,4 +84,17 @@ export function buildMergeTransitionGraph(clips: MergeClipPlan[], width: number,
   parts.push(`[${lastV}]null[vout]`)
 
   return { graph: parts.join(';'), totalMs, usedTransitions }
+}
+
+/** 合片缓存键：镜头顺序/地址/转场 + 音频模式；任一变化都必须重新合片。 */
+export function computeMergeSourceHash(
+  clips: { url: string; transition?: string | null }[],
+  audioMode: string,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify({
+      audioMode,
+      clips: clips.map((clip) => [clip.url, clip.transition || 'cut']),
+    }))
+    .digest('hex')
 }

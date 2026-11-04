@@ -70,11 +70,11 @@
     "pipelineStages": 8
   },
   "currentMetrics": {
-    "tsTests": 396,
+    "tsTests": 466,
     "tsFail": 0,
     "mjsPass": 61,
     "mjsFail": 0,
-    "frontendTests": 148,
+    "frontendTests": 190,
     "frontendFail": 0,
     "mcpTools": 61,
     "pipelineStages": 8
@@ -275,7 +275,11 @@
     "1104 使用问题修复（2026-11-04）：云 TTS 修正豆包 20000000/Qwen-TTS 多模态端点/真实合成探针；资产弹窗即时刷新与角色音色入口；分镜失败/过程/完成刷新、transition/continuity 与 xfade+acrossfade；配音改左侧 5 步阶段；拼接命名与软删除；模型级分辨率/参考图/视觉能力；小说题材/背景/文风预设与 1.2.0 提示词注入、导入目标字数 600–5000；后端 393/393、结构 61/61、前端 148/148、drift 123 PASS、typecheck 与前端 build 通过；MCP 61、TEMPLATE_VERSION 6；真实云服务未验收，V3-G5 仍 pending；桌面包已于 16:45 重打并安装",
     "1104 审计补强（2026-11-04）：verify-schema 与 novel-schema 结构测试纳入 background/writing_style 契约；GET /merge/episodes/:id/merge 过滤软删除并按 created_at/id 倒序，新增 merge-routes 2 用例；LineList「镜 N」徽标改用四语言 workbench.shot；后端 393/393、结构 61/61、前端 148/148、drift 123 PASS；.zion-mcp 运行态加入 .gitignore",
     "1104 桌面包构建与安装（2026-11-04 16:45–16:47）：frontend generate + desktop dist 退出码 0，arm64 dmg 174,191,881 bytes / arm64 zip 172,523,512 / x64 dmg 191,073,475 / x64 zip 189,555,629，app.asar 18,679,195 bytes；旧包备份 /tmp/HuobaoDrama.app.backup-20261104-164623，arm64 安装至 /Applications/HuobaoDrama.app（4.0.10、Mach-O arm64、TEMPLATE_VERSION=6）；启动冒烟端口 61214，health、/、/novels/、/api/v1/novels 均 200，tool_count=61，小说 6 人称 first/时间线 19/世界地图在位，settings/novel 文风与 1200 目标字数可读，merge 接口 200；退出后 backend exited code=0；未做 UI 交互冒烟，V3-G5 不变",
-    "豆包语音 Invalid X-Api-Key 修复与桌面重打（2026-11-04 16:52–17:02）：豆包 v3 支持新版控制台 X-Api-Key 与旧版 App ID + Access Token（X-Api-App-Id + X-Api-Access-Key）双鉴权，旧版同填时优先；解析 header.code（如 45000010）并输出可执行提示，探针缺鉴权不再 500；设置页新增 appId/accessKey 字段与旧版提示（四语言）；新增 cloud-tts 3 例与 ai-config-settings 2 例；后端 396/396、结构 61/61、前端 148/148、drift 123 PASS、typecheck/generate/build 通过；arm64 dmg 174,184,264 bytes / arm64 zip 172,524,723 / x64 dmg 191,075,095 / x64 zip 189,556,933，app.asar 18,682,182 bytes；旧包备份 /tmp/HuobaoDrama.app.backup-20261104-1702，arm64 安装后冒烟端口 62171（health、/、/novels/ 均 200，MCP 61），缺鉴权探针返回明确提示；真实云合成仍待用户有效 Key，V3-G5 不变"
+    "豆包语音 Invalid X-Api-Key 修复与桌面重打（2026-11-04 16:52–17:02）：豆包 v3 支持新版控制台 X-Api-Key 与旧版 App ID + Access Token（X-Api-App-Id + X-Api-Access-Key）双鉴权，旧版同填时优先；解析 header.code（如 45000010）并输出可执行提示，探针缺鉴权不再 500；设置页新增 appId/accessKey 字段与旧版提示（四语言）；新增 cloud-tts 3 例与 ai-config-settings 2 例；后端 396/396、结构 61/61、前端 148/148、drift 123 PASS、typecheck/generate/build 通过；arm64 dmg 174,184,264 bytes / arm64 zip 172,524,723 / x64 dmg 191,075,095 / x64 zip 189,556,933，app.asar 18,682,182 bytes；旧包备份 /tmp/HuobaoDrama.app.backup-20261104-1702，arm64 安装后冒烟端口 62171（health、/、/novels/ 均 200，MCP 61），缺鉴权探针返回明确提示；真实云合成仍待用户有效 Key，V3-G5 不变",
+    "本地 H3 收口与集视频配置联动（2026-11-04 20:46–20:55）：提交 87df4ae 已推送 origin/main；上传链路压缩/哈希缓存/600 秒超时/重试与超时恢复，修复慢上行 2.6–3MB PNG 参考图导致的生成超时；顶部视频选择恢复自 video_config_id 并在切换时写回所属配置、驱动分辨率集合，后端 PUT 校验 video_config_id；任务抽屉按集清空 completed/failed 任务；191 Qwen TTS seed/max_new_tokens 与 500 字切分；后端 434/434、结构 61/61、前端 166/166、local-h3 30/30、drift 123 PASS、typecheck 通过；frontend generate + desktop dist 退出码 0，arm64 dmg 174,175,561 bytes / arm64 zip 172,534,828 / x64 dmg 191,067,570 / x64 zip 189,567,040，app.asar 18,696,647 bytes；旧包备份 /tmp/HuobaoDrama.app.backup-20261104-205352，arm64 安装至 /Applications/HuobaoDrama.app（4.0.10、Mach-O arm64、TEMPLATE_VERSION=6）；启动冒烟端口 58412，health、/、/settings/、/api/v1/dramas 均 200，MCP tool_count=61，剧集 8 的 3 集 video_config_id=2，DELETE generation-tasks 对不存在剧集返回 404 证明路由在位；应用保持运行；真实 H3/云服务出片未复验，V3-G5 保持 pending",
+    "音色/静音原声/多轨混音 A/B/C（2026-11-04）：A 将 mute 床音量归零并跳过 sidechain，剧集 silent 强制覆盖配音原声，合片按镜头+转场+音频模式 hash 失效重算，silent 合片走 -an 无音轨路径，云视频 silent 落盘后强制去音轨；B 新增 voice clone（同项目复制提示词/参考音频并默认激活，不改源）、音色资产 tab（角色/旁白卡片、提示词与英文指令编辑、版本切换、试听、复制、批量生成）、逐句与批量音色分配及跨角色提示；C 新增 episode_audio_tracks/episode_audio_clips 与台词 voice_start_ms/voice_duration_ms，N 轨混音图（原声+对话+BGM+环境声/音效/额外语音，solo/mute/ducking/loop、淡入淡出）、时间段试听、语音轨 TTS 生成与缓存签名；手动时间轴不再 atempo 压缩、溢出按整片计算；后端 453/453、结构 61/61、前端 184/184、typecheck 通过；未构建/安装/提交，MCP 61、TEMPLATE_VERSION=6、V3-G5 pending；Phase D（ComfyUI 双模式）未实施",
+    "Phase D（ComfyUI 原生/工作流双模式）完成：集 video_mode/comfyui_config_id/comfyui_workflow_json；timeline_mapping 与 E12 默认映射；整集预览/提交/多输出拼接/成片登记；前端模式 tab 与只读工作流面板；后端 466/466、前端 190/190、drift 123 PASS；V3-G5 保持 pending。",
+    "A/B/C/D 桌面包构建与安装（2026-11-04 22:40–22:48）：frontend generate 与 desktop dist 退出码 0；arm64 dmg 174,214,137 bytes / arm64 zip 172,571,696 / x64 dmg 191,084,017 / x64 zip 189,603,812，app.asar 18,782,401 bytes（22:46:35）、frontend 60 文件；_nuxt/D2Y9a33Z.js 含「提交整集」「ComfyUI 工作流」，后端含 /comfyui/run；旧包备份 /tmp/HuobaoDrama.app.backup-20261104-224802，arm64 安装至 /Applications/HuobaoDrama.app（4.0.10、Mach-O arm64、TEMPLATE_VERSION=6）；按用户要求只安装未启动；V3-G5 不变"
   ],
-  "updatedAt": "2026-11-04T17:05+08:00"
+  "updatedAt": "2026-11-04T22:48+08:00"
 }

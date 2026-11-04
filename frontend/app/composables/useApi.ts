@@ -65,6 +65,8 @@ export const episodeAPI = {
   extractStatus: (id: number) => api.get(`/episodes/${id}/extract-status`),
   generateVideoPrompts: (id: number, model?: string, configId?: number, storyboardIds?: number[]) => api.post(`/episodes/${id}/generate-video-prompts`, { model: model || undefined, config_id: configId || undefined, storyboard_ids: storyboardIds?.length ? storyboardIds : undefined }),
   videoPromptsStatus: (id: number) => api.get(`/episodes/${id}/video-prompts-status`),
+  comfyWorkflow: (id: number, configId?: number) => api.get(`/episodes/${id}/comfyui/workflow${configId ? `?config_id=${configId}` : ''}`),
+  comfyRun: (id: number, opts?: { configId?: number; forceNew?: boolean }) => api.post(`/episodes/${id}/comfyui/run`, { config_id: opts?.configId, force_new: opts?.forceNew === true }),
 }
 
 // 全自动流水线：改写 → 提取 → 资产生图 → 分镜 → 视频提示词 → 视频
@@ -122,6 +124,10 @@ export interface VoiceProfile {
   error?: string | null
   speed?: number | null
   emotion?: string | null
+  gender?: string | null
+  ageRange?: string | null
+  pitch?: string | null
+  language?: string | null
 }
 
 export interface VoiceProfileList {
@@ -132,11 +138,17 @@ export interface VoiceProfileList {
 }
 
 export const voiceProfileAPI = {
-  list: (dramaId: number) => api.get(`/voices?drama_id=${dramaId}`),
+  list: (dramaId: number) => api.get<{ characters: VoiceProfileList[]; narrator: VoiceProfile[] }>(`/voices?drama_id=${dramaId}`),
   character: (id: number) => api.get<VoiceProfileList>(`/characters/${id}/voice-profile`),
   generate: (id: number, opts?: { force?: boolean; episode_id?: number; model?: string; config_id?: number }) =>
     api.post<{ profile: any; voice: VoiceProfile | null }>(`/characters/${id}/voice-profile`, opts || {}),
   update: (id: number, data: Record<string, any>) => api.put<VoiceProfile>(`/characters/${id}/voice-profile`, data),
+  updateById: (voiceId: number, data: Record<string, any>) => api.put<VoiceProfile>(`/voices/${voiceId}`, data),
+  sampleById: (voiceId: number, body: { text?: string; seed?: number } = {}) =>
+    api.post<{ sample_url: string; duration_ms: number }>(`/voices/${voiceId}/sample`, body),
+  activateById: (voiceId: number, characterId?: number) =>
+    api.post(`/voices/${voiceId}/activate`, characterId ? { character_id: characterId } : {}),
+  removeById: (voiceId: number) => api.del<{ deleted: boolean }>(`/voices/${voiceId}`),
   activate: (characterId: number, voiceId: number) =>
     api.post(`/characters/${characterId}/voice-profile/activate`, { voice_id: voiceId }),
   deactivate: (id: number) => api.del(`/characters/${id}/voice-profile`),
@@ -150,6 +162,8 @@ export const voiceProfileAPI = {
     }),
   sync: (characterId: number, voiceId: number) =>
     api.post<{ voice_audio_url: string }>(`/characters/${characterId}/voice-sync`, { voice_id: voiceId }),
+  cloneTo: (voiceId: number, target: { character_id?: number; scope?: 'character' | 'narrator'; activate?: boolean; name?: string }) =>
+    api.post<VoiceProfile>(`/voices/${voiceId}/clone`, target),
   narrator: {
     get: (dramaId: number) => api.get<VoiceProfile | null>(`/voices/narrator?drama_id=${dramaId}`),
     generate: (dramaId: number, force = false) => api.post<VoiceProfile>('/voices/narrator', { drama_id: dramaId, force }),
@@ -259,6 +273,61 @@ export interface DubState {
   outputUrl?: string
   subtitleUrl?: string
   error?: string
+}
+
+export type AudioTrackKind = 'ambience' | 'sfx' | 'bgm' | 'voice' | 'custom'
+
+export interface EpisodeAudioClip {
+  id: number
+  trackId: number
+  episodeId: number
+  startMs: number
+  endMs: number
+  sourceStartMs: number
+  fadeInMs: number
+  fadeOutMs: number
+  sourceUrl: string | null
+  audioUrl: string | null
+  text: string | null
+  voiceId: number | null
+  lineId: number | null
+  status: string
+  error: string | null
+}
+
+export interface EpisodeAudioTrack {
+  id: number
+  episodeId: number
+  dramaId: number
+  kind: AudioTrackKind
+  name: string
+  volume: number
+  muted: boolean
+  solo: boolean
+  ducking: boolean
+  loop: boolean
+  sortOrder: number
+  clips: EpisodeAudioClip[]
+}
+
+/** 多轨混音（V3 · C）：环境声/音效/语音轨 + 时间段试听 */
+export const audioTrackAPI = {
+  list: (episodeId: number) => api.get<{ items: EpisodeAudioTrack[] }>(`/episodes/${episodeId}/audio/tracks`),
+  create: (episodeId: number, data: { kind: AudioTrackKind; name?: string; volume?: number; muted?: boolean; solo?: boolean; ducking?: boolean; loop?: boolean }) =>
+    api.post<EpisodeAudioTrack>(`/episodes/${episodeId}/audio/tracks`, data),
+  update: (episodeId: number, trackId: number, data: Partial<Pick<EpisodeAudioTrack, 'kind' | 'name' | 'volume' | 'muted' | 'solo' | 'ducking' | 'loop' | 'sortOrder'>>) =>
+    api.put<EpisodeAudioTrack>(`/episodes/${episodeId}/audio/tracks/${trackId}`, data),
+  remove: (episodeId: number, trackId: number) => api.del(`/episodes/${episodeId}/audio/tracks/${trackId}`),
+  addClip: (episodeId: number, trackId: number, data: { audio_url: string; start_ms: number; end_ms: number; source_start_ms?: number; fade_in_ms?: number; fade_out_ms?: number; text?: string }) =>
+    api.post<EpisodeAudioClip>(`/episodes/${episodeId}/audio/tracks/${trackId}/clips`, data),
+  updateClip: (episodeId: number, clipId: number, data: { audio_url?: string; start_ms?: number; end_ms?: number; source_start_ms?: number; fade_in_ms?: number; fade_out_ms?: number; text?: string }) =>
+    api.put<EpisodeAudioClip>(`/episodes/${episodeId}/audio/clips/${clipId}`, data),
+  removeClip: (episodeId: number, clipId: number) => api.del(`/episodes/${episodeId}/audio/clips/${clipId}`),
+  voiceClip: (episodeId: number, data: { text: string; voice_id?: string | number | null; character_id?: number | null; start_ms: number; duration_ms?: number | null; line_id?: number | null }) =>
+    api.post<{ track: EpisodeAudioTrack; clip: EpisodeAudioClip; cached: boolean }>(`/episodes/${episodeId}/audio/voice-clips`, data),
+  preview: (episodeId: number, data: { start_ms: number; end_ms: number; bgm_url?: string | null; bgm_volume?: number; original_audio?: 'keep' | 'duck' | 'mute'; target_lufs?: number; ducking_ratio?: number }) =>
+    api.post<{ url: string; startMs: number; endMs: number; durationMs: number; hasBgm: boolean; trackCount: number; soloActive: boolean }>(`/episodes/${episodeId}/audio/preview`, data),
+  summary: (episodeId: number) => api.get<{ count: number; solo_active: boolean; signature: string; tracks: { id: number; kind: string; name: string; volume: number; muted: boolean; clips: number }[] }>(`/episodes/${episodeId}/audio/summary`),
 }
 
 export const dubbingAPI = {

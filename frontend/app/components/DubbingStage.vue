@@ -73,18 +73,32 @@
               <AlertCircle :size="13" />
               <span>{{ t('workbench.voiceFallback') }}</span>
             </div>
+            <div class="dub-batch-bar">
+              <span class="dub-batch-count">{{ t('workbench.batchSelectHint', { n: selectedLineIds.length }) }}</span>
+              <BaseSelect v-model="batchVoiceId" :options="allVoiceOptions" class="dub-batch-select" />
+              <button class="btn btn-sm" type="button" :disabled="!selectedLineIds.length || batchAssigning" @click="applyBatchVoice">
+                <Loader2 v-if="batchAssigning" :size="11" class="animate-spin" />
+                {{ t('workbench.batchAssign') }}
+              </button>
+            </div>
             <LineList
+              ref="lineListRef"
               :lines="filteredLines"
               :busy="busy"
               :saving="saving"
               :empty-text="t('workbench.empty')"
               show-issues
+              selectable
               :missing-voice-character-ids="missingVoiceCharacterIds"
               :narrator-missing-voice="narratorMissingVoice"
+              :voice-groups="voiceProfiles"
+              :narrator-voice="narratorVoice"
               @play="playLine"
               @synthesize="synthesizeLine"
               @save="saveLineText"
               @locate="locateLine"
+              @assign-voice="assignLineVoice"
+              @selection-change="selectedLineIds = $event"
             />
             <div class="dub-next-bar">
               <span class="dub-next-copy">
@@ -291,65 +305,78 @@
 
         <!-- 4. 预览与混音 -->
         <template v-else-if="currentStep === 3">
-          <div class="dub-preview-grid">
-            <div class="dub-preview-main">
-              <SubtitlePreview ref="previewRef" :src="videoUrl" :cues="timelineCues" />
-              <div class="dub-toolbar">
-                <span class="dub-toolbar-title">{{ t('workbench.timelineCues', { n: timelineCues.length }) }}</span>
-                <div class="dub-toolbar-actions">
-                  <button class="btn btn-sm" type="button" :disabled="loading" @click="loadTimeline">
-                    <Loader2 v-if="loading" :size="11" class="animate-spin" />
-                    {{ t('workbench.refreshTimeline') }}
-                  </button>
-                  <button class="btn btn-sm" type="button" :disabled="!readyCount" @click="synthesizeAll">
-                    {{ t('workbench.synthesizeAll') }}
-                  </button>
+          <div class="dub-mix-stage">
+            <div class="dub-preview-grid">
+              <div class="dub-preview-main">
+                <SubtitlePreview ref="previewRef" :src="videoUrl" :cues="timelineCues" />
+                <div class="dub-toolbar">
+                  <span class="dub-toolbar-title">{{ t('workbench.timelineCues', { n: timelineCues.length }) }}</span>
+                  <div class="dub-toolbar-actions">
+                    <button class="btn btn-sm" type="button" :disabled="loading" @click="loadTimeline">
+                      <Loader2 v-if="loading" :size="11" class="animate-spin" />
+                      {{ t('workbench.refreshTimeline') }}
+                    </button>
+                    <button class="btn btn-sm" type="button" :disabled="!readyCount" @click="synthesizeAll">
+                      {{ t('workbench.synthesizeAll') }}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <aside class="dub-mix-card">
-              <h3 class="dub-card-title">{{ t('workbench.mixTitle') }}</h3>
-              <label class="dub-field">
-                <span class="dub-field-label">{{ t('workbench.subtitleMode') }}</span>
-                <BaseSelect v-model="subtitleMode" :options="subtitleOptions" />
-              </label>
-              <label class="dub-field">
-                <span class="dub-field-label">{{ t('workbench.originalAudio') }}</span>
-                <BaseSelect v-model="originalAudio" :options="originalOptions" />
-              </label>
-              <label class="dub-field">
-                <span class="dub-field-label">{{ t('workbench.ducking') }} <span class="mono">{{ duckingRatio }}</span></span>
-                <input v-model.number="duckingRatio" class="dub-range" type="range" min="2" max="12" step="1" />
-                <span class="dub-field-hint">{{ t('workbench.duckingHint') }}</span>
-              </label>
-              <label class="dub-field">
-                <span class="dub-field-label">{{ t('workbench.bgm') }}</span>
-                <BaseSelect v-model="bgmName" :options="bgmOptions" :placeholder="t('workbench.bgmNone')" />
-              </label>
-              <label class="dub-field">
-                <span class="dub-field-label">{{ t('workbench.bgmVolume') }} <span class="mono">{{ bgmVolumePct }}%</span></span>
-                <input v-model.number="bgmVolumePct" class="dub-range" type="range" min="0" max="100" step="1" />
-              </label>
-              <div class="dub-mix-actions">
-                <button class="btn btn-sm" type="button" :disabled="bgmSaving || !episodeId" @click="applyBgm">
-                  <Loader2 v-if="bgmSaving" :size="11" class="animate-spin" />
-                  {{ t('workbench.bgmApply') }}
-                </button>
-                <label class="btn btn-sm dub-upload" :class="{ disabled: bgmUploading }">
-                  {{ bgmUploading ? t('workbench.bgmUploading') : t('workbench.bgmUpload') }}
-                  <input type="file" accept="audio/*" :disabled="bgmUploading" @change="uploadBgm" />
+              <aside class="dub-mix-card">
+                <h3 class="dub-card-title">{{ t('workbench.mixTitle') }}</h3>
+                <label class="dub-field">
+                  <span class="dub-field-label">{{ t('workbench.subtitleMode') }}</span>
+                  <BaseSelect v-model="subtitleMode" :options="subtitleOptions" />
                 </label>
-              </div>
-              <p class="dub-hint">{{ t('workbench.mixHint') }}</p>
-            </aside>
-          </div>
-          <div class="dub-next-bar">
-            <span class="dub-next-copy">{{ t('workbench.previewDoneHint') }}</span>
-            <button class="btn btn-sm is-primary" type="button" @click="nextStep">
-              {{ t('workbench.nextStep', { step: stepDefs[4].label }) }}
-              <ArrowRight :size="11" />
-            </button>
+                <label class="dub-field">
+                  <span class="dub-field-label">{{ t('workbench.originalAudio') }}</span>
+                  <BaseSelect v-model="originalAudio" :options="originalOptions" :disabled="originalAudioLocked" />
+                  <span v-if="originalAudioLocked" class="dub-field-hint">{{ t('workbench.originalAudioSilentLocked') }}</span>
+                </label>
+                <label class="dub-field">
+                  <span class="dub-field-label">{{ t('workbench.ducking') }} <span class="mono">{{ duckingRatio }}</span></span>
+                  <input v-model.number="duckingRatio" class="dub-range" type="range" min="2" max="12" step="1" :disabled="originalAudioLocked" />
+                  <span class="dub-field-hint">{{ t('workbench.duckingHint') }}</span>
+                </label>
+                <label class="dub-field">
+                  <span class="dub-field-label">{{ t('workbench.bgm') }}</span>
+                  <BaseSelect v-model="bgmName" :options="bgmOptions" :placeholder="t('workbench.bgmNone')" />
+                </label>
+                <label class="dub-field">
+                  <span class="dub-field-label">{{ t('workbench.bgmVolume') }} <span class="mono">{{ bgmVolumePct }}%</span></span>
+                  <input v-model.number="bgmVolumePct" class="dub-range" type="range" min="0" max="100" step="1" />
+                </label>
+                <div class="dub-mix-actions">
+                  <button class="btn btn-sm" type="button" :disabled="bgmSaving || !episodeId" @click="applyBgm">
+                    <Loader2 v-if="bgmSaving" :size="11" class="animate-spin" />
+                    {{ t('workbench.bgmApply') }}
+                  </button>
+                  <label class="btn btn-sm dub-upload" :class="{ disabled: bgmUploading }">
+                    {{ bgmUploading ? t('workbench.bgmUploading') : t('workbench.bgmUpload') }}
+                    <input type="file" accept="audio/*" :disabled="bgmUploading" @change="uploadBgm" />
+                  </label>
+                </div>
+                <p class="dub-hint">{{ t('workbench.mixHint') }}</p>
+              </aside>
+            </div>
+            <AudioMixBoard
+              :episode-id="episodeId"
+              :bgm-items="bgmItems"
+              :voice-options="allVoiceOptions"
+              :duration-ms="timelineTotalMs"
+              :bgm-url="selectedBgmUrl"
+              :bgm-volume="bgmVolumePct / 100"
+              :original-audio="originalAudio"
+              :ducking-ratio="duckingRatio"
+            />
+            <div class="dub-next-bar">
+              <span class="dub-next-copy">{{ t('workbench.previewDoneHint') }}</span>
+              <button class="btn btn-sm is-primary" type="button" @click="nextStep">
+                {{ t('workbench.nextStep', { step: stepDefs[4].label }) }}
+                <ArrowRight :size="11" />
+              </button>
+            </div>
           </div>
         </template>
 
@@ -494,6 +521,7 @@ import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { StoryboardLine } from '~/composables/useApi'
 import BaseSelect from '~/components/BaseSelect.vue'
+import AudioMixBoard from '~/components/AudioMixBoard.vue'
 import LineList from '~/components/LineList.vue'
 import SubtitlePreview from '~/components/SubtitlePreview.vue'
 
@@ -527,6 +555,7 @@ const {
   saving,
   subtitleMode,
   originalAudio,
+  originalAudioLocked,
   duckingRatio,
   bgmName,
   bgmVolumePct,
@@ -542,6 +571,7 @@ const {
   serviceBanner,
   dialogueSpeakers,
   narratorLineCount,
+  voiceProfiles,
   narratorVoice,
   narratorMissingVoice,
   missingVoiceSpeakers,
@@ -551,11 +581,13 @@ const {
   voiceFallbackNotice,
   voiceReadyCount,
   voiceTotalCount,
+  allVoiceOptions,
   voiceLoading,
   voiceBusyIds,
   narratorBusy,
   voiceGeneratingAll,
   timelineCues,
+  timelineTotalMs,
   videoUrl,
   load,
   loadVoices,
@@ -566,6 +598,8 @@ const {
   synthesizeAll,
   synthesizeLine,
   saveLineText,
+  assignLineVoice,
+  assignVoiceToLines,
   startDub,
   stopDub,
   exportSubtitle,
@@ -585,6 +619,7 @@ const stepDefs = computed(() => [
 ])
 
 const currentStep = computed(() => Math.max(0, Math.min(props.step || 0, stepDefs.value.length - 1)))
+const selectedBgmUrl = computed(() => bgmItems.value.find(item => item.name === bgmName.value)?.url || null)
 const stepDone = (index: number) => {
   if (index === 0) return lines.value.length > 0 && emptyLines.value.length === 0
   if (index === 1) return voiceTotalCount.value > 0 && voiceReadyCount.value === voiceTotalCount.value
@@ -617,6 +652,21 @@ const filteredLines = computed(() => {
   if (lineFilter.value === 'empty') return emptyLines.value
   return lines.value
 })
+
+const selectedLineIds = ref<number[]>([])
+const batchVoiceId = ref('')
+const batchAssigning = ref(false)
+const lineListRef = ref<{ clearSelection?: () => void } | null>(null)
+async function applyBatchVoice() {
+  if (!selectedLineIds.value.length) return
+  batchAssigning.value = true
+  try {
+    await assignVoiceToLines(selectedLineIds.value, batchVoiceId.value ? Number(batchVoiceId.value) : null)
+    lineListRef.value?.clearSelection?.()
+  } finally {
+    batchAssigning.value = false
+  }
+}
 
 const genFilter = ref<'all' | 'pending' | 'failed' | 'ready'>('all')
 const genFilters = computed(() => [
@@ -745,6 +795,9 @@ watch(() => props.step, step => {
   background: var(--surface-raised); padding: 10px 12px; overflow: hidden;
 }
 .dub-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dub-batch-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-2); }
+.dub-batch-count { font-size: 11px; color: var(--text-3); }
+.dub-batch-select { min-width: 180px; }
 .dub-toolbar-title { font-size: 11.5px; color: var(--text-2); font-weight: 600; }
 .dub-toolbar-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .dub-filters { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
@@ -785,6 +838,8 @@ watch(() => props.step, step => {
 .dub-progress { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-2); }
 .dub-bar { height: 6px; border-radius: 3px; background: var(--overlay-track); overflow: hidden; }
 .dub-bar span { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+.dub-mix-stage { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.dub-mix-stage .dub-preview-grid { flex: none; height: min(46vh, 420px); min-height: 280px; }
 .dub-preview-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 10px; }
 .dub-preview-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 .dub-mix-card { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-1); }

@@ -12,7 +12,8 @@ import { extractVideoPoster } from '../utils/video-poster.js'
 import { ffmpeg, checkFfmpegSuite } from '../utils/ffmpeg.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import { projectSubdirPath, projectStorageRelative } from './project-storage.js'
-import { buildMergeTransitionGraph, mergeTransitionStyle } from './merge-plan.js'
+import { buildMergeTransitionGraph, computeMergeSourceHash, mergeTransitionStyle } from './merge-plan.js'
+import { normalizeVideoAudioMode, type VideoAudioMode } from './video-audio.js'
 
 interface MergeClip {
   url: string
@@ -29,6 +30,9 @@ function toAbsPath(relativePath: string): string {
  * 传入 storyboardIds 时只拼接所选镜头（仍按镜号顺序）。
  */
 export async function mergeEpisodeVideos(episodeId: number, dramaId: number, storyboardIds?: number[], title?: string): Promise<number> {
+  const episode = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
+  const audioMode = normalizeVideoAudioMode(episode?.videoAudioMode)
+
   let storyboards = await db.select().from(schema.storyboards)
     .where(eq(schema.storyboards.episodeId, episodeId))
     .orderBy(schema.storyboards.storyboardNumber)
@@ -74,12 +78,14 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
     model: 'ffmpeg-concat-h264-aac',
     status: 'processing',
     scenes: JSON.stringify(videos),
+    sourceHash: computeMergeSourceHash(clips, audioMode),
+    mixOptions: JSON.stringify({ audioMode }),
     createdAt: ts,
   })
   const mergeId = getInsertId(res)
 
   // 异步执行
-  doMerge(mergeId, episodeId, dramaId, clips).catch(async err => {
+  doMerge(mergeId, episodeId, dramaId, clips, audioMode).catch(async err => {
     logTaskError('MergeTask', 'episode-merge', { mergeId, episodeId, error: err.message })
     console.error(`[Merge] Failed:`, err)
     await db.update(schema.videoMerges)
@@ -90,7 +96,7 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
   return mergeId
 }
 
-async function doMerge(mergeId: number, episodeId: number, dramaId: number, clips: MergeClip[]) {
+async function doMerge(mergeId: number, episodeId: number, dramaId: number, clips: MergeClip[], audioMode: VideoAudioMode) {
   const videos = clips.map(clip => clip.url)
   // 生成 concat 列表文件（项目临时目录；归档/清理时随项目一起管理）
   const listDir = projectSubdirPath(dramaId, 'temp')
@@ -119,8 +125,13 @@ async function doMerge(mergeId: number, episodeId: number, dramaId: number, clip
   // 任一段没有音轨时退回原来的 concat 路径，避免 filter 直接失败。
   let normalized = false
   let transitioned = false
+  let silent = false
   try {
-    if (await allClipsHaveAudio(preparedVideos)) {
+    if (audioMode === 'silent') {
+      // silent 是成片硬约束：不保留任何音轨，也不做逐段响度归一。
+      await mergeSilentVideos(preparedVideos, outputPath)
+      silent = true
+    } else if (await allClipsHaveAudio(preparedVideos)) {
       const hasTransitions = clips.some(clip => mergeTransitionStyle(clip.transition))
       if (hasTransitions) {
         try {
@@ -143,7 +154,7 @@ async function doMerge(mergeId: number, episodeId: number, dramaId: number, clip
       }
     }
 
-    if (!transitioned && !normalized) {
+    if (!silent && !transitioned && !normalized) {
       await new Promise<void>((resolve, reject) => {
         ffmpeg()
           .input(listPath)
@@ -190,7 +201,7 @@ async function doMerge(mergeId: number, episodeId: number, dramaId: number, clip
 
   logTaskSuccess('MergeTask', 'episode-merge', {
     mergeId, episodeId, output: mergedRelative, duration, clips: videos.length,
-    audio: transitioned ? 'xfade + acrossfade' : normalized ? 'per-clip loudnorm -16.5 LUFS' : 'plain concat',
+    audio: silent ? 'silent (no audio track)' : transitioned ? 'xfade + acrossfade' : normalized ? 'per-clip loudnorm -16.5 LUFS' : 'plain concat',
   })
 }
 
@@ -276,6 +287,77 @@ function ffprobeHasAudio(file: string): Promise<boolean> {
 async function allClipsHaveAudio(videos: string[]): Promise<boolean> {
   const results = await Promise.all(videos.map(v => ffprobeHasAudio(toAbsPath(v))))
   return results.every(Boolean)
+}
+
+/**
+ * 静音模式合片：只输出视频流。
+ * 逐段已统一画布，这里重编码一次以保证无音频流且容器参数一致。
+ */
+async function mergeSilentVideos(videos: string[], outputPath: string): Promise<void> {
+  const listPath = path.join(path.dirname(outputPath), `.silent-${uuid()}.txt`)
+  fs.writeFileSync(listPath, videos.map((video) => `file '${toAbsPath(video)}'`).join('\n'), 'utf-8')
+  try {
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg()
+        .input(listPath)
+        .inputOptions(['-f', 'concat', '-safe', '0'])
+        .outputOptions([
+          '-fflags', '+genpts',
+          '-an',
+          '-c:v', 'libx264',
+          '-preset', 'medium',
+          '-crf', '23',
+          '-movflags', '+faststart',
+        ])
+        .output(outputPath)
+        .on('end', () => resolve())
+        .on('error', (err) => reject(err))
+        .run()
+    })
+  } finally {
+    fs.rmSync(listPath, { force: true })
+  }
+}
+
+/**
+ * ComfyUI 整集多段产物：按输出顺序拼接为单文件。
+ * 单段直接复制；多段统一重编码，避免各段编码参数不一致导致 concat 失败。
+ */
+export async function concatVideoParts(videos: string[], outputPath: string, options: { silent?: boolean } = {}): Promise<void> {
+  if (!videos.length) throw new Error('没有可拼接的视频片段')
+  await fs.promises.mkdir(path.dirname(outputPath), { recursive: true })
+  if (videos.length === 1) {
+    await fs.promises.copyFile(toAbsPath(videos[0]), outputPath)
+    return
+  }
+  if (options.silent) {
+    await mergeSilentVideos(videos, outputPath)
+    return
+  }
+  const withAudio = await allClipsHaveAudio(videos)
+  const listPath = path.join(path.dirname(outputPath), `.comfy-${uuid()}.txt`)
+  fs.writeFileSync(listPath, videos.map(video => `file '${toAbsPath(video)}'`).join('\n'), 'utf-8')
+  try {
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg()
+        .input(listPath)
+        .inputOptions(['-f', 'concat', '-safe', '0'])
+        .outputOptions([
+          '-fflags', '+genpts',
+          ...(withAudio ? ['-c:a', 'aac', '-b:a', '192k'] : ['-an']),
+          '-c:v', 'libx264',
+          '-preset', 'medium',
+          '-crf', '23',
+          '-movflags', '+faststart',
+        ])
+        .output(outputPath)
+        .on('end', () => resolve())
+        .on('error', (err) => reject(err))
+        .run()
+    })
+  } finally {
+    fs.rmSync(listPath, { force: true })
+  }
 }
 
 /**

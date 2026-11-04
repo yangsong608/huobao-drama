@@ -154,37 +154,92 @@ export function unwrapComfyHistory(result: any): any {
   return result
 }
 
-export function extractComfyOutput(  result: any,
+export interface ComfyOutputsResult {
+  items: ComfyOutputItem[]
+  error?: string
+  pending?: boolean
+}
+
+/** 按节点/数组顺序收集产物；整集工作流可能输出多段，交由生成服务顺序拼接 */
+export function extractComfyOutputs(
+  result: any,
   outputNode: string | undefined,
   outputKey: string | undefined,
-): { item?: ComfyOutputItem; error?: string; pending?: boolean } {
+): ComfyOutputsResult {
   const outputs = result?.outputs
   if (!outputs || typeof outputs !== 'object') {
     const status = result?.status
-    if (status?.status_str === 'error') return { error: comfyStatusError(status) }
-    return { pending: true }
+    if (status?.status_str === 'error') return { items: [], error: comfyStatusError(status) }
+    return { items: [], pending: true }
   }
 
+  const items: ComfyOutputItem[] = []
   const nodeIds = outputNode ? [outputNode] : Object.keys(outputs)
   for (const nodeId of nodeIds) {
     const nodeOutput = outputs[nodeId]
     if (!nodeOutput || typeof nodeOutput !== 'object') continue
     const keys = outputKey ? [outputKey] : ['images', 'gifs', 'videos', 'video']
     for (const key of keys) {
-      const items = (nodeOutput as any)[key]
-      if (Array.isArray(items) && items.length) {
-        const item = items[0]
-        if (item?.filename) return { item }
+      const list = (nodeOutput as any)[key]
+      if (!Array.isArray(list)) continue
+      for (const item of list) {
+        if (item?.filename) items.push(item)
       }
     }
   }
+  if (items.length) return { items }
 
   const status = result?.status
-  if (status?.status_str === 'error') return { error: comfyStatusError(status) }
+  if (status?.status_str === 'error') return { items: [], error: comfyStatusError(status) }
   if (status?.completed) {
-    return { error: `ComfyUI 工作流已完成，但输出节点 ${outputNode || '(自动)'} 没有 ${outputKey || 'images/gifs'} 产物` }
+    return { items: [], error: `ComfyUI 工作流已完成，但输出节点 ${outputNode || '(自动)'} 没有 ${outputKey || 'images/gifs'} 产物` }
   }
-  return { pending: true }
+  return { items: [], pending: true }
+}
+
+export function extractComfyOutput(
+  result: any,
+  outputNode: string | undefined,
+  outputKey: string | undefined,
+): { item?: ComfyOutputItem; error?: string; pending?: boolean } {
+  const found = extractComfyOutputs(result, outputNode, outputKey)
+  const output: { item?: ComfyOutputItem; error?: string; pending?: boolean } = {}
+  if (found.items[0]) output.item = found.items[0]
+  if (found.error) output.error = found.error
+  if (found.pending) output.pending = true
+  return output
+}
+
+export interface ComfyTimelineInjection {
+  timelineData: Record<string, unknown>
+  node: string
+  input: string
+  syncInputs?: Record<string, string | number>
+  outputNode?: string
+}
+
+/** 把整集 timeline_data 写入指定节点，并按需同步图参数；不修改原工作流对象 */
+export function applyComfyTimelineWorkflow(
+  workflow: Record<string, unknown>,
+  injection: ComfyTimelineInjection,
+): Record<string, unknown> {
+  const cloned = JSON.parse(JSON.stringify(workflow)) as Record<string, any>
+  const node = cloned[injection.node]
+  if (!node || typeof node !== 'object') {
+    throw new Error(`ComfyUI 工作流缺少时间线节点 ${injection.node}，请检查 timeline_mapping.node`)
+  }
+  const inputs = node.inputs
+  if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) {
+    throw new Error(`ComfyUI 节点 ${injection.node} 缺少 inputs，无法写入 ${injection.input}`)
+  }
+  inputs[injection.input] = JSON.stringify(injection.timelineData)
+  for (const [key, value] of Object.entries(injection.syncInputs || {})) {
+    if (key in inputs) inputs[key] = value
+  }
+  if (injection.outputNode && !cloned[injection.outputNode]) {
+    throw new Error(`ComfyUI 工作流缺少输出节点 ${injection.outputNode}，请检查 timeline_mapping.output.node`)
+  }
+  return cloned
 }
 
 function comfyStatusError(status: any): string {

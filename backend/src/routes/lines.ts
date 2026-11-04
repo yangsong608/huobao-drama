@@ -14,7 +14,7 @@ import { badRequest, notFound, success, now } from '../utils/response.js'
 import { toSpeakText } from '../services/dialogue-lines.js'
 import { extractEpisodeLines } from '../services/dialogue-extract.js'
 import { synthesizeEpisodeLines, getDubbingState } from '../services/dubbing.js'
-import { resolveVoiceForLine } from '../services/voice-profile.js'
+import { getVoice, resolveVoiceForLine } from '../services/voice-profile.js'
 import { synthesize } from '../services/tts.js'
 import { getAbsolutePath } from '../utils/storage.js'
 
@@ -105,11 +105,22 @@ lines.put('/:id', async (c) => {
 
   const text = body.text !== undefined ? String(body.text) : row.text
   const speakText = body.text !== undefined ? toSpeakText(text) : row.speakText
+
+  let nextVoiceId = row.voiceId
+  if (body.voice_id !== undefined) {
+    nextVoiceId = body.voice_id ? Number(body.voice_id) : null
+    if (nextVoiceId !== null) {
+      const voice = getVoice(nextVoiceId)
+      if (!voice) return badRequest(c, '音色不存在')
+      if (voice.dramaId !== row.dramaId) return badRequest(c, '音色不属于该项目')
+    }
+  }
+  const voiceChanged = nextVoiceId !== row.voiceId
+  const textChanged = body.text !== undefined
+
   const updated = db.update(schema.storyboardLines).set({
-    ...(body.text !== undefined ? {
-      text,
-      speakText,
-      subtitleText: text,
+    ...(textChanged ? { text, speakText, subtitleText: text } : {}),
+    ...(textChanged || voiceChanged ? {
       status: 'pending',
       audioUrl: null,
       audioDurationMs: null,
@@ -118,9 +129,15 @@ lines.put('/:id', async (c) => {
     ...(body.speaker_type !== undefined ? { speakerType: String(body.speaker_type) } : {}),
     ...(body.character_id !== undefined ? { characterId: body.character_id ? Number(body.character_id) : null } : {}),
     ...(body.speaker_name !== undefined ? { speakerName: String(body.speaker_name) } : {}),
-    ...(body.voice_id !== undefined ? { voiceId: body.voice_id ? Number(body.voice_id) : null } : {}),
+    ...(body.voice_id !== undefined ? { voiceId: nextVoiceId } : {}),
     ...(body.voice_locked !== undefined ? { voiceLocked: Boolean(body.voice_locked) } : {}),
     ...(body.start_ms !== undefined ? { startMs: body.start_ms === null ? null : Number(body.start_ms) } : {}),
+    ...(body.voice_start_ms !== undefined ? {
+      voiceStartMs: body.voice_start_ms === null ? null : Math.max(0, Math.round(Number(body.voice_start_ms))),
+    } : {}),
+    ...(body.voice_duration_ms !== undefined ? {
+      voiceDurationMs: body.voice_duration_ms === null ? null : Math.max(0, Math.round(Number(body.voice_duration_ms))),
+    } : {}),
     ...(body.emotion !== undefined ? { emotion: body.emotion ? String(body.emotion) : null } : {}),
     ...(body.speed !== undefined ? { speed: Number(body.speed) } : {}),
     ...(body.locked !== undefined ? { locked: Boolean(body.locked) } : {}),

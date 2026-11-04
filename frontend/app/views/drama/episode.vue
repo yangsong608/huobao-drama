@@ -40,12 +40,13 @@
           <ModelSelect
             v-if="videoModelOptions.length"
             v-model="videoModel"
-            :label="t('common.serviceType.video')"
+            :label="isComfyVideoMode ? t('episode.comfy.modelLabel') : t('common.serviceType.video')"
             :options="videoModelOptions"
             :default-label="defaultVideoModelLabel"
             :show-config="videoModelMultiCfg"
           />
           <ModelSelect
+            v-if="!isComfyVideoMode"
             v-model="episodeResolution"
             :label="t('episode.topbar.resolution')"
             :options="resolutionOptions"
@@ -500,9 +501,30 @@
             </template>
           </div>
 
+          <!-- Sub: Voice Assets（音色档案卡片化，跨集复用） -->
+          <div v-if="prodTab === 'voices'" class="prod-content">
+            <VoiceAssetGrid :drama-id="dramaId" :episode-id="epId" @updated="onVoiceAssetUpdated" />
+          </div>
+
           <!-- Sub: Video Production（分镜拆分 + 视频生成 合并） -->
           <div v-if="prodTab === 'videos'" class="prod-content">
             <div class="prod-section-bar">
+              <div class="video-mode-tabs" role="tablist" :aria-label="t('episode.comfy.modeLabel')">
+                <button
+                  type="button"
+                  role="tab"
+                  :aria-selected="!isComfyVideoMode"
+                  :class="['video-mode-tab', { active: !isComfyVideoMode }]"
+                  @click="changeEpisodeVideoMode('native')"
+                >{{ t('episode.comfy.modeNative') }}</button>
+                <button
+                  type="button"
+                  role="tab"
+                  :aria-selected="isComfyVideoMode"
+                  :class="['video-mode-tab', { active: isComfyVideoMode }]"
+                  @click="changeEpisodeVideoMode('comfyui')"
+                >{{ t('episode.comfy.modeComfy') }}</button>
+              </div>
               <span class="dim" style="font-size:12px">{{ t('episode.prod.videos') }}</span>
               <span class="tag mono">{{ t('episode.sb.segmentStat', { n: sbs.length, dur: totalDuration }) }}</span>
               <span class="tag mono" :title="t('episode.vid.aspectRatio')">{{ dramaAspectRatio }}</span>
@@ -517,14 +539,14 @@
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                   {{ videoPromptBatch.running ? t('episode.sb.promptProgress', { done: videoPromptBatch.completed, total: videoPromptBatch.total }) : (videoSelectMode && selectedVideoSbIds.length ? t('episode.sb.promptSelected', { n: selectedVideoSbIds.length }) : t('episode.sb.batchPrompts')) }}
                 </button>
-                <button v-if="recoverableVideoCount" class="btn btn-sm video-retry-failed" @click="retryFailedVideos">
+                <button v-if="recoverableVideoCount && !isComfyVideoMode" class="btn btn-sm video-retry-failed" @click="retryFailedVideos">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   {{ t('episode.recovery.restoreFailed', { n: recoverableVideoCount }) }}
                 </button>
-                <button class="btn btn-sm" :class="{ 'is-on': videoSelectMode }" @click="toggleVideoSelectMode">
+                <button v-if="!isComfyVideoMode" class="btn btn-sm" :class="{ 'is-on': videoSelectMode }" @click="toggleVideoSelectMode">
                   {{ videoSelectMode ? t('episode.vid.selectDone', { n: selectedVideoSbIds.length }) : t('episode.vid.select') }}
                 </button>
-                <button class="btn btn-sm" :disabled="!sbs.length" @click="batchVideos">
+                <button v-if="!isComfyVideoMode" class="btn btn-sm" :disabled="!sbs.length" @click="batchVideos">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
                   {{ videoSelectMode && selectedVideoSbIds.length ? t('episode.vid.batchSelected', { n: selectedVideoSbIds.length }) : t('episode.vid.batchVideos') }}
                 </button>
@@ -619,6 +641,7 @@
                     </div>
                   </div>
                   <button
+                    v-if="!isComfyVideoMode"
                     class="btn btn-icon btn-sm video-task-action"
                     :title="videoTaskActionLabel(task.storyboard)"
                     :disabled="videoTaskState(task.storyboard) === 'pending'"
@@ -727,7 +750,7 @@
               </div>
 
               <aside class="video-task-inspector">
-            <aside class="video-task-player">
+            <aside v-if="!isComfyVideoMode" class="video-task-player">
               <div class="video-player-head">
                 <div class="video-player-head-info">
                   <div class="video-player-title">{{ t('episode.vid.playerTitle', { n: String(selectedVideoTaskNumber).padStart(2, '0') }) }}</div>
@@ -791,7 +814,7 @@
               </div>
             </aside>
 
-            <div v-if="sbVideoHistory.length" class="video-player-history">
+            <div v-if="!isComfyVideoMode && sbVideoHistory.length" class="video-player-history">
               <div class="video-player-history-head">
                 <span>{{ t('episode.vid.history') }}</span>
                 <span class="video-player-history-count">{{ sbVideoHistory.length }}</span>
@@ -813,7 +836,7 @@
                 </div>
               </div>
             </div>
-                <div class="video-inspector-body">
+                <div v-if="!isComfyVideoMode" class="video-inspector-body">
                   <section class="video-inspector-section">
                     <div class="video-inspector-prompt-head">
                       <span class="video-inspector-label">{{ t('episode.inspector.boundRefs') }}</span>
@@ -839,7 +862,7 @@
                 </div>
 
                 <!-- 分镜时长 + 生成操作常驻底部：不随检查器内容滚动 -->
-                <div class="video-inspector-footer">
+                <div v-if="!isComfyVideoMode" class="video-inspector-footer">
                   <section class="video-inspector-section video-params-card">
                     <div class="video-param-row">
                       <span class="video-param-name">{{ t('episode.inspector.duration') }}</span>
@@ -867,6 +890,77 @@
                   >
                     {{ videoTaskActionLabel(selectedSb) }}
                   </button>
+                </div>
+
+                <!-- ComfyUI 工作流模式：右侧展示整集映射与执行，分镜信息仍从中间列传入 -->
+                <div v-else class="comfy-workflow-panel">
+                  <div class="comfy-workflow-head">
+                    <div>
+                      <div class="video-inspector-label">ComfyUI</div>
+                      <div class="comfy-workflow-sub">{{ comfyConfigName }} · {{ t('episode.comfy.nodeCount', { n: comfyWorkflowNodeCount }) }}</div>
+                    </div>
+                    <button class="btn btn-sm" :disabled="comfyPreviewLoading" @click="loadComfyPreview()">
+                      <Loader2 v-if="comfyPreviewLoading" :size="11" class="animate-spin" />
+                      <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                      {{ t('common.refresh') }}
+                    </button>
+                  </div>
+
+                  <div v-if="comfyPendingTaskId" class="comfy-running-banner">
+                    <span class="dot pending" />
+                    {{ t('episode.comfy.runningTask', { id: comfyPendingTaskId }) }}
+                  </div>
+
+                  <div v-if="comfyPreviewLoading && !comfyPreview" class="comfy-workflow-loading">
+                    <Loader2 :size="18" class="animate-spin" />
+                    <span>{{ t('episode.comfy.loading') }}</span>
+                  </div>
+                  <div v-else-if="comfyPreviewError" class="comfy-workflow-error">
+                    <div>{{ comfyPreviewError }}</div>
+                    <button class="btn btn-sm" @click="goComfySettings">{{ t('episode.comfy.openSettings') }}</button>
+                  </div>
+                  <template v-else-if="comfyPreview">
+                    <div class="comfy-workflow-metrics">
+                      <span><b>{{ comfyPreview.timeline.segments.length }}</b>{{ t('episode.comfy.segments') }}</span>
+                      <span><b>{{ comfyPreview.timeline.totalFrames }}</b>{{ t('episode.comfy.frames') }}</span>
+                      <span><b>{{ comfyPreview.timeline.durationSec }}s</b>{{ t('episode.comfy.duration') }}</span>
+                      <span><b>{{ comfyPreview.mapping.width }}×{{ comfyPreview.mapping.height }}</b>{{ t('episode.comfy.resolution') }}</span>
+                    </div>
+                    <div class="comfy-workflow-mapping">
+                      <div class="comfy-map-row"><span>{{ t('episode.comfy.timelineNode') }}</span><code>{{ comfyPreview.mapping.node }}.{{ comfyPreview.mapping.input }}</code></div>
+                      <div class="comfy-map-row"><span>{{ t('episode.comfy.outputNode') }}</span><code>{{ comfyPreview.mapping.outputNode || t('episode.comfy.autoOutput') }}{{ comfyPreview.mapping.outputKey ? ' · ' + comfyPreview.mapping.outputKey : '' }}</code></div>
+                      <div class="comfy-map-row"><span>{{ t('episode.comfy.fps') }}</span><code>{{ comfyPreview.mapping.fps }} fps · {{ comfyPreview.mapping.steps }} steps</code></div>
+                      <div class="comfy-map-row"><span>{{ t('episode.comfy.mappingSource') }}</span><span>{{ comfyMappingSourceLabel }}</span></div>
+                    </div>
+                    <div v-if="comfyPreview.warnings.length" class="comfy-workflow-warnings">
+                      <div v-for="(warning, wi) in comfyPreview.warnings" :key="wi">· {{ warning }}</div>
+                    </div>
+                    <div class="comfy-segment-head">{{ t('episode.comfy.segmentsTitle') }}</div>
+                    <div class="comfy-segment-list">
+                      <button
+                        v-for="segment in comfyPreview.timeline.segments"
+                        :key="segment.storyboardId"
+                        type="button"
+                        :class="['comfy-segment', { active: selectedSb?.id === segment.storyboardId }]"
+                        @click="selectedSb = sbs.find(sb => sb.id === segment.storyboardId) || selectedSb"
+                      >
+                        <span class="comfy-segment-index">#{{ String(segment.storyboardNumber).padStart(2, '0') }}</span>
+                        <span class="comfy-segment-main">
+                          <span class="comfy-segment-title">{{ segment.title || t('episode.vid.shotN', { n: segment.storyboardNumber }) }}</span>
+                          <span class="comfy-segment-meta">{{ segment.frameCount }}f · {{ segment.durationSec }}s · {{ t('episode.comfy.refs', { n: segment.refs.length }) }}</span>
+                        </span>
+                      </button>
+                    </div>
+                    <div class="comfy-workflow-actions">
+                      <button class="btn btn-sm" @click="openComfyUI">{{ t('episode.comfy.open') }}</button>
+                      <button class="btn btn-primary btn-sm" :disabled="comfyRunning || !!comfyPendingTaskId" @click="runComfyEpisode">
+                        <Loader2 v-if="comfyRunning" :size="11" class="animate-spin" />
+                        {{ comfyPendingTaskId ? t('episode.comfy.running') : t('episode.comfy.run') }}
+                      </button>
+                    </div>
+                    <div class="comfy-workflow-hint">{{ t('episode.comfy.exportHint') }}</div>
+                  </template>
+                  <div v-else class="comfy-workflow-error">{{ t('episode.comfy.noPreview') }}</div>
                 </div>
               </aside>
               </div>
@@ -1718,7 +1812,7 @@ async function loadExportMerges() {
 const scriptStep = ref(storedPanel ? (storedPanel.scriptStep === 0 ? 0 : 1) : 0)
 // 旧版本地存储的 'storyboard' 子步骤已并入 'videos'（视频制作）
 const storedProdTab = storedPanel?.prodTab === 'storyboard' ? 'videos' : storedPanel?.prodTab
-const prodTab = ref(['assets', 'videos'].includes(storedProdTab) ? storedProdTab : 'assets')
+const prodTab = ref(['assets', 'voices', 'videos'].includes(storedProdTab) ? storedProdTab : 'assets')
 // 配音阶段的 5 个子步骤（与 DubbingStage 内部顺序一致）
 const DUB_STEP_KEYS = ['lines', 'voices', 'generate', 'preview', 'export']
 const storedDubStep = Number(storedPanel?.dubStep)
@@ -1868,6 +1962,10 @@ function updateCharacterVoice(id, voice) {
   const patch = { ...voice, voiceAudioUrl: voice.voice_audio_url, voiceAudioName: voice.voice_audio_name }
   const character = chars.value.find(item => item.id === id)
   if (character) Object.assign(character, patch)
+}
+async function onVoiceAssetUpdated() {
+  if (!epId.value) return
+  try { chars.value = await episodeAPI.characters(epId.value) } catch { /* 静默 */ }
 }
 const assetDetailDraft = ref({ appearance: '', styling: '', prompt: '', lighting: '', description: '' })
 // 最终提示词手动编辑：dirty 时才随保存提交，避免无修改保存误清空 Agent 生成的提示词
@@ -2319,7 +2417,17 @@ function isNarratorCharacter(char) {
 }
 
 const visualChars = computed(() => chars.value.filter(c => !isNarratorCharacter(c)))
-const lockedVideoConfigId = computed(() => episode.value?.video_config_id || episode.value?.videoConfigId || null)
+// 视频制作双模式：native = 逐分镜生成，comfyui = 整集工作流一次提交
+const episodeVideoMode = computed<'native' | 'comfyui'>(() =>
+  (episode.value?.video_mode || episode.value?.videoMode) === 'comfyui' ? 'comfyui' : 'native')
+const isComfyVideoMode = computed(() => episodeVideoMode.value === 'comfyui')
+const isComfyConfig = cfg => String(cfg?.provider || '').toLowerCase() === 'comfyui'
+const comfyConfigs = computed(() => videoConfigs.value.filter(isComfyConfig))
+const nativeVideoConfigs = computed(() => videoConfigs.value.filter(cfg => !isComfyConfig(cfg)))
+const videoModelConfigs = computed(() => isComfyVideoMode.value ? comfyConfigs.value : nativeVideoConfigs.value)
+const lockedVideoConfigId = computed(() => isComfyVideoMode.value
+  ? (episode.value?.comfyui_config_id || episode.value?.comfyuiConfigId || null)
+  : (episode.value?.video_config_id || episode.value?.videoConfigId || null))
 // 集视频分辨率：顶栏直接修改（持久化 episodes.resolution，生成任务按此值锁定）。
 // 档位与显示统一走 utils/video-resolution（项目详情页的「新建集 / 集卡片」共用同一套口径），
 // 避免同一条集在项目页显示 720p、在制作页显示 768P。
@@ -2433,19 +2541,19 @@ function hasMultiConfigs(options) {
 }
 const textModelOptions = computed(() => collectModelOptions(textConfigs.value))
 const imageModelOptions = computed(() => collectModelOptions(imageConfigs.value))
-const videoModelOptions = computed(() => collectModelOptions(videoConfigs.value))
+const videoModelOptions = computed(() => collectModelOptions(videoModelConfigs.value))
 // 未显式选择时展示集锁定配置的首个模型，而不是全部配置里优先级最高的那个
 const defaultVideoModelLabel = computed(() => {
-  const locked = videoConfigs.value.find(c => c.id === Number(lockedVideoConfigId.value) && c.is_active)
+  const locked = videoModelConfigs.value.find(c => c.id === Number(lockedVideoConfigId.value) && c.is_active)
   const model = configModels(locked)[0] || videoModelOptions.value[0]?.model || ''
   return t('episode.model.defaultWith', { model })
 })
 const selectedVideoConfig = computed(() => {
   const selected = findModelOption(videoModelOptions.value, videoModel.value)
-  if (selected) return videoConfigs.value.find(config => config.id === selected.configId)
-  const locked = videoConfigs.value.find(config => config.id === lockedVideoConfigId.value && config.is_active)
+  if (selected) return videoModelConfigs.value.find(config => config.id === selected.configId)
+  const locked = videoModelConfigs.value.find(config => config.id === lockedVideoConfigId.value && config.is_active)
   if (locked) return locked
-  return [...videoConfigs.value]
+  return [...videoModelConfigs.value]
     .filter(config => config.is_active)
     .sort((a, b) => (b.priority || 0) - (a.priority || 0))[0]
 })
@@ -2599,21 +2707,165 @@ watch(videoModel, (key, prevKey) => {
     try {
       if (seq !== videoConfigWriteSeq) return
       const prevLocked = confirmedVideoConfigId ?? (Number(lockedVideoConfigId.value) || null)
-      await episodeAPI.update(epId.value, { video_config_id: configId })
+      const targetConfig = videoConfigs.value.find(config => config.id === configId)
+      const comfyTarget = isComfyConfig(targetConfig)
+      // ComfyUI 配置单独写入 comfyui_config_id，原生/云端仍写 video_config_id
+      await episodeAPI.update(epId.value, comfyTarget ? { comfyui_config_id: configId } : { video_config_id: configId })
       if (seq !== videoConfigWriteSeq) return
-      if (episode.value) episode.value.video_config_id = configId
+      if (episode.value) {
+        if (comfyTarget) episode.value.comfyui_config_id = configId
+        else episode.value.video_config_id = configId
+      }
       confirmedVideoConfigId = configId
       toast.success(t('episode.topbar.videoConfigSwitched', { name: bareModelName(key) }))
+      if (comfyTarget) void loadComfyPreview(configId)
     } catch (e) {
       if (seq !== videoConfigWriteSeq) return
       setVideoModelQuietly(prevKey)
-      if (episode.value) episode.value.video_config_id = prevLocked
+      if (episode.value) {
+        if (isComfyConfig(videoConfigs.value.find(config => config.id === configId))) episode.value.comfyui_config_id = prevLocked
+        else episode.value.video_config_id = prevLocked
+      }
       toastError(e)
     } finally {
       videoConfigWritePending--
     }
   })
 }, { flush: 'sync' })
+
+// ===== 视频制作双模式：原生逐镜头 / ComfyUI 整集工作流 =====
+const comfyPreview = ref(null)
+const comfyPreviewLoading = ref(false)
+const comfyPreviewError = ref('')
+const comfyRunning = ref(false)
+
+const comfyBaseUrl = computed(() =>
+  String(selectedVideoConfig.value?.base_url || selectedVideoConfig.value?.baseUrl || '').trim().replace(/\/+$/, ''))
+const comfyConfigName = computed(() => {
+  const id = Number(comfyPreview.value?.config?.id || selectedVideoConfig.value?.id || 0)
+  return videoConfigs.value.find(config => config.id === id)?.name || 'ComfyUI'
+})
+const comfyWorkflowNodeCount = computed(() => Object.keys(comfyPreview.value?.workflow || {}).length)
+const comfyMappingSourceLabel = computed(() =>
+  comfyPreview.value?.mapping?.source === 'config' ? t('episode.comfy.mappingConfig') : t('episode.comfy.mappingDefault'))
+const comfyPendingTaskId = computed(() => {
+  const task = genTasks.value.find(t => t.type === 'video' && t.status === 'processing' && isEpisodeComfyTask(t))
+  return task?.id || null
+})
+
+const comfyPreviewConfigId = computed(() => {
+  const selected = findModelOption(videoModelOptions.value, videoModel.value)
+  return selected?.configId || (isComfyVideoMode.value ? Number(episode.value?.comfyui_config_id) || undefined : undefined)
+})
+
+async function loadComfyPreview(configId) {
+  if (!epId.value || !isComfyVideoMode.value) return
+  comfyPreviewLoading.value = true
+  comfyPreviewError.value = ''
+  try {
+    comfyPreview.value = await episodeAPI.comfyWorkflow(epId.value, configId || comfyPreviewConfigId.value)
+  } catch (e) {
+    comfyPreview.value = null
+    comfyPreviewError.value = e.message || t('episode.comfy.previewFailed')
+  } finally {
+    comfyPreviewLoading.value = false
+  }
+}
+
+function openComfyUI() {
+  const url = comfyBaseUrl.value
+  if (!url) {
+    toast.warning(t('episode.comfy.noBaseUrl'))
+    return
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    toast.error(t('episode.comfy.invalidBaseUrl'))
+    return
+  }
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function goComfySettings() {
+  navigateTo({ path: '/settings', query: { tab: 'ai' } })
+}
+
+async function changeEpisodeVideoMode(mode) {
+  if (!episode.value || mode === episodeVideoMode.value) return
+  const prev = episodeVideoMode.value
+  episode.value.video_mode = mode
+  try {
+    await episodeAPI.update(epId.value, { video_mode: mode })
+    if (mode === 'comfyui') {
+      const active = [...comfyConfigs.value]
+        .filter(config => config.is_active)
+        .sort((a, b) => (b.priority || 0) - (a.priority || 0))
+      const fallback = active.find(config => config.id === Number(episode.value.comfyui_config_id)) || active[0]
+      if (fallback && Number(episode.value.comfyui_config_id) !== fallback.id) {
+        await episodeAPI.update(epId.value, { comfyui_config_id: fallback.id })
+        episode.value.comfyui_config_id = fallback.id
+      }
+      if (fallback) {
+        const option = videoModelOptions.value.find(o => o.configId === fallback.id)
+        if (option && videoModel.value !== option.key) setVideoModelQuietly(option.key)
+      }
+      await loadComfyPreview(fallback?.id)
+      toast.success(t('episode.comfy.modeSwitchedComfy'))
+    } else {
+      const locked = nativeVideoConfigs.value.find(config => config.id === Number(episode.value.video_config_id) && config.is_active)
+      const fallback = locked || [...nativeVideoConfigs.value]
+        .filter(config => config.is_active)
+        .sort((a, b) => (b.priority || 0) - (a.priority || 0))[0]
+      if (fallback) {
+        const option = videoModelOptions.value.find(o => o.configId === fallback.id)
+        if (option && videoModel.value !== option.key) setVideoModelQuietly(option.key)
+      }
+      comfyPreview.value = null
+      comfyPreviewError.value = ''
+      toast.success(t('episode.comfy.modeSwitchedNative'))
+    }
+  } catch (e) {
+    episode.value.video_mode = prev
+    toastError(e)
+  }
+}
+
+async function runComfyEpisode() {
+  if (comfyRunning.value || !epId.value) return
+  const segments = comfyPreview.value?.timeline?.segments?.length || sbs.value.length
+  if (!window.confirm(t('episode.comfy.runConfirm', { n: segments }))) return
+  comfyRunning.value = true
+  try {
+    const res = await episodeAPI.comfyRun(epId.value, { configId: comfyPreviewConfigId.value })
+    toast.success(t('episode.comfy.runStarted', { n: res?.segmentCount ?? segments }))
+    await loadGenTasks()
+    void pollComfyEpisode(res?.taskId)
+  } catch (e) {
+    toastError(e, { fallback: 'episode.comfy.runFailed' })
+  } finally {
+    comfyRunning.value = false
+  }
+}
+
+async function pollComfyEpisode(taskId) {
+  if (!taskId) return
+  for (let i = 0; i < 300; i++) {
+    await sleep(4000)
+    try {
+      const res = await taskAPI.get(taskId)
+      if (res?.status === 'completed') {
+        toast.success(t('episode.comfy.runDone'))
+        await refresh()
+        return
+      }
+      if (res?.status === 'failed') {
+        toastError(res?.error_msg || res?.errorMsg, { fallback: 'episode.comfy.runFailed' })
+        await loadGenTasks()
+        return
+      }
+    } catch { /* 下一轮继续 */ }
+  }
+  await loadGenTasks()
+}
 
 // Production step helpers
 // ========== 任务列表面板 ==========
@@ -2694,7 +2946,15 @@ async function confirmClearGenTasks() {
   }
 }
 
+// 整集 ComfyUI 任务的 params 带 comfyTimeline；用于任务抽屉识别与重复提交提示
+function isEpisodeComfyTask(task) {
+  const raw = task?.params
+  if (!raw) return false
+  try { return !!JSON.parse(raw).comfyTimeline } catch { return false }
+}
+
 function genTaskTargetLabel(task) {
+  if (task.type === 'video' && isEpisodeComfyTask(task)) return t('episode.tasks.wholeEpisode')
   if (task.storyboard_id) {
     const sb = sbs.value.find(x => x.id === task.storyboard_id)
     return t('episode.tasks.sbN', { n: sb?.storyboard_number ?? sb?.storyboardNumber ?? task.storyboard_id })
@@ -2822,6 +3082,7 @@ const assetReadyCount = computed(() => charImgCount.value + sceneImgCount.value 
 
 const prodTabDefs = computed(() => [
   { id: 'assets', label: t('episode.prod.assets'), icon: FolderKanban, badge: assetTotalCount.value ? `${assetReadyCount.value}/${assetTotalCount.value}` : '' },
+  { id: 'voices', label: t('episode.prod.voices'), icon: Mic, badge: '' },
   { id: 'videos', label: t('episode.prod.videos'), icon: Clapperboard, badge: sbs.value.length ? `${shotVidCount.value}/${sbs.value.length}` : '' },
 ])
 
@@ -2847,6 +3108,7 @@ const sidebarSections = computed(() => ([
     label: t('episode.stage.production'),
     items: [
       { key: 'prod:assets', label: t('episode.prod.assets'), desc: '', icon: Users },
+      { key: 'prod:voices', label: t('episode.prod.voices'), desc: '', icon: Mic },
       { key: 'prod:videos', label: t('episode.prod.videos'), desc: '', icon: Clapperboard },
     ],
   },
@@ -3933,6 +4195,10 @@ function uploadAssetImage(kind, id) {
 }
 
 async function genVid(sb, opts = {}) {
+  if (isComfyVideoMode.value) {
+    if (!opts.silent) toast.warning(t('episode.comfy.nativeOnly'))
+    return
+  }
   if (!opts.forceNew && canRecoverVideo(sb.id)) return recoverVideo(sb)
   const latest = latestVideoTask(sb.id)
   const forceNew = opts.forceNew || latest?.status === 'failed'
@@ -4085,7 +4351,14 @@ async function loadConfigs() {
   } catch (e) { console.error('Failed to load AI configs', e) }
 }
 
-onMounted(async () => { await refresh(); loadConfigs(); syncExtractStatus(); loadPipelineRules(); loadDubbingEnabled() })
+onMounted(async () => {
+  await refresh()
+  loadConfigs()
+  syncExtractStatus()
+  loadPipelineRules()
+  loadDubbingEnabled()
+  if (isComfyVideoMode.value) void loadComfyPreview()
+})
 
 // ===== 应用内引导（工作台）：沿左侧进度栏走 6 步流水线 =====
 const EPISODE_TOUR = [
@@ -4884,6 +5157,84 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 }
 .prod-tab-badge { font-size: 10px; font-family: var(--font-mono); padding: 0 4px; background: var(--bg-3); border-radius: 99px; }
 .prod-tab.active .prod-tab-badge { background: var(--accent-bg); color: var(--accent-text); }
+
+/* 视频制作模式切换：原生逐镜头 / ComfyUI 整集工作流 */
+.video-mode-tabs {
+  display: inline-flex; gap: 2px; padding: 2px; flex-shrink: 0;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.video-mode-tab {
+  min-height: 22px; padding: 0 9px; font-size: 11px; font-weight: 600; line-height: 1;
+  border: 1px solid transparent; border-radius: calc(var(--radius) - 2px);
+  background: transparent; color: var(--text-3); cursor: pointer;
+  transition: all 0.18s var(--ease-out);
+}
+.video-mode-tab:hover { color: var(--text-0); background: var(--bg-hover); }
+.video-mode-tab.active {
+  background: var(--surface-raised); color: var(--text-0);
+  border-color: var(--border); box-shadow: var(--shadow-card);
+}
+.video-mode-tab:focus-visible {
+  outline: none;
+  border-color: var(--action-primary);
+  box-shadow: 0 0 0 3px var(--button-focus);
+}
+
+/* ComfyUI 工作流面板（右侧检查器） */
+.comfy-workflow-panel {
+  display: flex; flex-direction: column; gap: 9px;
+  height: 100%; min-height: 0; padding: 12px; overflow-y: auto;
+}
+.comfy-workflow-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.comfy-workflow-sub { margin-top: 3px; font-size: 11px; color: var(--text-3); }
+.comfy-running-banner {
+  display: flex; align-items: center; gap: 6px; padding: 7px 9px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-2); color: var(--text-2); font-size: 11px;
+}
+.comfy-workflow-loading {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 28px 0; color: var(--text-3); font-size: 12px;
+}
+.comfy-workflow-error {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  padding: 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-2); color: var(--text-2); font-size: 12px; line-height: 1.6;
+}
+.comfy-workflow-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+.comfy-workflow-metrics span {
+  display: flex; flex-direction: column; gap: 2px; padding: 6px 7px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-2); color: var(--text-3); font-size: 10px;
+}
+.comfy-workflow-metrics b { color: var(--text-0); font-size: 12px; font-weight: 650; }
+.comfy-workflow-mapping {
+  display: flex; flex-direction: column; gap: 4px; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2);
+}
+.comfy-map-row { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; color: var(--text-3); }
+.comfy-map-row code { font-family: var(--font-mono); color: var(--text-1); }
+.comfy-workflow-warnings {
+  display: flex; flex-direction: column; gap: 3px; padding: 8px 10px;
+  border-left: 2px solid var(--warning, #d97706); border-radius: var(--radius);
+  background: var(--bg-2); color: var(--text-2); font-size: 11px; line-height: 1.5;
+}
+.comfy-segment-head { font-size: 11px; color: var(--text-3); }
+.comfy-segment-list { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
+.comfy-segment {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: transparent; color: var(--text-1); text-align: left; cursor: pointer;
+}
+.comfy-segment:hover { background: var(--bg-hover); }
+.comfy-segment.active { border-color: var(--sel); background: var(--sel-bg); color: var(--sel-text); }
+.comfy-segment-index { flex-shrink: 0; font-family: var(--font-mono); font-size: 10px; color: var(--text-3); }
+.comfy-segment-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.comfy-segment-title { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.comfy-segment-meta { font-size: 10px; color: var(--text-3); }
+.comfy-workflow-actions { display: flex; gap: 6px; margin-top: auto; }
+.comfy-workflow-actions .btn { flex: 1; justify-content: center; }
+.comfy-workflow-hint { font-size: 10px; color: var(--text-3); line-height: 1.5; }
 
 /* Production content */
 .prod-content { flex: 1; overflow-y: auto; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 10px; }

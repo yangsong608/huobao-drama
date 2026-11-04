@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeVideoAudioMode } from '../src/services/video-audio.ts'
+import { normalizeVideoAudioMode, resolveDubbingOriginalAudio } from '../src/services/video-audio.ts'
 
 test('显式音频模式原样保留', () => {
   assert.equal(normalizeVideoAudioMode('ambient'), 'ambient')
@@ -26,4 +26,18 @@ test('未指定音频模式且需要声音时回落 native', () => {
 test('显式 ambient/silent 优先于 generate_audio 的默认值', () => {
   assert.equal(normalizeVideoAudioMode('ambient', true), 'ambient')
   assert.equal(normalizeVideoAudioMode('silent', true), 'silent')
+})
+
+test('剧集 silent 时配音原声强制 mute', () => {
+  assert.equal(resolveDubbingOriginalAudio('silent', 'keep', 'duck'), 'mute')
+  assert.equal(resolveDubbingOriginalAudio('silent', undefined, 'keep'), 'mute')
+  assert.equal(resolveDubbingOriginalAudio('SILENT', 'mute', 'duck'), 'mute')
+})
+
+test('非 silent 时保留请求值，缺省回落设置默认', () => {
+  assert.equal(resolveDubbingOriginalAudio('auto', 'keep', 'duck'), 'keep')
+  assert.equal(resolveDubbingOriginalAudio('native', 'mute', 'duck'), 'mute')
+  assert.equal(resolveDubbingOriginalAudio('ambient', 'duck', 'keep'), 'duck')
+  assert.equal(resolveDubbingOriginalAudio('native', undefined, 'duck'), 'duck')
+  assert.equal(resolveDubbingOriginalAudio(undefined, undefined, 'keep'), 'keep')
 })

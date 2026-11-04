@@ -216,6 +216,64 @@ export function deleteVoice(id: number): boolean {
   return true
 }
 
+/**
+ * 项目级复用：复制音色字段到目标角色/旁白，生成独立新版本。
+ * 只读源音色，不改变源版本与激活状态；目标默认激活。
+ */
+export function cloneVoice(
+  sourceVoiceId: number,
+  target: { characterId?: number | null; scope?: 'character' | 'narrator'; activate?: boolean; name?: string },
+): VoiceRow {
+  const source = getVoice(sourceVoiceId)
+  if (!source) throw new Error('音色不存在')
+
+  const scope: 'character' | 'narrator' = target.scope === 'narrator' ? 'narrator' : 'character'
+  let character: typeof schema.characters.$inferSelect | null = null
+  if (scope === 'character') {
+    const characterId = Number(target.characterId)
+    if (!Number.isSafeInteger(characterId) || characterId <= 0) throw new Error('目标角色必填')
+    character = db.select().from(schema.characters)
+      .where(and(eq(schema.characters.id, characterId), isNull(schema.characters.deletedAt))).get() ?? null
+    if (!character) throw new Error('目标角色不存在')
+    if (character.dramaId !== source.dramaId) throw new Error('目标角色不属于同一项目')
+  }
+
+  const targetName = scope === 'narrator' ? '旁白' : character!.name
+  const copied = createVoice({
+    dramaId: source.dramaId,
+    characterId: scope === 'narrator' ? null : character!.id,
+    scope,
+    name: (target.name || '').trim() || `${targetName} · 复用 ${source.name}`,
+    source: source.source as VoiceSource,
+    provider: source.provider,
+    model: source.model,
+    externalVoiceId: source.externalVoiceId,
+    voicePrompt: source.voicePrompt,
+    voicePromptSource: source.voicePromptSource,
+    designInstruct: source.designInstruct,
+    refAudioUrl: source.refAudioUrl,
+    refText: source.refText,
+    xVectorOnly: source.xVectorOnly ?? undefined,
+    sampleUrl: source.sampleUrl,
+    sampleText: source.sampleText,
+    gender: source.gender,
+    ageRange: source.ageRange,
+    pitch: source.pitch,
+    speed: source.speed,
+    emotion: source.emotion,
+    language: source.language,
+    seed: source.seed,
+    consentConfirmedAt: source.consentConfirmedAt,
+    status: source.status as VoiceStatus,
+  })
+
+  if (target.activate !== false) {
+    if (scope === 'narrator') setNarratorVoice(source.dramaId, copied.id)
+    else activateVoice(character!.id, copied.id)
+  }
+  return getVoice(copied.id)!
+}
+
 /** 角色最新一条音色（无激活时用于试听兜底） */
 export function getLatestVoiceForCharacter(characterId: number): VoiceRow | null {
   const rows = db.select().from(schema.characterVoices)

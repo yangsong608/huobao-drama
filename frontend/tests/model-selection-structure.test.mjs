@@ -23,7 +23,8 @@ test('workbench offers model selectors for rewrite, image and video generation',
   assert.match(page, /if \(Array\.isArray\(raw\)\) return raw\.filter\(Boolean\)/)
   assert.match(page, /collectModelOptions\(textConfigs\.value\)/)
   assert.match(page, /collectModelOptions\(imageConfigs\.value\)/)
-  assert.match(page, /collectModelOptions\(videoConfigs\.value\)/)
+  // 视频模型按当前模式（原生 / ComfyUI）过滤配置，避免在原生模式下选到 ComfyUI
+  assert.match(page, /collectModelOptions\(videoModelConfigs\.value\)/)
   assert.match(page, /aiConfigAPI\.list\('text'\)/)
 })
 

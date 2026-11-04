@@ -9,8 +9,50 @@ import { getVideoPromptBatchStatus, startVideoPromptBatch } from '../services/vi
 import { getAutomationState, isAutomationRunning, startAutomation, stopAutomation } from '../services/automation.js'
 import { ReworkError, reworkEpisode } from '../services/rework.js'
 import { getDubbingDefaults, VIDEO_AUDIO_MODES } from '../services/app-settings.js'
+import { previewEpisodeComfyRun, runEpisodeComfy } from '../services/comfyui-episode.js'
 
 const app = new Hono()
+
+const VIDEO_MODES = ['native', 'comfyui'] as const
+
+// ComfyUI 整集模式只接受 ComfyUI 视频配置；null 表示本集暂未绑定（运行时回退到 video_config_id）
+async function resolveComfyConfigId(raw: unknown): Promise<number | null> {
+  if (raw === null || raw === undefined || raw === '') return null
+  const id = Number(raw)
+  if (!Number.isInteger(id) || id <= 0) throw new Error('comfyui_config_id 无效')
+  const [config] = await db.select().from(schema.aiServiceConfigs)
+    .where(eq(schema.aiServiceConfigs.id, id))
+  if (!config || config.serviceType !== 'video' || String(config.provider || '').toLowerCase() !== 'comfyui') {
+    throw new Error('comfyui_config_id 必须指向 ComfyUI 视频配置')
+  }
+  return id
+}
+
+async function defaultComfyConfigId(): Promise<number | null> {
+  const rows = (await db.select().from(schema.aiServiceConfigs))
+    .filter(row => row.serviceType === 'video' && row.isActive && String(row.provider || '').toLowerCase() === 'comfyui')
+    .sort((a, b) => (b.priority || 0) - (a.priority || 0))
+  return rows[0]?.id ?? null
+}
+
+/** 工作流快照只存节点对象；空值 = 跟随配置。 */
+function normalizeWorkflowSnapshot(raw: unknown): string | null {
+  if (raw === null || raw === undefined || raw === '') return null
+  let workflow: unknown = raw
+  if (typeof workflow === 'string') {
+    try {
+      workflow = JSON.parse(workflow)
+    } catch {
+      throw new Error('comfyui_workflow_json 不是合法 JSON')
+    }
+  }
+  if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow)) {
+    throw new Error('comfyui_workflow_json 必须是节点对象')
+  }
+  const serialized = JSON.stringify(workflow)
+  if (serialized.length > 2_000_000) throw new Error('comfyui_workflow_json 过大')
+  return serialized
+}
 
 // GET /episodes?drama_id= — 按项目列出剧集（MCP/脚本按项目取集时使用）
 app.get('/', async (c) => {
@@ -45,6 +87,22 @@ app.post('/', async (c) => {
     ? requestedAudioMode
     : getDubbingDefaults().videoAudioModeForNewEpisodes
 
+  const videoMode = (VIDEO_MODES as readonly string[]).includes(body.video_mode) ? body.video_mode : 'native'
+  let comfyuiConfigId: number | null = null
+  try {
+    comfyuiConfigId = 'comfyui_config_id' in body
+      ? await resolveComfyConfigId(body.comfyui_config_id)
+      : videoMode === 'comfyui' ? await defaultComfyConfigId() : null
+  } catch (error: any) {
+    return badRequest(c, error?.message || 'comfyui_config_id 无效')
+  }
+  let comfyuiWorkflowJson: string | null = null
+  try {
+    comfyuiWorkflowJson = normalizeWorkflowSnapshot(body.comfyui_workflow_json)
+  } catch (error: any) {
+    return badRequest(c, error?.message || 'comfyui_workflow_json 无效')
+  }
+
   // Get next episode number（忽略已软删的集，删除中间集后新集号可复用空位之后的最大值）
   const existing = await db.select().from(schema.episodes)
     .where(and(eq(schema.episodes.dramaId, body.drama_id), isNull(schema.episodes.deletedAt)))
@@ -57,6 +115,9 @@ app.post('/', async (c) => {
     title: body.title || `第${nextNum}集`,
     imageConfigId,
     videoConfigId,
+    videoMode,
+    comfyuiConfigId,
+    comfyuiWorkflowJson,
     // 视频分辨率在创建集时固定（480p/720p/1080p），后续可通过 PUT 修改；各视频适配器再映射为厂商档位
     resolution: ['480p', '720p', '1080p'].includes(body.resolution) ? body.resolution : '720p',
     // 原始内容：可在建集时直接粘贴，供「全自动流程」的改写步骤使用
@@ -78,6 +139,8 @@ app.post('/', async (c) => {
     title: ep.title,
     image_config_id: ep.imageConfigId,
     video_config_id: ep.videoConfigId,
+    video_mode: ep.videoMode,
+    comfyui_config_id: ep.comfyuiConfigId,
     resolution: ep.resolution,
     auto_pipeline: ep.autoPipeline,
     auto_dub: ep.autoDub,
@@ -89,7 +152,7 @@ app.put('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const body = await c.req.json()
 
-  const allowed = ['content', 'script_content', 'title', 'description', 'status', 'resolution', 'video_audio_mode', 'bgm_url', 'auto_dub', 'video_config_id']
+  const allowed = ['content', 'script_content', 'title', 'description', 'status', 'resolution', 'video_audio_mode', 'bgm_url', 'auto_dub', 'video_config_id', 'video_mode', 'comfyui_config_id', 'comfyui_workflow_json']
   const updates: Record<string, any> = {}
   for (const key of allowed) {
     if (key in body) updates[key] = body[key]
@@ -120,6 +183,27 @@ app.put('/:id', async (c) => {
       .where(eq(schema.aiServiceConfigs.id, configId))
     if (!config || config.serviceType !== 'video') return badRequest(c, '视频配置不存在或类型不符')
     drizzleUpdates.videoConfigId = configId
+  }
+  if ('video_mode' in updates) {
+    if (!(VIDEO_MODES as readonly string[]).includes(updates.video_mode)) return badRequest(c, 'video_mode 只支持 native/comfyui')
+    drizzleUpdates.videoMode = updates.video_mode
+  }
+  if ('comfyui_config_id' in updates) {
+    try {
+      drizzleUpdates.comfyuiConfigId = await resolveComfyConfigId(updates.comfyui_config_id)
+    } catch (error: any) {
+      return badRequest(c, error?.message || 'comfyui_config_id 无效')
+    }
+  }
+  if ('comfyui_workflow_json' in updates) {
+    try {
+      drizzleUpdates.comfyuiWorkflowJson = normalizeWorkflowSnapshot(updates.comfyui_workflow_json)
+    } catch (error: any) {
+      return badRequest(c, error?.message || 'comfyui_workflow_json 无效')
+    }
+  } else if ('comfyui_config_id' in updates) {
+    // 切换 ComfyUI 配置时旧快照必然不匹配，未显式提供新快照就回落到配置内工作流
+    drizzleUpdates.comfyuiWorkflowJson = null
   }
 
   await db.update(schema.episodes).set(drizzleUpdates).where(eq(schema.episodes.id, id))
@@ -311,6 +395,40 @@ app.get('/:episode_id/storyboards', async (c) => {
   })))
 })
 
+// GET /episodes/:id/comfyui/workflow — 整集工作流预览：映射节点、分镜 segments 与参考图（不含密钥）
+app.get('/:id/comfyui/workflow', async (c) => {
+  const id = Number(c.req.param('id'))
+  const rawConfigId = c.req.query('config_id')
+  const configId = rawConfigId ? Number(rawConfigId) : undefined
+  if (configId !== undefined && (!Number.isInteger(configId) || configId <= 0)) {
+    return badRequest(c, 'config_id 无效')
+  }
+  try {
+    return success(c, await previewEpisodeComfyRun(id, { configId }))
+  } catch (error: any) {
+    return badRequest(c, error?.message || 'ComfyUI 工作流预览失败')
+  }
+})
+
+// POST /episodes/:id/comfyui/run — 提交整集工作流（一次 sys_task，产物登记到拼接导出）
+app.post('/:id/comfyui/run', async (c) => {
+  const id = Number(c.req.param('id'))
+  const body = await c.req.json().catch(() => ({}))
+  const rawConfigId = body?.config_id
+  const configId = rawConfigId === undefined || rawConfigId === null || rawConfigId === ''
+    ? undefined
+    : Number(rawConfigId)
+  if (configId !== undefined && (!Number.isInteger(configId) || configId <= 0)) {
+    return badRequest(c, 'config_id 无效')
+  }
+  try {
+    const result = await runEpisodeComfy(id, { configId, forceNew: body?.force_new === true })
+    return success(c, result)
+  } catch (error: any) {
+    return badRequest(c, error?.message || 'ComfyUI 整集任务提交失败')
+  }
+})
+
 // sys_task 无 episode_id,通过 storyboard/scene/character/prop 关联键归属到当前集
 async function getEpisodeTaskScope(episodeId: number) {
   const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
@@ -332,12 +450,22 @@ async function getEpisodeTaskScope(episodeId: number) {
   const propIds = new Set(dramaProps.map(p => p.id))
 
   const allTasks = await db.select().from(schema.sysTask).where(eq(schema.sysTask.dramaId, ep.dramaId))
+  // 整集 ComfyUI 任务不挂分镜，归属键在 params（episodeId + comfyTimeline）
+  const isEpisodeRun = (params: string | null) => {
+    try {
+      const parsed = JSON.parse(params || '{}')
+      return !!parsed.comfyTimeline && Number(parsed.episodeId) === episodeId
+    } catch {
+      return false
+    }
+  }
   const tasks = allTasks
     .filter(t =>
       (t.storyboardId && storyboardIds.has(t.storyboardId)) ||
       (t.sceneId && sceneIds.has(t.sceneId)) ||
       (t.characterId && characterIds.has(t.characterId)) ||
-      (t.propId && propIds.has(t.propId))
+      (t.propId && propIds.has(t.propId)) ||
+      isEpisodeRun(t.params)
     )
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
 

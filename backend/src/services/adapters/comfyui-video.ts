@@ -13,11 +13,12 @@ import type {
 } from './types'
 import { joinProviderUrl } from './url'
 import {
+  applyComfyTimelineWorkflow,
   applyWorkflowPlaceholders,
   buildComfyViewUrl,
   comfyHeaders,
   comfySeed,
-  extractComfyOutput,
+  extractComfyOutputs,
   parseComfyWorkflow,
   readComfySettings,
   unwrapComfyHistory,
@@ -40,8 +41,28 @@ export class ComfyUIVideoAdapter implements VideoProviderAdapter {
   provider = 'comfyui'
 
   async buildGenerateRequest(config: AIConfig, record: VideoGenerationRecord): Promise<ProviderRequest> {
-    const workflow = parseComfyWorkflow(config)
     const settings = readComfySettings(config)
+    const client_id = settings.clientId || 'huobao-drama'
+
+    // 整集时间线：参考图已由集执行服务上传并写入 timeline_data，这里只注入节点。
+    if (record.comfyTimeline) {
+      const workflow = record.comfyTimeline.workflow ?? parseComfyWorkflow(config)
+      const prompt = applyComfyTimelineWorkflow(workflow, {
+        timelineData: record.comfyTimeline.timelineData,
+        node: record.comfyTimeline.node,
+        input: record.comfyTimeline.input,
+        outputNode: record.comfyTimeline.outputNode,
+        syncInputs: { ...record.comfyTimeline.syncInputs, seed: comfySeed(settings) },
+      })
+      return {
+        url: joinProviderUrl(config.baseUrl, '', '/prompt'),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...comfyHeaders(config) },
+        body: { prompt, client_id },
+      }
+    }
+
+    const workflow = parseComfyWorkflow(config)
     const duration = Math.max(1, Number(record.duration) || 5)
     const fps = settings.fps || DEFAULT_FPS
     const refImages = parseUrlArray(record.referenceImageUrls)
@@ -82,7 +103,7 @@ export class ComfyUIVideoAdapter implements VideoProviderAdapter {
       headers: { 'Content-Type': 'application/json', ...comfyHeaders(config) },
       body: {
         prompt: applyWorkflowPlaceholders(workflow, values),
-        client_id: settings.clientId || 'huobao-drama',
+        client_id,
       },
     }
   }
@@ -107,14 +128,21 @@ export class ComfyUIVideoAdapter implements VideoProviderAdapter {
     }
   }
 
-  parsePollResponse(result: any, config?: AIConfig): VideoPollResponse {
+  parsePollResponse(result: any, config?: AIConfig, record?: VideoGenerationRecord): VideoPollResponse {
     const entry = unwrapComfyHistory(result)
     const settings = config ? readComfySettings(config) : {}
-    const output = extractComfyOutput(entry, settings.outputNode, settings.outputKey)
+    const timeline = record?.comfyTimeline
+    const output = extractComfyOutputs(
+      entry,
+      timeline?.outputNode ?? settings.outputNode,
+      timeline?.outputKey ?? settings.outputKey,
+    )
     if (output.error) return { status: 'failed', error: output.error }
-    if (output.pending || !output.item) return { status: 'processing' }
+    if (output.pending || !output.items.length) return { status: 'processing' }
     if (!config) return { status: 'failed', error: 'ComfyUI 轮询缺少服务配置' }
-    return { status: 'completed', videoUrl: buildComfyViewUrl(config, output.item) }
+    const videoUrls = output.items.map(item => buildComfyViewUrl(config, item))
+    if (videoUrls.length > 1) return { status: 'completed', videoUrl: videoUrls[0], videoUrls }
+    return { status: 'completed', videoUrl: videoUrls[0] }
   }
 
   extractVideoUrl(): string | null {

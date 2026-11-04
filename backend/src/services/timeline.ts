@@ -32,6 +32,10 @@ export interface TimelineLine {
   kind: CueKind
   /** 镜头内相对毫秒 */
   plannedStartMs?: number | null
+  /** 整集绝对起点（毫秒）；设置后忽略 plannedStartMs 与顺序游标 */
+  startOverrideMs?: number | null
+  /** 占位时长（毫秒）；只影响结束时间与字幕，不裁剪音频 */
+  durationOverrideMs?: number | null
   audioDurationMs: number
   audioUrl?: string | null
   /** 已应用的语速（>1 表示音频本就被加速过） */
@@ -121,16 +125,30 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
     }
 
     const planned = Number.isFinite(line.plannedStartMs) ? Math.max(0, Number(line.plannedStartMs)) : 0
-    const relStart = Math.max(MIN_LEAD_MS, planned, cursor - shot.startMs)
-    let start = shot.startMs + relStart
-    if (start < shot.startMs) start = shot.startMs
+    const overrideStart = Number.isFinite(line.startOverrideMs) ? Math.max(0, Number(line.startOverrideMs)) : null
+    let start: number
+    if (overrideStart !== null) {
+      start = overrideStart
+    } else {
+      const relStart = Math.max(MIN_LEAD_MS, planned, cursor - shot.startMs)
+      start = shot.startMs + relStart
+      if (start < shot.startMs) start = shot.startMs
+    }
+    // 只有手动绝对排布越过片尾才丢弃；自动排布保持旧行为（允许贴片尾）
+    if (overrideStart !== null && totalDurationMs > 0 && start >= totalDurationMs) {
+      skippedLineIds.push(line.lineId)
+      continue
+    }
 
     const overlap = start < cursor && cues.length > 0
     let speed = 1
     let duration = Math.max(MIN_LINE_MS, Math.round(line.audioDurationMs || 0))
+    const durationOverride = Number.isFinite(line.durationOverrideMs) ? Math.max(0, Number(line.durationOverrideMs)) : null
     const toleratedEnd = shot.endMs + OVERFLOW_TOLERANCE_MS
 
-    if (start + duration > toleratedEnd && duration > 0) {
+    if (durationOverride && durationOverride > 0) {
+      duration = Math.max(MIN_LINE_MS, Math.round(durationOverride))
+    } else if (overrideStart === null && start + duration > toleratedEnd && duration > 0) {
       const available = Math.max(MIN_LINE_MS, toleratedEnd - start)
       const needed = duration / available
       if (needed > 1.001) {
@@ -145,7 +163,7 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
 
     // 只有整集最后一句超出片尾才裁切（设计 L4）
     if (totalDurationMs > 0 && end > totalDurationMs) {
-      const isLast = cues.length === lines.length - 1
+      const isLast = line === lines[lines.length - 1]
       if (isLast) {
         end = totalDurationMs
         trimmed = true
@@ -153,7 +171,11 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
       }
     }
 
-    const overflowMs = Math.max(0, end - (shot.endMs + OVERFLOW_TOLERANCE_MS))
+    // 手动绝对排布可跨镜头，溢出按整集片尾计算；自动排布沿用镜头容差
+    const overflowLimit = overrideStart !== null && totalDurationMs > 0
+      ? totalDurationMs
+      : shot.endMs + OVERFLOW_TOLERANCE_MS
+    const overflowMs = Math.max(0, end - overflowLimit)
     if (overflowMs > maxOverflowMs) maxOverflowMs = overflowMs
     if (overlap) overlapCount += 1
 

@@ -29,6 +29,7 @@ import projectFiles from './routes/project-files.js'
 import voices, { characterVoices } from './routes/voices.js'
 import lines, { episodeLines } from './routes/lines.js'
 import dubbing from './routes/dubbing.js'
+import audioTracks from './routes/audio-tracks.js'
 import grid from './routes/grid.js'
 import scriptImport from './routes/scriptImport.js'
 import jobs from './routes/jobs.js'
@@ -94,6 +95,8 @@ api.route('/lines', lines)
 api.route('/episodes', episodeLines)
 // 根路径挂载以匹配设计：/episodes/:id/dub、/episodes/:id/subtitles、/jobs/:id
 api.route('/', dubbing)
+// 多轨混音：/episodes/:id/audio/tracks、/audio/preview
+api.route('/', audioTracks)
 // 兼容 M0 的 /dubbing 前缀
 api.route('/dubbing', dubbing)
 api.route('/grid', grid)

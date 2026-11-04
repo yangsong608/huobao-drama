@@ -49,6 +49,12 @@ export const episodes = sqliteTable('episodes', {
   thumbnail: text('thumbnail'),
   imageConfigId: integer('image_config_id'),
   videoConfigId: integer('video_config_id'),
+  /** 视频制作模式：native 原生逐镜 / comfyui 整集工作流（V3-D） */
+  videoMode: text('video_mode').default('native'),
+  /** ComfyUI 视频配置（video_mode=comfyui 时使用）（V3-D） */
+  comfyuiConfigId: integer('comfyui_config_id'),
+  /** 本集 ComfyUI 工作流快照（JSON 字符串；null = 使用配置内工作流）（V3-D） */
+  comfyuiWorkflowJson: text('comfyui_workflow_json'),
   resolution: text('resolution').default('720p'),
   /** 创建该集时是否选择了全自动流程（仅记录意图，进度看 automation_status） */
   autoPipeline: integer('auto_pipeline', { mode: 'boolean' }).default(false),
@@ -414,6 +420,10 @@ export const storyboardLines = sqliteTable('storyboard_lines', {
   plannedEndMs: integer('planned_end_ms'),
   startMs: integer('start_ms'),
   endMs: integer('end_ms'),
+  /** 手动指定整集绝对起点（毫秒）；为空时按镜头与顺序自动排布 */
+  voiceStartMs: integer('voice_start_ms'),
+  /** 手动指定占位时长（毫秒）；为空时使用合成音频真实时长 */
+  voiceDurationMs: integer('voice_duration_ms'),
   audioUrl: text('audio_url'),
   audioDurationMs: integer('audio_duration_ms'),
   audioHash: text('audio_hash'),
@@ -424,6 +434,44 @@ export const storyboardLines = sqliteTable('storyboard_lines', {
   locked: integer('locked', { mode: 'boolean' }).default(false),
   needsReview: integer('needs_review', { mode: 'boolean' }).default(false),
   error: text('error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** 成片附加音轨：环境声/音效/BGM/额外语音 */
+export const episodeAudioTracks = sqliteTable('episode_audio_tracks', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  kind: text('kind').notNull().default('ambience'),
+  name: text('name').notNull(),
+  volume: real('volume').default(1),
+  muted: integer('muted', { mode: 'boolean' }).default(false),
+  solo: integer('solo', { mode: 'boolean' }).default(false),
+  ducking: integer('ducking', { mode: 'boolean' }).default(true),
+  loop: integer('loop', { mode: 'boolean' }).default(false),
+  sortOrder: integer('sort_order').default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** 音轨上的时间段片段 */
+export const episodeAudioClips = sqliteTable('episode_audio_clips', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  trackId: integer('track_id').notNull(),
+  episodeId: integer('episode_id').notNull(),
+  startMs: integer('start_ms').notNull(),
+  endMs: integer('end_ms').notNull(),
+  sourceStartMs: integer('source_start_ms').default(0),
+  fadeInMs: integer('fade_in_ms').default(0),
+  fadeOutMs: integer('fade_out_ms').default(0),
+  sourceUrl: text('source_url'),
+  text: text('text'),
+  voiceId: integer('voice_id'),
+  audioUrl: text('audio_url'),
+  status: text('status').default('ready'),
+  error: text('error'),
+  lineId: integer('line_id'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })

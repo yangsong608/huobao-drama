@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { createRequire } from 'node:module'
-import { buildDialogueTrack, buildBurnFilter, buildLoopedBgmTrack, buildMixGraph, mixEpisodeAudio, probeDurationMs } from '../src/services/audio-mix.js'
+import { buildDialogueTrack, buildBurnFilter, buildExtraTrackAudio, buildLoopedBgmTrack, buildMixGraph, buildMixGraphWithTracks, mixEpisodeAudio, probeDurationMs, renderAudioRange } from '../src/services/audio-mix.js'
 
 const require = createRequire(import.meta.url)
 const ffmpegBin: string = process.env.FFMPEG_BIN || require('ffmpeg-static') || 'ffmpeg'
@@ -108,7 +108,7 @@ test('软字幕短于视频时不得用 -shortest 把整片裁短', async () => 
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
-test('原声 keep 时不挂 sidechain，mute 时压到 0.03', () => {
+test('原声 keep 时不挂 sidechain，mute 必须是真零', () => {
   const keep = buildMixGraph(
     { originalAudio: 'keep', duckingThreshold: 0.05, duckingRatio: 6, bgmVolume: 0.18, targetLufs: -16, targetTp: -2 },
     false,
@@ -120,7 +120,9 @@ test('原声 keep 时不挂 sidechain，mute 时压到 0.03', () => {
     false,
     10,
   )
-  assert.match(mute, /volume=0\.03/)
+  assert.match(mute, /\[0:a\][^;]*volume=0\[bed\]/)
+  assert.doesNotMatch(mute, /volume=0\.03/)
+  assert.doesNotMatch(mute, /sidechaincompress/)
 })
 
 test('烧录滤镜：有 ASS 用 ass，只有 SRT 退回 subtitles', () => {
@@ -192,6 +194,80 @@ test('烧录优先使用 ASS 文件', async (t) => {
     options: { subtitlePath: srt, subtitleAssPath: ass, subtitleMode: 'burn', durationMs: 2000 },
   })
   assert.ok(result.durationMs >= 1900, `烧录后成片应保持约 2000ms，实际 ${result.durationMs}`)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('多轨混音图：输入编号、duck 与权重正确', () => {
+  const resolved = {
+    originalAudio: 'duck' as const,
+    duckingThreshold: 0.05,
+    duckingRatio: 6,
+    bgmVolume: 0.18,
+    targetLufs: -16,
+    targetTp: -2,
+  }
+  const graph = buildMixGraphWithTracks(
+    resolved,
+    { hasBgm: true, tracks: [{ volume: 0.5, ducking: true }, { volume: 1.2, ducking: false }] },
+    10,
+  )
+  assert.match(graph, /\[3:a\]/)
+  assert.match(graph, /\[4:a\]/)
+  assert.match(graph, /\[trk0\]\[vo_trk0\]sidechaincompress/)
+  assert.doesNotMatch(graph, /trk1\]\[vo_trk1\]/)
+  assert.match(graph, /amix=inputs=5:normalize=0:duration=first:weights=1 0\.9 1 1 1\.35/)
+})
+
+test('范围试听混音图：所有输入裁到同一时间段且不套片尾淡出', () => {
+  const graph = buildMixGraphWithTracks(
+    { originalAudio: 'keep', duckingThreshold: 0.05, duckingRatio: 6, bgmVolume: 0.18, targetLufs: -16, targetTp: -2 },
+    { hasBgm: true, tracks: [{ volume: 1, ducking: false }], range: { startSec: 2, endSec: 5 }, bgmFadeOut: false },
+    3,
+  )
+  assert.match(graph, /atrim=2\.000:5\.000/)
+  assert.doesNotMatch(graph, /afade=t=out/)
+})
+
+test('附加音轨：多片段按时码拼成整集等长轨', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mix-extra-'))
+  const a = path.join(dir, 'a.wav')
+  const b = path.join(dir, 'b.wav')
+  makeTone(a, 1, 440)
+  makeTone(b, 0.5, 660)
+  const file = await buildExtraTrackAudio({
+    kind: 'ambience',
+    name: '环境声',
+    volume: 0.5,
+    loop: false,
+    clips: [
+      { audioPath: a, startMs: 500, endMs: 1500 },
+      { audioPath: b, startMs: 2200, endMs: 3200 },
+    ],
+  }, 4000, path.join(dir, 'work'))
+  assert.ok(file, '应生成音轨文件')
+  const duration = await probeDurationMs(file!)
+  assert.ok(Math.abs(duration - 4000) < 120, `附加音轨应约 4000ms，实际 ${duration}`)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('范围试听：输出音频长度与请求时间段一致', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mix-range-'))
+  const tone = path.join(dir, 'tone.wav')
+  makeTone(tone, 4, 330)
+  const dialogue = path.join(dir, 'dialogue.wav')
+  await buildDialogueTrack([{ audioPath: tone, startMs: 0 }], 4000, dialogue, path.join(dir, 'work'))
+  const out = path.join(dir, 'range.m4a')
+  const result = await renderAudioRange({
+    videoPath: null,
+    dialoguePath: dialogue,
+    outputPath: out,
+    rangeStartMs: 1000,
+    rangeEndMs: 3000,
+  })
+  assert.equal(result.startMs, 1000)
+  assert.equal(result.endMs, 3000)
+  const duration = await probeDurationMs(out)
+  assert.ok(Math.abs(duration - 2000) < 200, `试听应约 2000ms，实际 ${duration}`)
   fs.rmSync(dir, { recursive: true, force: true })
 })
 

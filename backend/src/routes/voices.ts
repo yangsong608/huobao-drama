@@ -17,6 +17,7 @@ import { synthesize, type VoiceRef } from '../services/tts.js'
 import { getAudioConfig } from '../services/tts.js'
 import {
   activateVoice,
+  cloneVoice,
   createVoice,
   deactivateVoice,
   deleteVoice,
@@ -206,6 +207,26 @@ voices.put('/:id', async (c) => {
   })
   if (!updated) return notFound(c, '音色不存在')
   return success(c, updated)
+})
+
+voices.post('/:id/clone', async (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '音色编号无效')
+  const body = await c.req.json().catch(() => ({}))
+  const scope = body.scope === 'narrator' ? 'narrator' : 'character'
+  const characterId = scope === 'character' ? parseId(String(body.character_id ?? '')) : null
+  if (scope === 'character' && !characterId) return badRequest(c, '目标角色必填')
+  try {
+    const voice = cloneVoice(id, {
+      characterId,
+      scope,
+      activate: body.activate !== false,
+      name: body.name ? String(body.name) : undefined,
+    })
+    return created(c, voice)
+  } catch (error: any) {
+    return badRequest(c, error?.message || '复制音色失败')
+  }
 })
 
 voices.post('/:id/activate', async (c) => {

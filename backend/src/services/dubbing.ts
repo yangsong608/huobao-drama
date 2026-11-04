@@ -18,8 +18,11 @@ import { now } from '../utils/response.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import { projectStorageRelative, projectSubdirPath } from './project-storage.js'
 import { mergeEpisodeVideos } from './ffmpeg-merge.js'
+import { computeMergeSourceHash } from './merge-plan.js'
+import { normalizeVideoAudioMode, resolveDubbingOriginalAudio } from './video-audio.js'
 import { buildTimeline, scaleClipsToDuration, type TimelineLine } from './timeline.js'
-import { buildDialogueTrack, mixEpisodeAudio, probeDurationMs } from './audio-mix.js'
+import { buildDialogueTrack, mixEpisodeAudio, probeDurationMs, renderAudioRange } from './audio-mix.js'
+import { collectMixTracks } from './audio-tracks.js'
 import { buildSubtitleCues, maxCharsForAspect, toAss, toSrt } from './subtitles.js'
 import { synthesize, type SynthResult } from './tts.js'
 import { resolveVoiceForLine, getVoice, type VoiceRow } from './voice-profile.js'
@@ -105,7 +108,7 @@ interface EnsureMergedResult {
   videoPath: string
   videoUrl: string
   durationMs: number
-  clips: { storyboardId: number; storyboardNumber: number; durationMs: number; videoUrl: string }[]
+  clips: { storyboardId: number; storyboardNumber: number; durationMs: number; videoUrl: string; transition: string }[]
   remixed: boolean
 }
 
@@ -123,6 +126,9 @@ export async function ensureMergedVideo(
     .orderBy(asc(schema.storyboards.storyboardNumber))
     .all()
 
+  const episode = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
+  const audioMode = normalizeVideoAudioMode(episode?.videoAudioMode)
+
   const clips: EnsureMergedResult['clips'] = []
   for (const sb of storyboards) {
     const url = sb.videoUrl || sb.composedVideoUrl
@@ -131,7 +137,7 @@ export async function ensureMergedVideo(
     if (!fs.existsSync(abs)) continue
     const durationMs = await probeDurationMs(abs)
     if (durationMs <= 0) continue
-    clips.push({ storyboardId: sb.id, storyboardNumber: sb.storyboardNumber, durationMs, videoUrl: url })
+    clips.push({ storyboardId: sb.id, storyboardNumber: sb.storyboardNumber, durationMs, videoUrl: url, transition: sb.transition || 'cut' })
   }
   if (!clips.length) throw new Error('本集还没有可用的镜头视频')
 
@@ -142,13 +148,22 @@ export async function ensureMergedVideo(
     .filter((m) => m.status === 'completed' && m.mergedUrl && m.kind !== 'mix')
     .sort((a, b) => (b.id || 0) - (a.id || 0))[0]
 
+  // 合片缓存必须跟随音频模式：切到 silent 后旧成片仍带原声，必须重合。
+  const expectedHash = computeMergeSourceHash(
+    clips.map((c) => ({ url: c.videoUrl, transition: c.transition })),
+    audioMode,
+  )
+  const staleHash = Boolean(latest?.mergedUrl) && latest?.sourceHash !== expectedHash
+
   let videoUrl = latest?.mergedUrl || ''
   let videoPath = videoUrl ? getAbsolutePath(videoUrl) : ''
   let durationMs = videoPath && fs.existsSync(videoPath) ? await probeDurationMs(videoPath) : 0
   let remixed = false
 
-  if (!videoPath || !fs.existsSync(videoPath) || Math.abs(durationMs - sum) > Math.max(1000, sum * 0.05)) {
-    options.onProgress?.(`合片与镜头不一致（${Math.round(durationMs / 1000)}s / ${Math.round(sum / 1000)}s），正在重新合并`)
+  if (!videoPath || !fs.existsSync(videoPath) || Math.abs(durationMs - sum) > Math.max(1000, sum * 0.05) || staleHash) {
+    options.onProgress?.(staleHash
+      ? `音频模式（${audioMode}）或镜头已变化，正在重新合并`
+      : `合片与镜头不一致（${Math.round(durationMs / 1000)}s / ${Math.round(sum / 1000)}s），正在重新合并`)
     const mergeId = await mergeEpisodeVideos(episodeId, dramaId)
     const deadline = Date.now() + 10 * 60 * 1000
     for (;;) {
@@ -295,6 +310,8 @@ export async function buildEpisodeSubtitles(
     speaker: row.speakerName || '旁白',
     kind: (row.speakerType as TimelineLine['kind']) || 'narration',
     plannedStartMs: row.plannedStartMs ?? 0,
+    startOverrideMs: row.voiceStartMs ?? null,
+    durationOverrideMs: row.voiceDurationMs ?? null,
     audioDurationMs: row.audioDurationMs || 0,
     audioUrl: row.audioUrl,
     speed: row.speed ?? 1,
@@ -347,21 +364,25 @@ export async function buildEpisodeSubtitles(
 
 function computeSourceHash(input: {
   clips: EnsureMergedResult['clips']
-  rows: { id: number; audioHash?: string | null }[]
+  rows: { id: number; audioHash?: string | null; voiceStartMs?: number | null; voiceDurationMs?: number | null }[]
   options: DubOptions
+  audioMode: string
   width: number
   height: number
+  tracksSignature?: string
 }) {
   const payload = JSON.stringify({
     clips: input.clips.map((c) => [c.storyboardId, c.videoUrl, c.durationMs]),
-    audio: input.rows.map((r) => [r.id, r.audioHash || '']),
+    audio: input.rows.map((r) => [r.id, r.audioHash || '', r.voiceStartMs ?? null, r.voiceDurationMs ?? null]),
     subtitle: input.options.subtitleMode || 'soft',
     original: input.options.originalAudio || 'duck',
+    audioMode: input.audioMode,
     bgm: input.options.bgmUrl || null,
     bgmVolume: input.options.bgmVolume ?? 0.18,
     duckingRatio: input.options.duckingRatio ?? 6,
     targetLufs: input.options.targetLufs ?? -16,
     canvas: [input.width, input.height],
+    tracks: input.tracksSignature || '',
   })
   return crypto.createHash('sha256').update(payload).digest('hex')
 }
@@ -410,8 +431,14 @@ async function runDubbing(episodeId: number, dramaId: number, options: DubOption
   }
 
   const defaults = getDubbingDefaults()
+  const episodeRow = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
+  const audioMode = normalizeVideoAudioMode(episodeRow?.videoAudioMode)
   const subtitleMode: SubtitleMode = options.subtitleMode || defaults.subtitleMode
-  const originalAudio: OriginalAudioMode = options.originalAudio || defaults.originalAudio
+  const originalAudio: OriginalAudioMode = resolveDubbingOriginalAudio(
+    episodeRow?.videoAudioMode,
+    options.originalAudio,
+    defaults.originalAudio,
+  )
   const bgmVolume = options.bgmVolume ?? defaults.bgmVolume
   const targetLufs = options.targetLufs ?? defaults.targetLufs
   const duckingRatio = options.duckingRatio ?? defaults.duckingRatio
@@ -472,17 +499,20 @@ async function runDubbing(episodeId: number, dramaId: number, options: DubOption
     const outputDir = projectSubdirPath(dramaId, 'merged')
     fs.mkdirSync(outputDir, { recursive: true })
     const outputPath = path.join(outputDir, outputName)
-    const episodeRow = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
     const dramaRow = db.select().from(schema.dramas).where(eq(schema.dramas.id, dramaId)).get()
     const bgmSource = options.bgmUrl || episodeRow?.bgmUrl || dramaRow?.bgmUrl || null
     const bgmPath = bgmSource ? (path.isAbsolute(bgmSource) ? bgmSource : getAbsolutePath(bgmSource)) : null
 
+    const collected = collectMixTracks(episodeId)
+
     const sourceHash = computeSourceHash({
       clips: merged.clips,
-      rows: rows.map((r) => ({ id: r.id, audioHash: r.audioHash })),
+      rows: rows.map((r) => ({ id: r.id, audioHash: r.audioHash, voiceStartMs: r.voiceStartMs, voiceDurationMs: r.voiceDurationMs })),
       options: { ...options, subtitleMode, originalAudio, bgmVolume, targetLufs, duckingRatio },
+      audioMode,
       width: aspect.width,
       height: aspect.height,
+      tracksSignature: collected.signature,
     })
 
     const mergeRow = db.insert(schema.videoMerges).values({
@@ -498,7 +528,10 @@ async function runDubbing(episodeId: number, dramaId: number, options: DubOption
       subtitleUrl: subs.srtUrl,
       dialogueTrackUrl: null,
       bgmUrl: options.bgmUrl ?? null,
-      mixOptions: JSON.stringify({ subtitleMode, originalAudio, bgmVolume, targetLufs, duckingRatio }),
+      mixOptions: JSON.stringify({
+        subtitleMode, originalAudio, audioMode, bgmVolume, targetLufs, duckingRatio,
+        trackCount: collected.count, tracksHash: collected.signature.slice(0, 16),
+      }),
       createdAt: now(),
     }).run()
     const mergeId = Number((mergeRow as any).lastInsertRowid)
@@ -518,6 +551,7 @@ async function runDubbing(episodeId: number, dramaId: number, options: DubOption
         bgmVolume,
         targetLufs,
         duckingRatio,
+        tracks: collected.tracks,
       },
     })
 
@@ -606,6 +640,8 @@ export async function previewTimeline(episodeId: number, dramaId: number) {
       speaker: row.speakerName || '旁白',
       kind: (row.speakerType as TimelineLine['kind']) || 'narration',
       plannedStartMs: row.plannedStartMs ?? 0,
+      startOverrideMs: row.voiceStartMs ?? null,
+      durationOverrideMs: row.voiceDurationMs ?? null,
       audioDurationMs: row.audioDurationMs || 0,
       audioUrl: row.audioUrl,
     })),
@@ -615,9 +651,122 @@ export async function previewTimeline(episodeId: number, dramaId: number) {
   return timeline
 }
 
+/** 只保留最近 N 个匹配前缀的缓存文件，避免手动试听反复生成堆积 */
+function keepLatestFiles(dir: string, prefix: string, keep: number) {
+  if (!fs.existsSync(dir)) return
+  const files = fs.readdirSync(dir)
+    .filter((name) => name.startsWith(prefix))
+    .map((name) => {
+      const file = path.join(dir, name)
+      try {
+        return { file, mtime: fs.statSync(file).mtimeMs }
+      } catch {
+        return null
+      }
+    })
+    .filter((item): item is { file: string; mtime: number } => Boolean(item))
+    .sort((a, b) => b.mtime - a.mtime)
+  for (const item of files.slice(keep)) fs.rmSync(item.file, { force: true })
+}
+
+export interface RangePreviewOptions {
+  startMs?: number
+  endMs?: number
+  bgmUrl?: string | null
+  bgmVolume?: number
+  originalAudio?: OriginalAudioMode
+  targetLufs?: number
+  duckingRatio?: number
+}
+
+/**
+ * 时间段试听：只出音频，不重新合片。
+ * 对话轨按当前时间轴生成并缓存；改音量/音轨时只重跑混音。
+ */
+export async function renderRangePreview(episodeId: number, dramaId: number, options: RangePreviewOptions = {}) {
+  const episode = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
+  if (!episode) throw new Error('集不存在')
+
+  const timeline = await previewTimeline(episodeId, dramaId)
+  const totalMs = timeline.totalDurationMs
+  if (!totalMs) throw new Error('本集还没有可用的镜头视频，无法试听')
+
+  const defaults = getDubbingDefaults()
+  const startMs = Math.min(Math.max(0, Math.round(options.startMs ?? 0)), Math.max(0, totalMs - 500))
+  const requestedEnd = options.endMs ? Math.round(options.endMs) : startMs + 15000
+  const endMs = Math.min(totalMs, Math.max(startMs + 500, requestedEnd))
+  if (endMs - startMs < 200) throw new Error('试听时间段太短')
+
+  const rows = db.select().from(schema.storyboardLines)
+    .where(eq(schema.storyboardLines.episodeId, episodeId))
+    .all()
+    .filter((row) => !row.stale && row.audioUrl && row.audioDurationMs)
+  const audioById = new Map<number, string>()
+  for (const row of rows) {
+    const abs = getAbsolutePath(row.audioUrl!)
+    if (fs.existsSync(abs)) audioById.set(row.id, abs)
+  }
+
+  const fullCues = timeline.cues
+    .map((cue) => ({ audioPath: audioById.get(cue.lineId) || '', startMs: cue.startMs, lineId: cue.lineId }))
+    .filter((cue) => cue.audioPath)
+
+  const audioDir = projectSubdirPath(dramaId, 'audio')
+  fs.mkdirSync(audioDir, { recursive: true })
+  const cueKey = crypto.createHash('sha256')
+    .update(JSON.stringify({
+      totalMs,
+      cues: timeline.cues.map((cue) => [cue.lineId, cue.startMs, cue.endMs, audioById.get(cue.lineId) || '']),
+    }))
+    .digest('hex').slice(0, 16)
+  const dialoguePath = path.join(audioDir, `dialogue-ep${episodeId}-${cueKey}.wav`)
+  if (!fs.existsSync(dialoguePath)) {
+    const workDir = projectSubdirPath(dramaId, 'temp')
+    fs.mkdirSync(workDir, { recursive: true })
+    await buildDialogueTrack(fullCues, totalMs, dialoguePath, workDir)
+    keepLatestFiles(audioDir, `dialogue-ep${episodeId}-`, 3)
+  }
+
+  const latestMerge = db.select().from(schema.videoMerges)
+    .where(eq(schema.videoMerges.episodeId, episodeId))
+    .all()
+    .filter((row) => row.status === 'completed' && row.mergedUrl && row.kind !== 'mix')
+    .sort((a, b) => (b.id || 0) - (a.id || 0))[0]
+  const bedPath = latestMerge?.mergedUrl ? getAbsolutePath(latestMerge.mergedUrl) : null
+  const dramaRow = db.select().from(schema.dramas).where(eq(schema.dramas.id, dramaId)).get()
+  const bgmSource = options.bgmUrl || episode.bgmUrl || dramaRow?.bgmUrl || null
+  const bgmPath = bgmSource ? (path.isAbsolute(bgmSource) ? bgmSource : getAbsolutePath(bgmSource)) : null
+  const collected = collectMixTracks(episodeId)
+
+  const outputName = `range-ep${episodeId}-${Date.now()}.m4a`
+  const outputPath = path.join(audioDir, outputName)
+  const result = await renderAudioRange({
+    videoPath: bedPath && fs.existsSync(bedPath) ? bedPath : null,
+    dialoguePath,
+    outputPath,
+    rangeStartMs: startMs,
+    rangeEndMs: endMs,
+    options: {
+      originalAudio: options.originalAudio || resolveDubbingOriginalAudio(episode.videoAudioMode, undefined, defaults.originalAudio),
+      bgmPath,
+      bgmVolume: options.bgmVolume ?? defaults.bgmVolume,
+      targetLufs: options.targetLufs ?? defaults.targetLufs,
+      duckingRatio: options.duckingRatio ?? defaults.duckingRatio,
+      tracks: collected.tracks,
+    },
+  })
+  keepLatestFiles(audioDir, `range-ep${episodeId}-`, 3)
+
+  return {
+    url: projectStorageRelative(dramaId, 'audio', outputName),
+    ...result,
+    trackCount: collected.count,
+    soloActive: collected.soloActive,
+  }
+}
+
 /** 供 MCP / 自动化使用：已合成且未 stale 的台词数 */
-export function countReadyLines(episodeId: number): number {
-  return db.select().from(schema.storyboardLines)
+export function countReadyLines(episodeId: number): number {  return db.select().from(schema.storyboardLines)
     .where(and(eq(schema.storyboardLines.episodeId, episodeId), eq(schema.storyboardLines.status, 'ready')))
     .all()
     .filter((l) => !l.stale && l.audioUrl)

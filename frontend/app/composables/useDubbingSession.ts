@@ -34,6 +34,8 @@ export function useDubbingSession(options: {
   const saving = ref(false)
   const subtitleMode = ref<'soft' | 'burn' | 'none'>('soft')
   const originalAudio = ref<'duck' | 'keep' | 'mute'>('duck')
+  const episodeVideoAudioMode = ref<'auto' | 'native' | 'ambient' | 'silent'>('auto')
+  const originalAudioLocked = computed(() => episodeVideoAudioMode.value === 'silent')
   const duckingRatio = ref(6)
   const bgmItems = ref<{ name: string; url: string }[]>([])
   const bgmName = ref('')
@@ -46,6 +48,7 @@ export function useDubbingSession(options: {
   const audioConfigsLoaded = ref(false)
   const serviceError = ref('')
   const timelineCues = ref<TimelineCue[]>([])
+  const timelineTotalMs = ref(0)
   const videoUrl = ref('')
   const voiceProfiles = ref<VoiceProfileList[]>([])
   const narratorVoice = ref<VoiceProfile | null>(null)
@@ -55,6 +58,10 @@ export function useDubbingSession(options: {
   const voiceGeneratingAll = ref(false)
   let defaultsAppliedFor: number | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
+
+  function maxCueEnd(cues: TimelineCue[]) {
+    return cues.reduce((max, cue) => Math.max(max, Number(cue.endMs) || 0), 0)
+  }
 
   const busy = computed(() => loading.value || synthesizing.value || saving.value || state.value?.status === 'running')
   const readyCount = computed(() => lines.value.filter(line => line.status === 'ready' && line.audioUrl).length)
@@ -130,6 +137,21 @@ export function useDubbingSession(options: {
   const voiceReadyCount = computed(() =>
     dialogueSpeakers.value.filter(speaker => speaker.voice).length + (narratorLineCount.value > 0 && narratorReady.value ? 1 : 0))
   const voiceTotalCount = computed(() => dialogueSpeakers.value.length + (narratorLineCount.value > 0 ? 1 : 0))
+
+  /** 批量/逐句改派可选的项目音色（自动 + 角色版本 + 旁白） */
+  const allVoiceOptions = computed(() => {
+    const options: { label: string; value: string }[] = [{ label: t('workbench.voiceAuto'), value: '' }]
+    for (const group of voiceProfiles.value) {
+      for (const voice of group.voices) {
+        const suffix = voice.isActive ? ` · ${t('workbench.voiceActiveShort')}` : ''
+        options.push({ label: `${group.character_name} · ${voice.name}${suffix}`, value: String(voice.id) })
+      }
+    }
+    if (narratorVoice.value) {
+      options.push({ label: `${t('workbench.narrator')} · ${narratorVoice.value.name}`, value: String(narratorVoice.value.id) })
+    }
+    return options
+  })
 
   function noteServiceError(error: any) {
     const message = String(error?.message || error || '')
@@ -210,6 +232,7 @@ export function useDubbingSession(options: {
     try {
       const timeline = await dubbingAPI.timeline(episodeId)
       timelineCues.value = Array.isArray(timeline?.cues) ? timeline.cues : []
+      timelineTotalMs.value = Number(timeline?.totalDurationMs) || maxCueEnd(timelineCues.value)
     } catch {
       // 时间轴需要已合成台词；失败时保留旧值
     }
@@ -232,6 +255,7 @@ export function useDubbingSession(options: {
       lines.value = list.items || []
       state.value = dubState
       timelineCues.value = Array.isArray(timeline?.cues) ? timeline.cues : []
+      timelineTotalMs.value = Number(timeline?.totalDurationMs) || maxCueEnd(timelineCues.value)
       videoUrl.value = dubState?.outputUrl || episode?.video_url || episode?.videoUrl || ''
       defaults.value = settings?.defaults || null
       if (cfgList !== null) {
@@ -247,6 +271,11 @@ export function useDubbingSession(options: {
         bgmVolumePct.value = Math.round((defaults.value.bgmVolume ?? 0.18) * 100)
         defaultsAppliedFor = episodeId
       }
+
+      const rawMode = String(episode?.video_audio_mode || episode?.videoAudioMode || 'auto')
+      episodeVideoAudioMode.value = (['auto', 'native', 'ambient', 'silent'].includes(rawMode)
+        ? rawMode : 'auto') as typeof episodeVideoAudioMode.value
+      if (originalAudioLocked.value) originalAudio.value = 'mute'
 
       await Promise.all([loadBgm(episode), loadVoices()])
       if (dubState?.status === 'running') schedule()
@@ -329,6 +358,35 @@ export function useDubbingSession(options: {
     } finally {
       saving.value = false
     }
+  }
+
+  /** 改派单句音色：后端会作废旧音频，需重新合成 */
+  async function assignLineVoice(line: StoryboardLine, voiceId: number | null) {
+    try {
+      await dubbingAPI.updateLine(line.id, { voice_id: voiceId })
+      await load()
+      options.onUpdated?.()
+      toast.success(t('workbench.voiceAssigned'))
+    } catch (error) {
+      toastError(error)
+    }
+  }
+
+  /** 批量改派：逐句写入 voice_id，失败的单句不影响其余 */
+  async function assignVoiceToLines(lineIds: number[], voiceId: number | null) {
+    if (!lineIds.length) return
+    let ok = 0
+    for (const lineId of lineIds) {
+      try {
+        await dubbingAPI.updateLine(lineId, { voice_id: voiceId })
+        ok += 1
+      } catch (error) {
+        toastError(error)
+      }
+    }
+    await load()
+    options.onUpdated?.()
+    toast.success(t('workbench.batchAssigned', { n: ok }))
   }
 
   async function startDub() {
@@ -472,6 +530,8 @@ export function useDubbingSession(options: {
     saving,
     subtitleMode,
     originalAudio,
+    episodeVideoAudioMode,
+    originalAudioLocked,
     duckingRatio,
     bgmItems,
     bgmName,
@@ -482,6 +542,7 @@ export function useDubbingSession(options: {
     dubbingEnabled,
     serviceError,
     timelineCues,
+    timelineTotalMs,
     videoUrl,
     voiceProfiles,
     narratorVoice,
@@ -511,6 +572,7 @@ export function useDubbingSession(options: {
     voiceFallbackNotice,
     voiceReadyCount,
     voiceTotalCount,
+    allVoiceOptions,
     activeVoiceFor,
     load,
     loadVoices,
@@ -522,6 +584,8 @@ export function useDubbingSession(options: {
     synthesizeAll,
     synthesizeLine,
     saveLineText,
+    assignLineVoice,
+    assignVoiceToLines,
     startDub,
     stopDub,
     exportSubtitle,

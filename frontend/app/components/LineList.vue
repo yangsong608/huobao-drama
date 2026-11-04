@@ -8,6 +8,14 @@
         :style="{ transform: `translateY(${row.index * ROW_HEIGHT}px)` }"
       >
         <div class="line-head">
+          <input
+            v-if="selectable"
+            type="checkbox"
+            class="line-select"
+            :checked="isSelected(row.line.id)"
+            @change="toggleSelect(row.line.id)"
+            @click.stop
+          />
           <span class="line-no">#{{ row.line.lineNo }}</span>
           <span v-if="row.line.storyboardNumber" class="line-shot">{{ t('workbench.shot', { n: row.line.storyboardNumber }) }}</span>
           <span class="line-speaker">{{ row.line.speakerName || t('workbench.narrator') }}</span>
@@ -19,6 +27,7 @@
           <span v-if="row.line.stale" class="line-chip is-stale">{{ t('workbench.stale') }}</span>
           <span v-if="row.line.needsReview" class="line-chip is-review">{{ t('workbench.review') }}</span>
           <span v-if="row.line.status === 'failed'" class="line-chip is-failed">{{ t('workbench.failed') }}</span>
+          <span v-if="crossCharacter(row.line)" class="line-chip is-warn">{{ t('workbench.voiceCross') }}</span>
           <span v-if="missingVoice(row.line)" class="line-chip is-warn">{{ t('workbench.issueNoVoice') }}</span>
           <span v-if="longText(row.line)" class="line-chip is-warn">{{ t('workbench.issueLong') }}</span>
           <span v-if="emptyLine(row.line)" class="line-chip is-danger">{{ t('workbench.issueEmpty') }}</span>
@@ -37,6 +46,26 @@
         <p v-else class="line-text" :title="row.line.text" @dblclick="beginEdit(row.line)">{{ row.line.text }}</p>
 
         <div class="line-actions">
+          <select
+            class="line-voice-select"
+            :class="{ 'is-cross': crossCharacter(row.line) }"
+            :value="row.line.voiceId ?? ''"
+            :title="t('workbench.voiceAssignHint')"
+            @change="onVoiceChange(row.line, $event)"
+          >
+            <option value="">{{ t('workbench.voiceAuto') }}</option>
+            <optgroup v-if="ownVoices(row.line).length" :label="t('workbench.voiceOwnGroup')">
+              <option v-for="voice in ownVoices(row.line)" :key="voice.id" :value="voice.id">{{ voiceLabel(voice) }}</option>
+            </optgroup>
+            <optgroup v-if="narratorVoice" :label="t('workbench.narrator')">
+              <option :value="narratorVoice.id">{{ voiceLabel(narratorVoice) }}</option>
+            </optgroup>
+            <optgroup v-if="otherVoiceOptions(row.line).length" :label="t('workbench.voiceOtherGroup')">
+              <option v-for="item in otherVoiceOptions(row.line)" :key="item.voice.id" :value="item.voice.id">
+                {{ item.characterName }} · {{ voiceLabel(item.voice) }}
+              </option>
+            </optgroup>
+          </select>
           <button v-if="row.line.audioUrl" class="line-mini" type="button" @click="emit('play', row.line)">{{ t('workbench.play') }}</button>
           <button class="line-mini" type="button" :disabled="busy" @click="emit('synthesize', row.line)">{{ t('workbench.resynthesize') }}</button>
           <button class="line-mini" type="button" @click="emit('locate', row.line)">{{ t('workbench.locate') }}</button>
@@ -51,7 +80,7 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import type { StoryboardLine } from '~/composables/useApi'
+import type { StoryboardLine, VoiceProfile, VoiceProfileList } from '~/composables/useApi'
 
 const props = withDefaults(defineProps<{
   lines: StoryboardLine[]
@@ -61,6 +90,9 @@ const props = withDefaults(defineProps<{
   showIssues?: boolean
   missingVoiceCharacterIds?: number[]
   narratorMissingVoice?: boolean
+  voiceGroups?: VoiceProfileList[]
+  narratorVoice?: VoiceProfile | null
+  selectable?: boolean
 }>(), {
   busy: false,
   saving: false,
@@ -68,6 +100,9 @@ const props = withDefaults(defineProps<{
   showIssues: false,
   missingVoiceCharacterIds: () => [],
   narratorMissingVoice: false,
+  voiceGroups: () => [],
+  narratorVoice: null,
+  selectable: false,
 })
 
 const emit = defineEmits<{
@@ -75,10 +110,12 @@ const emit = defineEmits<{
   synthesize: [line: StoryboardLine]
   locate: [line: StoryboardLine]
   save: [line: StoryboardLine, text: string]
+  assignVoice: [line: StoryboardLine, voiceId: number | null]
+  selectionChange: [ids: number[]]
 }>()
 
 const { t } = useI18n()
-const ROW_HEIGHT = 96
+const ROW_HEIGHT = 104
 const OVERSCAN = 6
 
 const viewport = ref<HTMLElement | null>(null)
@@ -86,6 +123,7 @@ const scrollTop = ref(0)
 const viewportHeight = ref(360)
 const editingId = ref<number | null>(null)
 const editingText = ref('')
+const selectedIds = ref<number[]>([])
 let observer: ResizeObserver | null = null
 
 const totalHeight = computed(() => props.lines.length * ROW_HEIGHT)
@@ -97,6 +135,73 @@ const visibleRows = computed(() => {
     .slice(startIndex.value, startIndex.value + count)
     .map((line, i) => ({ line, index: startIndex.value + i }))
 })
+
+watch(() => props.lines, (rows) => {
+  const ids = new Set(rows.map(row => row.id))
+  if (selectedIds.value.some(id => !ids.has(id))) {
+    selectedIds.value = selectedIds.value.filter(id => ids.has(id))
+    emit('selectionChange', selectedIds.value)
+  }
+})
+
+function isSelected(id: number) {
+  return selectedIds.value.includes(id)
+}
+function toggleSelect(id: number) {
+  selectedIds.value = isSelected(id)
+    ? selectedIds.value.filter(item => item !== id)
+    : [...selectedIds.value, id]
+  emit('selectionChange', selectedIds.value)
+}
+function clearSelection() {
+  selectedIds.value = []
+  emit('selectionChange', [])
+}
+defineExpose({ clearSelection })
+
+function voiceById(id: number | null | undefined): VoiceProfile | null {
+  if (!id) return null
+  for (const group of props.voiceGroups) {
+    const voice = group.voices.find(item => item.id === id)
+    if (voice) return voice
+  }
+  return props.narratorVoice?.id === id ? props.narratorVoice : null
+}
+
+function ownVoices(line: StoryboardLine): VoiceProfile[] {
+  if (line.speakerType !== 'dialogue' || !line.characterId) return []
+  const group = props.voiceGroups.find(item => item.character_id === line.characterId)
+  return group ? [...group.voices].sort((a, b) => Number(b.isActive) - Number(a.isActive) || b.id - a.id) : []
+}
+
+function otherVoiceOptions(line: StoryboardLine): { characterName: string; voice: VoiceProfile }[] {
+  const options: { characterName: string; voice: VoiceProfile }[] = []
+  for (const group of props.voiceGroups) {
+    if (group.character_id === line.characterId) continue
+    for (const voice of group.voices) options.push({ characterName: group.character_name, voice })
+  }
+  return options
+}
+
+function voiceLabel(voice: VoiceProfile) {
+  const parts = [voice.name]
+  if (voice.isActive) parts.push(t('workbench.voiceActiveShort'))
+  if (voice.status !== 'ready') parts.push(voice.status)
+  return parts.join(' · ')
+}
+
+function crossCharacter(line: StoryboardLine) {
+  if (!line.voiceId) return false
+  const voice = voiceById(line.voiceId)
+  if (!voice) return false
+  if (voice.characterId) return voice.characterId !== (line.characterId || null)
+  return line.speakerType === 'dialogue'
+}
+
+function onVoiceChange(line: StoryboardLine, event: Event) {
+  const raw = (event.target as HTMLSelectElement).value
+  emit('assignVoice', line, raw ? Number(raw) : null)
+}
 
 function onScroll(event: Event) {
   scrollTop.value = (event.target as HTMLElement).scrollTop
@@ -155,7 +260,7 @@ onBeforeUnmount(() => {
 .line-row {
   position: absolute;
   inset: 0 0 auto 0;
-  height: calc(96px - 6px);
+  height: calc(104px - 6px);
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -168,6 +273,7 @@ onBeforeUnmount(() => {
 .line-row.is-failed { border-color: rgba(217, 83, 79, .4); }
 .line-row.is-stale { background: rgba(196, 138, 27, .06); }
 .line-head { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-3); flex-wrap: nowrap; overflow: hidden; }
+.line-select { margin: 0; flex: 0 0 auto; }
 .line-no { font-variant-numeric: tabular-nums; }
 .line-shot { color: var(--text-3); }
 .line-speaker { color: var(--text-2); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -205,6 +311,17 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 .line-actions { display: flex; align-items: center; gap: 10px; min-height: 14px; }
+.line-voice-select {
+  max-width: 190px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--bg-2, transparent);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 4px;
+}
+.line-voice-select.is-cross { border-color: rgba(196, 138, 27, .5); color: #c48a1b; }
 .line-mini { background: none; border: none; padding: 0; font: inherit; font-size: 11px; color: var(--text-3); cursor: pointer; }
 .line-mini:hover { color: var(--accent, #2b7bd6); }
 .line-mini:disabled { opacity: .45; cursor: default; }

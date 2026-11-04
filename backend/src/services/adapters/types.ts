@@ -58,7 +58,7 @@ export interface VideoProviderAdapter {
 
   buildPollRequest(config: AIConfig, taskId: string): ProviderRequest
 
-  parsePollResponse(result: any, config?: AIConfig): VideoPollResponse
+  parsePollResponse(result: any, config?: AIConfig, record?: VideoGenerationRecord): VideoPollResponse
 
   extractVideoUrl(result: any): string | null
 }
@@ -123,7 +123,25 @@ export interface VideoGenerationRecord {
   seed?: number | null
   promptExtend?: number | boolean | null
   watermark?: number | boolean | null
+  /** ComfyUI 整集时间线任务（false/undefined 时走占位符单任务模式） */
+  comfyTimeline?: ComfyTimelineTask | null
   // ... 其他字段
+}
+
+/** ComfyUI 整集：已构建的 timeline_data 与节点绑定 */
+export interface ComfyTimelineTask {
+  timelineData: Record<string, unknown>
+  node: string
+  input: string
+  /** 提交时工作流快照；缺省使用配置内工作流 */
+  workflow?: Record<string, unknown> | null
+  outputNode?: string
+  outputKey?: string
+  /** 写入时间线节点输入框的图参数（节点不存在该输入时跳过） */
+  syncInputs?: Record<string, string | number>
+  segmentStoryboardIds?: number[]
+  fps?: number
+  totalFrames?: number
 }
 
 export interface ImageGenResponse {
@@ -150,6 +168,8 @@ export interface VideoPollResponse {
   status: 'pending' | 'processing' | 'completed' | 'failed'
   stage?: 'transferring'
   videoUrl?: string
+  /** ComfyUI 多输出：按节点/数组顺序拼接后登记 */
+  videoUrls?: string[]
   duration?: number
   error?: string
 }

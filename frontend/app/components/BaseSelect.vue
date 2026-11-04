@@ -2,7 +2,7 @@
   <div class="base-select">
     <AppMenu v-model:open="isOpen" block match-width :min-width="132" :max-height="380">
       <template #trigger>
-        <button type="button" class="base-select-trigger" :class="{ open: isOpen }">
+        <button type="button" class="base-select-trigger" :class="{ open: isOpen, disabled }" :disabled="disabled">
           <span :class="selectedLabel ? '' : 'placeholder'" class="base-select-label">{{ selectedLabel || effectivePlaceholder }}</span>
           <ChevronDown :size="13" class="base-select-arrow" :class="{ open: isOpen }" />
         </button>
@@ -53,6 +53,7 @@ const props = defineProps({
   options: { type: Array, default: () => [] }, // [{ label, value, group? }, ...] or [{ label, group, options: [] }]
   placeholder: { type: String, default: '' },  // 缺省回退 t('components.baseSelect.placeholder')
   searchable: { type: Boolean, default: true },
+  disabled: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -114,6 +115,7 @@ const selectedLabel = computed(() => {
 })
 
 function pick(opt) {
+  if (props.disabled) return
   emit('update:modelValue', opt.value)
   isOpen.value = false
 }
@@ -194,6 +196,11 @@ function onSearchKeydown(e) {
   outline: none;
   border-color: var(--action-primary);
   box-shadow: 0 0 0 3px var(--button-focus), var(--button-shadow-hover);
+}
+.base-select-trigger.disabled,
+.base-select-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .base-select-trigger .placeholder {
   color: var(--text-3);

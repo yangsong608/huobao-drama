@@ -17,7 +17,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { DATA_ROOT } from '../utils/paths.js'
 
-export const PROJECT_SUBDIRS = ['images', 'videos', 'uploads', 'merged', 'temp'] as const
+export const PROJECT_SUBDIRS = ['images', 'videos', 'uploads', 'merged', 'temp', 'audio'] as const
 export type ProjectSubdir = typeof PROJECT_SUBDIRS[number]
 
 const PROJECT_PATH_RE = /^static\/projects\/(\d+)\/(.+)$/
