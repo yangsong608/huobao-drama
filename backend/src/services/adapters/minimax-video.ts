@@ -65,6 +65,18 @@ function parseUrlArray(raw?: string | null): string[] {
   }
 }
 
+function normalizeQuality(raw: unknown): 'preview' | 'final' | null {
+  const value = String(raw ?? '').trim().toLowerCase()
+  return value === 'preview' || value === 'final' ? value : null
+}
+
+function settingsNumber(settings: Record<string, unknown> | undefined, key: string): number | null {
+  const raw = settings?.[key]
+  if (raw === '' || raw === null || raw === undefined) return null
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
+}
+
 export class MiniMaxVideoAdapter implements VideoProviderAdapter {
   provider = 'minimax'
 
@@ -85,6 +97,7 @@ export class MiniMaxVideoAdapter implements VideoProviderAdapter {
     if (prompt.length > PROMPT_MAX_CHARS) {
       throw new Error(`提示词超长：MiniMax H3 上限 ${PROMPT_MAX_CHARS} 字符，当前 ${prompt.length}`)
     }
+    if (lastFrame && !firstFrame) throw new Error('MiniMax H3 尾帧必须与首帧同时提供')
 
     const totalRefs = refImages.length + refVideos.length + refAudios.length + (firstFrame ? 1 : 0) + (lastFrame ? 1 : 0)
     if (refImages.length > REF_LIMITS.images || refVideos.length > REF_LIMITS.videos || refAudios.length > REF_LIMITS.audios || totalRefs > REF_LIMITS.total) {
@@ -128,6 +141,16 @@ export class MiniMaxVideoAdapter implements VideoProviderAdapter {
       if (record.audioMode === 'ambient' || record.audioMode === 'silent') {
         body.audio_mode = record.audioMode
       }
+      // 质量档：preview 4 步 LoRA 快速迭代，final 8 步 LoRA 交付
+      const quality = normalizeQuality(record.quality ?? config.settings?.quality)
+      if (quality) body.quality = quality
+      // 负向提示词 / 固定种子 / CFG 走本地扩展，云端不识别这些字段
+      const negative = String(config.settings?.negative_prompt ?? '').trim()
+      if (negative) body.negative_prompt = negative
+      const seed = record.seed ?? settingsNumber(config.settings, 'seed')
+      if (seed != null) body.seed = seed
+      const cfg = settingsNumber(config.settings, 'cfg')
+      if (cfg != null) body.cfg = cfg
     }
 
     return {

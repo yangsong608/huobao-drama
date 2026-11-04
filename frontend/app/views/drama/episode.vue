@@ -42,7 +42,7 @@
             v-model="videoModel"
             :label="t('common.serviceType.video')"
             :options="videoModelOptions"
-            :default-label="t('episode.model.defaultWith', { model: videoModelOptions[0].model })"
+            :default-label="defaultVideoModelLabel"
             :show-config="videoModelMultiCfg"
           />
           <ModelSelect
@@ -1065,6 +1065,10 @@
               <div class="video-task-meta">{{ t('episode.tasks.meta', { n: genTaskRows.length }) }}</div>
             </div>
             <div class="task-drawer-head-actions">
+              <button class="btn btn-sm" :disabled="!genTaskClearableCount || clearTasks.loading" @click="clearTasks.open = true">
+                <Trash2 :size="12" />
+                {{ t('episode.tasks.clear') }}
+              </button>
               <button class="btn btn-sm" @click="loadGenTasks">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 {{ t('common.refresh') }}
@@ -1245,15 +1249,16 @@
                   <p v-else class="asset-ref-hint">{{ t('episode.asset.refEmpty') }}</p>
                 </div>
 
-                <CharacterVoice v-if="assetDetail.type === 'character'" :key="assetDetailItem.id" :character="assetDetailItem" @updated="updateCharacterVoice" />
-                <VoiceProfilePanel
-                  v-if="assetDetail.type === 'character'"
-                  :key="`voice-profile-${assetDetailItem.id}`"
-                  :character="assetDetailItem"
-                  :drama-id="dramaId"
-                  :episode-id="epId"
-                  @updated="updateCharacterVoice"
-                />
+                <div v-if="assetDetail.type === 'character'" class="voice-stack">
+                  <VoiceProfilePanel
+                    :key="`voice-profile-${assetDetailItem.id}`"
+                    :character="assetDetailItem"
+                    :drama-id="dramaId"
+                    :episode-id="epId"
+                    @updated="updateCharacterVoice"
+                  />
+                  <CharacterVoice :key="assetDetailItem.id" :character="assetDetailItem" @updated="updateCharacterVoice" />
+                </div>
               </aside>
 
               <section class="asset-detail-editor-panel">
@@ -1573,6 +1578,16 @@
         @confirm="confirmDeleteAsset"
         @cancel="assetDelete.open = false"
       />
+
+      <ConfirmDialog
+        :open="clearTasks.open"
+        :title="t('episode.tasks.clearTitle')"
+        :message="t('episode.tasks.clearMessage', { n: genTaskClearableCount })"
+        :confirm-text="t('episode.tasks.clearConfirm')"
+        :loading="clearTasks.loading"
+        @confirm="confirmClearGenTasks"
+        @cancel="clearTasks.open = false"
+      />
     </main>
     </div>
   </div>
@@ -1599,7 +1614,7 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import {
   Users, FileText, FolderKanban, Clapperboard, Download, Loader2,
-  Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal,
+  Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2,
 } from 'lucide-vue-next'
 import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
@@ -1764,15 +1779,16 @@ const prodTabIdx = computed({
 const imageConfigs = ref([])
 const videoConfigs = ref([])
 const textConfigs = ref([])
-// 生成时可选模型：空串 = 跟随配置默认（models[0]）；选择持久化到 localStorage，刷新页面后保留
-const MODEL_STORE_KEYS = { chat: 'huobao:model:chat', image: 'huobao:model:image', video: 'huobao:model:video' }
+// 生成时可选模型：空串 = 跟随配置默认（models[0]）。文本/图片是全局偏好；
+// 视频模型属于集级配置，按 episodes.video_config_id 恢复，存储键按集隔离，避免跨集串用。
+const MODEL_STORE_KEYS = { chat: 'huobao:model:chat', image: 'huobao:model:image' }
 function readStoredModel(key, legacyKey = '') {
   try { return localStorage.getItem(key) || (legacyKey && localStorage.getItem(legacyKey)) || '' } catch { return '' }
 }
 // 顶栏文本模型：适用于所有 Chat Agent 调用（改写/提取/拆镜/视频提示词/最终提示词），空串 = 跟随配置默认
 const chatModel = ref(readStoredModel(MODEL_STORE_KEYS.chat, 'huobao:model:rewrite'))
 const imageModel = ref(readStoredModel(MODEL_STORE_KEYS.image))
-const videoModel = ref(readStoredModel(MODEL_STORE_KEYS.video))
+const videoModel = ref('')
 function persistModel(modelRef, key) {
   watch(modelRef, v => {
     try { v ? localStorage.setItem(key, v) : localStorage.removeItem(key) } catch {}
@@ -1780,7 +1796,6 @@ function persistModel(modelRef, key) {
 }
 persistModel(chatModel, MODEL_STORE_KEYS.chat)
 persistModel(imageModel, MODEL_STORE_KEYS.image)
-persistModel(videoModel, MODEL_STORE_KEYS.video)
 // 左侧菜单栏收起/展开：收起为窄图标栏给内容区让位，持久化到 localStorage
 const SIDEBAR_COLLAPSED_KEY = 'huobao:sidebar-collapsed'
 const sidebarCollapsed = ref((() => {
@@ -1806,6 +1821,7 @@ const failedVideoMessages = ref({})
 const genTasks = ref([])
 const genMerges = ref([])
 const taskDrawer = ref(false)
+const clearTasks = ref({ open: false, loading: false })
 let genTasksTimer = null
 
 function openTaskDrawer() {
@@ -2418,6 +2434,12 @@ function hasMultiConfigs(options) {
 const textModelOptions = computed(() => collectModelOptions(textConfigs.value))
 const imageModelOptions = computed(() => collectModelOptions(imageConfigs.value))
 const videoModelOptions = computed(() => collectModelOptions(videoConfigs.value))
+// 未显式选择时展示集锁定配置的首个模型，而不是全部配置里优先级最高的那个
+const defaultVideoModelLabel = computed(() => {
+  const locked = videoConfigs.value.find(c => c.id === Number(lockedVideoConfigId.value) && c.is_active)
+  const model = configModels(locked)[0] || videoModelOptions.value[0]?.model || ''
+  return t('episode.model.defaultWith', { model })
+})
 const selectedVideoConfig = computed(() => {
   const selected = findModelOption(videoModelOptions.value, videoModel.value)
   if (selected) return videoConfigs.value.find(config => config.id === selected.configId)
@@ -2506,10 +2528,92 @@ function pruneStaleModel(modelRef, optionsRef) {
 }
 pruneStaleModel(chatModel, textModelOptions)
 pruneStaleModel(imageModel, imageModelOptions)
-pruneStaleModel(videoModel, videoModelOptions)
+// 视频模型不走通用清理：失效选项由 syncVideoModelWithEpisode 静默回退，避免触发配置写回
 const textModelMultiCfg = computed(() => hasMultiConfigs(textModelOptions.value))
 const imageModelMultiCfg = computed(() => hasMultiConfigs(imageModelOptions.value))
 const videoModelMultiCfg = computed(() => hasMultiConfigs(videoModelOptions.value))
+
+// ===== 顶栏视频模型 ↔ 集锁定配置 =====
+// 视频生成按集的 video_config_id 锁定服务配置：顶栏切换写回该字段，
+// 刷新或切集时再按字段恢复（配置内具体模型按集记忆），避免全局 localStorage 串到其他集。
+const videoConfigReady = ref(false)
+let videoModelSilent = false
+let videoConfigWritePending = 0
+let confirmedVideoConfigId = null
+let videoConfigWriteSeq = 0
+let videoConfigWriteQueue = Promise.resolve()
+
+function episodeVideoModelStoreKey() {
+  return `huobao:model:video:episode:${episode.value?.id || 0}`
+}
+function readEpisodeVideoModel() {
+  try { return localStorage.getItem(episodeVideoModelStoreKey()) || '' } catch { return '' }
+}
+function setVideoModelQuietly(key) {
+  videoModelSilent = true
+  videoModel.value = key
+  videoModelSilent = false
+}
+
+function syncVideoModelWithEpisode() {
+  if (!episode.value || !videoModelOptions.value.length) return
+  // 写回未完成时不要用旧锁定值把刚选的模型拉回去
+  if (videoConfigWritePending > 0) return
+  const lockedId = Number(lockedVideoConfigId.value) || 0
+  const selected = findModelOption(videoModelOptions.value, videoModel.value)
+  let target = null
+  if (lockedId) {
+    const stored = findModelOption(videoModelOptions.value, readEpisodeVideoModel())
+    target = selected?.configId === lockedId
+      ? selected
+      : stored?.configId === lockedId
+        ? stored
+        : videoModelOptions.value.find(o => o.configId === lockedId) || null
+  } else if (!videoConfigReady.value) {
+    target = selected || findModelOption(videoModelOptions.value, readEpisodeVideoModel())
+  }
+  if (target && target.key !== videoModel.value) setVideoModelQuietly(target.key)
+  else if (!target && videoModel.value && !selected) setVideoModelQuietly('')
+  confirmedVideoConfigId = lockedId || null
+  videoConfigReady.value = true
+}
+watch([videoModelOptions, lockedVideoConfigId, () => episode.value?.id], syncVideoModelWithEpisode)
+
+// 配置内具体模型按集记忆；配置本身仍以集锁定为准
+watch(videoModel, key => {
+  if (!videoConfigReady.value) return
+  try {
+    if (key) localStorage.setItem(episodeVideoModelStoreKey(), key)
+    else localStorage.removeItem(episodeVideoModelStoreKey())
+  } catch { /* 静默 */ }
+})
+
+// 顶栏切换模型时把所属配置写回集：串行执行，只落最后一次选择；失败回滚选择与锁定值。
+watch(videoModel, (key, prevKey) => {
+  if (videoModelSilent || !videoConfigReady.value || !episode.value?.id || !key) return
+  const configId = ownerConfigId(videoModelOptions.value, key)
+  if (!configId) return
+  const seq = ++videoConfigWriteSeq
+  videoConfigWritePending++
+  videoConfigWriteQueue = videoConfigWriteQueue.catch(() => {}).then(async () => {
+    try {
+      if (seq !== videoConfigWriteSeq) return
+      const prevLocked = confirmedVideoConfigId ?? (Number(lockedVideoConfigId.value) || null)
+      await episodeAPI.update(epId.value, { video_config_id: configId })
+      if (seq !== videoConfigWriteSeq) return
+      if (episode.value) episode.value.video_config_id = configId
+      confirmedVideoConfigId = configId
+      toast.success(t('episode.topbar.videoConfigSwitched', { name: bareModelName(key) }))
+    } catch (e) {
+      if (seq !== videoConfigWriteSeq) return
+      setVideoModelQuietly(prevKey)
+      if (episode.value) episode.value.video_config_id = prevLocked
+      toastError(e)
+    } finally {
+      videoConfigWritePending--
+    }
+  })
+}, { flush: 'sync' })
 
 // Production step helpers
 // ========== 任务列表面板 ==========
@@ -2569,6 +2673,26 @@ const genTaskFailedCount = computed(() =>
   genTasks.value.filter(t => t.status === 'failed').length +
   genMerges.value.filter(m => m.status === 'failed').length
 )
+// 清空范围只含 sys_task 的已完成/失败记录；成片版本与进行中任务保留
+const genTaskClearableCount = computed(() =>
+  genTasks.value.filter(t => t.status === 'completed' || t.status === 'failed').length
+)
+
+async function confirmClearGenTasks() {
+  if (!epId.value || clearTasks.value.loading) return
+  clearTasks.value.loading = true
+  try {
+    const result = await taskAPI.clearByEpisode(epId.value)
+    clearTasks.value.open = false
+    failedVideoMessages.value = {}
+    await loadGenTasks()
+    toast.success(t('episode.tasks.cleared', { n: result?.deleted ?? 0 }))
+  } catch (err) {
+    toastError(err)
+  } finally {
+    clearTasks.value.loading = false
+  }
+}
 
 function genTaskTargetLabel(task) {
   if (task.storyboard_id) {
@@ -3815,6 +3939,9 @@ async function genVid(sb, opts = {}) {
   if (forceNew && !window.confirm(t('episode.recovery.confirmNew'))) return
   const referenceImages = getShotReferenceImages(sb)
   const audioMode = episodeVideoAudioMode.value
+  // 分镜若已生成首/尾帧则走 fl2v；尾帧必须与首帧成对，避免后端拒绝
+  const firstFrameImage = sb.first_frame_image || sb.firstFrameImage
+  const lastFrameImage = sb.last_frame_image || sb.lastFrameImage
   // 参考素材完全来自分镜绑定的角色/场景/道具图片
   const params = {
     storyboard_id: sb.id,
@@ -3828,6 +3955,8 @@ async function genVid(sb, opts = {}) {
     config_id: ownerConfigId(videoModelOptions.value, videoModel.value),
     reference_image_urls: referenceImages,
   }
+  if (firstFrameImage) params.first_frame_url = firstFrameImage
+  if (firstFrameImage && lastFrameImage) params.last_frame_url = lastFrameImage
   if (!params.prompt && !referenceImages.length) {
     toast.error(t('episode.vid.needRefOrPrompt'))
     return
@@ -6098,6 +6227,12 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 @keyframes asset-ref-spin { to { transform: rotate(360deg); } }
 .asset-ref-hint { margin: 0; color: var(--text-3); font-size: 10.5px; line-height: 1.5; }
+/* 角色音色：音色档案在上，直传参考音在下，共用一条分隔线 */
+.voice-stack {
+  display: flex; flex-direction: column; gap: 12px; min-width: 0;
+  border-top: 1px solid var(--surface-outline); padding-top: 12px; margin-top: 4px;
+}
+.voice-stack :deep(.character-voice) { margin-top: 0; padding-top: 0; }
 .asset-ref-chip {
   font-size: 10px;
   font-weight: 700;

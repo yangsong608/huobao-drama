@@ -5,6 +5,8 @@
   },
   "characterVoice": {
     "title": "キャラクターの声",
+    "sampleTitle": "参考音声を直接アップロード",
+    "directHint": "明瞭な音声を動画の参考音として直接アップロードします。声のプロファイルは生成しません。上のプロファイルといずれか一方を使用してください。",
     "forCharacter": "{name}の声",
     "upload": "音声をアップロード",
     "replace": "音声を差し替え",
@@ -672,6 +674,11 @@
       "seedInvalid": "シードは整数で入力してください",
       "fpsInvalid": "フレームレートは正の数で入力してください",
       "sampleRateInvalid": "サンプルレートは正の整数で入力してください",
+      "h3Quality": "ローカル H3 品質",
+      "h3QualityHint": "プレビューは 4 ステップ LoRA で高速確認、納品は 8 ステップ LoRA を使用",
+      "h3QualityPreview": "プレビュー（4 ステップ）",
+      "h3QualityFinal": "納品（8 ステップ）",
+      "h3LocalOnlyHint": "これらの設定はローカル H3 互換レイヤーでのみ有効です。クラウド MiniMax では無視されます",
       "workflowRequired": "ComfyUI にはワークフロー JSON が必要です",
       "workflowInvalid": "ワークフロー JSON が不正です。API 形式のワークフローを貼り付けてください",
       "outputFormat": "画像形式",
@@ -690,7 +697,17 @@
       "audioFormat": "音声形式",
       "sampleRate": "サンプルレート",
       "emotion": "感情",
-      "emotionPlaceholder": "例: happy / sad。空欄で既定"
+      "emotionPlaceholder": "例: happy / sad。空欄で既定",
+      "ttsTimeout": "合成タイムアウト（ミリ秒）",
+      "ttsTimeoutHint": "空欄時はモデルに従います：191 は 650000、旧ローカルサービスは 120000",
+      "ttsConcurrency": "並列数",
+      "ttsConcurrencyHint": "191 は GPU あたり 1 タスクです。1 を推奨（範囲 1–8）",
+      "ttsMaxInputChars": "1 回の最大文字数",
+      "ttsMaxInputCharsHint": "191 は最大 500 文字です。超過分は句読点で自動分割されます。空欄時はモデルに従います",
+      "ttsMaxNewTokens": "最大生成 token",
+      "ttsMaxNewTokensHint": "191 の範囲は 64–2048、空欄時は 2048",
+      "ttsSeedHint": "空欄時はサービスの既定値（191 は 42）",
+      "qwen191Hint": "191 ローカルサービス：Base URL は http://127.0.0.1:18190（/v1 を付けない）を指定してください。音色 ID は Serena / Vivian などの内蔵名を使用します。音色設計は自動的に /v1/audio/speech を使用します。参照音声のクローンは HTTP では未対応です。"
     },
     "styleDialog": {
       "editTitle": "スタイルプリセットを編集",
@@ -799,7 +816,8 @@
       "start": "制作を開始",
       "resolution": "解像度",
       "videoAudio": "ネイティブ音声",
-      "videoAudioSwitched": "この話の動画音声を「{mode}」に切り替えました"
+      "videoAudioSwitched": "この話の動画音声を「{mode}」に切り替えました",
+      "videoConfigSwitched": "この話の動画設定を {name} に切り替えました"
     },
     "model": {
       "defaultWith": "デフォルト · {model}",
@@ -1156,7 +1174,12 @@
       "sbN": "分镜 #{n}",
       "generic": "汎用",
       "fullMerge": "話全体の結合",
-      "mergeKind": "結合"
+      "mergeKind": "結合",
+      "clear": "クリア",
+      "clearTitle": "完了/失敗タスクをクリア",
+      "clearMessage": "この話の完了または失敗した {n} 件のタスク記録を削除します。実行中のタスクと結合版は保持され、ディスク上のファイルは削除されません。",
+      "clearConfirm": "記録をクリア",
+      "cleared": "{n} 件のタスク記録をクリアしました"
     },
     "export": {
       "notReadyDesc": "先に分镜と制作の工程を完了してください",
@@ -1350,7 +1373,14 @@
     "externalVoiceId": "外部音色 ID",
     "externalVoiceIdPlaceholder": "サービスコンソールの音色 ID",
     "externalVoiceIdHint": "阿里雲/豆包のクラウド音声で必要。ローカル Qwen3-TTS は空欄可",
-    "externalVoiceIdSaved": "外部音色 ID を保存しました"
+    "externalVoiceIdSaved": "外部音色 ID を保存しました",
+    "version": "声のバージョン",
+    "syncStateSynced": "動画参考音に同期済み",
+    "syncStateStale": "動画参考音は別バージョン",
+    "syncStateNone": "動画参考音に未設定",
+    "syncHintStale": "この声はまだ同期されていません。動画生成では以前の参考音が使われます。",
+    "advanced": "詳細設定（プロンプト / 音色 ID / 指示）",
+    "capabilityHint": "参考音声に対応：阿里雲 Wan 3.0、豆包 Seedance 2.0、火宝クラウド MiniMax。ローカル H3 は音声参照に非対応のため、吹き替えワークベンチで統一してください。"
   },
   "workbench": {
     "title": "吹き替えワークベンチ",

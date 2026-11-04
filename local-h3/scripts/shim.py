@@ -10,7 +10,8 @@
 画布换算：官方 resolution 只有 768P / 2K，本地额外接受 resolution_tier（480p/720p/1080p）
 与 aspect_ratio（16:9 / 9:16 / ...），按短边档位 + 比例算出 32 倍数的真实画布。
 """
-import json, os, re, time, uuid, urllib.error, urllib.request, urllib.parse, threading
+import hashlib, json, os, re, shutil, subprocess, tempfile, time, uuid
+import urllib.error, urllib.request, urllib.parse, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 COMFY = "http://127.0.0.1:8188"
@@ -20,6 +21,35 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # H3 画布必须是 32 的倍数（VAE ÷16 后再 2×2 patch），否则 patchify_video 直接报错
 CANVAS_STRIDE = 32
 DEFAULT_RATIO = 16 / 9
+
+# H3 只接受 5+17k 帧；24fps 下覆盖 0.21s .. 15.08s
+FRAME_GRID = [5 + 17 * k for k in range(22)]
+
+# 参考图处理长边上限：超过 1024 只会拖慢编码，对身份保持没有额外收益
+REF_MAX_CAP = 1024
+
+# 上行慢链路保护：大图先压到长边内再上传；超时后先校验服务端是否已落盘再重试
+UPLOAD_TIMEOUT = float(os.environ.get("H3_UPLOAD_TIMEOUT", "600"))
+UPLOAD_RETRIES = 1
+UPLOAD_RETRY_DELAY = 2
+COMPRESS_MIN_BYTES = 400 * 1024
+UPLOAD_CACHE_PATH = os.path.join(HERE, "upload_cache.json")
+UPLOAD_CACHE = {}
+UPLOAD_CACHE_LIMIT = 500
+UPLOAD_LOCK = threading.Lock()
+
+# 质量档：preview 用 4 步 LoRA 快速迭代，final 用 8 步 LoRA 交付
+QUALITY_PRESETS = {
+    "preview": {
+        "lora": "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+        "steps": 4,
+    },
+    "final": {
+        "lora": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        "steps": 8,
+    },
+}
+DEFAULT_QUALITY = "preview"
 
 # 官方只给 768P / 2K 两档，本地按项目档位细分到短边像素。
 # 480p→480、720p/768P→768（对齐 turbo LoRA 的 768p 训练分辨率）、1080p/2K→1080。
@@ -109,17 +139,20 @@ NEG = "bad video, distorted face, extra fingers, text, watermark, subtitles, muf
 # 所以真正生效的是下面 with_audio_directive 拼进每段提示词的那一行。
 AUDIO_DIRECTIVE = (
     "Audio: clear, intelligible Mandarin dialogue and voice-over narration, "
-    "natural ambience, no background music."
+    "natural ambience, no background music, no subtitles, no captions, no on-screen text."
 )
-# 后期配音模式：画面不要清晰人声，只留环境声，避免与 TTS 抢同一频段
+# 后期配音模式：不生成可辨识人声，但保留说话口型，方便后期对轨
 AMBIENT_DIRECTIVE = (
     "Audio: ambient sound only, no intelligible speech, no dialogue, no voice-over, "
-    "no background music; characters do not speak."
+    "no background music; characters may move their mouths and gesture as if speaking, "
+    "but their speech must stay unintelligible. "
+    "No subtitles, no captions, no on-screen text."
 )
 # 静音模式：连音轨都不要（CreateVideo 也不接 audio 输入），留给后期整轨配音
 SILENT_DIRECTIVE = (
     "Audio: silent video, no audio track at all; no speech, no dialogue, no voice-over, "
-    "no ambience, no sound effects, no background music."
+    "no ambience, no sound effects, no background music. "
+    "No subtitles, no captions, no on-screen text."
 )
 GLOBAL_PROMPT = (
     "Natural synchronized audio: clear, intelligible Mandarin dialogue and voice-over narration, "
@@ -149,7 +182,7 @@ def with_audio_directive(prompt, audio_mode="native"):
         return f"{directive}\n{text}" if text else directive
     if not text:
         return directive
-    if text.startswith(directive) or "音频：" in text or re.search(r"(?im)^\s*audio\s*[：:]", text):
+    if text.startswith(directive):
         return text
     return f"{directive}\n{text}"
 
@@ -254,39 +287,221 @@ def fetch_bytes(url, timeout=120):
         return r.read(), r.headers.get("Content-Type", "")
 
 
-def upload_image(url):
-    """把外部图片下载后上传到 ComfyUI input，返回文件名"""
-    raw, ctype = fetch_bytes(url)
-    boundary = "----mm" + uuid.uuid4().hex
-    ext = ".png"
+def load_upload_cache():
+    try:
+        data = json.load(open(UPLOAD_CACHE_PATH))
+    except Exception:
+        return
+    if isinstance(data, dict):
+        UPLOAD_CACHE.update({k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)})
+
+
+def save_upload_cache():
+    try:
+        items = list(UPLOAD_CACHE.items())[-UPLOAD_CACHE_LIMIT:]
+        tmp = UPLOAD_CACHE_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(dict(items), f, ensure_ascii=False)
+        os.replace(tmp, UPLOAD_CACHE_PATH)
+    except Exception as e:
+        print("[shim] save_upload_cache failed", e, flush=True)
+
+
+def _sips_convert(raw, max_edge, src_ext=".png"):
+    """macOS 自带 sips 压成 JPEG；失败返回 None 由调用方回退原图"""
+    sips = shutil.which("sips")
+    if not sips:
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "in" + src_ext)
+            dst = os.path.join(td, "out.jpg")
+            with open(src, "wb") as f:
+                f.write(raw)
+            subprocess.run(
+                [sips, "-Z", str(int(max_edge)), "--setProperty", "format", "jpeg",
+                 "--setProperty", "formatOptions", "88", src, "--out", dst],
+                check=True, capture_output=True, timeout=30,
+            )
+            if not os.path.exists(dst):
+                return None
+            with open(dst, "rb") as f:
+                return f.read()
+    except Exception as e:
+        print(f"[shim] sips compress failed: {type(e).__name__}: {e}", flush=True)
+        return None
+
+
+def prepare_image(raw, ctype, max_edge):
+    """上传前压缩：大图压到长边内，小图/非图片原样返回"""
+    ctype = (ctype or "").split(";")[0].strip().lower()
     if "jpeg" in ctype or "jpg" in ctype:
         ext = ".jpg"
-    name = f"mm_{uuid.uuid4().hex[:10]}{ext}"
+    elif "webp" in ctype:
+        ext = ".webp"
+    elif "bmp" in ctype:
+        ext = ".bmp"
+    else:
+        ext = ".png"
+    if not ctype.startswith("image/") or len(raw) <= COMPRESS_MIN_BYTES:
+        return raw, ctype or "application/octet-stream", ext
+    out = _sips_convert(raw, max_edge, ext)
+    if out and len(out) < len(raw):
+        return out, "image/jpeg", ".jpg"
+    return raw, ctype, ext
+
+
+def remote_input_exists(name):
+    """HEAD /view 轻量校验 ComfyUI input 里是否已有同名文件（不下正文）"""
+    q = urllib.parse.urlencode({"filename": name, "subfolder": "", "type": "input"})
+    req = urllib.request.Request(f"{COMFY}/view?{q}", method="HEAD")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return 200 <= r.status < 300
+    except urllib.error.HTTPError as e:
+        return 200 <= e.code < 300
+    except Exception:
+        return False
+
+
+def post_upload(data, name, ctype, timeout=None):
+    boundary = "----mm" + uuid.uuid4().hex
     body = b""
     body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{name}\"\r\n".encode()
-    body += f"Content-Type: {ctype or 'application/octet-stream'}\r\n\r\n".encode()
-    body += raw + b"\r\n"
+    body += f"Content-Type: {ctype}\r\n\r\n".encode()
+    body += data + b"\r\n"
     body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n".encode()
     body += f"--{boundary}--\r\n".encode()
     req = urllib.request.Request(COMFY + "/upload/image", data=body,
                                  headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
-    with urllib.request.urlopen(req, timeout=180) as r:
+    with urllib.request.urlopen(req, timeout=timeout or UPLOAD_TIMEOUT) as r:
         return json.loads(r.read().decode())["name"]
 
 
+def upload_image(url, max_edge=REF_MAX_CAP):
+    """把外部图片压缩后上传到 ComfyUI input，返回文件名；同内容复用已上传文件"""
+    raw, ctype = fetch_bytes(url)
+    data, ctype, ext = prepare_image(raw, ctype, max_edge)
+    key = hashlib.sha256(data).hexdigest()
+    with UPLOAD_LOCK:
+        cached = UPLOAD_CACHE.get(key)
+        if cached and remote_input_exists(cached):
+            print(f"[shim] upload cache hit {cached} ({len(data) / 1024:.0f}KB)", flush=True)
+            return cached
+        name = f"mm_{uuid.uuid4().hex[:10]}{ext}"
+        last_error = None
+        for attempt in range(UPLOAD_RETRIES + 1):
+            started = time.time()
+            try:
+                stored = post_upload(data, name, ctype, timeout=UPLOAD_TIMEOUT)
+                took = time.time() - started
+                rate = len(data) / 1024 / took if took > 0 else 0
+                print(f"[shim] uploaded {stored} {len(data) / 1024:.0f}KB in {took:.1f}s ({rate:.0f}KB/s)",
+                      flush=True)
+                UPLOAD_CACHE[key] = stored
+                save_upload_cache()
+                return stored
+            except urllib.error.HTTPError as e:
+                last_error = e
+                print(f"[shim] upload rejected {name}: HTTP {e.code}", flush=True)
+                break
+            except (OSError, ValueError) as e:
+                last_error = e
+                took = time.time() - started
+                print(f"[shim] upload attempt {attempt + 1} failed after {took:.1f}s: "
+                      f"{type(e).__name__}: {e}", flush=True)
+                # 客户端超时后服务端可能已收完整文件：先校验再重试
+                if remote_input_exists(name):
+                    UPLOAD_CACHE[key] = name
+                    save_upload_cache()
+                    print(f"[shim] upload recovered after timeout {name}", flush=True)
+                    return name
+                if attempt < UPLOAD_RETRIES:
+                    time.sleep(UPLOAD_RETRY_DELAY)
+        raise RuntimeError(
+            f"上传参考图失败（{len(data) / 1024:.0f}KB，单次超时 {UPLOAD_TIMEOUT:.0f}s）："
+            f"{type(last_error).__name__}: {last_error}；请检查到 ComfyUI 的上行带宽或 SSH 隧道"
+        )
+
+
+load_upload_cache()
+
+
+def parse_content(content):
+    """解析 MiniMax content[]；不支持的素材类型直接报错，绝不静默丢弃"""
+    prompt = "".join(c.get("text", "") for c in content if c.get("type") == "text").strip()
+    first = last = None
+    ref_urls = []
+    for c in content:
+        kind = c.get("type")
+        if kind == "text":
+            continue
+        if kind == "audio_url":
+            raise ValueError("本地 H3 兼容层暂不支持参考音频（reference_audio）")
+        if kind == "video_url":
+            raise ValueError("本地 H3 兼容层暂不支持参考视频（reference_video）")
+        if kind != "image_url":
+            raise ValueError(f"本地 H3 兼容层暂不支持素材类型 {kind}")
+        u = (c.get("image_url") or {}).get("url")
+        role = c.get("role")
+        if role == "first_frame" and not first:
+            first = u
+        elif role == "last_frame" and not last:
+            last = u
+        elif role in ("reference_image", None):
+            ref_urls.append(u)
+    return prompt, first, last, ref_urls
+
+
+def capabilities():
+    """本地 shim 的真实能力，供后端/前端握手，避免按云端能力误判"""
+    return {
+        "audioModes": ["native", "ambient", "silent"],
+        "referenceImages": 9,
+        "referenceVideos": 0,
+        "referenceAudios": 0,
+        "firstLastFrame": True,
+        "frameGrid": list(FRAME_GRID),
+        "durationRange": [round(FRAME_GRID[0] / 24.0, 3), round(FRAME_GRID[-1] / 24.0, 3)],
+        "qualities": list(QUALITY_PRESETS.keys()),
+        "defaultQuality": DEFAULT_QUALITY,
+        "qualitySteps": {name: preset["steps"] for name, preset in QUALITY_PRESETS.items()},
+        "negativePrompt": True,
+        "seed": True,
+        "cfg": True,
+        "refMaxSize": REF_MAX_CAP,
+    }
+
+
 def frames_for(duration):
-    d = float(duration or 5)
-    if d <= 6:
-        return 124
-    if d <= 11:
-        return 241
-    return 362
+    """把请求时长吸附到最近的 5+17k 帧网格点（24fps）"""
+    try:
+        seconds = float(5 if duration in (None, "") else duration)
+    except (TypeError, ValueError):
+        seconds = 5.0
+    raw = int(round(seconds * 24))
+    k = int(round((raw - 5) / 17))
+    k = max(0, min(len(FRAME_GRID) - 1, k))
+    return FRAME_GRID[k]
 
 
-def build_graph(prompt, first_name, last_name, frames, seed, ref_names=None, size=None, audio_mode="native"):
+def normalize_quality(value):
+    quality = str(value or "").strip().lower()
+    return quality if quality in QUALITY_PRESETS else DEFAULT_QUALITY
+
+
+def build_graph(prompt, first_name, last_name, frames, seed, ref_names=None, size=None,
+                audio_mode="native", quality=DEFAULT_QUALITY, negative=None, cfg=1.0):
     ref_names = ref_names or []
     width, height = size or (864, 480)
-    ref_max = max(width, height)
+    long_edge = max(width, height)
+    ref_max = min(REF_MAX_CAP, long_edge)
+    preset = QUALITY_PRESETS[normalize_quality(quality)]
+    negative = (str(negative).strip() if negative is not None else "") or NEG
+    try:
+        cfg = min(5.0, max(0.5, float(cfg)))
+    except (TypeError, ValueError):
+        cfg = 1.0
     mode = str(audio_mode or "native").strip().lower()
     prompt = with_audio_directive(prompt, mode)
     global_prompt = {"ambient": AMBIENT_DIRECTIVE, "silent": SILENT_DIRECTIVE}.get(mode, GLOBAL_PROMPT)
@@ -294,15 +509,15 @@ def build_graph(prompt, first_name, last_name, frames, seed, ref_names=None, siz
     t2v = (not first_name) and not r2v
     si = None if t2v else {"imageFile": first_name, "width": 0, "height": 0}
     ei = {"imageFile": last_name, "width": 0, "height": 0} if last_name else None
-    shot = {"id": "s0", "durationSec": frames / 24.0, "prompt": prompt, "negativePrompt": NEG,
+    shot = {"id": "s0", "durationSec": frames / 24.0, "prompt": prompt, "negativePrompt": negative,
             "continuityFromPrev": False, "loras": [], "startImage": si, "endImage": ei}
     seg = {"id": "s0", "start": 0, "length": frames, "frameCount": frames, "durationSec": frames / 24.0,
-           "prompt": prompt, "negativePrompt": NEG, "continuityFromPrev": False, "loras": [],
+           "prompt": prompt, "negativePrompt": negative, "continuityFromPrev": False, "loras": [],
            "isStartFrame": bool(si), "isEndFrame": bool(ei), "genImage": si or {"imageFile": ""}, "endImage": ei, "taskType": "",
            "refs": [{"index": i, "imageFile": n} for i, n in enumerate(ref_names)]}
     tl = {"version": 4, "editMode": "segment", "timelineMode": ("r2v" if r2v else ("t2v" if t2v else "fl2v")), "totalFrames": frames, "frameRate": 24.0,
           "width": width, "height": height, "refMaxSize": ref_max,
-          "output": {"mode": "fixed", "longEdge": ref_max, "width": width, "height": height, "maxExportFrames": 0,
+          "output": {"mode": "fixed", "longEdge": long_edge, "width": width, "height": height, "maxExportFrames": 0,
                      "exportMode": "all", "continuityEnabled": False, "continuityOverlapFrames": 9},
           "videoClips": [], "video": {"fileName": "", "videoFile": "", "subfolder": "", "type": "input", "frames": [], "frameMap": []},
           "global": {"taskType": ("r2v — 参考主体生视频(Reference to Video)" if r2v else ("t2v — 文生视频(Text to Video)" if t2v else "fl2v — 首尾帧生视频(First-Last Frame)")), "prompt": prompt, "refs": [],
@@ -315,7 +530,7 @@ def build_graph(prompt, first_name, last_name, frames, seed, ref_names=None, siz
         create_video["inputs"]["audio"] = ["6", 1]
     return {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors", "weight_dtype": "default"}},
-        "2": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["1", 0], "lora_name": "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors", "strength_model": 1.0}},
+        "2": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["1", 0], "lora_name": preset["lora"], "strength_model": 1.0}},
         "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", "type": "minimax", "device": "default"}},
         "4": {"class_type": "VAELoader", "inputs": {"vae_name": "minimax_h3_video_vae_fp16.safetensors"}},
         "5": {"class_type": "VAELoader", "inputs": {"vae_name": "minimax_h3_audio_vae_fp32.safetensors"}},
@@ -323,23 +538,32 @@ def build_graph(prompt, first_name, last_name, frames, seed, ref_names=None, siz
             "model": ["2", 0], "video_vae": ["4", 0], "audio_vae": ["5", 0], "clip": ["3", 0],
             "task_type": ("r2v — 参考主体生视频(Reference to Video)" if r2v else ("t2v — 文生视频(Text to Video)" if t2v else "fl2v — 首尾帧生视频(First-Last Frame)")),
             "global_prompt": global_prompt,
-            "cfg": 1.0, "bd_grp_sample": "采样设置", "bd_grp_advanced": "高级采样 Advanced", "bd_grp_perf": "性能 Performance",
+            "cfg": cfg, "bd_grp_sample": "采样设置", "bd_grp_advanced": "高级采样 Advanced", "bd_grp_perf": "性能 Performance",
             "frame_rate": 24.0, "width": width, "height": height, "ref_max_size": ref_max,
             "total_frames": frames, "timeline_data": json.dumps(tl, ensure_ascii=False),
-            "steps": 4, "sampler": "euler", "scheduler": "beta", "shift_video": 12.0, "shift_audio": 3.0,
+            "steps": preset["steps"], "sampler": "euler", "scheduler": "beta", "shift_video": 12.0, "shift_audio": 3.0,
             "seed": seed, "clear_vram_between_segments": True}},
         "7": create_video,
         "8": {"class_type": "SaveVideo", "inputs": {"video": ["7", 0], "filename_prefix": f"mm/{seed}", "format": "auto", "codec": "auto"}},
     }
 
 
-def worker(task_id, prompt, first_url, last_url, frames, ref_urls=None, size=None, audio_mode="native"):
+def worker(task_id, prompt, first_url, last_url, frames, ref_urls=None, size=None, audio_mode="native",
+           quality=DEFAULT_QUALITY, seed=None, negative=None, cfg=1.0):
     try:
-        first_name = upload_image(first_url) if first_url else None
-        last_name = upload_image(last_url) if last_url else None
-        ref_names = [upload_image(u) for u in (ref_urls or []) if u][:9]
-        seed = int(uuid.uuid4().int % 2_000_000_000)
-        graph = build_graph(prompt, first_name, last_name, frames, seed, ref_names, size, audio_mode)
+        width, height = size or (864, 480)
+        frame_cap = max(width, height)
+        ref_cap = min(REF_MAX_CAP, frame_cap)
+        first_name = upload_image(first_url, frame_cap) if first_url else None
+        last_name = upload_image(last_url, frame_cap) if last_url else None
+        ref_names = [upload_image(u, ref_cap) for u in (ref_urls or []) if u][:9]
+        try:
+            seed = int(seed) if seed not in (None, "") else int(uuid.uuid4().int % 2_000_000_000)
+        except (TypeError, ValueError):
+            seed = int(uuid.uuid4().int % 2_000_000_000)
+        seed = abs(seed) % 2_147_483_647
+        graph = build_graph(prompt, first_name, last_name, frames, seed, ref_names, size, audio_mode,
+                            quality=quality, negative=negative, cfg=cfg)
         pid = http_json(COMFY + "/prompt", {"prompt": graph})["prompt_id"]
         with LOCK:
             TASKS[task_id]["pid"] = pid
@@ -404,19 +628,10 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(n) or b"{}")
         content = body.get("content") or []
-        prompt = "".join(c.get("text", "") for c in content if c.get("type") == "text").strip()
-        first = last = None
-        ref_urls = []
-        for c in content:
-            if c.get("type") == "image_url":
-                u = (c.get("image_url") or {}).get("url")
-                role = c.get("role")
-                if role == "first_frame" and not first:
-                    first = u
-                elif role == "last_frame" and not last:
-                    last = u
-                elif role in ("reference_image", None):
-                    ref_urls.append(u)
+        try:
+            prompt, first, last, ref_urls = parse_content(content)
+        except ValueError as exc:
+            return self._send(400, {"error": str(exc)})
         if not prompt:
             return self._send(400, {"error": "prompt required"})
         # 无首帧时走 t2v（文生视频），不再拒绝
@@ -429,14 +644,21 @@ class H(BaseHTTPRequestHandler):
         audio_mode = str(body.get("audio_mode") or "").strip().lower()
         if audio_mode not in ("native", "ambient", "silent"):
             audio_mode = "native"
+        quality = normalize_quality(body.get("quality"))
+        negative = str(body.get("negative_prompt") or "").strip() or None
+        seed = body.get("seed")
+        cfg = body.get("cfg")
         task_id = uuid.uuid4().hex
         with LOCK:
             TASKS[task_id] = {"state": "processing", "url": None, "error": None, "pid": None,
                               "frames": frames, "duration": frames / 24.0}
         save_state()
         print(f"[shim] task {task_id[:8]} canvas={size[0]}x{size[1]} "
-              f"resolution={resolution or '-'} ratio={ratio or '-'} audio={audio_mode} duration={body.get('duration')}", flush=True)
-        threading.Thread(target=worker, args=(task_id, prompt, first, last, frames, ref_urls, size, audio_mode), daemon=True).start()
+              f"resolution={resolution or '-'} ratio={ratio or '-'} audio={audio_mode} "
+              f"frames={frames} quality={quality} seed={seed or 'random'} duration={body.get('duration')}", flush=True)
+        threading.Thread(target=worker, args=(task_id, prompt, first, last, frames, ref_urls, size, audio_mode),
+                         kwargs={"quality": quality, "seed": seed, "negative": negative, "cfg": cfg},
+                         daemon=True).start()
         return self._send(200, {"task_id": task_id})
 
     def do_GET(self):
@@ -474,6 +696,7 @@ class H(BaseHTTPRequestHandler):
                 "script": os.path.abspath(__file__),
                 "pid": os.getpid(),
                 "tasks": len(TASKS),
+                "capabilities": capabilities(),
                 "canvases": {tier: "x".join(str(v) for v in resolve_canvas(tier, "16:9"))
                              for tier in ("480p", "720p", "1080p")},
             })

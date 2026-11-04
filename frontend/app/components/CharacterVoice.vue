@@ -1,7 +1,7 @@
 <template>
   <section class="character-voice" :aria-label="t('characterVoice.forCharacter', { name: character.name })" @click.stop @keydown.stop>
     <div class="voice-heading">
-      <div class="voice-label"><AudioLines :size="14" /><span>{{ t('characterVoice.title') }}</span></div>
+      <div class="voice-label"><AudioLines :size="14" /><span>{{ t('characterVoice.sampleTitle') }}</span></div>
       <button type="button" class="btn btn-sm" :disabled="busy" @click="fileInput?.click()">
         <Loader2 v-if="busy" :size="12" class="animate-spin" />
         <Upload v-else :size="12" />
@@ -9,6 +9,7 @@
       </button>
       <input ref="fileInput" class="voice-file-input" type="file" accept=".mp3,.wav,.m4a,.aac,audio/mpeg,audio/wav,audio/mp4,audio/aac" :disabled="busy" :aria-label="t('characterVoice.upload')" @change="upload" />
     </div>
+    <p class="voice-direct-hint">{{ t('characterVoice.directHint') }}</p>
     <template v-if="voiceUrl">
       <div class="voice-file-row">
         <span class="voice-filename" :title="voiceName">{{ voiceName }}</span>
@@ -111,7 +112,8 @@ function onPlay(event: Event) {
 .voice-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .voice-remove:disabled { opacity: 0.5; cursor: default; }
 .character-voice audio { display: block; width: 100%; min-width: 0; height: 36px; }
-.voice-hint, .voice-formats, .voice-error { margin: 0; font-size: 11px; line-height: 1.6; }
+.voice-hint, .voice-formats, .voice-error, .voice-direct-hint { margin: 0; font-size: 11px; line-height: 1.6; }
+.voice-direct-hint { color: var(--text-2); }
 .voice-hint { color: var(--text-2); }
 .voice-formats { color: var(--text-3); }
 .voice-error { color: var(--action-danger); }

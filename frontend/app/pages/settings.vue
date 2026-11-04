@@ -1237,6 +1237,27 @@
               </div>
             </section>
           </template>
+          <template v-else-if="cfgForm.service_type === 'video' && cfgForm.provider === 'minimax'">
+            <section class="cfg-settings">
+              <div class="cfg-settings-head">{{ t('settings.cfg.providerSettings') }}</div>
+              <label class="field">
+                <span class="field-label">{{ t('settings.cfg.h3Quality') }}</span>
+                <BaseSelect v-model="cfgForm.provider_settings.quality" :options="h3QualityOptions" />
+                <span class="field-hint">{{ t('settings.cfg.h3QualityHint') }}</span>
+              </label>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.negativePrompt') }}</span>
+                  <input v-model="cfgForm.provider_settings.negative_prompt" class="input" :placeholder="t('settings.cfg.negativePromptPlaceholder')" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.seed') }}</span>
+                  <input v-model="cfgForm.provider_settings.seed" class="input" type="number" step="1" :placeholder="t('settings.cfg.seedPlaceholder')" />
+                </label>
+              </div>
+              <span class="field-hint">{{ t('settings.cfg.h3LocalOnlyHint') }}</span>
+            </section>
+          </template>
           <template v-else-if="cfgForm.service_type === 'image' && (cfgForm.provider === 'volcengine' || cfgForm.provider === 'aliyun')">
             <section class="cfg-settings">
               <div class="cfg-settings-head">{{ t('settings.cfg.providerSettings') }}</div>
@@ -1314,6 +1335,41 @@
               </label>
               <span class="field-hint">{{ t('settings.cfg.resourceIdHint') }}</span>
               <span v-if="cfgForm.provider === 'volcengine'" class="field-hint">{{ t('settings.cfg.legacyAuthHint') }}</span>
+            </section>
+          </template>
+          <template v-else-if="cfgForm.service_type === 'audio' && cfgForm.provider === 'qwen3-tts'">
+            <section class="cfg-settings">
+              <div class="cfg-settings-head">{{ t('settings.cfg.voiceSettings') }}</div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.ttsTimeout') }}</span>
+                  <input v-model="cfgForm.provider_settings.timeoutMs" class="input" type="number" min="1000" step="1000" placeholder="650000" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.ttsConcurrency') }}</span>
+                  <input v-model="cfgForm.provider_settings.concurrency" class="input" type="number" min="1" max="8" step="1" placeholder="1" />
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.ttsMaxInputChars') }}</span>
+                  <input v-model="cfgForm.provider_settings.maxInputChars" class="input" type="number" min="1" step="1" placeholder="500" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.ttsMaxNewTokens') }}</span>
+                  <input v-model="cfgForm.provider_settings.maxNewTokens" class="input" type="number" min="64" max="2048" step="1" placeholder="2048" />
+                </label>
+              </div>
+              <label class="field">
+                <span class="field-label">{{ t('settings.cfg.seed') }}</span>
+                <input v-model="cfgForm.provider_settings.seed" class="input" type="number" step="1" placeholder="42" />
+                <span class="field-hint">{{ t('settings.cfg.ttsSeedHint') }}</span>
+              </label>
+              <span class="field-hint">{{ t('settings.cfg.ttsTimeoutHint') }}</span>
+              <span class="field-hint">{{ t('settings.cfg.ttsConcurrencyHint') }}</span>
+              <span class="field-hint">{{ t('settings.cfg.ttsMaxInputCharsHint') }}</span>
+              <span class="field-hint">{{ t('settings.cfg.ttsMaxNewTokensHint') }}</span>
+              <span class="field-hint">{{ t('settings.cfg.qwen191Hint') }}</span>
             </section>
           </template>
           <label v-if="cfgForm.service_type === 'text'" class="field">
@@ -1663,7 +1719,7 @@ const CFG_SETTING_KEYS = computed(() => {
   const type = cfgForm.service_type
   const provider = cfgForm.provider
   if (type === 'audio') {
-    if (provider === 'qwen3-tts') return []
+    if (provider === 'qwen3-tts') return ['timeoutMs', 'concurrency', 'maxInputChars', 'seed', 'maxNewTokens']
     if (provider === 'volcengine') return ['defaultVoiceId', 'resourceId', 'uid', 'appId', 'accessKey', 'format', 'sampleRate', 'emotion']
     return ['defaultVoiceId', 'format', 'sampleRate', 'emotion']
   }
@@ -1674,6 +1730,7 @@ const CFG_SETTING_KEYS = computed(() => {
   }
   if (type === 'image' && provider === 'aliyun') return ['prompt_extend', 'watermark', 'negative_prompt', 'seed']
   if (type === 'image' && provider === 'volcengine') return ['output_format', 'response_format', 'watermark', 'seed']
+  if (type === 'video' && provider === 'minimax') return ['quality', 'negative_prompt', 'seed']
   return []
 })
 // 模型标签编辑器：首位即默认模型；输入框支持回车添加、逗号/换行批量粘贴
@@ -1714,6 +1771,10 @@ const responseFormatOptions = [
   { label: 'URL', value: 'url' },
   { label: 'Base64', value: 'b64_json' },
 ]
+const h3QualityOptions = computed(() => [
+  { label: t('settings.cfg.h3QualityPreview'), value: 'preview' },
+  { label: t('settings.cfg.h3QualityFinal'), value: 'final' },
+])
 const audioFormatOptions = [
   { label: 'WAV', value: 'wav' },
   { label: 'MP3', value: 'mp3' },
@@ -1735,6 +1796,11 @@ function emptyProviderSettings() {
     format: 'wav',
     sampleRate: 24000,
     emotion: '',
+    // Qwen3-TTS 本地服务（含 191 节点）
+    timeoutMs: '',
+    concurrency: '',
+    maxInputChars: '',
+    maxNewTokens: '',
     // ComfyUI 本地工作流
     workflow: '',
     output_node: '',
@@ -1748,6 +1814,8 @@ function emptyProviderSettings() {
     watermark: false,
     output_format: 'jpeg',
     response_format: 'url',
+    // 本地 H3 质量档
+    quality: 'preview',
   }
 }
 
@@ -1762,13 +1830,17 @@ function collectProviderSettings() {
       outgoing[key] = value
       continue
     }
-    if (key === 'seed' || key === 'fps' || key === 'sampleRate') {
+    if (['seed', 'fps', 'sampleRate', 'timeoutMs', 'concurrency', 'maxInputChars', 'maxNewTokens'].includes(key)) {
       if (value === '' || value === null || value === undefined) continue
       const n = Number(value)
       if (!Number.isFinite(n)) throw new Error(t('settings.cfg.numberInvalid'))
       if (key === 'seed' && !Number.isInteger(n)) throw new Error(t('settings.cfg.seedInvalid'))
       if (key === 'fps' && n <= 0) throw new Error(t('settings.cfg.fpsInvalid'))
       if (key === 'sampleRate' && (!Number.isInteger(n) || n <= 0)) throw new Error(t('settings.cfg.sampleRateInvalid'))
+      if (key === 'timeoutMs' && (!Number.isInteger(n) || n <= 0)) throw new Error(t('settings.cfg.numberInvalid'))
+      if (key === 'concurrency' && (!Number.isInteger(n) || n < 1 || n > 8)) throw new Error(t('settings.cfg.numberInvalid'))
+      if (key === 'maxInputChars' && (!Number.isInteger(n) || n <= 0)) throw new Error(t('settings.cfg.numberInvalid'))
+      if (key === 'maxNewTokens' && (!Number.isInteger(n) || n < 64 || n > 2048)) throw new Error(t('settings.cfg.numberInvalid'))
       outgoing[key] = n
       continue
     }
@@ -1812,7 +1884,7 @@ const providerPresets = {
   },
   // 云语音与本地 OpenAI 兼容语音；音色 ID 在音色档案或配置默认音色里填写
   audio: {
-    'qwen3-tts': { label: 'Qwen3-TTS 本地服务', baseUrl: 'http://192.168.1.100:8000', models: ['Qwen3-TTS-12Hz-1.7B-VoiceDesign', 'Qwen3-TTS-12Hz-1.7B-Base', 'Qwen3-TTS-12Hz-0.6B-Base'] },
+    'qwen3-tts': { label: 'Qwen3-TTS 本地服务', baseUrl: 'http://127.0.0.1:18190', models: ['qwen3-tts-customvoice', 'qwen3-tts-voicedesign', 'qwen3-tts-base', 'Qwen3-TTS-12Hz-1.7B-VoiceDesign', 'Qwen3-TTS-12Hz-1.7B-Base', 'Qwen3-TTS-12Hz-0.6B-Base'] },
     aliyun: { label: '阿里云百炼语音', baseUrl: 'https://dashscope.aliyuncs.com', models: ['cosyvoice-v2', 'qwen-tts'] },
     volcengine: { label: '豆包语音合成 v3', baseUrl: 'https://openspeech.bytedance.com', models: ['seed-tts-2.0'] },
     'openai-compatible': { label: '本地 OpenAI 兼容语音', baseUrl: 'http://127.0.0.1:8000', models: ['tts-1'] },

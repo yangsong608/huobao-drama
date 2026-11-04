@@ -92,3 +92,46 @@ test('自定义端口的本地 shim 也认（不限 127.0.0.1）', () => {
   assert.equal(req.body.resolution_tier, '720p')
   assert.equal(req.body.aspect_ratio, '9:16')
 })
+
+test('本地 shim：质量档、负面提示词、种子与 CFG 走扩展字段', () => {
+  const req = adapter.buildGenerateRequest(
+    { ...localConfig, settings: { quality: 'final', negative_prompt: 'subtitles, text', seed: 20261104, cfg: 2 } },
+    record({ quality: 'preview', seed: 7 }),
+  )
+  // 任务级质量优先于配置默认
+  assert.equal(req.body.quality, 'preview')
+  assert.equal(req.body.negative_prompt, 'subtitles, text')
+  assert.equal(req.body.seed, 7)
+  assert.equal(req.body.cfg, 2)
+})
+
+test('本地 shim：配置里的质量档兜底，非法值不写扩展字段', () => {
+  const final = adapter.buildGenerateRequest({ ...localConfig, settings: { quality: 'final' } }, record())
+  assert.equal(final.body.quality, 'final')
+
+  const invalid = adapter.buildGenerateRequest({ ...localConfig, settings: { quality: 'ultra', seed: '' } }, record())
+  assert.equal(invalid.body.quality, undefined)
+  assert.equal(invalid.body.seed, undefined)
+  assert.equal(invalid.body.negative_prompt, undefined)
+})
+
+test('云端：质量档/负面提示词/种子/CFG 也不带，保持官方 schema', () => {
+  const req = adapter.buildGenerateRequest(
+    { ...cloudConfig, settings: { quality: 'final', negative_prompt: 'subtitles', seed: 1, cfg: 2 } },
+    record({ quality: 'final', seed: 7 }),
+  )
+  for (const key of ['quality', 'negative_prompt', 'seed', 'cfg']) {
+    assert.equal(Object.prototype.hasOwnProperty.call(req.body, key), false, key)
+  }
+})
+
+test('首尾帧按 role 下发，尾帧缺首帧时明确报错', () => {
+  const req = adapter.buildGenerateRequest(localConfig, record({ lastFrameUrl: 'http://127.0.0.1:8190/files/last.png' }))
+  const roles = req.body.content.filter((item: any) => item.role).map((item: any) => item.role)
+  assert.deepEqual(roles, ['first_frame', 'last_frame'])
+
+  assert.throws(
+    () => adapter.buildGenerateRequest(localConfig, record({ firstFrameUrl: null, lastFrameUrl: 'http://127.0.0.1:8190/files/last.png' })),
+    /尾帧必须与首帧/,
+  )
+})

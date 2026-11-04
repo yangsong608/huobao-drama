@@ -5,6 +5,8 @@
   },
   "characterVoice": {
     "title": "캐릭터 음색",
+    "sampleTitle": "참조 음성 직접 업로드",
+    "directHint": "선명한 음성을 영상 참조 음성으로 직접 업로드합니다. 음색 프로필은 생성하지 않으며, 위 프로필과 둘 중 하나만 사용하세요.",
     "forCharacter": "{name}의 음색",
     "upload": "음색 업로드",
     "replace": "음색 교체",
@@ -672,6 +674,11 @@
       "seedInvalid": "시드는 정수여야 합니다",
       "fpsInvalid": "프레임 레이트는 양수여야 합니다",
       "sampleRateInvalid": "샘플레이트는 양의 정수여야 합니다",
+      "h3Quality": "로컬 H3 품질",
+      "h3QualityHint": "미리보기는 4단계 LoRA로 빠르게 확인하고, 납품은 8단계 LoRA를 사용합니다",
+      "h3QualityPreview": "미리보기(4단계)",
+      "h3QualityFinal": "납품(8단계)",
+      "h3LocalOnlyHint": "이 설정은 로컬 H3 호환 레이어에서만 적용되며 클라우드 MiniMax는 무시합니다",
       "workflowRequired": "ComfyUI에는 워크플로 JSON이 필요합니다",
       "workflowInvalid": "워크플로 JSON이 올바르지 않습니다. API 형식 워크플로를 붙여넣으세요",
       "outputFormat": "이미지 형식",
@@ -690,7 +697,17 @@
       "audioFormat": "오디오 형식",
       "sampleRate": "샘플레이트",
       "emotion": "감정",
-      "emotionPlaceholder": "예: happy / sad, 비워두면 기본"
+      "emotionPlaceholder": "예: happy / sad, 비워두면 기본",
+      "ttsTimeout": "합성 타임아웃(ms)",
+      "ttsTimeoutHint": "비워두면 모델 기본값을 사용합니다: 191은 650000, 기존 로컬 서비스는 120000",
+      "ttsConcurrency": "동시 실행 수",
+      "ttsConcurrencyHint": "191은 GPU당 단일 작업입니다. 1을 권장합니다(범위 1–8)",
+      "ttsMaxInputChars": "요청당 최대 글자 수",
+      "ttsMaxInputCharsHint": "191은 최대 500자입니다. 초과분은 문장 부호에서 자동 분할됩니다. 비워두면 모델 기본값을 사용합니다",
+      "ttsMaxNewTokens": "최대 생성 token",
+      "ttsMaxNewTokensHint": "191 범위는 64–2048이며 기본값은 2048입니다",
+      "ttsSeedHint": "비워두면 서비스 기본값(191은 42)을 사용합니다",
+      "qwen191Hint": "191 로컬 서비스: Base URL은 http://127.0.0.1:18190(/v1 제외)을 사용하세요. 음색 ID는 Serena, Vivian 등 내장 이름을 입력합니다. 음색 설계는 자동으로 /v1/audio/speech를 사용합니다. 참조 오디오 복제는 HTTP에서 지원되지 않습니다."
     },
     "styleDialog": {
       "editTitle": "스타일 프리셋 편집",
@@ -799,7 +816,8 @@
       "start": "제작 시작",
       "resolution": "해상도",
       "videoAudio": "원본 오디오",
-      "videoAudioSwitched": "이 에피소드의 동영상 오디오를 '{mode}'(으)로 전환했습니다"
+      "videoAudioSwitched": "이 에피소드의 동영상 오디오를 '{mode}'(으)로 전환했습니다",
+      "videoConfigSwitched": "이 에피소드의 동영상 설정을 {name}(으)로 전환했습니다"
     },
     "model": {
       "defaultWith": "기본 · {model}",
@@ -1156,7 +1174,12 @@
       "sbN": "스토리보드 #{n}",
       "generic": "일반",
       "fullMerge": "화 전체 병합",
-      "mergeKind": "병합"
+      "mergeKind": "병합",
+      "clear": "비우기",
+      "clearTitle": "완료/실패 작업 비우기",
+      "clearMessage": "이 화의 완료 또는 실패 작업 기록 {n}개를 삭제합니다. 진행 중인 작업과 병합 버전은 유지되며 디스크 파일은 삭제되지 않습니다.",
+      "clearConfirm": "기록 비우기",
+      "cleared": "작업 기록 {n}개를 비웠습니다"
     },
     "export": {
       "notReadyDesc": "먼저 스토리보드와 제작 단계를 완료하세요",
@@ -1350,7 +1373,14 @@
     "externalVoiceId": "외부 음색 ID",
     "externalVoiceIdPlaceholder": "서비스 콘솔의 음색 ID",
     "externalVoiceIdHint": "알리윤/Doubao 클라우드 음성 사용 시 입력. 로컬 Qwen3-TTS는 비워둘 수 있습니다",
-    "externalVoiceIdSaved": "외부 음색 ID가 저장되었습니다"
+    "externalVoiceIdSaved": "외부 음색 ID가 저장되었습니다",
+    "version": "음색 버전",
+    "syncStateSynced": "영상 참조 음성으로 동기화됨",
+    "syncStateStale": "영상 참조 음성이 다른 버전임",
+    "syncStateNone": "영상 참조 음성으로 미설정",
+    "syncHintStale": "현재 음색이 아직 동기화되지 않았습니다. 영상 생성에는 이전 참조 음성이 사용됩니다.",
+    "advanced": "고급 설정(프롬프트 / 음색 ID / 지시문)",
+    "capabilityHint": "참조 음성 지원: 알리윤 Wan 3.0, Doubao Seedance 2.0, 火宝 클라우드 MiniMax. 로컬 H3는 음색 참조를 지원하지 않으므로 더빙 워크벤치에서 통일하세요."
   },
   "workbench": {
     "title": "더빙 워크벤치",

@@ -28,14 +28,25 @@ const server = http.createServer(async (req, res) => {
 })
 await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
 const baseUrl = `http://127.0.0.1:${(server.address() as any).port}`
+// 云端 minimax 的 baseUrl 不能是本机地址，否则会被路由识别为本地 shim、跳过音色解析；
+// 假域名由 fetch 垫片改写到本机捕获服务器，保证测试不出网。
+const cloudHost = 'http://minimax-cloud.test'
+const realFetch = globalThis.fetch
+globalThis.fetch = ((input: any, init?: any) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input?.url
+  return realFetch(typeof url === 'string' && url.startsWith(cloudHost) ? url.replace(cloudHost, baseUrl) : input, init)
+}) as typeof fetch
 const ts = new Date().toISOString()
 const timestamps = { createdAt: ts, updatedAt: ts }
 const drama = db.insert(schema.dramas).values({ title: '声音引用测试', ...timestamps }).returning().get()
 const episode = db.insert(schema.episodes).values({ dramaId: drama.id, episodeNumber: 1, title: '测试', ...timestamps }).returning().get()
 const configs = Object.fromEntries(['volcengine', 'minimax', 'aliyun'].map(provider => [provider,
-  db.insert(schema.aiServiceConfigs).values({ serviceType: 'video', provider, name: 'test', baseUrl, apiKey: 'mock-key',
+  db.insert(schema.aiServiceConfigs).values({ serviceType: 'video', provider, name: 'test',
+    baseUrl: provider === 'minimax' ? cloudHost : baseUrl, apiKey: 'mock-key',
     model: JSON.stringify([provider === 'volcengine' ? 'doubao-seedance-2-0-mini-260615' : provider === 'minimax' ? 'MiniMax-H3' : 'wan3.0-video']), ...timestamps }).returning().get().id,
 ]))
+const localMinimaxConfig = db.insert(schema.aiServiceConfigs).values({ serviceType: 'video', provider: 'minimax',
+  name: 'local-shim', baseUrl, apiKey: 'local', model: JSON.stringify(['MiniMax-H3']), ...timestamps }).returning().get().id
 function wav(seconds: number) {
   const buffer = Buffer.alloc(44 + 16000 * seconds)
   buffer.write('RIFF'); buffer.writeUInt32LE(buffer.length - 8, 4); buffer.write('WAVEfmt ', 8)
@@ -125,6 +136,20 @@ test('Seedance and MiniMax submissions carry local voice bytes and correct role 
     assert.deepEqual(JSON.parse(task.params!).referenceAudioUrls, ['static/uploads/3.wav'])
     if (provider === 'volcengine') assert.equal(request.generate_audio, true)
   }
+})
+
+test('local H3 shim never receives voice references; tags are compiled away', async () => {
+  const c = char('林小雨')
+  const response = await submit(shot(c), '0-3秒：@图片1林小雨抬头，#林小雨轻声说：「早上好。」', { config_id: localMinimaxConfig })
+  assert.equal(response.status, 201, await response.clone().text())
+  const { data } = await response.json()
+  const task = await waitForSubmission(data.id)
+  const request = received.at(-1)
+  const text = request.content.find((c: any) => c.type === 'text').text
+  assert.match(text, /林小雨 speaks in Mandarin/)
+  assert.doesNotMatch(text, /音频1|音色参考音频/)
+  assert.equal(request.content.some((c: any) => c.type === 'audio_url'), false)
+  assert.deepEqual(JSON.parse(task.params!).referenceAudioUrls, [])
 })
 
 test('image-only prompts never attach the character voice automatically', async () => {

@@ -53,6 +53,10 @@ test('本地 MiniMax shim 的 H3 额外支持 480p，云端仍只认 720p/1080p'
   assert.deepEqual(local.resolutions, ['480p', '720p', '1080p'])
   assert.equal(local.vendorResolutions['480p'], '480P')
   assert.equal(resolutionSupportError('minimax', 'MiniMax-H3', '480p', { localShim: true }), null)
+  // shim 只实现了图片参考与首尾帧，音频/视频参考必须显式声明为 0
+  assert.equal(local.referenceImages, 9)
+  assert.equal(local.referenceVideos, 0)
+  assert.equal(local.referenceAudios, 0)
 
   const cloud = videoModelCapabilities('minimax', 'MiniMax-H3')
   assert.deepEqual(cloud.resolutions, ['720p', '1080p'])

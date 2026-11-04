@@ -118,6 +118,8 @@ export interface VideoGenerationRecord {
   duration?: number | null
   aspectRatio?: string | null
   resolution?: string | null
+  /** 本地 H3 质量档：preview 4 步快速预览，final 8 步交付 */
+  quality?: 'preview' | 'final' | null
   seed?: number | null
   promptExtend?: number | boolean | null
   watermark?: number | boolean | null

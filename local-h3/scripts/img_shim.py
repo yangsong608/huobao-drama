@@ -17,6 +17,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FILES = os.path.join(HERE, "files")
 os.makedirs(FILES, exist_ok=True)
 
+# Qwen-Image 只有 img2img 一条参考图通道，没有多图编辑节点；多传的图不能静默丢弃，
+# 统一只取第一张并在响应里返回 warning，/health 也如实上报 maxReferences。
+MAX_EDIT_REFS = 1
+
 # 只做「质量兜底」：不再限制画风（旧的「写实/照片/真人实拍/胶片颗粒/文字」会和
 # 风格预设里的正面描述直接对撞——例如「写实电影感」风格会被强制拉成动画）。
 NEG = "低质量，模糊，噪点，压缩伪影，过曝，畸变，多余手指，多余肢体，畸形脸，水印，签名，低分辨率"
@@ -58,6 +62,37 @@ def parse_size(size, model):
     return w, h
 
 
+def capabilities():
+    """图片桥的真实能力，供健康检查与后端排查（不冒充多图编辑）"""
+    return {
+        "generations": True,
+        "edits": True,
+        "multiReference": False,
+        "maxReferences": MAX_EDIT_REFS,
+        "editSize": True,
+        "models": ["qwen-image"],
+    }
+
+
+def select_edit_reference(images):
+    """编辑只取第一张参考图；多传的图返回明确 warning，绝不静默丢弃"""
+    if not images:
+        return None, ""
+    extra = len(images) - MAX_EDIT_REFS
+    if extra <= 0:
+        return images[0], ""
+    warning = (f"本地图片桥每次编辑只使用第 1 张参考图，本次收到 {len(images)} 张，"
+               f"其余 {extra} 张未参与生成")
+    return images[0], warning
+
+
+def multipart_text(raw, name):
+    """从 multipart 请求体里提取普通文本字段（prompt / size 等）"""
+    pattern = rb'name="' + re.escape(name.encode()) + rb'"[^\r]*\r\n(?:Content-Type:[^\r]*\r\n)?\r\n(.*?)\r\n--'
+    match = re.search(pattern, raw, re.S)
+    return match.group(1).decode("utf-8", "ignore").strip() if match else ""
+
+
 def graph_t2i(prompt, w, h, seed):
     return {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "qwen_image_fp8_e4m3fn.safetensors", "weight_dtype": "default"}},
@@ -74,7 +109,7 @@ def graph_t2i(prompt, w, h, seed):
     }
 
 
-def graph_img2img(prompt, src_name, seed, denoise=0.6):
+def graph_img2img(prompt, src_name, seed, w, h, denoise=0.6):
     return {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "qwen_image_fp8_e4m3fn.safetensors", "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors", "type": "qwen_image", "device": "default"}},
@@ -82,12 +117,15 @@ def graph_img2img(prompt, src_name, seed, denoise=0.6):
         "4": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": prompt}},
         "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": NEG}},
         "6": {"class_type": "LoadImage", "inputs": {"image": src_name, "upload": "image"}},
-        "7": {"class_type": "VAEEncode", "inputs": {"pixels": ["6", 0], "vae": ["3", 0]}},
-        "8": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0],
-                                                   "latent_image": ["7", 0], "seed": seed, "steps": 25, "cfg": 4.0,
+        # 参考图原始尺寸不可控，先缩放到请求尺寸再编码，避免输出跟随源图分辨率
+        "7": {"class_type": "ImageScale", "inputs": {"image": ["6", 0], "upscale_method": "lanczos",
+                                                     "width": w, "height": h, "crop": "center"}},
+        "8": {"class_type": "VAEEncode", "inputs": {"pixels": ["7", 0], "vae": ["3", 0]}},
+        "9": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0],
+                                                   "latent_image": ["8", 0], "seed": seed, "steps": 25, "cfg": 4.0,
                                                    "sampler_name": "euler", "scheduler": "simple", "denoise": denoise}},
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
-        "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "imgshim/qwen_i2i"}},
+        "10": {"class_type": "VAEDecode", "inputs": {"samples": ["9", 0], "vae": ["3", 0]}},
+        "11": {"class_type": "SaveImage", "inputs": {"images": ["10", 0], "filename_prefix": "imgshim/qwen_i2i"}},
     }
 
 
@@ -131,7 +169,8 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
             return
         if self.path in ("/", "/health"):
-            return self._json(200, {"ok": True, "script": os.path.abspath(__file__), "pid": os.getpid()})
+            return self._json(200, {"ok": True, "script": os.path.abspath(__file__), "pid": os.getpid(),
+                                    "capabilities": capabilities()})
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -140,18 +179,21 @@ class H(BaseHTTPRequestHandler):
         raw = self.rfile.read(n)
         try:
             if self.path.startswith("/v1/images/edits"):
-                # 简易 multipart 解析：取 prompt 与第一张图
-                text = raw.decode("utf-8", "ignore")
-                prompt = ""
-                m = re.search(r'name="prompt"\r\n\r\n(.*?)\r\n--', text, re.S)
-                if m: prompt = m.group(1)
+                prompt = multipart_text(raw, "prompt")
+                size = multipart_text(raw, "size")
                 imgs = re.findall(rb"name=\"image\[\]\"[^\r]*\r\nContent-Type: ([^\r]+)\r\n\r\n(.*?)\r\n--", raw, re.S)
                 if not imgs:
                     return self._json(400, {"error": {"message": "image[] required"}})
-                ctype_i, data = imgs[0][0].decode(), imgs[0][1]
-                src = upload_image(data, ctype_i)
-                url = run_graph(graph_img2img(prompt, src, random.randint(0, 2**31 - 1)), "i2i")
-                return self._json(200, {"data": [{"url": url}]})
+                (ctype_i, data), warning = select_edit_reference(imgs)
+                if warning:
+                    print(f"[imgshim] warning: {warning}", flush=True)
+                w, h = parse_size(size, "qwen-image")
+                src = upload_image(data, ctype_i.decode())
+                url = run_graph(graph_img2img(prompt, src, random.randint(0, 2**31 - 1), w, h), "i2i")
+                payload = {"data": [{"url": url}]}
+                if warning:
+                    payload["warning"] = warning
+                return self._json(200, payload)
             # generations
             body = json.loads(raw or b"{}")
             prompt = (body.get("prompt") or "").strip()

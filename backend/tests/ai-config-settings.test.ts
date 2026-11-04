@@ -91,6 +91,12 @@ before(async () => {
         res.end(JSON.stringify({ header: { reqid: 'probe', code: 45000010, message: 'Invalid X-Api-Key' } }))
         return
       }
+      if (req.headers['x-api-key'] === 'expired-401') {
+        res.statusCode = 401
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ header: { reqid: 'probe', code: 45000010, message: 'Invalid X-Api-Key' } }))
+        return
+      }
       if (req.url === '/api/v3/tts/unidirectional') {
         res.setHeader('content-type', 'application/json')
         res.end([
@@ -403,4 +409,22 @@ test('audio probes exercise the real synthesis contract and reject bad credentia
   assert.match(expiredKey.message, /45000010/)
   assert.match(expiredKey.message, /API Key/)
   assert.match(expiredKey.message, /App ID/)
+
+  // HTTP 401 且响应体带厂商鉴权错误时，同样要保留 45000010 明细
+  const expired401 = (await json(await app.request('/api/v1/ai-configs/test', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      service_type: 'audio',
+      provider: 'volcengine',
+      base_url: baseUrl,
+      api_key: 'expired-401',
+      provider_settings: { defaultVoiceId: 'voice-clone-id' },
+    }),
+  }))).data
+  assert.equal(expired401.ok, false)
+  assert.equal(expired401.reachable, false)
+  assert.match(expired401.message, /45000010/)
+  assert.match(expired401.message, /API Key/)
+  assert.match(expired401.message, /App ID/)
 })

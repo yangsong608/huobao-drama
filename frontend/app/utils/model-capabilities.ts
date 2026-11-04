@@ -94,9 +94,10 @@ function minimaxCapability(model: string, options: VideoCapabilityOptions = {}):
     })
   }
   // 本地 shim 有完整 480P 画布，标准 H3 在本地也可选 480p；云端仍只认 768P/2K
+  // 音频/视频参考尚未接入 shim，声明为 0，避免 UI 让用户绑定后被后端拒绝
   if (options.localShim) {
     return build('h3', ['480p', '720p', '1080p'], { '480p': '480P', '720p': '768P', '1080p': '2K' }, {
-      minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true,
+      minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 0, referenceAudios: 0, nativeAudio: true,
     })
   }
   return build('h3', ['720p', '1080p'], { '720p': '768P', '1080p': '2K' }, {

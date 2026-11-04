@@ -358,6 +358,8 @@ export const taskAPI = {
   },
   // 按集聚合生成任务（sys_task + video_merges）
   listByEpisode: (episodeId: number) => api.get<{ tasks: any[]; merges: any[] }>(`/episodes/${episodeId}/generation-tasks`),
+  // 清空本集已完成/失败任务（保留进行中与成片）
+  clearByEpisode: (episodeId: number) => api.del<{ deleted: number }>(`/episodes/${episodeId}/generation-tasks`),
 }
 
 async function uploadReq<T = any>(path: string, file: File, dramaId?: number): Promise<T> {

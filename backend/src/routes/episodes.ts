@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { success, notFound, badRequest, now } from '../utils/response.js'
 import { toSnakeCaseArray, toSnakeCase } from '../utils/transform.js'
@@ -89,7 +89,7 @@ app.put('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const body = await c.req.json()
 
-  const allowed = ['content', 'script_content', 'title', 'description', 'status', 'resolution', 'video_audio_mode', 'bgm_url', 'auto_dub']
+  const allowed = ['content', 'script_content', 'title', 'description', 'status', 'resolution', 'video_audio_mode', 'bgm_url', 'auto_dub', 'video_config_id']
   const updates: Record<string, any> = {}
   for (const key of allowed) {
     if (key in body) updates[key] = body[key]
@@ -113,6 +113,14 @@ app.put('/:id', async (c) => {
   }
   if ('bgm_url' in updates) drizzleUpdates.bgmUrl = updates.bgm_url
   if ('auto_dub' in updates) drizzleUpdates.autoDub = Boolean(updates.auto_dub)
+  if ('video_config_id' in updates) {
+    const configId = Number(updates.video_config_id)
+    if (!Number.isInteger(configId) || configId <= 0) return badRequest(c, 'video_config_id 无效')
+    const [config] = await db.select().from(schema.aiServiceConfigs)
+      .where(eq(schema.aiServiceConfigs.id, configId))
+    if (!config || config.serviceType !== 'video') return badRequest(c, '视频配置不存在或类型不符')
+    drizzleUpdates.videoConfigId = configId
+  }
 
   await db.update(schema.episodes).set(drizzleUpdates).where(eq(schema.episodes.id, id))
   return success(c)
@@ -303,13 +311,10 @@ app.get('/:episode_id/storyboards', async (c) => {
   })))
 })
 
-// GET /episodes/:id/pipeline-status — 流水线进度
-// GET /episodes/:id/generation-tasks — 按集聚合 sys_task + video_merges
 // sys_task 无 episode_id,通过 storyboard/scene/character/prop 关联键归属到当前集
-app.get('/:id/generation-tasks', async (c) => {
-  const episodeId = Number(c.req.param('id'))
+async function getEpisodeTaskScope(episodeId: number) {
   const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
-  if (!ep) return notFound(c, '剧集不存在')
+  if (!ep) return null
 
   const sbs = await db.select().from(schema.storyboards).where(eq(schema.storyboards.episodeId, episodeId))
   const storyboardIds = new Set(sbs.map(s => s.id))
@@ -336,15 +341,42 @@ app.get('/:id/generation-tasks', async (c) => {
     )
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
 
+  return { ep, tasks }
+}
+
+// GET /episodes/:id/generation-tasks — 按集聚合 sys_task + video_merges
+app.get('/:id/generation-tasks', async (c) => {
+  const episodeId = Number(c.req.param('id'))
+  const scope = await getEpisodeTaskScope(episodeId)
+  if (!scope) return notFound(c, '剧集不存在')
+
   const merges = (await db.select().from(schema.videoMerges)
     .where(and(eq(schema.videoMerges.episodeId, episodeId), isNull(schema.videoMerges.deletedAt))))
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
     .slice(0, 20)
 
   return success(c, {
-    tasks: toSnakeCaseArray(tasks),
+    tasks: toSnakeCaseArray(scope.tasks),
     merges: toSnakeCaseArray(merges),
   })
+})
+
+// DELETE /episodes/:id/generation-tasks — 清空已完成/失败任务（保留进行中、成片与磁盘文件）
+app.delete('/:id/generation-tasks', async (c) => {
+  const episodeId = Number(c.req.param('id'))
+  const scope = await getEpisodeTaskScope(episodeId)
+  if (!scope) return notFound(c, '剧集不存在')
+
+  const ids = scope.tasks
+    .filter(t => t.status === 'completed' || t.status === 'failed')
+    .map(t => t.id)
+  if (!ids.length) return success(c, { deleted: 0 })
+
+  const result = await db.delete(schema.sysTask).where(and(
+    inArray(schema.sysTask.id, ids),
+    inArray(schema.sysTask.status, ['completed', 'failed']),
+  ))
+  return success(c, { deleted: result.changes })
 })
 
 app.get('/:id/pipeline-status', async (c) => {

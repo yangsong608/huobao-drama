@@ -36,6 +36,8 @@ data/
 
 # Local H3 bridge runtime artifacts
 local-h3/scripts/files/
+local-h3/scripts/state.json
+local-h3/scripts/upload_cache.json
 __pycache__/
 *.py[cod]
 .pytest_cache/

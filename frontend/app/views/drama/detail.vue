@@ -466,14 +466,15 @@
                     <strong>{{ editTarget.kindKey === 'character' ? (editTarget.role || t('common.role')) : editTarget.kindKey === 'prop' ? (editTarget.type || t('common.prop')) : (editTarget.time || t('episode.asset.noTime')) }}</strong>
                   </div>
                 </div>
-                <CharacterVoice v-if="editTarget.kindKey === 'character'" :key="editTarget.id" :character="editTarget" @updated="updateCharacterVoice" />
-                <VoiceProfilePanel
-                  v-if="editTarget.kindKey === 'character'"
-                  :key="'vp-' + editTarget.id"
-                  :character="editTarget"
-                  :drama-id="dramaId"
-                  @updated="updateCharacterVoice"
-                />
+                <div v-if="editTarget.kindKey === 'character'" class="voice-stack">
+                  <VoiceProfilePanel
+                    :key="'vp-' + editTarget.id"
+                    :character="editTarget"
+                    :drama-id="dramaId"
+                    @updated="updateCharacterVoice"
+                  />
+                  <CharacterVoice :key="editTarget.id" :character="editTarget" @updated="updateCharacterVoice" />
+                </div>
               </aside>
 
               <!-- 右侧：编辑信息 -->
@@ -2256,6 +2257,13 @@ onMounted(() => {
   color: var(--text-0); font-size: 12px;
   line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+
+/* 角色音色：音色档案在上，直传参考音在下，共用一条分隔线 */
+.voice-stack {
+  display: flex; flex-direction: column; gap: 12px; min-width: 0;
+  border-top: 1px solid var(--surface-outline); padding-top: 12px; margin-top: 4px;
+}
+.voice-stack :deep(.character-voice) { margin-top: 0; padding-top: 0; }
 
 /* 编辑区域 */
 .mat-detail-edit-grid {

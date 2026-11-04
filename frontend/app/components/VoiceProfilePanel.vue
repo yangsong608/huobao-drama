@@ -6,6 +6,7 @@
         <span>{{ t('voiceProfile.title') }}</span>
         <span v-if="activeVoice" :class="['vp-chip', `is-${activeVoice.status}`]">{{ statusLabel(activeVoice) }}</span>
         <span v-else class="vp-chip is-empty">{{ t('voiceProfile.empty') }}</span>
+        <span v-if="activeVoice" :class="['vp-sync', `is-${syncState}`]">{{ syncLabel }}</span>
       </div>
       <div class="vp-actions">
         <button type="button" class="btn btn-sm" :disabled="busy || generating" @click="generate(!activeVoice)">
@@ -19,35 +20,12 @@
     <p v-if="!activeVoice && !generating" class="vp-hint">{{ t('voiceProfile.emptyHint') }}</p>
 
     <template v-if="activeVoice">
-      <label class="vp-field">
-        <span>{{ t('voiceProfile.prompt') }}</span>
-        <textarea
-          v-model="promptDraft"
-          rows="3"
-          maxlength="600"
-          :disabled="saving"
-          :placeholder="t('voiceProfile.promptPlaceholder')"
-          @blur="savePrompt"
-        />
+      <label v-if="voices.length > 1" class="vp-field">
+        <span>{{ t('voiceProfile.version') }}</span>
+        <select v-model="activeId">
+          <option v-for="voice in voices" :key="voice.id" :value="voice.id">{{ voiceOptionLabel(voice) }}</option>
+        </select>
       </label>
-
-      <label class="vp-field">
-        <span>{{ t('voiceProfile.externalVoiceId') }}</span>
-        <input
-          v-model="externalIdDraft"
-          type="text"
-          :disabled="saving"
-          :placeholder="t('voiceProfile.externalVoiceIdPlaceholder')"
-          @blur="saveExternalId"
-          @keydown.enter.prevent="saveExternalId"
-        />
-        <small class="vp-foot-hint">{{ t('voiceProfile.externalVoiceIdHint') }}</small>
-      </label>
-
-      <details class="vp-instruct">
-        <summary>{{ t('voiceProfile.instruct') }}</summary>
-        <p>{{ activeVoice.designInstruct || '—' }}</p>
-      </details>
 
       <div class="vp-actions vp-actions--wrap">
         <button type="button" class="btn btn-sm" :disabled="busy" @click="playSample">
@@ -65,9 +43,10 @@
           <Check :size="12" />
           {{ t('voiceProfile.activate') }}
         </button>
-        <button type="button" class="btn btn-sm" :disabled="busy" @click="syncToVideo">
-          <Link2 :size="12" />
-          {{ t('voiceProfile.syncToVideo') }}
+        <button type="button" class="btn btn-sm" :disabled="busy || syncState === 'synced'" @click="syncToVideo">
+          <Check v-if="syncState === 'synced'" :size="12" />
+          <Link2 v-else :size="12" />
+          {{ syncState === 'synced' ? t('voiceProfile.syncStateSynced') : t('voiceProfile.syncToVideo') }}
         </button>
         <button type="button" class="btn btn-sm" :disabled="busy" @click="fileInput?.click()">
           <Upload :size="12" />
@@ -83,15 +62,51 @@
         />
       </div>
 
+      <p v-if="syncState === 'stale'" class="vp-warn">{{ t('voiceProfile.syncHintStale') }}</p>
+
       <audio v-if="sampleUrl" :key="sampleUrl" class="vp-audio" :src="sampleUrl" controls preload="none" />
 
       <p v-if="activeVoice.status === 'failed'" class="vp-error" role="alert">
         {{ activeVoice.error || t('voiceProfile.failed') }}
       </p>
       <p v-if="activeVoice.status === 'pending_model'" class="vp-warn">{{ t('voiceProfile.pendingModel') }}</p>
+
+      <details class="vp-advanced">
+        <summary>{{ t('voiceProfile.advanced') }}</summary>
+        <label class="vp-field">
+          <span>{{ t('voiceProfile.prompt') }}</span>
+          <textarea
+            v-model="promptDraft"
+            rows="3"
+            maxlength="600"
+            :disabled="saving"
+            :placeholder="t('voiceProfile.promptPlaceholder')"
+            @blur="savePrompt"
+          />
+        </label>
+
+        <label class="vp-field">
+          <span>{{ t('voiceProfile.externalVoiceId') }}</span>
+          <input
+            v-model="externalIdDraft"
+            type="text"
+            :disabled="saving"
+            :placeholder="t('voiceProfile.externalVoiceIdPlaceholder')"
+            @blur="saveExternalId"
+            @keydown.enter.prevent="saveExternalId"
+          />
+          <small class="vp-foot-hint">{{ t('voiceProfile.externalVoiceIdHint') }}</small>
+        </label>
+
+        <details class="vp-instruct">
+          <summary>{{ t('voiceProfile.instruct') }}</summary>
+          <p>{{ activeVoice.designInstruct || '—' }}</p>
+        </details>
+      </details>
     </template>
 
     <p class="vp-foot">{{ t('voiceProfile.footHint') }}</p>
+    <p class="vp-foot">{{ t('voiceProfile.capabilityHint') }}</p>
   </section>
 </template>
 
@@ -103,7 +118,7 @@ import { voiceProfileAPI, type VoiceProfile } from '~/composables/useApi'
 import { toastError } from '~/composables/useToast'
 
 const props = defineProps<{
-  character: { id: number; name?: string }
+  character: { id: number; name?: string; voice_audio_url?: string | null; voiceAudioUrl?: string | null }
   dramaId: number
   episodeId?: number | null
 }>()
@@ -119,12 +134,36 @@ const voices = ref<VoiceProfile[]>([])
 const activeId = ref<number | null>(null)
 const promptDraft = ref('')
 const externalIdDraft = ref('')
+const lastSynced = ref<{ voiceId: number; url: string } | null>(null)
 
 const busy = computed(() => loading.value || generating.value || saving.value || sampling.value)
 const activeVoice = computed(() => voices.value.find(v => v.id === activeId.value) || voices.value[0] || null)
 const sampleUrl = computed(() => {
   const value = activeVoice.value?.sampleUrl || ''
   return value && !value.startsWith('/') && !/^https?:\/\//i.test(value) ? `/${value}` : value
+})
+
+function normalizeVoiceUrl(value: string | null | undefined) {
+  return String(value || '').replace(/^\/+/, '')
+}
+
+const videoRefUrl = computed(() => normalizeVoiceUrl(props.character.voice_audio_url ?? props.character.voiceAudioUrl))
+const activeSampleUrl = computed(() => normalizeVoiceUrl(activeVoice.value?.sampleUrl || ''))
+// 服务端不记录「同步的是哪一版」，只能靠路径/文件名推断；本会话内同步过的版本直接按 id 记住。
+const syncState = computed<'synced' | 'stale' | 'none'>(() => {
+  const voice = activeVoice.value
+  if (!voice) return 'none'
+  if (lastSynced.value?.voiceId === voice.id && videoRefUrl.value === normalizeVoiceUrl(lastSynced.value.url)) return 'synced'
+  if (!videoRefUrl.value) return 'none'
+  if (activeSampleUrl.value && videoRefUrl.value === activeSampleUrl.value) return 'synced'
+  const basename = videoRefUrl.value.split('/').pop() || ''
+  if (basename.startsWith(`voice-${voice.id}-`)) return 'synced'
+  return 'stale'
+})
+const syncLabel = computed(() => {
+  if (syncState.value === 'synced') return t('voiceProfile.syncStateSynced')
+  if (syncState.value === 'stale') return t('voiceProfile.syncStateStale')
+  return t('voiceProfile.syncStateNone')
 })
 
 watch(activeVoice, (voice) => {
@@ -159,6 +198,10 @@ function statusLabel(voice: VoiceProfile) {
     generating: t('voiceProfile.statusGenerating'),
   }
   return map[voice.status] || voice.status
+}
+
+function voiceOptionLabel(voice: VoiceProfile) {
+  return `${voice.name || t('voiceProfile.title')} · ${statusLabel(voice)}`
 }
 
 async function load() {
@@ -247,6 +290,7 @@ async function syncToVideo() {
   if (!voice) return
   try {
     const result = await voiceProfileAPI.sync(props.character.id, voice.id)
+    lastSynced.value = { voiceId: voice.id, url: result.voice_audio_url }
     emit('updated', props.character.id, { voice_audio_url: result.voice_audio_url, voice_audio_name: props.character.name || null })
     toast.success(t('voiceProfile.synced'))
   } catch (error) {
@@ -281,23 +325,29 @@ defineExpose({ reload: load })
 </script>
 
 <style scoped>
-.voice-profile { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 8px; min-width: 0; }
+.voice-profile { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .vp-head, .vp-title, .vp-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .vp-head { justify-content: space-between; }
-.vp-title { color: var(--text-1); font-size: 12px; font-weight: 600; }
+.vp-title { color: var(--text-1); font-size: 12px; font-weight: 600; flex-wrap: wrap; }
 .vp-title svg { color: var(--text-3); flex-shrink: 0; }
 .vp-chip { border-radius: 999px; padding: 1px 7px; font-size: 10px; font-weight: 500; background: var(--surface-2, rgba(127,127,127,0.12)); color: var(--text-2); }
 .vp-chip.is-ready { color: var(--action-success, #2e9e5b); background: rgba(46, 158, 91, 0.12); }
 .vp-chip.is-failed { color: var(--action-danger, #d9534f); background: rgba(217, 83, 79, 0.12); }
 .vp-chip.is-empty { color: var(--text-3); }
+.vp-sync { border-radius: 999px; padding: 1px 7px; font-size: 10px; font-weight: 500; background: var(--surface-2, rgba(127,127,127,0.12)); color: var(--text-3); }
+.vp-sync.is-synced { color: var(--action-success, #2e9e5b); background: rgba(46, 158, 91, 0.12); }
+.vp-sync.is-stale { color: var(--action-warning, #c48a1b); background: rgba(196, 138, 27, 0.12); }
 .vp-actions { flex-shrink: 0; }
 .vp-actions--wrap { flex-wrap: wrap; }
 .vp-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-2); }
 .vp-field textarea { width: 100%; resize: vertical; min-height: 58px; padding: 6px 8px; font: inherit; font-size: 12px; line-height: 1.6; color: var(--text-1); background: var(--bg-2, transparent); border: 1px solid var(--border); border-radius: 6px; }
 .vp-field textarea:disabled { opacity: 0.6; }
-.vp-field input { width: 100%; padding: 6px 8px; font: inherit; font-size: 12px; color: var(--text-1); background: var(--bg-2, transparent); border: 1px solid var(--border); border-radius: 6px; }
-.vp-field input:disabled { opacity: 0.6; }
+.vp-field input, .vp-field select { width: 100%; padding: 6px 8px; font: inherit; font-size: 12px; color: var(--text-1); background: var(--bg-2, transparent); border: 1px solid var(--border); border-radius: 6px; }
+.vp-field input:disabled, .vp-field select:disabled { opacity: 0.6; }
 .vp-foot-hint { font-size: 10px; color: var(--text-3); line-height: 1.5; }
+.vp-advanced { font-size: 11px; color: var(--text-3); border-top: 1px dashed var(--border); padding-top: 8px; }
+.vp-advanced summary { cursor: pointer; }
+.vp-advanced > .vp-field, .vp-advanced > .vp-instruct { margin-top: 8px; }
 .vp-instruct { font-size: 11px; color: var(--text-3); }
 .vp-instruct summary { cursor: pointer; }
 .vp-instruct p { margin: 4px 0 0; line-height: 1.6; word-break: break-word; }

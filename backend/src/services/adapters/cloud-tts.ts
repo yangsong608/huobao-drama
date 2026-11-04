@@ -9,7 +9,7 @@
  */
 import crypto from 'crypto'
 import { joinProviderUrl } from './url.js'
-import { parseAudioResponse, TtsError, type AudioFormat, type ParsedAudio } from './qwen-tts.js'
+import { parseAudioResponse, ttsErrorCodeForStatus, TtsError, type AudioFormat, type ParsedAudio } from './qwen-tts.js'
 
 export interface CloudTtsSettings {
   /** 配置级默认音色（voice profile 未绑定 externalVoiceId 时使用） */
@@ -261,9 +261,40 @@ function volcengineErrorMessage(code: number, message: string): string {
   return `[${code}] ${message}${hint}`
 }
 
+/** 从豆包错误响应体提取带指引的厂商错误；非错误响应返回 null */
+function volcengineBodyError(text: string): string | null {
+  if (!text) return null
+  for (const line of text.split(/\r?\n/)) {
+    const payload = line.trim().replace(/^data:\s*/, '')
+    if (!payload || payload === '[DONE]') continue
+    let json: any
+    try {
+      json = JSON.parse(payload)
+    } catch {
+      continue
+    }
+    const header = json?.header
+    const rawCode = header?.code ?? json?.code
+    if (rawCode === undefined || rawCode === null) continue
+    const code = Number(rawCode)
+    if (!Number.isFinite(code) || code === 0 || code === 20_000_000) continue
+    return volcengineErrorMessage(code, header?.message || header?.msg || json?.message || '豆包语音合成失败')
+  }
+  return null
+}
+
 /** 豆包 v3 单向流式响应：逐行 JSON / SSE，data 字段为 base64 音频块 */
 async function parseVolcengineAudio(resp: Response): Promise<ParsedAudio> {
-  if (!resp.ok) return parseAudioResponse(resp)
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '')
+    const vendor = volcengineBodyError(text)
+    if (vendor) throw new TtsError(ttsErrorCodeForStatus(resp.status), vendor, resp.status, text.slice(0, 512))
+    return parseAudioResponse(new Response(text, {
+      status: resp.status,
+      statusText: resp.statusText,
+      headers: resp.headers,
+    }))
+  }
 
   const contentType = (resp.headers.get('content-type') || '').toLowerCase()
   if (!contentType.includes('json') && !contentType.includes('stream')) return parseAudioResponse(resp)

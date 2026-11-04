@@ -5,6 +5,8 @@
   },
   "characterVoice": {
     "title": "Character voice",
+    "sampleTitle": "Upload reference audio directly",
+    "directHint": "Upload a clear voice clip to use directly as the video reference, without a voice profile. Use either this or the profile above.",
     "forCharacter": "Voice for {name}",
     "upload": "Upload voice",
     "replace": "Replace voice",
@@ -672,6 +674,11 @@
       "seedInvalid": "Seed must be an integer",
       "fpsInvalid": "Frame rate must be positive",
       "sampleRateInvalid": "Sample rate must be a positive integer",
+      "h3Quality": "Local H3 quality",
+      "h3QualityHint": "Preview uses the 4-step LoRA for fast iteration; Final uses the 8-step LoRA for delivery",
+      "h3QualityPreview": "Preview (4-step)",
+      "h3QualityFinal": "Final (8-step)",
+      "h3LocalOnlyHint": "These settings only apply to the local H3 shim; cloud MiniMax ignores them",
       "workflowRequired": "ComfyUI requires a workflow JSON",
       "workflowInvalid": "Invalid workflow JSON; paste an API-format workflow",
       "outputFormat": "Image format",
@@ -690,7 +697,17 @@
       "audioFormat": "Audio format",
       "sampleRate": "Sample rate",
       "emotion": "Emotion",
-      "emotionPlaceholder": "e.g. happy / sad; leave empty for default"
+      "emotionPlaceholder": "e.g. happy / sad; leave empty for default",
+      "ttsTimeout": "Synthesis timeout (ms)",
+      "ttsTimeoutHint": "Leave empty to follow the model: 650000 for 191, 120000 for legacy local services",
+      "ttsConcurrency": "Concurrency",
+      "ttsConcurrencyHint": "191 runs one task per GPU; use 1 (range 1–8)",
+      "ttsMaxInputChars": "Max characters per request",
+      "ttsMaxInputCharsHint": "191 accepts up to 500 characters; longer text is split at punctuation. Leave empty to follow the model",
+      "ttsMaxNewTokens": "Max new tokens",
+      "ttsMaxNewTokensHint": "191 range 64–2048; defaults to 2048 for 191",
+      "ttsSeedHint": "Leave empty to use the service default (42 on 191)",
+      "qwen191Hint": "191 local service: use Base URL http://127.0.0.1:18190 without /v1; voice IDs must be built-in names such as Serena or Vivian; voice design automatically uses /v1/audio/speech; reference-audio cloning is not available over HTTP."
     },
     "styleDialog": {
       "editTitle": "Edit Style Preset",
@@ -799,7 +816,8 @@
       "start": "Start Production",
       "resolution": "Resolution",
       "videoAudio": "Native audio",
-      "videoAudioSwitched": "Video audio for this episode set to “{mode}”"
+      "videoAudioSwitched": "Video audio for this episode set to “{mode}”",
+      "videoConfigSwitched": "Episode video config switched to {name}"
     },
     "model": {
       "defaultWith": "Default · {model}",
@@ -1156,7 +1174,12 @@
       "sbN": "Shot #{n}",
       "generic": "General",
       "fullMerge": "Full-episode merge",
-      "mergeKind": "Merge"
+      "mergeKind": "Merge",
+      "clear": "Clear",
+      "clearTitle": "Clear completed/failed tasks",
+      "clearMessage": "Delete {n} completed or failed task record(s) for this episode. Running tasks and merge versions are kept; files on disk are not deleted.",
+      "clearConfirm": "Clear records",
+      "cleared": "Cleared {n} task record(s)"
     },
     "export": {
       "notReadyDesc": "Please finish the storyboard and production steps first",
@@ -1350,7 +1373,14 @@
     "externalVoiceId": "External voice ID",
     "externalVoiceIdPlaceholder": "Voice ID from the provider console",
     "externalVoiceIdHint": "Required for Aliyun/Doubao cloud speech; optional for local Qwen3-TTS",
-    "externalVoiceIdSaved": "External voice ID saved"
+    "externalVoiceIdSaved": "External voice ID saved",
+    "version": "Voice version",
+    "syncStateSynced": "Synced as video reference",
+    "syncStateStale": "Video reference is another version",
+    "syncStateNone": "Not set as video reference",
+    "syncHintStale": "This voice is not synced yet; video generation still uses the previous reference audio.",
+    "advanced": "Advanced (prompt / voice ID / instruction)",
+    "capabilityHint": "Reference audio is supported by Aliyun Wan 3.0, Doubao Seedance 2.0 and Huobao cloud MiniMax. Local H3 does not support voice references — dub in the dubbing workbench instead."
   },
   "workbench": {
     "title": "Dubbing workbench",

@@ -162,6 +162,23 @@ test('Volcengine header.code auth errors are surfaced with actionable guidance',
   )
 })
 
+test('Volcengine 401 responses keep the vendor error detail', async () => {
+  await assert.rejects(
+    () => parseCloudAudioResponse(
+      new Response(JSON.stringify({
+        header: { reqid: '401-req', code: 45000010, message: 'Invalid X-Api-Key' },
+      }), { status: 401, headers: { 'content-type': 'application/json' } }),
+      volcengineOptions(),
+    ),
+    (error: TtsError) =>
+      error.code === 'unauthorized'
+      && /\[45000010\] Invalid X-Api-Key/.test(error.message)
+      && /API Key/.test(error.message)
+      && /App ID/.test(error.message)
+      && (error.bodyPreview || '').includes('45000010'),
+  )
+})
+
 test('OpenAI-compatible TTS request targets a local /v1/audio/speech endpoint', () => {
   const { url, init } = buildCloudSpeechRequest(
     {

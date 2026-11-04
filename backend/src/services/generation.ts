@@ -70,6 +70,7 @@ interface GenerateVideoParams {
   duration?: number
   aspectRatio?: string
   resolution?: string
+  quality?: 'preview' | 'final'
   seed?: number
   promptExtend?: boolean
   watermark?: boolean
@@ -168,6 +169,7 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
       aspectRatio: params.aspectRatio,
       // 统一存为项目内部格式，各适配器再转换为官方大小写与枚举。
       resolution: normalizeStoredVideoResolution(params.resolution),
+      quality: params.quality,
       seed: params.seed,
       promptExtend: params.promptExtend,
       watermark: params.watermark,
@@ -290,6 +292,7 @@ async function processTask(id: number, config: AIConfig) {
         duration: params.duration,
         aspectRatio: params.aspectRatio,
         resolution: params.resolution,
+        quality: params.quality,
         seed: params.seed,
         promptExtend: params.promptExtend,
         watermark: params.watermark,
@@ -328,6 +331,9 @@ async function processTask(id: number, config: AIConfig) {
     if (!resp.ok) throw new Error(`API error ${resp.status}: ${await resp.text()}`)
     const result = await resp.json() as any
     logTaskPayload(label, 'response payload', { id, provider: config.provider, result })
+    if (typeof result?.warning === 'string' && result.warning.trim()) {
+      logTaskWarn(label, 'provider-warning', { id, provider: config.provider, warning: result.warning })
+    }
 
     if (type === 'image') {
       const adapter = getImageAdapter(config.provider)

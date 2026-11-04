@@ -10,7 +10,8 @@ import { getDramaBackground, withDramaBackground } from '../services/drama-backg
 import { resolveStoryboardVoiceReferences } from '../services/character-voice-references.js'
 import { resolutionSupportError } from '../services/model-capabilities.js'
 import { normalizeVideoAudioMode } from '../services/video-audio.js'
-import { logTaskError, logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { compileLocalH3Prompt } from '../services/h3-prompt.js'
+import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
 
 const app = new Hono()
 
@@ -71,6 +72,7 @@ function normalizeVideoRequest(body: any) {
     duration: body.duration ?? parameters.duration,
     aspect_ratio: body.aspect_ratio ?? parameters.ratio,
     resolution: body.resolution ?? parameters.resolution,
+    quality: body.quality ?? parameters.quality,
     seed: body.seed ?? parameters.seed,
     prompt_extend: body.prompt_extend ?? parameters.prompt_extend,
     watermark: body.watermark ?? parameters.watermark,
@@ -97,7 +99,8 @@ function isLocalMinimaxShim(
   return false
 }
 
-function validateVideoRequest(body: any, provider?: string): string | null {  for (const key of ['reference_image_urls', 'reference_video_urls', 'reference_audio_urls']) {
+function validateVideoRequest(body: any, provider?: string, options: { localShim?: boolean } = {}): string | null {
+  for (const key of ['reference_image_urls', 'reference_video_urls', 'reference_audio_urls']) {
     if (body[key] !== undefined && !Array.isArray(body[key])) return `${key} 必须为数组`
     if (Array.isArray(body[key]) && body[key].some((url: any) => typeof url !== 'string' || !url.trim())) {
       return `${key} 中的每个 URL 都必须为非空字符串`
@@ -125,6 +128,13 @@ function validateVideoRequest(body: any, provider?: string): string | null {  fo
   const file = Boolean(body.file_url)
   const link = Boolean(body.link_url)
 
+  // 本地 shim 只实现了图片参考与首尾帧，其余素材不能静默丢弃
+  if (options.localShim) {
+    if (vids > 0) return '本地 H3 兼容层暂不支持参考视频，请移除后重试'
+    if (auds > 0) return '本地 H3 兼容层暂不支持参考音频；角色音色请使用云端 H3，或改用后期配音'
+    if (file || link) return '本地 H3 兼容层暂不支持 file/link 参考素材'
+  }
+
   if ((provider || '').toLowerCase() === 'aliyun') {
     if (imgs > 10 || vids > 5 || auds > 5) return 'Wan 3.0 参考素材超限：图片≤10、视频≤5、音频≤5'
     if (last && !first) return 'Wan 3.0 尾帧必须与首帧同时传入'
@@ -137,6 +147,7 @@ function validateVideoRequest(body: any, provider?: string): string | null {  fo
   } else {
     if (imgs > 9 || vids > 3 || auds > 3) return '参考素材超限：图片≤9、视频≤3、音频≤3'
     if (auds > 0 && imgs + vids === 0) return '参考音频需要至少 1 个参考图片或视频'
+    if (last && !first) return '尾帧必须与首帧同时提供'
   }
 
   if (!String(body.prompt || '').trim() && imgs + vids + auds === 0 && !first && !last && !file && !link) {
@@ -183,11 +194,13 @@ app.post('/', async (c) => {
       }
     }
 
+    let localVideoShim = false
     if (type === 'video' && videoBody) {
       const effectiveConfig = configId
         ? (await getConfigById(configId)) ?? await getActiveConfig('video')
         : await getActiveConfig('video')
-      const validationError = validateVideoRequest(videoBody, effectiveConfig?.provider)
+      localVideoShim = isLocalMinimaxShim(effectiveConfig)
+      const validationError = validateVideoRequest(videoBody, effectiveConfig?.provider, { localShim: localVideoShim })
       if (validationError) return badRequest(c, validationError)
       // 模型级分辨率：mini/fast 最高 720p、H3-Highspeed 仅 768P 等，创建任务前直接拒绝；
       // 本地 minimax shim 额外支持 480p 自有画布
@@ -196,15 +209,22 @@ app.post('/', async (c) => {
         effectiveConfig?.provider,
         String(videoBody.model || effectiveConfig?.model || ''),
         requestedResolution,
-        { localShim: isLocalMinimaxShim(effectiveConfig) },
+        { localShim: localVideoShim },
       )
       if (resolutionError) return badRequest(c, resolutionError)
-      const voices = await resolveStoryboardVoiceReferences(String(videoBody.prompt || ''), Number(body.storyboard_id) || undefined, videoBody.reference_audio_urls)
-      videoBody.prompt = voices.prompt
-      videoBody.reference_audio_urls = voices.audioUrls
-      if (voices.hasVoiceReferences && videoBody.audio_mode === 'silent') return badRequest(c, '引用角色音色时需要开启视频声音')
-      const referenceError = validateVideoRequest(videoBody, effectiveConfig?.provider)
-      if (referenceError) return badRequest(c, referenceError)
+      if (!localVideoShim) {
+        const voices = await resolveStoryboardVoiceReferences(String(videoBody.prompt || ''), Number(body.storyboard_id) || undefined, videoBody.reference_audio_urls)
+        videoBody.prompt = voices.prompt
+        videoBody.reference_audio_urls = voices.audioUrls
+        if (voices.hasVoiceReferences && videoBody.audio_mode === 'silent') return badRequest(c, '引用角色音色时需要开启视频声音')
+        const referenceError = validateVideoRequest(videoBody, effectiveConfig?.provider)
+        if (referenceError) return badRequest(c, referenceError)
+      } else if (String(videoBody.prompt || '').includes('#')) {
+        logTaskWarn('TaskAPI', 'local-shim-voice-tags-ignored', {
+          storyboardId: body.storyboard_id,
+          reason: 'local H3 has no audio reference input',
+        })
+      }
     }
 
     logTaskStart('TaskAPI', 'generate', {
@@ -227,6 +247,18 @@ app.post('/', async (c) => {
       ])
       if (stylePrompt) videoPrompt = `${stylePrompt}，\n${videoPrompt}`
       videoPrompt = withDramaBackground(String(videoPrompt || ''), background)
+    }
+
+    // 本地 H3 把中文正文当字幕烧进画面：提交前统一转英文结构，对白只留口型动作
+    if (type === 'video' && localVideoShim && String(videoPrompt || '').trim()) {
+      const audioMode = normalizeVideoAudioMode(videoBody!.audio_mode, videoBody!.generate_audio)
+      const rawPrompt = String(videoPrompt)
+      videoPrompt = await compileLocalH3Prompt(rawPrompt, audioMode)
+      logTaskProgress('TaskAPI', 'h3-prompt-compiled', {
+        storyboardId: body.storyboard_id,
+        audioMode,
+        chars: `${rawPrompt.length}->${videoPrompt.length}`,
+      })
     }
 
     // 分镜图等直连图片任务同样带项目背景（资产生图走各自路由，已在路由内注入）
@@ -268,6 +300,7 @@ app.post('/', async (c) => {
         duration: videoBody!.duration,
         aspectRatio: videoBody!.aspect_ratio,
         resolution: episodeResolution || videoBody!.resolution,
+        quality: videoBody!.quality === 'final' ? 'final' : videoBody!.quality === 'preview' ? 'preview' : undefined,
         seed: videoBody!.seed,
         promptExtend: videoBody!.prompt_extend,
         watermark: videoBody!.watermark,

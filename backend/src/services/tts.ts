@@ -20,6 +20,8 @@ import {
   buildCloneRequest,
   buildDesignRequest,
   buildSpeechRequest,
+  isQwen191BaseModel,
+  isQwen191Model,
   parseAudioResponse,
   toTtsError,
   TtsError,
@@ -79,6 +81,12 @@ export interface TtsSettings {
   uid?: string
   format?: AudioFormat
   emotion?: string
+  /** 单次请求的文本上限；留空按模型推断（191 服务为 500） */
+  maxInputChars?: number
+  /** 191 服务随机种子 0–2147483647；留空用服务默认 */
+  seed?: number
+  /** 191 服务音频生成上限 64–2048；留空按模型推断（191 为 2048） */
+  maxNewTokens?: number
   /** 仅测试用：重试退避，默认 [1000, 3000] */
   retryDelaysMs?: number[]
   /** 仅测试用：覆盖缓存目录 */
@@ -101,7 +109,8 @@ const MAX_AUDIO_BYTES = 30 * 1024 * 1024
 /** 各服务商单次请求的文本上限；超长文本会按标点切分后合成再拼接 */
 export function ttsTextLimit(provider: string, model: string): number {
   if (provider === 'aliyun' && /qwen[\w.-]*tts/i.test(model)) return 600
-  if (provider === 'qwen3-tts') return 2000
+  // 191 节点的 /v1/audio/speech 只接受 1–500 字，超长会直接 422
+  if (provider === 'qwen3-tts' && isQwen191Model(model)) return 500
   return 2000
 }
 
@@ -148,6 +157,15 @@ export function parseTtsSettings(raw: string | Record<string, unknown> | null | 
     if (typeof s.sampleRate === 'number') out.sampleRate = s.sampleRate
     if (typeof s.timeoutMs === 'number') out.timeoutMs = s.timeoutMs
     if (typeof s.concurrency === 'number') out.concurrency = s.concurrency
+    if (typeof s.maxInputChars === 'number' && Number.isInteger(s.maxInputChars) && s.maxInputChars > 0 && s.maxInputChars <= 10_000) {
+      out.maxInputChars = s.maxInputChars
+    }
+    if (typeof s.seed === 'number' && Number.isInteger(s.seed) && s.seed >= 0 && s.seed <= 2_147_483_647) {
+      out.seed = s.seed
+    }
+    if (typeof s.maxNewTokens === 'number' && Number.isInteger(s.maxNewTokens) && s.maxNewTokens >= 64 && s.maxNewTokens <= 2048) {
+      out.maxNewTokens = s.maxNewTokens
+    }
     if (typeof s.defaultVoiceId === 'string') out.defaultVoiceId = s.defaultVoiceId
     if (typeof s.resourceId === 'string') out.resourceId = s.resourceId
     if (typeof s.appId === 'string') out.appId = s.appId
@@ -206,6 +224,9 @@ export function buildCacheKey(
     String(settings.sampleRate ?? ''),
     settings.resourceId || '',
     settings.language || '',
+    String(settings.seed ?? ''),
+    String(settings.maxNewTokens ?? ''),
+    String(settings.maxInputChars ?? ''),
   ]
   return crypto.createHash('sha256').update(parts.join('\u0001')).digest('hex')
 }
@@ -377,7 +398,7 @@ export async function synthesize(params: SynthParams, deps: SynthDeps = {}): Pro
   const model = config.model || (config.provider === 'qwen3-tts' ? 'Qwen3-TTS-12Hz-1.7B-VoiceDesign' : config.provider)
   const hash = buildCacheKey({ ...params, text }, model, config.provider, config.settings)
   const file = cacheFile(hash, deps.cacheDir || config.settings.cacheDir)
-  const chunks = splitSpeakText(text, ttsTextLimit(config.provider, model))
+  const chunks = splitSpeakText(text, config.settings.maxInputChars ?? ttsTextLimit(config.provider, model))
 
   if (fs.existsSync(file)) {
     return { url: cacheUrl(hash), durationMs: await readDuration(file), format: 'wav', hash, cached: true }
@@ -392,7 +413,8 @@ export async function synthesize(params: SynthParams, deps: SynthDeps = {}): Pro
     model,
     language: params.language || config.settings.language || 'Chinese',
     paths: config.settings.paths,
-    timeoutMs: config.settings.timeoutMs ?? 120_000,
+    // 191 单句最长实测 144.5s，且忙时会排队；按文档上限给 650s
+    timeoutMs: config.settings.timeoutMs ?? (isQwen191Model(model) ? 650_000 : 120_000),
   }
   const cloudOpts: CloudTtsOptions = {
     provider: config.provider,
@@ -473,7 +495,18 @@ async function buildRequest(
       language: params.language || config.settings.language,
     })
   }
-  if (params.voice.refAudioUrl) {
+
+  const qwen191 = isQwen191Model(opts.model)
+  const base191 = isQwen191BaseModel(opts.model)
+  // 191 的 /v1/audio/speech 没有 speed 参数，约定外的字段可能被严格校验拒绝
+  const speed = qwen191 ? undefined : params.speed
+  // 191 Base 只认固定参考音色，instruct 必须为空
+  const instruct = base191 ? undefined : params.voice.designInstruct
+  const voice191Base = base191 ? 'synthetic-reference' : undefined
+  const seed = config.settings.seed
+  const maxNewTokens = config.settings.maxNewTokens ?? (qwen191 ? 2048 : undefined)
+
+  if (params.voice.refAudioUrl && !qwen191) {
     const audio = await readReferenceAudio(params.voice.refAudioUrl)
     return buildCloneRequest(opts, {
       text,
@@ -487,14 +520,29 @@ async function buildRequest(
   if (params.voice.externalVoiceId) {
     return buildSpeechRequest(opts, {
       text,
-      voice: params.voice.externalVoiceId,
+      voice: voice191Base ?? params.voice.externalVoiceId,
       model: opts.model,
       language: params.language,
-      speed: params.speed,
-      instruct: params.voice.designInstruct,
+      speed,
+      instruct,
+      seed,
+      maxNewTokens,
     })
   }
   if (params.voice.designInstruct) {
+    // 191 的 VoiceDesign 复用 /v1/audio/speech + instruct，没有独立的 /design 端点
+    if (qwen191) {
+      return buildSpeechRequest(opts, {
+        text,
+        voice: voice191Base,
+        model: opts.model,
+        language: params.language,
+        speed: undefined,
+        instruct,
+        seed,
+        maxNewTokens,
+      })
+    }
     return buildDesignRequest(opts, {
       text,
       voiceDescription: params.voice.designInstruct,
@@ -502,6 +550,9 @@ async function buildRequest(
       language: params.language,
       speed: params.speed,
     })
+  }
+  if (params.voice.refAudioUrl) {
+    throw new TtsError('not_found', '当前语音服务不支持参考音频克隆（191 无上传接口），请为音色绑定内置音色 ID 或设计描述')
   }
   throw new TtsError('protocol_error', '音色缺少 externalVoiceId / designInstruct / refAudioUrl')
 }

@@ -24,6 +24,17 @@ export const DEFAULT_PATHS: QwenTtsPaths = {
   health: '/health',
 }
 
+/** 191 节点部署的 Qwen3-TTS 模型 ID（与旧 llama.cpp 部署的 Qwen3-TTS-12Hz-* 区分） */
+const QWEN191_MODELS = new Set(['qwen3-tts-customvoice', 'qwen3-tts-voicedesign', 'qwen3-tts-base'])
+
+export function isQwen191Model(model: string | null | undefined): boolean {
+  return Boolean(model && QWEN191_MODELS.has(model.toLowerCase()))
+}
+
+export function isQwen191BaseModel(model: string | null | undefined): boolean {
+  return Boolean(model && model.toLowerCase() === 'qwen3-tts-base')
+}
+
 export interface QwenTtsOptions {
   baseUrl: string
   apiKey?: string | null
@@ -130,18 +141,20 @@ function parseJsonAudio(text: string): ParsedAudio {
   return { buffer, format, durationMs }
 }
 
+export function ttsErrorCodeForStatus(status: number): TtsErrorCode {
+  if (status === 401 || status === 403) return 'unauthorized'
+  if (status === 404) return 'not_found'
+  if (status === 429) return 'rate_limited'
+  if (status >= 500) return 'server_error'
+  return 'protocol_error'
+}
+
 /** 解析三种响应：音频二进制 / JSON base64 / 包装 JSON（hex） */
 export async function parseAudioResponse(resp: Response): Promise<ParsedAudio> {
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')
     const status = resp.status
-    const code: TtsErrorCode =
-      status === 401 || status === 403 ? 'unauthorized'
-        : status === 404 ? 'not_found'
-          : status === 429 ? 'rate_limited'
-            : status >= 500 ? 'server_error'
-              : 'protocol_error'
-    throw new TtsError(code, `语音服务返回 ${status}`, status, text.slice(0, 512))
+    throw new TtsError(ttsErrorCodeForStatus(status), `语音服务返回 ${status}`, status, text.slice(0, 512))
   }
 
   const contentType = (resp.headers.get('content-type') || '').toLowerCase()
@@ -170,6 +183,10 @@ export interface SpeechRequest {
   speed?: number
   instruct?: string | null
   responseFormat?: AudioFormat
+  /** 191 服务：随机种子 0–2147483647 */
+  seed?: number
+  /** 191 服务：音频生成上限 64–2048 */
+  maxNewTokens?: number
 }
 
 export function buildSpeechRequest(opts: QwenTtsOptions, req: SpeechRequest): { url: string; init: RequestInit } {
@@ -182,6 +199,8 @@ export function buildSpeechRequest(opts: QwenTtsOptions, req: SpeechRequest): { 
   }
   if (typeof req.speed === 'number' && Number.isFinite(req.speed)) body.speed = req.speed
   if (req.instruct) body.instruct = req.instruct
+  if (Number.isInteger(req.seed)) body.seed = req.seed
+  if (Number.isInteger(req.maxNewTokens)) body.max_new_tokens = req.maxNewTokens
   return {
     url: urlOf(opts, opts.paths?.speech || DEFAULT_PATHS.speech),
     init: {

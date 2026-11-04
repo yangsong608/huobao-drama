@@ -447,14 +447,17 @@ app.post('/test', async (c) => {
     const authFailed = resp.status === 401 || resp.status === 403
     const reachable = !authFailed && resp.status !== 404
     const audioOk = probe.audioProbe ? audioProbeSucceeded(contentType, text) : true
+    const vendorMessage = probe.audioProbe ? audioProbeFailureMessage(text) : null
     const ok = resp.ok && audioOk
     let message: string
     if (authFailed) {
-      message = `鉴权失败（HTTP ${resp.status}），请检查 API Key`
+      message = vendorMessage
+        ? `鉴权失败（HTTP ${resp.status}）：${vendorMessage}`
+        : `鉴权失败（HTTP ${resp.status}），请检查 API Key`
     } else if (!reachable) {
       message = '端点未按预期响应，请检查 Base URL 和代理前缀'
     } else if (probe.audioProbe && !audioOk) {
-      message = audioProbeFailureMessage(text) || '端点已响应，但未返回可用音频，请检查模型、音色 ID 与资源 ID'
+      message = vendorMessage || '端点已响应，但未返回可用音频，请检查模型、音色 ID 与资源 ID'
     } else if (probe.audioProbe) {
       message = '语音合成成功，认证与模型配置正常'
     } else if (resp.ok) {

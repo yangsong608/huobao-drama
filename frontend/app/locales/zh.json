@@ -5,6 +5,8 @@
   },
   "characterVoice": {
     "title": "角色音色",
+    "sampleTitle": "直接上传参考音",
+    "directHint": "上传一段清晰人声直接作为视频参考音，不生成音色档案；与上方音色档案二选一。",
     "forCharacter": "{name}的角色音色",
     "upload": "上传音色",
     "replace": "替换音色",
@@ -672,6 +674,11 @@
       "seedInvalid": "种子需为整数",
       "fpsInvalid": "帧率需为正数",
       "sampleRateInvalid": "采样率需为正整数",
+      "h3Quality": "本地 H3 质量档",
+      "h3QualityHint": "preview 用 4 步 LoRA 快速预览，final 用 8 步 LoRA 交付",
+      "h3QualityPreview": "预览（4 步）",
+      "h3QualityFinal": "交付（8 步）",
+      "h3LocalOnlyHint": "以上参数仅对本地 H3 兼容层生效，云端 MiniMax 会忽略",
       "workflowRequired": "ComfyUI 需要填写工作流 JSON",
       "workflowInvalid": "工作流 JSON 不合法，请粘贴 API 格式工作流",
       "outputFormat": "图片格式",
@@ -690,7 +697,17 @@
       "audioFormat": "音频格式",
       "sampleRate": "采样率",
       "emotion": "情绪",
-      "emotionPlaceholder": "如 happy / sad，留空为默认"
+      "emotionPlaceholder": "如 happy / sad，留空为默认",
+      "ttsTimeout": "合成超时（毫秒）",
+      "ttsTimeoutHint": "留空按模型自动：191 服务 650000，旧本地服务 120000",
+      "ttsConcurrency": "并发数",
+      "ttsConcurrencyHint": "191 为单卡单任务，建议 1；范围 1–8",
+      "ttsMaxInputChars": "单次输入字数",
+      "ttsMaxInputCharsHint": "191 服务上限 500 字，超长文本会自动按标点切分；留空按模型自动",
+      "ttsMaxNewTokens": "最大生成 token",
+      "ttsMaxNewTokensHint": "191 范围 64–2048；留空按模型自动（191 为 2048）",
+      "ttsSeedHint": "留空使用服务默认（191 为 42）",
+      "qwen191Hint": "191 本地服务：Base URL 填 http://127.0.0.1:18190，不要带 /v1；音色 ID 填 Serena、Vivian 等内置名；设计音色会自动走 /v1/audio/speech；参考音频克隆暂不支持 HTTP 上传。"
     },
     "styleDialog": {
       "editTitle": "编辑风格预设",
@@ -799,7 +816,8 @@
       "start": "开始制作",
       "resolution": "分辨率",
       "videoAudio": "原生音频",
-      "videoAudioSwitched": "本集视频音频已切换为「{mode}」"
+      "videoAudioSwitched": "本集视频音频已切换为「{mode}」",
+      "videoConfigSwitched": "本集视频配置已切换为 {name}"
     },
     "model": {
       "defaultWith": "默认 · {model}",
@@ -1156,7 +1174,12 @@
       "sbN": "分镜 #{n}",
       "generic": "通用",
       "fullMerge": "整集拼接",
-      "mergeKind": "合并"
+      "mergeKind": "合并",
+      "clear": "清空",
+      "clearTitle": "清空已完成/失败任务",
+      "clearMessage": "将删除本集 {n} 条已完成或失败的任务记录；进行中的任务和成片版本会保留，磁盘文件不会删除。",
+      "clearConfirm": "清空记录",
+      "cleared": "已清空 {n} 条任务记录"
     },
     "export": {
       "notReadyDesc": "请先完成分镜和制作流程",
@@ -1350,7 +1373,14 @@
     "externalVoiceId": "外部音色 ID",
     "externalVoiceIdPlaceholder": "服务商控制台的音色 ID",
     "externalVoiceIdHint": "使用阿里云/豆包云语音时填写；本地 Qwen3-TTS 可留空",
-    "externalVoiceIdSaved": "外部音色 ID 已保存"
+    "externalVoiceIdSaved": "外部音色 ID 已保存",
+    "version": "音色版本",
+    "syncStateSynced": "已同步为视频参考",
+    "syncStateStale": "视频参考是其他版本",
+    "syncStateNone": "未设为视频参考",
+    "syncHintStale": "当前音色尚未同步，视频生成仍会使用之前的参考音。",
+    "advanced": "高级设置（提示词 / 音色 ID / 指令）",
+    "capabilityHint": "视频参考音支持：阿里云 Wan 3.0、豆包 Seedance 2.0、火宝云端 MiniMax；本地 H3 不支持音色参考，请用配音工作台统一配音。"
   },
   "workbench": {
     "title": "配音工作台",

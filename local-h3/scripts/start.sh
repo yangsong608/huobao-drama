@@ -12,8 +12,8 @@ code=$(curl -s -m 5 -o /dev/null -w "%{http_code}" http://127.0.0.1:8188/system_
 if [ "$code" != "200" ]; then
   echo "  ✗ 本机 8188 不通（HTTP=$code）"
   echo "  请先建隧道："
-  echo "    DSH: ssh_tunnel start  alias=$H3_HOST localPort=8188 remotePort=8188"
-  echo "    或:  ssh -N -L 8188:127.0.0.1:8188 root@$H3_HOST"
+  echo "    DSH: ssh_tunnel start  alias=$H3_HOST localPort=8188 remotePort=8188 remoteHost=127.0.0.1"
+  echo "    或:  ssh -f -N -L 8188:127.0.0.1:8188 -o ExitOnForwardFailure=yes root@$H3_HOST"
   exit 1
 fi
 echo "  ✓ ComfyUI 可达"

@@ -16,6 +16,7 @@ test('settings dialog exposes provider-specific fields for cloud and local media
   assert.match(settingsPage, /\['workflow', 'output_node', 'output_key', 'negative_prompt', 'seed'\]/)
   assert.match(settingsPage, /\? \['workflow', 'output_node', 'output_key', 'negative_prompt', 'seed', 'fps', 'client_id'\]/)
   assert.match(settingsPage, /provider === 'volcengine'\) return \['defaultVoiceId', 'resourceId', 'uid', 'appId', 'accessKey', 'format', 'sampleRate', 'emotion'\]/)
+  assert.match(settingsPage, /provider === 'qwen3-tts'\) return \['timeoutMs', 'concurrency', 'maxInputChars', 'seed', 'maxNewTokens'\]/)
   assert.match(settingsPage, /return \['defaultVoiceId', 'format', 'sampleRate', 'emotion'\]/)
 
   assert.match(settingsPage, /v-model="cfgForm\.provider_settings\.workflow"/)
@@ -33,6 +34,17 @@ test('settings dialog exposes provider-specific fields for cloud and local media
   assert.match(settingsPage, /v-model="cfgForm\.provider_settings\.emotion"/)
   assert.match(settingsPage, /v-model="cfgForm\.provider_settings\.prompt_extend"/)
   assert.match(settingsPage, /v-model="cfgForm\.provider_settings\.watermark"/)
+})
+
+test('qwen3-tts exposes 191-compatible timing, chunking and sampling fields', () => {
+  assert.match(settingsPage, /v-model="cfgForm\.provider_settings\.timeoutMs"/)
+  assert.match(settingsPage, /v-model="cfgForm\.provider_settings\.concurrency"/)
+  assert.match(settingsPage, /v-model="cfgForm\.provider_settings\.maxInputChars"/)
+  assert.match(settingsPage, /v-model="cfgForm\.provider_settings\.maxNewTokens"/)
+  assert.match(settingsPage, /t\('settings\.cfg\.qwen191Hint'\)/)
+  assert.match(settingsPage, /qwen3-tts-customvoice/)
+  assert.match(settingsPage, /qwen3-tts-voicedesign/)
+  assert.match(settingsPage, /qwen3-tts-base/)
 })
 
 test('provider settings are validated and merged on save without dropping unknown keys', () => {
@@ -86,6 +98,16 @@ test('new provider settings and external voice keys exist in all four locales', 
       'emotion',
       'promptExtend',
       'watermark',
+      'ttsTimeout',
+      'ttsTimeoutHint',
+      'ttsConcurrency',
+      'ttsConcurrencyHint',
+      'ttsMaxInputChars',
+      'ttsMaxInputCharsHint',
+      'ttsMaxNewTokens',
+      'ttsMaxNewTokensHint',
+      'ttsSeedHint',
+      'qwen191Hint',
     ]) {
       assert.ok(messages.settings?.cfg?.[key], `${name} missing settings.cfg.${key}`)
     }
