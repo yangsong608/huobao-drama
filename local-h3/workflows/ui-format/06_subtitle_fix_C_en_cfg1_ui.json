@@ -1,0 +1,773 @@
+{
+ "last_node_id": 17,
+ "last_link_id": 21,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "UNETLoader",
+   "pos": [
+    100,
+    150
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+    "default"
+   ]
+  },
+  {
+   "id": 2,
+   "type": "LoraLoaderModelOnly",
+   "pos": [
+    100,
+    300
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "*",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoraLoaderModelOnly"
+   },
+   "widgets_values": [
+    "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+    1.0
+   ]
+  },
+  {
+   "id": 3,
+   "type": "CLIPLoader",
+   "pos": [
+    100,
+    450
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    "minimax",
+    "default"
+   ]
+  },
+  {
+   "id": 4,
+   "type": "VAELoader",
+   "pos": [
+    100,
+    600
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "minimax_h3_video_vae_fp16.safetensors"
+   ]
+  },
+  {
+   "id": 5,
+   "type": "VAELoader",
+   "pos": [
+    100,
+    750
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "minimax_h3_audio_vae_fp32.safetensors"
+   ]
+  },
+  {
+   "id": 6,
+   "type": "LoadImage",
+   "pos": [
+    100,
+    900
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoadImage"
+   },
+   "widgets_values": [
+    "c2_5.png"
+   ]
+  },
+  {
+   "id": 7,
+   "type": "MiniMaxH3ImageToVideo",
+   "pos": [
+    100,
+    1050
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "clip",
+     "type": "*",
+     "link": 2
+    },
+    {
+     "name": "vae",
+     "type": "*",
+     "link": 3
+    },
+    {
+     "name": "first_frame",
+     "type": "*",
+     "link": 4
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "MiniMaxH3ImageToVideo"
+   },
+   "widgets_values": [
+    "[Shot 1] 3D CG, cinematic, the gaunt woman in a dark ochre robe strides to the bench outside the busy shop and slams a stack of bamboo steamers down on it; the baskets knock together with a dull thud and a burst of steam blows out. She lifts her chin past the queue toward the stove, her neck taut, and shouts a short, sharp, angry line at the stove, jaw tight, mouth moving clearly. The camera holds a static shot. warm practical light, natural and steady contrast, saturated earthy tones.\nThe line is spoken in Mandarin, but nothing is written on screen: no subtitles, no captions, no text of any kind.\noverall_soundscape: bamboo steamers thudding, steam bursting, crowd whispering.\nnon_diegetic_music: N/A",
+    864,
+    480,
+    124
+   ]
+  },
+  {
+   "id": 8,
+   "type": "CLIPTextEncode",
+   "pos": [
+    100,
+    1200
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "clip",
+     "type": "*",
+     "link": 5
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPTextEncode"
+   },
+   "widgets_values": [
+    "subtitles, captions, on-screen text, chinese characters, watermark, logo, distorted face, extra fingers"
+   ]
+  },
+  {
+   "id": 9,
+   "type": "CFGGuider",
+   "pos": [
+    100,
+    1350
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "*",
+     "link": 6
+    },
+    {
+     "name": "positive",
+     "type": "*",
+     "link": 7
+    },
+    {
+     "name": "negative",
+     "type": "*",
+     "link": 8
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CFGGuider"
+   },
+   "widgets_values": [
+    1.0
+   ]
+  },
+  {
+   "id": 10,
+   "type": "KSamplerSelect",
+   "pos": [
+    100,
+    1500
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSamplerSelect"
+   },
+   "widgets_values": [
+    "euler"
+   ]
+  },
+  {
+   "id": 11,
+   "type": "BasicScheduler",
+   "pos": [
+    100,
+    1650
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "*",
+     "link": 9
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "BasicScheduler"
+   },
+   "widgets_values": [
+    "beta",
+    4,
+    1.0
+   ]
+  },
+  {
+   "id": 12,
+   "type": "RandomNoise",
+   "pos": [
+    100,
+    1800
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "RandomNoise"
+   },
+   "widgets_values": [
+    20267801
+   ]
+  },
+  {
+   "id": 13,
+   "type": "SamplerCustomAdvanced",
+   "pos": [
+    100,
+    1950
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "noise",
+     "type": "*",
+     "link": 10
+    },
+    {
+     "name": "guider",
+     "type": "*",
+     "link": 11
+    },
+    {
+     "name": "sampler",
+     "type": "*",
+     "link": 12
+    },
+    {
+     "name": "sigmas",
+     "type": "*",
+     "link": 13
+    },
+    {
+     "name": "latent_image",
+     "type": "*",
+     "link": 14
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SamplerCustomAdvanced"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 14,
+   "type": "VAEDecode",
+   "pos": [
+    100,
+    2100
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 13,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "samples",
+     "type": "*",
+     "link": 15
+    },
+    {
+     "name": "vae",
+     "type": "*",
+     "link": 16
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 15,
+   "type": "VAEDecodeAudio",
+   "pos": [
+    100,
+    2250
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 14,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "samples",
+     "type": "*",
+     "link": 17
+    },
+    {
+     "name": "vae",
+     "type": "*",
+     "link": 18
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecodeAudio"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 16,
+   "type": "CreateVideo",
+   "pos": [
+    100,
+    2400
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 15,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "*",
+     "link": 19
+    },
+    {
+     "name": "audio",
+     "type": "*",
+     "link": 20
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CreateVideo"
+   },
+   "widgets_values": [
+    24,
+    8
+   ]
+  },
+  {
+   "id": 17,
+   "type": "SaveVideo",
+   "pos": [
+    100,
+    2550
+   ],
+   "size": [
+    320,
+    120
+   ],
+   "flags": {},
+   "order": 16,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "video",
+     "type": "*",
+     "link": 21
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "*",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SaveVideo"
+   },
+   "widgets_values": [
+    "hb_fix/C_en_cfg1",
+    "auto",
+    "auto"
+   ]
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   2,
+   "model"
+  ],
+  [
+   2,
+   3,
+   0,
+   7,
+   "clip"
+  ],
+  [
+   3,
+   4,
+   0,
+   7,
+   "vae"
+  ],
+  [
+   4,
+   6,
+   0,
+   7,
+   "first_frame"
+  ],
+  [
+   5,
+   3,
+   0,
+   8,
+   "clip"
+  ],
+  [
+   6,
+   2,
+   0,
+   9,
+   "model"
+  ],
+  [
+   7,
+   7,
+   0,
+   9,
+   "positive"
+  ],
+  [
+   8,
+   8,
+   0,
+   9,
+   "negative"
+  ],
+  [
+   9,
+   2,
+   0,
+   11,
+   "model"
+  ],
+  [
+   10,
+   12,
+   0,
+   13,
+   "noise"
+  ],
+  [
+   11,
+   9,
+   0,
+   13,
+   "guider"
+  ],
+  [
+   12,
+   10,
+   0,
+   13,
+   "sampler"
+  ],
+  [
+   13,
+   11,
+   0,
+   13,
+   "sigmas"
+  ],
+  [
+   14,
+   7,
+   0,
+   13,
+   "latent_image"
+  ],
+  [
+   15,
+   13,
+   0,
+   14,
+   "samples"
+  ],
+  [
+   16,
+   4,
+   0,
+   14,
+   "vae"
+  ],
+  [
+   17,
+   13,
+   0,
+   15,
+   "samples"
+  ],
+  [
+   18,
+   5,
+   0,
+   15,
+   "vae"
+  ],
+  [
+   19,
+   14,
+   0,
+   16,
+   "images"
+  ],
+  [
+   20,
+   15,
+   0,
+   16,
+   "audio"
+  ],
+  [
+   21,
+   16,
+   0,
+   17,
+   "video"
+  ]
+ ],
+ "groups": [],
+ "config": {},
+ "extra": {},
+ "version": 0.4
+}

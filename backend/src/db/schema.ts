@@ -1,0 +1,606 @@
+/**
+ * Drizzle schema - SQLite column mappings.
+ * 自 MySQL 迁移：varchar(x)→text（SQLite 不校验长度）、int→integer、
+ * boolean→integer boolean mode、时间戳仍为 text 存 ISO 字符串，表/列名不变。
+ */
+import { sqliteTable, text, integer, real, primaryKey } from 'drizzle-orm/sqlite-core'
+
+export const dramas = sqliteTable('dramas', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  title: text('title').notNull(),
+  description: text('description'),
+  genre: text('genre'),
+  style: text('style').default('3d'),
+  /** 项目背景（世界观/时代/地域/主线设定）：资产与视频提示词生成时自动拼接 */
+  background: text('background'),
+  aspectRatio: text('aspect_ratio').default('16:9'),
+  totalEpisodes: integer('total_episodes').default(1),
+  totalDuration: integer('total_duration').default(0),
+  status: text('status').notNull().default('draft'),
+  thumbnail: text('thumbnail'),
+  tags: text('tags'),
+  metadata: text('metadata'),
+  /** 项目媒体存储根目录（绝对路径）；null = 默认 DATA_ROOT/static/projects/<id> */
+  storageDir: text('storage_dir'),
+  /** 旁白音色（character_voices.id，V2） */
+  narratorVoiceId: integer('narrator_voice_id'),
+  /** 项目默认 BGM（V2） */
+  bgmUrl: text('bgm_url'),
+  /** 来源小说（V3） */
+  sourceNovelId: integer('source_novel_id'),
+  /** 故事圣经五件套 JSON（V3） */
+  storyBible: text('story_bible'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+export const episodes = sqliteTable('episodes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  dramaId: integer('drama_id').notNull(),
+  episodeNumber: integer('episode_number').notNull(),
+  title: text('title').notNull(),
+  content: text('content'),
+  scriptContent: text('script_content'),
+  description: text('description'),
+  duration: integer('duration').default(0),
+  status: text('status').default('draft'),
+  videoUrl: text('video_url'),
+  thumbnail: text('thumbnail'),
+  imageConfigId: integer('image_config_id'),
+  videoConfigId: integer('video_config_id'),
+  resolution: text('resolution').default('720p'),
+  /** 创建该集时是否选择了全自动流程（仅记录意图，进度看 automation_status） */
+  autoPipeline: integer('auto_pipeline', { mode: 'boolean' }).default(false),
+  /** 自动化状态：idle / running / done / failed / stopped / interrupted */
+  automationStatus: text('automation_status'),
+  /** 当前阶段：rewrite / extract / asset_images / storyboards / video_prompts / videos / done */
+  automationStage: text('automation_stage'),
+  /** 总体进度 0-100 */
+  automationProgress: integer('automation_progress').default(0),
+  /** 阶段内进度文案，如「角色 2/5」 */
+  automationNote: text('automation_note'),
+  automationError: text('automation_error'),
+  automationStartedAt: text('automation_started_at'),
+  automationFinishedAt: text('automation_finished_at'),
+  /** 建集时是否同时生成配音（V2） */
+  autoDub: integer('auto_dub', { mode: 'boolean' }).default(false),
+  /** 配音状态：idle / running / done / failed / stopped */
+  dubStatus: text('dub_status'),
+  dubProgress: integer('dub_progress').default(0),
+  dubNote: text('dub_note'),
+  /** 最新字幕（SRT/ASS） */
+  subtitleUrl: text('subtitle_url'),
+  /** 原声策略：auto / native / ambient / silent（V2） */
+  videoAudioMode: text('video_audio_mode').default('auto'),
+  /** 单集 BGM */
+  bgmUrl: text('bgm_url'),
+  /** 来源小说章节（V3） */
+  sourceChapterNo: integer('source_chapter_no'),
+  sourcePartNo: integer('source_part_no'),
+  /** 原著已更新，剧本/分镜待重做（V3） */
+  sourceStale: integer('source_stale', { mode: 'boolean' }).default(false),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+export const characters = sqliteTable('characters', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  dramaId: integer('drama_id').notNull(),
+  name: text('name').notNull(),
+  role: text('role'),
+  description: text('description'),
+  appearance: text('appearance'),
+  styling: text('styling'),
+  finalPrompt: text('final_prompt'),
+  personality: text('personality'),
+  imageUrl: text('image_url'),
+  voiceAudioUrl: text('voice_audio_url'),
+  voiceAudioName: text('voice_audio_name'),
+  /** 激活音色的只读缓存（V2）：以 character_voices 为准，这里仅供列表展示 */
+  voicePrompt: text('voice_prompt'),
+  voiceStatus: text('voice_status'),
+  referenceImages: text('reference_images'),
+  seedValue: text('seed_value'),
+  sortOrder: integer('sort_order'),
+  localPath: text('local_path'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+// Episode-Character many-to-many
+export const episodeCharacters = sqliteTable('episode_characters', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  characterId: integer('character_id').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+
+// Episode-Scene many-to-many
+export const episodeScenes = sqliteTable('episode_scenes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  sceneId: integer('scene_id').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+
+// Episode-Prop many-to-many
+export const episodeProps = sqliteTable('episode_props', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  propId: integer('prop_id').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+
+export const scenes = sqliteTable('scenes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  dramaId: integer('drama_id').notNull(),
+  episodeId: integer('episode_id'),
+  location: text('location').notNull(),
+  time: text('time').notNull(),
+  prompt: text('prompt').notNull(),
+  lighting: text('lighting'),
+  finalPrompt: text('final_prompt'),
+  storyboardCount: integer('storyboard_count').default(1),
+  imageUrl: text('image_url'),
+  referenceImages: text('reference_images'),
+  status: text('status').default('pending'),
+  localPath: text('local_path'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+export const storyboards = sqliteTable('storyboards', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  sceneId: integer('scene_id'),
+  storyboardNumber: integer('storyboard_number').notNull(),
+  title: text('title'),
+  location: text('location'),
+  time: text('time'),
+  shotType: text('shot_type'),
+  angle: text('angle'),
+  movement: text('movement'),
+  result: text('result'),
+  atmosphere: text('atmosphere'),
+  imagePrompt: text('image_prompt'),
+  videoPrompt: text('video_prompt'),
+  bgmPrompt: text('bgm_prompt'),
+  soundEffect: text('sound_effect'),
+  description: text('description'),
+  /** 与上一镜的转场：cut / fade / dissolve / wipe */
+  transition: text('transition').default('cut'),
+  /** 承接上一镜的连续性说明（尾动作、视线、空间关系） */
+  continuity: text('continuity'),
+  duration: integer('duration').default(0),
+  composedImage: text('composed_image'),
+  firstFrameImage: text('first_frame_image'),
+  lastFrameImage: text('last_frame_image'),
+  referenceImages: text('reference_images'),
+  videoUrl: text('video_url'),
+  subtitleUrl: text('subtitle_url'),
+  composedVideoUrl: text('composed_video_url'),
+  status: text('status').default('pending'),
+  /** 内容指纹：台词抽取幂等（V2） */
+  sourceHash: text('source_hash'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+export const storyboardCharacters = sqliteTable('storyboard_characters', {
+  storyboardId: integer('storyboard_id').notNull(),
+  characterId: integer('character_id').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.storyboardId, table.characterId] }),
+])
+
+export const storyboardProps = sqliteTable('storyboard_props', {
+  storyboardId: integer('storyboard_id').notNull(),
+  propId: integer('prop_id').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.storyboardId, table.propId] }),
+])
+
+export const aiServiceConfigs = sqliteTable('ai_service_configs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  serviceType: text('service_type').notNull(),
+  provider: text('provider'),
+  name: text('name').notNull(),
+  baseUrl: text('base_url').notNull(),
+  apiKey: text('api_key').notNull(),
+  model: text('model'),
+  endpoint: text('endpoint'),
+  queryEndpoint: text('query_endpoint'),
+  priority: integer('priority').default(0),
+  isDefault: integer('is_default', { mode: 'boolean' }).default(false),
+  isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  settings: text('settings'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  // 注意: 此表无 deleted_at
+})
+
+export const aiServiceProviders = sqliteTable('ai_service_providers', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  displayName: text('display_name'),
+  serviceType: text('service_type').notNull(),
+  provider: text('provider').notNull(),
+  defaultUrl: text('default_url'),
+  presetModels: text('preset_models'),
+  description: text('description'),
+  isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const stylePresets = sqliteTable('style_presets', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  value: text('value').notNull(),
+  prompt: text('prompt').notNull(),
+  description: text('description'),
+  sortOrder: integer('sort_order').default(0),
+  isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  // 注意: 此表无 deleted_at（硬删除），value 列有唯一索引（见 sqlite-schema.ts DDL）
+})
+
+// 统一生成任务表：图片/视频生成共用，type 区分，生成参数存 params(JSON)
+export const sysTask = sqliteTable('sys_task', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  configId: integer('config_id'),
+  configBaseUrl: text('config_base_url'),
+  stage: text('stage'),
+  errorCode: text('error_code'),
+  type: text('type').notNull(), // image | video
+  storyboardId: integer('storyboard_id'),
+  dramaId: integer('drama_id'),
+  sceneId: integer('scene_id'),
+  characterId: integer('character_id'),
+  propId: integer('prop_id'),
+  provider: text('provider'),
+  prompt: text('prompt'),
+  model: text('model'),
+  // image: {size, frameType, referenceImages[]}
+  // video: {referenceMode, firstFrameUrl, lastFrameUrl, referenceImageUrls[], referenceVideoUrls[], referenceAudioUrls[], referenceFileUrl, referenceLinkUrl, generateAudio, duration, aspectRatio, resolution, seed, promptExtend, watermark}
+  params: text('params'),
+  taskId: text('task_id'),
+  resultUrl: text('result_url'),
+  localPath: text('local_path'),
+  status: text('status').default('processing'),
+  errorMsg: text('error_msg'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  completedAt: text('completed_at'),
+})
+
+export const videoMerges = sqliteTable('video_merges', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id'),
+  dramaId: integer('drama_id'),
+  title: text('title'),
+  provider: text('provider'),
+  model: text('model'),
+  status: text('status').default('pending'),
+  scenes: text('scenes'), // JSON
+  mergedUrl: text('merged_url'),
+  duration: integer('duration'),
+  taskId: text('task_id'),
+  errorMsg: text('error_msg'),
+  /** 版本类型：concat（纯拼接）/ mix（配音+字幕+BGM）（V2） */
+  kind: text('kind').default('concat'),
+  /** 幂等指纹：分镜集合 + 混音参数（V2） */
+  sourceHash: text('source_hash'),
+  subtitleUrl: text('subtitle_url'),
+  dialogueTrackUrl: text('dialogue_track_url'),
+  bgmUrl: text('bgm_url'),
+  mixOptions: text('mix_options'), // JSON
+  createdAt: text('created_at').notNull(),
+  completedAt: text('completed_at'),
+  deletedAt: text('deleted_at'),
+})
+
+export const props = sqliteTable('props', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  dramaId: integer('drama_id').notNull(),
+  name: text('name').notNull(),
+  type: text('type'),
+  description: text('description'),
+  prompt: text('prompt'),
+  finalPrompt: text('final_prompt'),
+  imageUrl: text('image_url'),
+  referenceImages: text('reference_images'),
+  localPath: text('local_path'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+export const assets = sqliteTable('assets', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  dramaId: integer('drama_id'),
+  episodeId: integer('episode_id'),
+  storyboardId: integer('storyboard_id'),
+  storyboardNum: integer('storyboard_num'),
+  name: text('name'),
+  description: text('description'),
+  type: text('type'),
+  category: text('category'),
+  url: text('url'),
+  thumbnailUrl: text('thumbnail_url'),
+  localPath: text('local_path'),
+  fileSize: integer('file_size'),
+  mimeType: text('mime_type'),
+  width: integer('width'),
+  height: integer('height'),
+  duration: integer('duration'),
+  format: text('format'),
+  imageGenId: integer('image_gen_id'),
+  videoGenId: integer('video_gen_id'),
+  isFavorite: integer('is_favorite', { mode: 'boolean' }).default(false),
+  viewCount: integer('view_count').default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+export const appSettings = sqliteTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+// ===== V2 新增表 =====
+
+/** 音色档案：一个可复现的声音。旁白 scope='narrator' 且 characterId 为 null */
+export const characterVoices = sqliteTable('character_voices', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  dramaId: integer('drama_id').notNull(),
+  characterId: integer('character_id'),
+  scope: text('scope').notNull().default('character'),
+  name: text('name').notNull(),
+  source: text('source').notNull().default('design'),
+  provider: text('provider'),
+  model: text('model'),
+  externalVoiceId: text('external_voice_id'),
+  voicePrompt: text('voice_prompt'),
+  voicePromptSource: text('voice_prompt_source').default('llm'),
+  designInstruct: text('design_instruct'),
+  refAudioUrl: text('ref_audio_url'),
+  refText: text('ref_text'),
+  xVectorOnly: integer('x_vector_only', { mode: 'boolean' }).default(false),
+  sampleUrl: text('sample_url'),
+  sampleText: text('sample_text'),
+  gender: text('gender'),
+  ageRange: text('age_range'),
+  pitch: text('pitch'),
+  speed: real('speed').default(1.0),
+  emotion: text('emotion'),
+  language: text('language').default('Chinese'),
+  seed: integer('seed'),
+  consentConfirmedAt: text('consent_confirmed_at'),
+  status: text('status').default('draft'),
+  error: text('error'),
+  isActive: integer('is_active', { mode: 'boolean' }).default(false),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+/** 台词行：最小配音单位 */
+export const storyboardLines = sqliteTable('storyboard_lines', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  storyboardId: integer('storyboard_id').notNull(),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  lineNo: integer('line_no').notNull(),
+  speakerType: text('speaker_type').notNull().default('dialogue'),
+  characterId: integer('character_id'),
+  voiceId: integer('voice_id'),
+  voiceLocked: integer('voice_locked', { mode: 'boolean' }).default(false),
+  speakerName: text('speaker_name'),
+  text: text('text').notNull(),
+  speakText: text('speak_text'),
+  subtitleText: text('subtitle_text'),
+  emotion: text('emotion'),
+  speed: real('speed').default(1.0),
+  plannedStartMs: integer('planned_start_ms'),
+  plannedEndMs: integer('planned_end_ms'),
+  startMs: integer('start_ms'),
+  endMs: integer('end_ms'),
+  audioUrl: text('audio_url'),
+  audioDurationMs: integer('audio_duration_ms'),
+  audioHash: text('audio_hash'),
+  status: text('status').default('pending'),
+  overflowMs: integer('overflow_ms').default(0),
+  stale: integer('stale', { mode: 'boolean' }).default(false),
+  source: text('source').default('auto'),
+  locked: integer('locked', { mode: 'boolean' }).default(false),
+  needsReview: integer('needs_review', { mode: 'boolean' }).default(false),
+  error: text('error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** 宫格图：一次生成 N 格再切分 */
+export const gridSheets = sqliteTable('grid_sheets', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  dramaId: integer('drama_id').notNull(),
+  episodeId: integer('episode_id'),
+  kind: text('kind').notNull(),
+  rows: integer('rows').notNull(),
+  cols: integer('cols').notNull(),
+  prompt: text('prompt'),
+  imageUrl: text('image_url'),
+  cells: text('cells'), // JSON
+  inset: real('inset').default(0.015),
+  status: text('status').default('pending'),
+  error: text('error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** 整本剧本导入 */
+export const scriptImports = sqliteTable('script_imports', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  dramaId: integer('drama_id').notNull(),
+  filename: text('filename'),
+  sourceHash: text('source_hash').notNull(),
+  rawText: text('raw_text'),
+  chapterCount: integer('chapter_count').default(0),
+  status: text('status').default('parsed'),
+  createdAt: text('created_at').notNull(),
+})
+
+export const scriptChapters = sqliteTable('script_chapters', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  importId: integer('import_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  chapterIndex: integer('chapter_index').notNull(),
+  partNo: integer('part_no').default(1),
+  title: text('title'),
+  content: text('content').notNull(),
+  charCount: integer('char_count').default(0),
+  episodeId: integer('episode_id'),
+  createdAt: text('created_at').notNull(),
+})
+
+// ===== V3：小说创作 =====
+
+export const novels = sqliteTable('novels', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  title: text('title').notNull(),
+  topic: text('topic'),
+  genre: text('genre'), // JSON 数组
+  background: text('background'),
+  writingStyle: text('writing_style'), // JSON {key,name,prompt}
+  numberOfChapters: integer('number_of_chapters').default(100),
+  wordNumber: integer('word_number').default(3000),
+  userGuidance: text('user_guidance'),
+  coreSeed: text('core_seed'),
+  characterDynamics: text('character_dynamics'),
+  worldBuilding: text('world_building'),
+  plotArchitecture: text('plot_architecture'),
+  characterState: text('character_state'),
+  chapterBlueprint: text('chapter_blueprint'),
+  globalSummary: text('global_summary'),
+  graphMeta: text('graph_meta'), // JSON
+  architectureGenerated: integer('architecture_generated', { mode: 'boolean' }).default(false),
+  blueprintGenerated: integer('blueprint_generated', { mode: 'boolean' }).default(false),
+  status: text('status').default('draft'),
+  contentUpdatedAt: text('content_updated_at'),
+  narrativePerson: text('narrative_person').default('first'),
+  timelineEvents: text('timeline_events'),
+  worldMap: text('world_map'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+export const novelChapters = sqliteTable('novel_chapters', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull(),
+  chapterNo: integer('chapter_no').notNull(),
+  title: text('title'),
+  content: text('content'),
+  wordCount: integer('word_count').default(0),
+  contentHash: text('content_hash'),
+  status: text('status').default('draft'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const novelGraphSnapshots = sqliteTable('novel_graph_snapshots', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull(),
+  chapterNo: integer('chapter_no').notNull(),
+  nodes: text('nodes'),
+  edges: text('edges'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const novelChapterGraphs = sqliteTable('novel_chapter_graphs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull(),
+  chapterNo: integer('chapter_no').notNull(),
+  nodes: text('nodes'),
+  edges: text('edges'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const novelJobs = sqliteTable('novel_jobs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull(),
+  type: text('type').notNull(),
+  chapterNo: integer('chapter_no'),
+  status: text('status').notNull().default('queued'),
+  stage: text('stage'),
+  progress: integer('progress').default(0),
+  total: integer('total').default(0),
+  message: text('message'),
+  partial: text('partial'),
+  result: text('result'), // JSON
+  error: text('error'),
+  errorCode: text('error_code'),
+  cancelRequested: integer('cancel_requested', { mode: 'boolean' }).default(false),
+  createdAt: text('created_at').notNull(),
+  startedAt: text('started_at'),
+  finishedAt: text('finished_at'),
+})
+
+export const novelImports = sqliteTable('novel_imports', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  requestId: text('request_id'),
+  mode: text('mode').default('manual'),
+  status: text('status').default('active'),
+  sourceUpdatedAt: text('source_updated_at'),
+  lastSyncedAt: text('last_synced_at'),
+  lastSyncSummary: text('last_sync_summary'), // JSON
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const novelImportEpisodes = sqliteTable('novel_import_episodes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  importId: integer('import_id').notNull(),
+  chapterNo: integer('chapter_no').notNull(),
+  partNo: integer('part_no').default(1),
+  episodeId: integer('episode_id').notNull(),
+  contentHash: text('content_hash'),
+  chapterHash: text('chapter_hash'),
+  syncedTitle: text('synced_title'),
+  status: text('status').default('synced'),
+  syncedAt: text('synced_at'),
+})
+
+/** 持久化任务队列 */
+export const pipelineJobs = sqliteTable('pipeline_jobs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  kind: text('kind').notNull(),
+  dramaId: integer('drama_id'),
+  episodeId: integer('episode_id'),
+  resource: text('resource').notNull(),
+  status: text('status').notNull().default('queued'),
+  priority: integer('priority').default(0),
+  payload: text('payload'), // JSON
+  progress: integer('progress').default(0),
+  note: text('note'),
+  error: text('error'),
+  attempts: integer('attempts').default(0),
+  maxAttempts: integer('max_attempts').default(2),
+  lockedBy: text('locked_by'),
+  heartbeatAt: text('heartbeat_at'),
+  createdAt: text('created_at').notNull(),
+  startedAt: text('started_at'),
+  finishedAt: text('finished_at'),
+})
