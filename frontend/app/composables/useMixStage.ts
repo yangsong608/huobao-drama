@@ -19,6 +19,7 @@ import {
   type MixTrack,
   type SeparationStatus,
 } from '~/composables/useApi'
+import { applySoloMuteState } from '~/utils/mix-solo'
 
 export interface StageClip extends MixClip {
   _uid: string
@@ -180,18 +181,7 @@ export function useMixStage(options: UseMixStageOptions) {
   }
 
   function recomputeEffective(target: StagePlan) {
-    const soloActive = target.tracks.some((track) => track.solo)
-      || target.buses.some((bus) => bus.key !== 'master' && bus.solo)
-    for (const bus of target.buses) {
-      bus.effectiveMuted = bus.key === 'master'
-        ? bus.muted
-        : bus.muted || (soloActive && !bus.solo)
-    }
-    for (const track of target.tracks) {
-      const bus = target.buses.find((item) => item.key === track.busId)
-      const soloed = track.solo || (track.busId !== 'master' && Boolean(bus?.solo))
-      track.effectiveMuted = track.muted || Boolean(bus?.muted) || (soloActive && !soloed)
-    }
+    applySoloMuteState(target.tracks, target.buses)
     const clipEnd = target.tracks.reduce((max, track) => Math.max(max, clipEndOf(track)), 0)
     target.durationMs = Math.max(target.durationMs, clipEnd)
   }
@@ -803,7 +793,7 @@ export function useMixStage(options: UseMixStageOptions) {
   }
 
   function setZoom(value: number) {
-    zoom.value = clamp(Number(value) || 64, 8, 240)
+    zoom.value = clamp(Number(value) || 64, 1, 240)
   }
 
   function undo() {

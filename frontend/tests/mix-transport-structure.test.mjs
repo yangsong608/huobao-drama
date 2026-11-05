@@ -11,6 +11,10 @@ const preview = read('app/components/SubtitlePreview.vue')
 const timeline = read('app/components/MixTimeline.vue')
 const trackHead = read('app/components/MixTrackHead.vue')
 const stage = read('app/composables/useMixStage.ts')
+const zh = JSON.parse(read('app/locales/zh.json'))
+const en = JSON.parse(read('app/locales/en.json'))
+const ja = JSON.parse(read('app/locales/ja.json'))
+const ko = JSON.parse(read('app/locales/ko.json'))
 
 test('subtitle preview exposes a headless transport contract', () => {
   assert.match(preview, /controls\?: boolean/)
@@ -131,9 +135,29 @@ test('mix stage forwards settings into the inspector and toggles it persistently
   assert.match(mixStage, /\.mx-body\.is-inspector-closed \{ grid-template-columns: 288px minmax\(0, 1fr\); \}/)
 })
 
+test('timeline can show the whole episode, jump to an exact second and pan while dragging', () => {
+  assert.match(timeline, /fitTimelineZoom/)
+  assert.match(timeline, /function fitToWidth\(\)/)
+  assert.match(timeline, /fitToWidth/)
+  assert.match(timeline, /defineExpose\(\{ scrollToMs, scrollByY, fitToWidth \}\)/)
+  assert.match(timeline, /function startEdgeScroll/)
+  assert.match(timeline, /requestAnimationFrame\(step\)/)
+  assert.match(timeline, /stopEdgeScroll\(\)/)
+  assert.match(mixStage, /function seekFromInput/)
+  assert.match(mixStage, /@change="seekFromInput"/)
+  assert.match(mixStage, /timelineRef\.value\?\.fitToWidth\(\)/)
+  assert.match(mixStage, /timelineRef\.value\?\.scrollToMs\(target\)/)
+  assert.match(mixStage, /t\('mix\.playheadTime'\)/)
+  assert.match(mixStage, /t\('mix\.fit'\)/)
+  for (const locale of [zh, en, ja, ko]) {
+    assert.equal(typeof locale.mix.fit, 'string')
+    assert.equal(typeof locale.mix.playheadTime, 'string')
+  }
+})
+
 test('track heads scroll the timeline vertically when the pointer wheel passes over them', () => {
   assert.match(mixStage, /@wheel="onHeadsWheel"/)
   assert.match(mixStage, /function onHeadsWheel\(event: WheelEvent\)/)
   assert.match(mixStage, /timelineRef\.value\?\.scrollByY\(delta\)/)
-  assert.match(timeline, /defineExpose\(\{ scrollToMs, scrollByY \}\)/)
+  assert.match(timeline, /defineExpose\(\{ scrollToMs, scrollByY, fitToWidth \}\)/)
 })

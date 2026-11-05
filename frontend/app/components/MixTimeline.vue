@@ -31,6 +31,7 @@ import { useI18n } from 'vue-i18n'
 import { mixAPI, type PeaksPayload } from '~/composables/useApi'
 import type { StageClip, StageTrack } from '~/composables/useMixStage'
 import { useTheme } from '~/composables/useTheme'
+import { fitTimelineZoom, TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '~/utils/timeline-zoom'
 
 const props = defineProps<{
   episodeId: number | null
@@ -72,8 +73,9 @@ const RULER_H = 30
 const VIDEO_LANE_H = 58
 const MIN_TRACK_H = 56
 const MAX_TRACK_H = 160
-const MIN_ZOOM = 8
-const MAX_ZOOM = 240
+const MIN_ZOOM = TIMELINE_ZOOM_MIN
+const MAX_ZOOM = TIMELINE_ZOOM_MAX
+const EDGE_SCROLL_PX = 44
 const TRACK_COLORS: Record<string, string> = {
   dialogue: '#f59e0b',
   voice: '#f59e0b',
@@ -99,6 +101,9 @@ const peaksInflight = new Set<string>()
 let pendingAnchor: { timeSec: number; offsetX: number } | null = null
 let resizeObserver: ResizeObserver | null = null
 let raf = 0
+let edgeRaf = 0
+let edgeDirection = 0
+let lastPointerClient = { x: 0, y: 0 }
 let interaction: {
   kind: 'move' | 'trim-start' | 'trim-end' | 'seek'
   clip: StageClip | null
@@ -159,6 +164,59 @@ function toMs(x: number): number {
   return Math.max(0, (x / props.zoom) * 1000)
 }
 
+function contentXOf(clientX: number): number {
+  const canvas = canvasRef.value
+  if (!canvas) return 0
+  return Math.max(0, clientX - canvas.getBoundingClientRect().left)
+}
+
+function emitSeekAt(clientX: number) {
+  emit('seek', Math.min(toMs(contentXOf(clientX)), props.durationMs))
+}
+
+function stopEdgeScroll() {
+  edgeDirection = 0
+  if (edgeRaf) {
+    cancelAnimationFrame(edgeRaf)
+    edgeRaf = 0
+  }
+}
+
+function startEdgeScroll(direction: number) {
+  edgeDirection = direction
+  if (edgeRaf) return
+  const step = () => {
+    edgeRaf = 0
+    const wrap = wrapRef.value
+    if (!wrap || !interaction || interaction.kind !== 'seek' || !edgeDirection) {
+      edgeDirection = 0
+      return
+    }
+    const max = Math.max(0, wrap.scrollWidth - wrap.clientWidth)
+    const next = Math.min(max, Math.max(0, wrap.scrollLeft + edgeDirection * 12))
+    if (next === wrap.scrollLeft) {
+      edgeDirection = 0
+      return
+    }
+    wrap.scrollLeft = next
+    emitSeekAt(lastPointerClient.x)
+    edgeRaf = requestAnimationFrame(step)
+  }
+  edgeRaf = requestAnimationFrame(step)
+}
+
+function updateEdgeScroll(clientX: number) {
+  const wrap = wrapRef.value
+  if (!wrap || !interaction || interaction.kind !== 'seek') {
+    stopEdgeScroll()
+    return
+  }
+  const rect = wrap.getBoundingClientRect()
+  if (clientX > rect.right - EDGE_SCROLL_PX) startEdgeScroll(1)
+  else if (clientX < rect.left + EDGE_SCROLL_PX) startEdgeScroll(-1)
+  else stopEdgeScroll()
+}
+
 function formatTime(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000))
   const minutes = Math.floor(total / 60)
@@ -177,7 +235,7 @@ function lineLabel(clip: StageClip): string {
   if (clip.lineId && props.lineTexts?.[clip.lineId]) return props.lineTexts[clip.lineId]
   if (clip.name) return clip.name
   if (clip.lineId) return t('mix.lineNumber', { n: props.lineNumbers?.[clip.lineId] ?? clip.lineId })
-  if (clip.takeId) return `Take #${clip.takeId}`
+  if (clip.takeId) return t('mix.takeLabel', { id: clip.takeId })
   const name = String(clip.audioUrl || '').split('/').pop() || ''
   try {
     return decodeURIComponent(name) || t('mix.unnamedClip')
@@ -735,6 +793,7 @@ function onPointerDown(event: PointerEvent) {
 }
 
 function onPointerMove(event: PointerEvent) {
+  lastPointerClient = { x: event.clientX, y: event.clientY }
   const { x, y } = pointOf(event)
   if (!interaction) {
     updateHover(x, y)
@@ -743,8 +802,10 @@ function onPointerMove(event: PointerEvent) {
   if (interaction.kind === 'seek') {
     emit('seek', Math.min(toMs(x), props.durationMs))
     if (Math.abs(x - interaction.startX) > 2) interaction.moved = true
+    updateEdgeScroll(event.clientX)
     return
   }
+  stopEdgeScroll()
   const clip = interaction.clip
   if (!clip) return
   interaction.moved = true
@@ -771,13 +832,17 @@ function onPointerMove(event: PointerEvent) {
 function onPointerUp(event: PointerEvent) {
   const canvas = canvasRef.value
   if (canvas?.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId)
+  stopEdgeScroll()
   if (interaction && interaction.kind !== 'seek') emit('end-change')
   interaction = null
   cursor.value = 'default'
 }
 
 function onPointerLeave() {
-  if (!interaction) hideHover()
+  if (!interaction) {
+    stopEdgeScroll()
+    hideHover()
+  }
 }
 
 function onDoubleClick(event: MouseEvent) {
@@ -858,12 +923,10 @@ function onScroll() {
 function onWheel(event: WheelEvent) {
   if (event.metaKey || event.ctrlKey) {
     event.preventDefault()
-    const canvas = canvasRef.value
     const wrap = wrapRef.value
-    if (!canvas || !wrap) return
-    const rect = canvas.getBoundingClientRect()
-    const offsetX = event.clientX - rect.left
-    pendingAnchor = { timeSec: offsetX / props.zoom, offsetX }
+    if (!wrap) return
+    const offsetX = event.clientX - wrap.getBoundingClientRect().left
+    pendingAnchor = { timeSec: (wrap.scrollLeft + offsetX) / props.zoom, offsetX }
     const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2
     const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, props.zoom * factor))
     emit('zoom', next)
@@ -879,11 +942,26 @@ function onWheel(event: WheelEvent) {
 function scrollToMs(ms: number) {
   const wrap = wrapRef.value
   if (!wrap) return
-  wrap.scrollTo({ left: Math.max(0, toX(ms) - 80), behavior: 'smooth' })
+  const x = toX(Math.min(ms, props.durationMs))
+  const left = wrap.scrollLeft
+  if (x < left + 24 || x > left + wrap.clientWidth - 90) {
+    wrap.scrollTo({ left: Math.max(0, x - wrap.clientWidth * 0.3), behavior: 'smooth' })
+  }
 }
 
 function scrollByY(delta: number) {
   wrapRef.value?.scrollBy({ top: delta })
+}
+
+function fitToWidth() {
+  const wrap = wrapRef.value
+  if (!wrap || props.durationMs <= 0) return
+  pendingAnchor = null
+  emit('zoom', fitTimelineZoom(wrap.clientWidth, props.durationMs))
+  nextTick(() => {
+    if (wrapRef.value) wrapRef.value.scrollLeft = 0
+    scheduleDraw()
+  })
 }
 
 watch(
@@ -972,10 +1050,11 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
+  stopEdgeScroll()
   if (raf) cancelAnimationFrame(raf)
 })
 
-defineExpose({ scrollToMs, scrollByY })
+defineExpose({ scrollToMs, scrollByY, fitToWidth })
 </script>
 
 <style scoped>

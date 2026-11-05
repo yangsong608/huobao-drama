@@ -515,15 +515,26 @@ export async function compileMixPlan(episodeId: number, dramaId: number): Promis
 
   const soloActive = tracks.some((track) => track.solo)
     || buses.some((bus) => bus.key !== 'master' && bus.solo)
+  const soloedBusKeys = new Set<string>()
+  for (const track of tracks) {
+    const bus = busByKey.get(track.busId)!
+    if (!soloActive) {
+      track.effectiveMuted = track.muted || bus.muted
+      continue
+    }
+    if (track.solo) {
+      // 轨 solo 压过轨自身静音，并让其所属总线保持开启
+      track.effectiveMuted = false
+      if (bus.key !== 'master') soloedBusKeys.add(bus.key)
+      continue
+    }
+    // 总线 solo 只隔离其他总线，轨自身的静音仍然生效
+    track.effectiveMuted = bus.solo ? track.muted : true
+  }
   for (const bus of buses) {
     bus.effectiveMuted = bus.key === 'master'
       ? bus.muted
-      : bus.muted || (soloActive && !bus.solo)
-  }
-  for (const track of tracks) {
-    const bus = busByKey.get(track.busId)!
-    const soloed = track.solo || (track.busId !== 'master' && bus.solo)
-    track.effectiveMuted = track.muted || bus.muted || (soloActive && !soloed)
+      : soloActive ? !(bus.solo || soloedBusKeys.has(bus.key)) : bus.muted
   }
 
   const clipEnd = tracks.reduce(

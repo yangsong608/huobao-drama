@@ -29,11 +29,12 @@
         <button class="mx-icon" type="button" :title="t('mix.redo')" :disabled="!canRedo" @click="redo"><Redo2 :size="13" /></button>
         <button :class="['mx-icon', { on: snap }]" type="button" :title="t('mix.snap')" @click="toggleSnap"><Magnet :size="13" /></button>
         <span class="mx-divider" />
+        <button class="mx-icon" type="button" :title="t('mix.fit')" @click="fitTimeline"><Maximize2 :size="12" /></button>
         <button class="mx-icon" type="button" :title="t('mix.zoomOut')" @click="nudgeZoom(-8)"><Minus :size="12" /></button>
         <input
           class="mx-zoom"
           type="range"
-          min="8"
+          min="1"
           max="240"
           step="4"
           :value="zoom"
@@ -43,16 +44,29 @@
         <button class="mx-icon" type="button" :title="t('mix.zoomIn')" @click="nudgeZoom(8)"><Plus :size="12" /></button>
         <span class="mx-zoom-val">{{ Math.round(zoom) }}</span>
         <span class="mx-divider" />
-        <AppMenu v-if="episodeId" v-model:open="addMenuOpen" :min-width="188">
+        <AppMenu v-if="episodeId" v-model:open="addMenuOpen" :min-width="248">
           <template #trigger>
-            <button class="mx-icon" type="button" :title="t('mix.addTrack')" :disabled="loading"><Plus :size="13" /></button>
+            <button class="mx-btn" type="button" :title="t('mix.addTrack')" :disabled="loading">
+              <Plus :size="12" />
+              {{ t('mix.addTrack') }}
+            </button>
           </template>
+          <div class="mx-add-head">
+            <b>{{ t('mix.addTrackMenuTitle') }}</b>
+            <span>{{ t('mix.addTrackMenuHint') }}</span>
+          </div>
           <AppMenuItem v-for="role in ADD_ROLES" :key="role" @click="addTrack(role)">
-            {{ roleLabel(role) }}
+            <span class="mx-add-role">
+              {{ roleLabel(role) }}
+              <small>{{ roleHint(role) }}</small>
+            </span>
             <template #trailing>{{ busLabel(ROLE_META[role]?.bus || 'sfx') }}</template>
           </AppMenuItem>
         </AppMenu>
-        <button v-else class="mx-icon" type="button" :title="t('mix.addTrack')" disabled><Plus :size="13" /></button>
+        <button v-else class="mx-btn" type="button" :title="t('mix.addTrack')" disabled>
+          <Plus :size="12" />
+          {{ t('mix.addTrack') }}
+        </button>
         <button class="mx-btn is-plain" type="button" :disabled="!episodeId || saving" @click="onSaveRevision">
           <Save :size="12" />
           {{ t('mix.saveRevision') }}
@@ -179,12 +193,19 @@
               <AudioWaveform :size="12" />
               {{ t('mix.separate') }}
             </button>
-            <AppMenu v-model:open="emptyMenuOpen" :min-width="188">
+            <AppMenu v-model:open="emptyMenuOpen" :min-width="248">
               <template #trigger>
                 <button class="mx-btn is-plain" type="button">{{ t('mix.addTrack') }}</button>
               </template>
+              <div class="mx-add-head">
+                <b>{{ t('mix.addTrackMenuTitle') }}</b>
+                <span>{{ t('mix.addTrackMenuHint') }}</span>
+              </div>
               <AppMenuItem v-for="role in ADD_ROLES" :key="role" @click="addTrack(role)">
-                {{ roleLabel(role) }}
+                <span class="mx-add-role">
+                  {{ roleLabel(role) }}
+                  <small>{{ roleHint(role) }}</small>
+                </span>
                 <template #trailing>{{ busLabel(ROLE_META[role]?.bus || 'sfx') }}</template>
               </AppMenuItem>
             </AppMenu>
@@ -204,6 +225,8 @@
         :line-number="inspectorLineNumber"
         :master="plan?.master ?? null"
         :saving="saving"
+        :dirty="dirty"
+        :can-edit="Boolean(episodeId)"
         @update-clip="onUpdateClip"
         @update-track="onTrackUpdate"
         @update-bus="onBusUpdate"
@@ -276,7 +299,19 @@
       </div>
 
       <div class="mx-transport-group is-right">
-        <span class="mx-playhead">{{ formatTimePrecise(playheadMs) }} / {{ formatTime(totalDuration) }}</span>
+        <label class="mx-goto">
+          <span class="mx-muted">{{ t('mix.playheadTime') }}</span>
+          <input
+            class="mx-time-input"
+            type="number"
+            min="0"
+            step="0.1"
+            :value="toSec(playheadMs)"
+            :aria-label="t('mix.playheadTime')"
+            @change="seekFromInput"
+          />
+          <span class="mx-muted">/ {{ formatTime(totalDuration) }}</span>
+        </label>
         <span class="mx-muted">{{ t('mix.shortcutHint') }}</span>
       </div>
     </footer>
@@ -312,6 +347,7 @@ import {
   Film,
   Loader2,
   Magnet,
+  Maximize2,
   Minus,
   PanelRightClose,
   PanelRightOpen,
@@ -420,6 +456,7 @@ const rootRef = ref<HTMLElement | null>(null)
 const timelineRef = ref<{
   scrollToMs: (ms: number) => void
   scrollByY: (delta: number) => void
+  fitToWidth: () => void
 } | null>(null)
 const videoPreview = ref<{
   play: () => Promise<void>
@@ -512,6 +549,15 @@ const ROLE_META: Record<string, { label: string; bus: MixBusKey }> = {  dialogue
   bgm: { label: 'mix.roleBgm', bus: 'bgm' },
   custom: { label: 'mix.roleCustom', bus: 'sfx' },
 }
+const ROLE_HINTS: Record<string, string> = {
+  dialogue: 'mix.roleDialogueHint',
+  crowd: 'mix.roleCrowdHint',
+  original: 'mix.roleOriginalHint',
+  ambience: 'mix.roleAmbienceHint',
+  sfx: 'mix.roleSfxHint',
+  bgm: 'mix.roleBgmHint',
+  custom: 'mix.roleCustomHint',
+}
 const ASSET_ROLE: Record<string, string> = {
   vocals: 'dialogue',
   instrumental: 'ambience',
@@ -533,6 +579,10 @@ function busLabel(key: string): string {
 function roleLabel(role: string): string {
   const meta = ROLE_META[role]
   return meta ? t(meta.label) : role
+}
+function roleHint(role: string): string {
+  const key = ROLE_HINTS[role]
+  return key ? t(key) : ''
 }
 function assetLabel(asset: EpisodeAudioAsset): string {
   const raw = String(asset.url || '').split('/').pop() || ''
@@ -879,6 +929,16 @@ function nudgeZoom(delta: number) {
 function onZoomInput(event: Event) {
   setZoom(Number((event.target as HTMLInputElement).value))
 }
+function fitTimeline() {
+  timelineRef.value?.fitToWidth()
+}
+function seekFromInput(event: Event) {
+  const value = Number((event.target as HTMLInputElement).value)
+  if (!Number.isFinite(value)) return
+  const target = clamp(Math.round(value * 1000), 0, totalDuration.value)
+  onSeek(target)
+  timelineRef.value?.scrollToMs(target)
+}
 function setRangeStart(event: Event) {
   const value = Number((event.target as HTMLInputElement).value)
   if (!Number.isFinite(value)) return
@@ -899,15 +959,22 @@ function toggleMasterMute() {
   const bus = masterBus.value
   if (bus) updateBus(bus, { muted: !bus.muted })
 }
-function addTrack(role: string) {
+function addTrack(role: string, name?: string) {
   addMenuOpen.value = false
   emptyMenuOpen.value = false
   const meta = ROLE_META[role]
-  const track = addStageTrack({ role, busId: meta?.bus, name: roleLabel(role) })
-  if (track) {
-    activeTrackUid.value = track._uid
-    clearSelection()
+  const track = addStageTrack({
+    role,
+    busId: meta?.bus,
+    name: (name || '').trim() || roleLabel(role),
+  })
+  if (!track) {
+    toast.error(t('mix.trackAddFailed'))
+    return
   }
+  activeTrackUid.value = track._uid
+  clearSelection()
+  toast.success(t('mix.trackAdded', { name: track.name }))
 }
 function insertAsset(asset: EpisodeAudioAsset) {
   if (!asset.url) {
@@ -1212,7 +1279,7 @@ function onKeydown(event: KeyboardEvent) {
     }
     return
   }
-  if (!meta && key === 's') {
+  if (!meta && key === 'b') {
     event.preventDefault()
     splitSelected()
     return
@@ -1274,6 +1341,11 @@ defineExpose({ seekTo, pause, play: togglePlay })
 .mx-icon.on { border-color: var(--accent-glow); background: var(--accent-bg); color: var(--accent-text); }
 .mx-icon:disabled { opacity: .4; cursor: default; }
 .mx-divider { width: 1px; height: 16px; background: var(--border); }
+.mx-add-head { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px 7px; border-bottom: 1px solid var(--border); }
+.mx-add-head b { font-size: 10.5px; color: var(--text-0); }
+.mx-add-head span { font-size: 9px; line-height: 1.4; color: var(--text-3); }
+.mx-add-role { display: flex; flex-direction: column; gap: 1px; align-items: flex-start; line-height: 1.3; }
+.mx-add-role small { font-size: 8.5px; font-weight: 400; color: var(--text-3); }
 .mx-zoom { width: 84px; height: 12px; accent-color: var(--accent); }
 .mx-zoom-val { width: 24px; font-size: 9px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .mx-progress { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--border); background: var(--accent-bg); }
@@ -1319,7 +1391,7 @@ defineExpose({ seekTo, pause, play: togglePlay })
 .mx-master-range { width: 90px; height: 12px; accent-color: var(--accent); }
 .mx-target { font-size: 9px; color: var(--text-3); white-space: nowrap; }
 .mx-target b { color: var(--text-1); font-variant-numeric: tabular-nums; }
-.mx-playhead { font-size: 10px; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.mx-goto { display: inline-flex; align-items: center; gap: 4px; }
 .mx-hidden-audio { display: none; }
 @container mx-stage (max-width: 1180px) {
   .mx-body { grid-template-columns: 232px minmax(0, 1fr) 272px; }

@@ -3,7 +3,7 @@
     <header class="mx-ins-head">
       <SlidersHorizontal :size="12" />
       <h4>{{ t('mix.inspector') }}</h4>
-      <span class="mx-ins-state">{{ saving ? t('mix.saving') : t('mix.saved') }}</span>
+      <span :class="['mx-ins-state', { 'is-dirty': dirty && !saving }]">{{ saveState }}</span>
     </header>
 
     <div class="mx-ins-scroll">
@@ -44,105 +44,116 @@
           {{ t('mix.clipUnusable') }}<template v-if="clip.reason"> · {{ clip.reason }}</template>
         </p>
 
-        <label class="mx-field">
-          <span>{{ t('mix.clipName') }}</span>
-          <input
-            :value="clip.name || ''"
-            :placeholder="t('mix.clipNamePlaceholder')"
-            :disabled="!clipEditable"
-            @change="setName"
-          />
-        </label>
+        <template v-if="virtual">
+          <p class="mx-hint">{{ t('mix.clipVirtualHint') }}</p>
+          <div v-if="clip.lineId" class="mx-actions">
+            <button class="mx-btn is-plain" type="button" @click="emit('locate-line', clip.lineId)">{{ t('mix.locateLine') }}</button>
+            <button class="mx-btn is-plain" type="button" @click="emit('regenerate-line', clip.lineId)">{{ t('mix.regenerateLine') }}</button>
+          </div>
+        </template>
 
-        <div class="mx-grid2">
+        <template v-else>
           <label class="mx-field">
-            <span>{{ t('mix.start') }}</span>
-            <input type="number" min="0" step="0.01" :value="toSec(clip.startMs)" :disabled="!clipEditable" @change="setStart" />
+            <span>{{ t('mix.clipName') }}</span>
+            <input
+              :value="clip.name || ''"
+              :placeholder="t('mix.clipNamePlaceholder')"
+              :disabled="!clipEditable"
+              @change="setName"
+            />
           </label>
-          <label class="mx-field">
-            <span>{{ t('mix.end') }}</span>
-            <input type="number" min="0" step="0.01" :value="toSec(clip.endMs)" :disabled="!clipEditable" @change="setEnd" />
-          </label>
-        </div>
-        <div class="mx-grid2">
-          <label class="mx-field">
-            <span>{{ t('mix.duration') }}</span>
-            <input :value="toSec(clip.endMs - clip.startMs)" disabled />
-          </label>
-          <label class="mx-field">
-            <span>{{ t('mix.sourceOffset') }}</span>
-            <input type="number" min="0" step="0.01" :value="toSec(clip.sourceStartMs)" :disabled="!clipEditable" @change="setSourceStart" />
-          </label>
-        </div>
 
-        <div class="mx-field">
-          <span class="mx-field-label">{{ t('mix.gain') }} <b>{{ clip.gainDb.toFixed(1) }} dB</b></span>
-          <input
-            class="mx-range"
-            type="range"
-            min="-24"
-            max="12"
-            step="0.5"
-            :value="clip.gainDb"
-            :disabled="!clipEditable"
-            @pointerdown="emit('begin-change')"
-            @pointerup="emit('end-change')"
-            @input="setGain"
-            @change="emit('end-change')"
-          />
-        </div>
-        <div class="mx-field">
-          <span class="mx-field-label">{{ t('mix.pan') }} <b>{{ panLabel }}</b></span>
-          <input
-            class="mx-range"
-            type="range"
-            min="-100"
-            max="100"
-            step="1"
-            :value="Math.round(clip.pan * 100)"
-            :disabled="!clipEditable"
-            @pointerdown="emit('begin-change')"
-            @pointerup="emit('end-change')"
-            @input="setPan"
-            @change="emit('end-change')"
-          />
-        </div>
-        <div class="mx-grid2">
+          <div class="mx-grid2">
+            <label class="mx-field">
+              <span>{{ t('mix.start') }}</span>
+              <input type="number" min="0" step="0.01" :value="toSec(clip.startMs)" :disabled="!clipEditable" @change="setStart" />
+            </label>
+            <label class="mx-field">
+              <span>{{ t('mix.end') }}</span>
+              <input type="number" min="0" step="0.01" :value="toSec(clip.endMs)" :disabled="!clipEditable" @change="setEnd" />
+            </label>
+          </div>
+          <div class="mx-grid2">
+            <label class="mx-field">
+              <span>{{ t('mix.duration') }}</span>
+              <input :value="toSec(clip.endMs - clip.startMs)" disabled />
+            </label>
+            <label class="mx-field">
+              <span>{{ t('mix.sourceOffset') }}</span>
+              <input type="number" min="0" step="0.01" :value="toSec(clip.sourceStartMs)" :disabled="!clipEditable" @change="setSourceStart" />
+            </label>
+          </div>
+
+          <div class="mx-field">
+            <span class="mx-field-label">{{ t('mix.gain') }} <b>{{ clip.gainDb.toFixed(1) }} dB</b></span>
+            <input
+              class="mx-range"
+              type="range"
+              min="-24"
+              max="12"
+              step="0.5"
+              :value="clip.gainDb"
+              :disabled="!clipEditable"
+              @pointerdown="emit('begin-change')"
+              @pointerup="emit('end-change')"
+              @input="setGain"
+              @change="emit('end-change')"
+            />
+          </div>
+          <div class="mx-field">
+            <span class="mx-field-label">{{ t('mix.pan') }} <b>{{ panLabel }}</b></span>
+            <input
+              class="mx-range"
+              type="range"
+              min="-100"
+              max="100"
+              step="1"
+              :value="Math.round(clip.pan * 100)"
+              :disabled="!clipEditable"
+              @pointerdown="emit('begin-change')"
+              @pointerup="emit('end-change')"
+              @input="setPan"
+              @change="emit('end-change')"
+            />
+          </div>
+          <div class="mx-grid2">
+            <label class="mx-field">
+              <span>{{ t('mix.fadeIn') }}</span>
+              <input type="number" min="0" step="0.05" :value="toSec(clip.fadeInMs)" :disabled="!clipEditable" @change="setFadeIn" />
+            </label>
+            <label class="mx-field">
+              <span>{{ t('mix.fadeOut') }}</span>
+              <input type="number" min="0" step="0.05" :value="toSec(clip.fadeOutMs)" :disabled="!clipEditable" @change="setFadeOut" />
+            </label>
+          </div>
           <label class="mx-field">
-            <span>{{ t('mix.fadeIn') }}</span>
-            <input type="number" min="0" step="0.05" :value="toSec(clip.fadeInMs)" :disabled="!clipEditable" @change="setFadeIn" />
+            <span>{{ t('mix.fadeCurve') }}</span>
+            <BaseSelect
+              :model-value="clip.fadeCurve"
+              :options="curveOptions"
+              :searchable="false"
+              :disabled="!clipEditable"
+              @update:model-value="setCurve"
+            />
           </label>
-          <label class="mx-field">
-            <span>{{ t('mix.fadeOut') }}</span>
-            <input type="number" min="0" step="0.05" :value="toSec(clip.fadeOutMs)" :disabled="!clipEditable" @change="setFadeOut" />
-          </label>
-        </div>
-        <label class="mx-field">
-          <span>{{ t('mix.fadeCurve') }}</span>
-          <BaseSelect
-            :model-value="clip.fadeCurve"
-            :options="curveOptions"
-            :searchable="false"
-            :disabled="!clipEditable"
-            @update:model-value="setCurve"
-          />
-        </label>
 
-        <div class="mx-toggle-row">
-          <button :class="['mx-toggle', { on: clip.loop }]" type="button" :disabled="!clipEditable && !clip.loop" @click="toggleClip('loop')">{{ t('mix.loopClip') }}</button>
-          <button :class="['mx-toggle', { on: clip.muted }]" type="button" :disabled="!clipEditable && !clip.muted" @click="toggleClip('muted')">{{ t('mix.mutedClip') }}</button>
-          <button :class="['mx-toggle', { on: clip.locked }]" type="button" :disabled="virtual || trackLocked" @click="toggleClip('locked')">{{ t('mix.lockedClip') }}</button>
-        </div>
+          <div class="mx-toggle-row">
+            <button :class="['mx-toggle', { on: clip.loop }]" type="button" :disabled="!clipEditable && !clip.loop" @click="toggleClip('loop')">{{ t('mix.loopClip') }}</button>
+            <button :class="['mx-toggle', { on: clip.muted }]" type="button" :disabled="!clipEditable && !clip.muted" @click="toggleClip('muted')">{{ t('mix.mutedClip') }}</button>
+            <button :class="['mx-toggle', { on: clip.locked }]" type="button" :disabled="trackLocked" @click="toggleClip('locked')">{{ t('mix.lockedClip') }}</button>
+          </div>
 
-        <p class="mx-hint">{{ t('mix.followTakeHint') }}</p>
+          <p v-if="clip.takeId" class="mx-hint">{{ t('mix.followTakeHint') }}</p>
+          <p v-else class="mx-hint">{{ t('mix.clipManualHint') }}</p>
 
-        <div class="mx-actions">
-          <button v-if="clip.lineId" class="mx-btn is-plain" type="button" @click="emit('locate-line', clip.lineId)">{{ t('mix.locateLine') }}</button>
-          <button v-if="clip.lineId" class="mx-btn is-plain" type="button" @click="emit('regenerate-line', clip.lineId)">{{ t('mix.regenerateLine') }}</button>
-          <button class="mx-btn is-plain" type="button" :disabled="!clipEditable" @click="emit('split-clip', clip)">{{ t('mix.splitClip') }}</button>
-          <button class="mx-btn is-plain" type="button" :disabled="virtual" @click="emit('duplicate-clip', clip)">{{ t('mix.duplicateClip') }}</button>
-          <button class="mx-btn is-danger" type="button" :disabled="!clipEditable" @click="emit('remove-clip', clip)">{{ t('mix.deleteClip') }}</button>
-        </div>
+          <div class="mx-actions">
+            <button v-if="clip.lineId" class="mx-btn is-plain" type="button" @click="emit('locate-line', clip.lineId)">{{ t('mix.locateLine') }}</button>
+            <button v-if="clip.lineId" class="mx-btn is-plain" type="button" @click="emit('regenerate-line', clip.lineId)">{{ t('mix.regenerateLine') }}</button>
+            <button class="mx-btn is-plain" type="button" :disabled="!clipEditable" @click="emit('split-clip', clip)">{{ t('mix.splitClip') }}</button>
+            <button class="mx-btn is-plain" type="button" :disabled="virtual" @click="emit('duplicate-clip', clip)">{{ t('mix.duplicateClip') }}</button>
+            <button class="mx-btn is-danger" type="button" :disabled="!clipEditable" @click="emit('remove-clip', clip)">{{ t('mix.deleteClip') }}</button>
+          </div>
+        </template>
       </section>
 
       <!-- 轨道 -->
@@ -170,48 +181,48 @@
           </label>
         </div>
 
-        <template v-if="!track.virtual">
-          <div class="mx-field">
-            <span class="mx-field-label">{{ t('mix.trackVolume') }} <b>{{ Math.round(track.volume * 100) }}%</b></span>
-            <input
-              class="mx-range"
-              type="range"
-              min="0"
-              max="200"
-              step="1"
-              :value="Math.round(track.volume * 100)"
-              :disabled="trackLocked"
-              @pointerdown="emit('begin-change')"
-              @pointerup="emit('end-change')"
-              @input="setTrackVolume"
-              @change="emit('end-change')"
-            />
-          </div>
-          <div class="mx-field">
-            <span class="mx-field-label">{{ t('mix.trackPan') }} <b>{{ trackPanLabel }}</b></span>
-            <input
-              class="mx-range"
-              type="range"
-              min="-100"
-              max="100"
-              step="1"
-              :value="Math.round(track.pan * 100)"
-              :disabled="trackLocked"
-              @pointerdown="emit('begin-change')"
-              @pointerup="emit('end-change')"
-              @input="setTrackPan"
-              @change="emit('end-change')"
-            />
-          </div>
-          <div class="mx-toggle-row">
-            <button :class="['mx-toggle', { on: track.muted }]" type="button" :disabled="trackLocked" @click="toggleTrack('muted')">M</button>
-            <button :class="['mx-toggle', { on: track.solo }]" type="button" :disabled="trackLocked" @click="toggleTrack('solo')">S</button>
-            <button :class="['mx-toggle', { on: track.ducking }]" type="button" :disabled="trackLocked" @click="toggleTrack('ducking')">Duck</button>
-            <button :class="['mx-toggle', { on: track.loop }]" type="button" :disabled="trackLocked" @click="toggleTrack('loop')">Loop</button>
-            <button :class="['mx-toggle', { on: track.locked }]" type="button" @click="toggleTrack('locked')">{{ t('mix.trackLock') }}</button>
-          </div>
-          <button class="mx-btn is-danger" type="button" @click="emit('remove-track', track)">{{ t('mix.trackRemove') }}</button>
-        </template>
+        <p v-if="track.virtual" class="mx-hint">{{ t('mix.trackVirtualFaderHint') }}</p>
+
+        <div class="mx-field">
+          <span class="mx-field-label">{{ t('mix.trackVolume') }} <b>{{ Math.round(track.volume * 100) }}%</b></span>
+          <input
+            class="mx-range"
+            type="range"
+            min="0"
+            max="200"
+            step="1"
+            :value="Math.round(track.volume * 100)"
+            :disabled="trackLocked"
+            @pointerdown="emit('begin-change')"
+            @pointerup="emit('end-change')"
+            @input="setTrackVolume"
+            @change="emit('end-change')"
+          />
+        </div>
+        <div class="mx-field">
+          <span class="mx-field-label">{{ t('mix.trackPan') }} <b>{{ trackPanLabel }}</b></span>
+          <input
+            class="mx-range"
+            type="range"
+            min="-100"
+            max="100"
+            step="1"
+            :value="Math.round(track.pan * 100)"
+            :disabled="trackLocked"
+            @pointerdown="emit('begin-change')"
+            @pointerup="emit('end-change')"
+            @input="setTrackPan"
+            @change="emit('end-change')"
+          />
+        </div>
+        <div class="mx-toggle-row">
+          <button :class="['mx-toggle', { on: track.muted }]" type="button" :disabled="trackLocked" @click="toggleTrack('muted')">{{ t('mix.trackMute') }}</button>
+          <button :class="['mx-toggle', { on: track.solo }]" type="button" :disabled="trackLocked" @click="toggleTrack('solo')">{{ t('mix.trackSolo') }}</button>
+          <button v-if="!track.virtual" :class="['mx-toggle', { on: track.ducking }]" type="button" :disabled="trackLocked" @click="toggleTrack('ducking')">{{ t('mix.trackDuck') }}</button>
+          <button :class="['mx-toggle', { on: track.loop }]" type="button" :disabled="trackLocked" @click="toggleTrack('loop')">{{ t('mix.trackLoop') }}</button>
+          <button v-if="!track.virtual" :class="['mx-toggle', { on: track.locked }]" type="button" @click="toggleTrack('locked')">{{ t('mix.trackLock') }}</button>
+        </div>
+        <button v-if="!track.virtual" class="mx-btn is-danger" type="button" @click="emit('remove-track', track)">{{ t('mix.trackRemove') }}</button>
       </section>
 
       <section v-if="!track && !clip" class="mx-card">
@@ -222,10 +233,24 @@
         <div class="mx-card-head">
           <span class="mx-chip">{{ t('mix.newTrack') }}</span>
         </div>
-        <div class="mx-inline">
-          <BaseSelect v-model="newRole" :options="roleOptions" :searchable="false" />
-          <button class="mx-btn" type="button" @click="emit('add-track', newRole)">{{ t('mix.addTrack') }}</button>
-        </div>
+        <p class="mx-hint">{{ t('mix.newTrackHint') }}</p>
+        <label class="mx-field">
+          <span>{{ t('mix.newTrackName') }}</span>
+          <input
+            v-model="newTrackName"
+            :placeholder="t('mix.newTrackNamePlaceholder')"
+            :disabled="!canEdit"
+            @keydown.enter.prevent="submitNewTrack"
+          />
+        </label>
+        <label class="mx-field">
+          <span>{{ t('mix.trackRole') }}</span>
+          <BaseSelect v-model="newRole" :options="roleOptions" :searchable="false" :disabled="!canEdit" />
+        </label>
+        <p class="mx-hint">{{ roleHint(newRole) }}</p>
+        <p class="mx-hint">{{ t('mix.newTrackBusHint', { bus: busName(ROLE_BUS[newRole] || 'sfx') }) }}</p>
+        <p v-if="!canEdit" class="mx-hint is-warning">{{ t('mix.newTrackDisabledHint') }}</p>
+        <button class="mx-btn" type="button" :disabled="!canEdit" @click="submitNewTrack">{{ t('mix.addTrack') }}</button>
       </section>
 
       <!-- 集级设置（由宿主注入：字幕模式、原声、BGM 等） -->
@@ -237,6 +262,7 @@
           <span class="mx-chip">{{ t('mix.assets') }}</span>
           <span class="mx-muted">{{ assets.length }}</span>
         </div>
+        <p class="mx-hint">{{ t('mix.assetSourceHint') }}</p>
         <p v-if="!assets.length" class="mx-hint">{{ t('mix.assetEmpty') }}</p>
         <ul v-else class="mx-assets">
           <li v-for="asset in assets" :key="asset.id" class="mx-asset">
@@ -259,13 +285,14 @@
       <!-- 总线 -->
       <details class="mx-card mx-details">
         <summary>{{ t('mix.busSection') }}</summary>
+        <p class="mx-hint">{{ t('mix.busHint') }}</p>
         <div v-for="bus in buses.filter(item => item.key !== 'master')" :key="bus.key" class="mx-bus">
           <div class="mx-bus-head">
             <span class="mx-bus-name">{{ busName(bus.key) }}</span>
             <span v-if="track?.busId === bus.key" class="mx-chip is-accent">{{ t('mix.busCurrent') }}</span>
             <span class="mx-muted">{{ Math.round(bus.volume * 100) }}%</span>
-            <button :class="['mx-toggle', { on: bus.muted }]" type="button" @click="patchBus(bus, { muted: !bus.muted })">M</button>
-            <button :class="['mx-toggle', { on: bus.solo }]" type="button" @click="patchBus(bus, { solo: !bus.solo })">S</button>
+            <button :class="['mx-toggle', { on: bus.muted }]" type="button" @click="patchBus(bus, { muted: !bus.muted })">{{ t('mix.trackMute') }}</button>
+            <button :class="['mx-toggle', { on: bus.solo }]" type="button" @click="patchBus(bus, { solo: !bus.solo })">{{ t('mix.trackSolo') }}</button>
           </div>
           <input
             class="mx-range"
@@ -345,6 +372,8 @@ const props = defineProps<{
   lineNumber?: number | null
   master?: { lufs: number; truePeak: number; limiter: string } | null
   saving?: boolean
+  dirty?: boolean
+  canEdit?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -356,7 +385,7 @@ const emit = defineEmits<{
   'duplicate-clip': [clip: StageClip]
   'locate-line': [lineId: number]
   'regenerate-line': [lineId: number]
-  'add-track': [role: string]
+  'add-track': [role: string, name?: string]
   'remove-track': [track: StageTrack]
   'insert-asset': [asset: EpisodeAudioAsset]
   'remove-asset': [asset: EpisodeAudioAsset]
@@ -379,6 +408,25 @@ const ROLE_KEYS: Record<string, string> = {
   bgm: 'mix.roleBgm',
   custom: 'mix.roleCustom',
 }
+const ROLE_HINTS: Record<string, string> = {
+  dialogue: 'mix.roleDialogueHint',
+  voice: 'mix.roleDialogueHint',
+  crowd: 'mix.roleCrowdHint',
+  original: 'mix.roleOriginalHint',
+  ambience: 'mix.roleAmbienceHint',
+  sfx: 'mix.roleSfxHint',
+  bgm: 'mix.roleBgmHint',
+  custom: 'mix.roleCustomHint',
+}
+const ROLE_BUS: Record<string, string> = {
+  dialogue: 'dialogue',
+  crowd: 'dialogue',
+  original: 'original',
+  ambience: 'original',
+  sfx: 'sfx',
+  bgm: 'bgm',
+  custom: 'sfx',
+}
 const BUS_KEYS: Record<string, string> = {
   dialogue: 'mix.busDialogue',
   original: 'mix.busOriginal',
@@ -396,6 +444,9 @@ const ASSET_KEYS: Record<string, string> = {
 }
 
 const newRole = ref('sfx')
+const newTrackName = ref('')
+const saveState = computed(() => props.saving ? t('mix.saving') : props.dirty ? t('mix.unsaved') : t('mix.saved'))
+const canEdit = computed(() => props.canEdit !== false)
 const roleOptions = computed(() => ['dialogue', 'crowd', 'original', 'ambience', 'sfx', 'bgm', 'custom'].map(role => ({
   value: role,
   label: ROLE_KEYS[role] ? t(ROLE_KEYS[role]) : role,
@@ -417,17 +468,18 @@ const clipEditable = computed(() => Boolean(props.clip)
   && !props.clip?.locked)
 const basicEngine = computed(() => props.separation?.engine === 'basic'
   || props.assets.some(asset => asset.engine === 'basic'))
-const panLabel = computed(() => {
-  const pan = Number(props.clip?.pan) || 0
-  if (Math.abs(pan) < 0.02) return 'C'
-  return `${pan < 0 ? 'L' : 'R'}${Math.round(Math.abs(pan) * 100)}`
-})
-const trackPanLabel = computed(() => {
-  const pan = Number(props.track?.pan) || 0
-  if (Math.abs(pan) < 0.02) return 'C'
-  return `${pan < 0 ? 'L' : 'R'}${Math.round(Math.abs(pan) * 100)}`
-})
+const panLabel = computed(() => panText(Number(props.clip?.pan) || 0))
+const trackPanLabel = computed(() => panText(Number(props.track?.pan) || 0))
 
+function panText(value: number): string {
+  if (Math.abs(value) < 0.02) return t('mix.panCenter')
+  const amount = Math.round(Math.abs(value) * 100)
+  return value < 0 ? t('mix.panLeft', { n: amount }) : t('mix.panRight', { n: amount })
+}
+function roleHint(role: string): string {
+  const key = ROLE_HINTS[role]
+  return key ? t(key) : ''
+}
 function busName(key: string): string {
   return BUS_KEYS[key] ? t(BUS_KEYS[key]) : key
 }
@@ -437,8 +489,8 @@ function kindLabel(kind: string): string {
 function engineLabel(engine: string | null): string {
   if (!engine) return t('mix.engineUnknown')
   if (engine === 'basic') return t('mix.engineBasic')
-  if (engine === 'uvr') return 'UVR'
-  if (engine === 'demucs') return 'Demucs'
+  if (engine === 'uvr') return t('mix.engineUvr')
+  if (engine === 'demucs') return t('mix.engineDemucs')
   return engine
 }
 function assetName(asset: EpisodeAudioAsset): string {
@@ -536,6 +588,11 @@ function toggleTrack(key: 'muted' | 'solo' | 'ducking' | 'loop' | 'locked') {
   if (!props.track) return
   emitTrack({ [key]: !props.track[key] })
 }
+function submitNewTrack() {
+  if (!canEdit.value) return
+  emit('add-track', newRole.value, newTrackName.value.trim() || undefined)
+  newTrackName.value = ''
+}
 
 function patchBus(bus: MixBus, patch: Record<string, unknown>) {
   emit('update-bus', bus, patch)
@@ -555,6 +612,7 @@ function setBusNumber(bus: MixBus, key: 'duckRatio' | 'duckAttackMs' | 'duckRele
 .mx-ins-head { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border-bottom: 1px solid var(--border); color: var(--text-2); }
 .mx-ins-head h4 { margin: 0; font-size: 11.5px; font-weight: 700; color: var(--text-0); }
 .mx-ins-state { margin-left: auto; font-size: 9.5px; color: var(--text-3); }
+.mx-ins-state.is-dirty { color: var(--warning); }
 .mx-ins-scroll { flex: 1; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
 .mx-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-0); }
 .mx-card.is-sep { border-color: var(--accent-glow); }
@@ -572,6 +630,7 @@ function setBusNumber(bus: MixBus, key: 'duckRatio' | 'duckAttackMs' | 'duckRele
 .mx-note.is-warning { background: var(--warning-bg); color: var(--warning); }
 .mx-note.is-danger { background: var(--action-danger-bg); color: var(--action-danger); }
 .mx-hint { margin: 0; font-size: 9.5px; line-height: 1.5; color: var(--text-3); }
+.mx-hint.is-warning { color: var(--warning); }
 .mx-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .mx-field > span { font-size: 9.5px; color: var(--text-3); }
 .mx-field > span b { color: var(--text-1); font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -580,8 +639,6 @@ function setBusNumber(bus: MixBus, key: 'duckRatio' | 'duckAttackMs' | 'duckRele
 .mx-field input:disabled { opacity: .55; }
 .mx-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .mx-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-.mx-inline { display: flex; align-items: center; gap: 6px; }
-.mx-inline > :first-child { flex: 1; min-width: 0; }
 .mx-range { width: 100%; height: 14px; accent-color: var(--accent); cursor: pointer; }
 .mx-range:disabled { opacity: .5; cursor: default; }
 .mx-toggle-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
@@ -612,7 +669,7 @@ function setBusNumber(bus: MixBus, key: 'duckRatio' | 'duckAttackMs' | 'duckRele
 .mx-bus { display: flex; flex-direction: column; gap: 3px; padding-top: 5px; border-top: 1px dashed var(--border); }
 .mx-bus-head { display: flex; align-items: center; gap: 4px; }
 .mx-bus-name { font-size: 10px; font-weight: 600; color: var(--text-1); }
-.mx-bus-head .mx-toggle { width: 18px; height: 18px; padding: 0; }
+.mx-bus-head .mx-toggle { width: auto; min-width: 18px; padding: 0 3px; font-size: 9px; }
 .mx-bus .mx-range { height: 12px; }
 .mx-target { display: flex; flex-wrap: wrap; gap: 4px 10px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: 9.5px; color: var(--text-2); }
 .mx-target b { color: var(--text-0); font-variant-numeric: tabular-nums; }

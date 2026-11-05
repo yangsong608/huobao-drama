@@ -176,6 +176,24 @@ test('solo 派生 effectiveMuted，不改写 muted 原值', async () => {
   db.update(schema.episodeAudioTracks).set({ solo: false }).where(eq(schema.episodeAudioTracks.id, ambience.id)).run()
 })
 
+test('solo 能试听默认静音轨并保持所属总线开启', async () => {
+  db.update(schema.episodeAudioTracks)
+    .set({ muted: true, solo: true })
+    .where(eq(schema.episodeAudioTracks.id, ambience.id))
+    .run()
+  const plan = await compileMixPlan(episode.id, 1)
+  const track = plan.tracks.find((item) => item.id === ambience.id)!
+  assert.equal(track.effectiveMuted, false, 'solo 必须压过轨道自身静音')
+  assert.equal(track.muted, true, 'solo 不应改写 muted 原值')
+  assert.equal(plan.buses.find((bus) => bus.key === 'original')!.effectiveMuted, false, '所属总线必须保持开启')
+  assert.equal(plan.tracks.find((item) => item.id === bgm.id)!.effectiveMuted, true)
+  assert.equal(plan.buses.find((bus) => bus.key === 'bgm')!.effectiveMuted, true)
+  db.update(schema.episodeAudioTracks)
+    .set({ muted: false, solo: false })
+    .where(eq(schema.episodeAudioTracks.id, ambience.id))
+    .run()
+})
+
 test('总线 solo 让未 solo 总线上的轨道静音', async () => {
   const buses = ensureDefaultBuses(episode.id)
   const bgmBus = buses.find((bus) => bus.key === 'bgm')!
@@ -185,6 +203,23 @@ test('总线 solo 让未 solo 总线上的轨道静音', async () => {
   assert.equal(plan.tracks.find((item) => item.id === ambience.id)!.effectiveMuted, true)
   assert.equal(plan.buses.find((bus) => bus.key === 'bgm')!.effectiveMuted, false)
   db.update(schema.audioBuses).set({ solo: false }).where(eq(schema.audioBuses.id, bgmBus.id)).run()
+})
+
+test('总线 solo 只隔离其他总线，不覆盖轨自身静音', async () => {
+  const buses = ensureDefaultBuses(episode.id)
+  const originalBus = buses.find((bus) => bus.key === 'original')!
+  db.update(schema.episodeAudioTracks).set({ muted: true }).where(eq(schema.episodeAudioTracks.id, ambience.id)).run()
+  db.update(schema.audioBuses).set({ solo: true }).where(eq(schema.audioBuses.id, originalBus.id)).run()
+  const plan = await compileMixPlan(episode.id, 1)
+  assert.equal(
+    plan.tracks.find((item) => item.id === ambience.id)!.effectiveMuted,
+    true,
+    '总线 solo 不应放出该总线上被静音的轨道',
+  )
+  assert.equal(plan.buses.find((bus) => bus.key === 'original')!.effectiveMuted, false)
+  assert.equal(plan.tracks.find((item) => item.id === bgm.id)!.effectiveMuted, true, '其他总线保持静音')
+  db.update(schema.audioBuses).set({ solo: false }).where(eq(schema.audioBuses.id, originalBus.id)).run()
+  db.update(schema.episodeAudioTracks).set({ muted: false }).where(eq(schema.episodeAudioTracks.id, ambience.id)).run()
 })
 
 test('plan hash 内容稳定，改音量后变化', async () => {

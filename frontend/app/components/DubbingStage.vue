@@ -361,9 +361,6 @@
                   <Loader2 v-if="loading" :size="11" class="animate-spin" />
                   {{ t('workbench.refreshTimeline') }}
                 </button>
-                <button class="btn btn-sm" type="button" :disabled="!readyCount" @click="synthesizeAll()">
-                  {{ t('workbench.synthesizeAll') }}
-                </button>
               </template>
 
               <template #settings>

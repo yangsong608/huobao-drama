@@ -59,14 +59,14 @@ test('mix stage drives realtime monitoring from the video clock', () => {
 })
 
 test('render preview stays available as a labeled final check', () => {
-  assert.equal(zh.mix.preview, '渲染终检')
+  assert.equal(zh.mix.preview, '生成试听')
   assert.equal(zh.mix.realtimeHint.includes('实时监听'), true)
   assert.equal(en.mix.preview, 'Render check')
   assert.equal(en.mix.realtimeHint.includes('Real-time'), true)
   assert.match(mixStage, /t\('mix\.realtimeMissing'/)
   assert.match(timeline, /t\('mix\.missingAudio'\)/)
   assert.match(mixStage, /t\('mix\.videoPlayFailed'\)/)
-  assert.match(zh.mix.loopPreviewHint, /渲染终检/)
+  assert.match(zh.mix.loopPreviewHint, /生成试听/)
   assert.match(en.mix.videoPlayFailed, /audio monitoring/)
 })
 

@@ -50,10 +50,10 @@
     </header>
 
     <div class="mx-th-row">
-      <button :class="['mx-th-toggle', { on: track.muted }]" type="button" :title="t('mix.trackMute')" @click.stop="toggle('muted')">M</button>
-      <button :class="['mx-th-toggle', { on: track.solo }]" type="button" :title="t('mix.trackSolo')" @click.stop="toggle('solo')">S</button>
-      <button v-if="!track.virtual" :class="['mx-th-toggle', { on: track.ducking }]" type="button" :title="t('mix.trackDuck')" @click.stop="toggle('ducking')">D</button>
-      <button :class="['mx-th-toggle', { on: track.loop }]" type="button" :title="t('mix.trackLoop')" @click.stop="toggle('loop')">L</button>
+      <button :class="['mx-th-toggle', { on: track.muted }]" type="button" :title="t('mix.trackMute')" @click.stop="toggle('muted')">{{ t('mix.trackMuteShort') }}</button>
+      <button :class="['mx-th-toggle', { on: track.solo }]" type="button" :title="t('mix.trackSolo')" @click.stop="toggle('solo')">{{ t('mix.trackSoloShort') }}</button>
+      <button v-if="!track.virtual" :class="['mx-th-toggle', { on: track.ducking }]" type="button" :title="t('mix.trackDuck')" @click.stop="toggle('ducking')">{{ t('mix.trackDuckShort') }}</button>
+      <button :class="['mx-th-toggle', { on: track.loop }]" type="button" :title="t('mix.trackLoop')" @click.stop="toggle('loop')">{{ t('mix.trackLoopShort') }}</button>
       <span v-if="track.virtual" class="mx-th-note">{{ t('mix.trackVirtualHint', { n: track.clips.length }) }}</span>
       <span v-else class="mx-th-clips">{{ t('mix.clipCount', { n: track.clips.length }) }}</span>
     </div>
@@ -148,8 +148,9 @@ const volumePct = computed(() => Math.round((Number(props.track.volume) || 0) * 
 const panPct = computed(() => Math.round((Number(props.track.pan) || 0) * 100))
 const panLabel = computed(() => {
   const pan = Number(props.track.pan) || 0
-  if (Math.abs(pan) < 0.02) return 'C'
-  return `${pan < 0 ? 'L' : 'R'}${Math.round(Math.abs(pan) * 100)}`
+  if (Math.abs(pan) < 0.02) return t('mix.panCenter')
+  const amount = Math.round(Math.abs(pan) * 100)
+  return pan < 0 ? t('mix.panLeft', { n: amount }) : t('mix.panRight', { n: amount })
 })
 const meterPct = computed(() => {
   if (props.track.effectiveMuted || props.track.hidden) return 0
@@ -239,16 +240,16 @@ function onResizeUp(event: PointerEvent) {
 .mx-th-icon.on { color: var(--accent-text); }
 .mx-th-icon.is-danger:hover { color: var(--action-danger); background: var(--action-danger-bg); }
 .mx-th-row { display: flex; align-items: center; gap: 3px; min-height: 17px; }
-.mx-th-toggle { width: 19px; height: 17px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-0); color: var(--text-3); font: inherit; font-size: 9px; font-weight: 700; line-height: 1; cursor: pointer; }
+.mx-th-toggle { width: auto; min-width: 19px; height: 17px; padding: 0 3px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-0); color: var(--text-3); font: inherit; font-size: 8.5px; font-weight: 700; line-height: 1; white-space: nowrap; cursor: pointer; }
 .mx-th-toggle:hover { color: var(--text-1); }
 .mx-th-toggle.on { border-color: var(--accent-glow); background: var(--accent-bg); color: var(--accent-text); }
 .mx-th-clips { margin-left: auto; font-size: 9px; color: var(--text-3); white-space: nowrap; }
 .mx-th-note { font-size: 9.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mx-th-row.is-faders { gap: 4px; }
 .mx-th-fader-label { flex: none; width: 30px; font-size: 9px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.mx-th-fader-label.is-pan { width: 22px; text-align: right; }
+.mx-th-fader-label.is-pan { width: 30px; text-align: right; }
 .mx-th-range { flex: 1; min-width: 24px; height: 12px; accent-color: var(--accent); cursor: pointer; }
-.mx-th-range.is-pan { flex: none; width: 38px; }
+.mx-th-range.is-pan { flex: none; width: 32px; }
 .mx-th-meter { flex: none; display: flex; align-items: flex-end; width: 4px; height: 14px; border-radius: 2px; background: var(--bg-3); overflow: hidden; }
 .mx-th-meter i { display: block; width: 100%; border-radius: 2px; background: linear-gradient(0deg, var(--success), var(--warning) 72%, var(--error)); }
 .mx-th-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; cursor: ns-resize; }
