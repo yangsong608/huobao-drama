@@ -757,7 +757,19 @@ export const mixAPI = {
   getPlan: (episodeId: number) => api.get<MixPlan>(`/episodes/${episodeId}/mix`),
   savePlan: (
     episodeId: number,
-    data: { buses?: Partial<MixBus>[]; tracks?: any[]; clips?: any[] },
+    data: {
+      buses?: Partial<MixBus>[]
+      tracks?: any[]
+      clips?: any[]
+      virtualTracks?: Array<{
+        role: string
+        volume?: number
+        pan?: number
+        muted?: boolean
+        solo?: boolean
+        loop?: boolean
+      }>
+    },
   ) => api.put<MixPlan>(`/episodes/${episodeId}/mix`, data),
   buses: (episodeId: number) =>
     api.get<{ items: MixBus[] }>(`/episodes/${episodeId}/mix/buses`),

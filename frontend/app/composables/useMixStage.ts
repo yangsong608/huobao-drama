@@ -33,9 +33,19 @@ export interface StagePlan extends Omit<MixPlan, 'tracks'> {
   tracks: StageTrack[]
 }
 
+export interface VirtualTrackSnapshot {
+  role: string
+  volume: number
+  pan: number
+  muted: boolean
+  solo: boolean
+  loop: boolean
+}
+
 export interface MixSnapshot {
   tracks: StageTrack[]
   buses: MixBus[]
+  virtual: VirtualTrackSnapshot[]
 }
 
 export interface MixSelection {
@@ -249,9 +259,18 @@ export function useMixStage(options: UseMixStageOptions) {
   }
 
   function snapshot(): MixSnapshot {
+    const tracks = plan.value?.tracks ?? []
     return {
-      tracks: clone((plan.value?.tracks ?? []).filter((track) => !track.virtual)),
+      tracks: clone(tracks.filter((track) => !track.virtual)),
       buses: clone(plan.value?.buses ?? []),
+      virtual: tracks.filter((track) => track.virtual).map((track) => ({
+        role: track.role,
+        volume: track.volume,
+        pan: track.pan,
+        muted: track.muted,
+        solo: track.solo,
+        loop: track.loop,
+      })),
     }
   }
 
@@ -263,6 +282,15 @@ export function useMixStage(options: UseMixStageOptions) {
   function applySnapshot(snap: MixSnapshot) {
     if (!plan.value) return
     const virtual = plan.value.tracks.filter((track) => track.virtual)
+    for (const saved of snap.virtual) {
+      const track = virtual.find((item) => item.role === saved.role)
+      if (!track) continue
+      track.volume = saved.volume
+      track.pan = saved.pan
+      track.muted = saved.muted
+      track.solo = saved.solo
+      track.loop = saved.loop
+    }
     plan.value = {
       ...plan.value,
       buses: clone(snap.buses),
@@ -366,6 +394,16 @@ export function useMixStage(options: UseMixStageOptions) {
             locked: clip.locked,
             audioUrl: clip.audioUrl,
           })),
+        })),
+      virtualTracks: current.tracks
+        .filter((track) => track.virtual)
+        .map((track) => ({
+          role: track.role,
+          volume: track.volume,
+          pan: track.pan,
+          muted: track.muted,
+          solo: track.solo,
+          loop: track.loop,
         })),
     }
   }
@@ -760,8 +798,8 @@ export function useMixStage(options: UseMixStageOptions) {
     return Math.max(0, Math.round(best))
   }
 
-  function setPlayhead(ms: number) {
-    playheadMs.value = clamp(Math.round(ms), 0, Math.max(durationMs.value, 0))
+  function setPlayhead(ms: number, maxMs = durationMs.value) {
+    playheadMs.value = clamp(Math.round(ms), 0, Math.max(maxMs, 0))
   }
 
   function setZoom(value: number) {

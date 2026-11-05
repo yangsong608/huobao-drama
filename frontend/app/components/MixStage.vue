@@ -15,6 +15,10 @@
         <span v-else-if="separation?.engine === 'basic'" class="mx-chip is-warning">{{ t('mix.engineBasic') }}</span>
       </div>
       <div class="mx-top-actions">
+        <template v-if="$slots.actions">
+          <slot name="actions" />
+          <span class="mx-divider" />
+        </template>
         <button class="mx-btn" :class="{ 'is-primary': !hasAssets }" type="button" :disabled="!episodeId || separationRunning || loading" @click="requestSeparate(false)">
           <AudioWaveform :size="12" />
           {{ hasAssets ? t('mix.reseparate') : t('mix.separate') }}
@@ -39,13 +43,31 @@
         <button class="mx-icon" type="button" :title="t('mix.zoomIn')" @click="nudgeZoom(8)"><Plus :size="12" /></button>
         <span class="mx-zoom-val">{{ Math.round(zoom) }}</span>
         <span class="mx-divider" />
-        <button class="mx-icon" type="button" :title="t('mix.addTrack')" :disabled="!episodeId || loading" @click="addAmbienceTrack"><Plus :size="13" /></button>
+        <AppMenu v-if="episodeId" v-model:open="addMenuOpen" :min-width="188">
+          <template #trigger>
+            <button class="mx-icon" type="button" :title="t('mix.addTrack')" :disabled="loading"><Plus :size="13" /></button>
+          </template>
+          <AppMenuItem v-for="role in ADD_ROLES" :key="role" @click="addTrack(role)">
+            {{ roleLabel(role) }}
+            <template #trailing>{{ busLabel(ROLE_META[role]?.bus || 'sfx') }}</template>
+          </AppMenuItem>
+        </AppMenu>
+        <button v-else class="mx-icon" type="button" :title="t('mix.addTrack')" disabled><Plus :size="13" /></button>
         <button class="mx-btn is-plain" type="button" :disabled="!episodeId || saving" @click="onSaveRevision">
           <Save :size="12" />
           {{ t('mix.saveRevision') }}
         </button>
         <button class="mx-icon" type="button" :title="t('mix.refresh')" :disabled="loading" @click="requestReload">
           <RefreshCw :size="13" :class="{ 'animate-spin': loading }" />
+        </button>
+        <button
+          :class="['mx-icon', { on: inspectorOpen }]"
+          type="button"
+          :title="inspectorOpen ? t('mix.inspectorHide') : t('mix.inspectorShow')"
+          @click="toggleInspector"
+        >
+          <PanelRightClose v-if="inspectorOpen" :size="13" />
+          <PanelRightOpen v-else :size="13" />
         </button>
       </div>
     </header>
@@ -57,11 +79,42 @@
 
     <p v-if="error" class="mx-error">{{ error }}</p>
 
-    <div class="mx-body">
+    <div v-if="videoUrl" class="mx-monitor">
+      <div class="mx-monitor-stage">
+        <SubtitlePreview
+          ref="videoPreview"
+          :src="videoUrl"
+          :cues="cues"
+          :controls="false"
+          :show-scrub="false"
+          :muted="true"
+          @timeupdate="onVideoTime"
+          @duration="onVideoDuration"
+          @play="onVideoPlay"
+          @playing="onVideoPlaying"
+          @pause="onVideoPause"
+          @waiting="onVideoWaiting"
+          @ended="onVideoEnded"
+        />
+      </div>
+      <div class="mx-monitor-info">
+        <span class="mx-monitor-kicker">{{ t('mix.monitorKicker') }}</span>
+        <p class="mx-monitor-cue">{{ currentCueText || t('mix.monitorNoCue') }}</p>
+        <span class="mx-monitor-time">{{ formatTimePrecise(playheadMs) }} / {{ formatTime(totalDuration) }}</span>
+        <p class="mx-monitor-hint">{{ t('mix.monitorHint') }}</p>
+      </div>
+    </div>
+
+    <div :class="['mx-body', { 'is-inspector-closed': !inspectorOpen }]">
       <aside class="mx-heads">
         <div class="mx-heads-label">{{ t('mix.trackColumn') }}</div>
-        <div class="mx-heads-clip">
+        <div class="mx-heads-clip" @wheel="onHeadsWheel">
           <div class="mx-heads-inner" :style="{ transform: `translateY(-${scrollTop}px)` }">
+            <div v-if="videoUrl" class="mx-heads-video" :style="{ height: `${VIDEO_LANE_H}px` }">
+              <Film :size="12" />
+              <span>{{ t('mix.videoLane') }}</span>
+              <span class="mx-heads-video-tag">{{ t('mix.videoLaneReadonly') }}</span>
+            </div>
             <div class="mx-heads-spacer" />
             <MixTrackHead
               v-for="track in tracks"
@@ -95,6 +148,9 @@
           :active-track-uid="activeTrackUid"
           :line-texts="lineTexts"
           :line-numbers="lineNumbers"
+          :video-url="videoUrl"
+          :video-duration-ms="videoDurationMs"
+          :follow="playing"
           @select="onSelectClip"
           @select-track="onSelectTrack"
           @seek="onSeek"
@@ -123,12 +179,21 @@
               <AudioWaveform :size="12" />
               {{ t('mix.separate') }}
             </button>
-            <button class="mx-btn is-plain" type="button" @click="addAmbienceTrack">{{ t('mix.addTrack') }}</button>
+            <AppMenu v-model:open="emptyMenuOpen" :min-width="188">
+              <template #trigger>
+                <button class="mx-btn is-plain" type="button">{{ t('mix.addTrack') }}</button>
+              </template>
+              <AppMenuItem v-for="role in ADD_ROLES" :key="role" @click="addTrack(role)">
+                {{ roleLabel(role) }}
+                <template #trailing>{{ busLabel(ROLE_META[role]?.bus || 'sfx') }}</template>
+              </AppMenuItem>
+            </AppMenu>
           </div>
         </div>
       </div>
 
       <MixClipInspector
+        v-show="inspectorOpen"
         :clip="selectedClip"
         :track="inspectorTrack"
         :buses="buses"
@@ -156,7 +221,11 @@
         @cancel-separation="onCancelSeparation"
         @begin-change="beginChange"
         @end-change="endChange"
-      />
+      >
+        <template v-if="$slots.settings" #settings>
+          <slot name="settings" />
+        </template>
+      </MixClipInspector>
     </div>
 
     <footer class="mx-transport">
@@ -165,21 +234,22 @@
         <input class="mx-time-input" type="number" min="0" step="0.1" :value="toSec(rangeStartMs)" :aria-label="t('mix.rangeStart')" @change="setRangeStart" />
         <span class="mx-muted">–</span>
         <input class="mx-time-input" type="number" min="0" step="0.1" :value="toSec(rangeEndMs)" :aria-label="t('mix.rangeEnd')" @change="setRangeEnd" />
-        <button class="mx-btn" :class="{ 'is-primary': !preview }" type="button" :disabled="previewing || !episodeId || !hasAnyAudio" @click="generatePreview(true)">
+        <button class="mx-btn" type="button" :disabled="previewing || !episodeId || !hasAnyAudio" @click="generatePreview()">
           <Loader2 v-if="previewing" :size="12" class="animate-spin" />
           <AudioLines v-else :size="12" />
           {{ previewing ? t('mix.previewing') : t('mix.preview') }}
         </button>
-        <button class="mx-icon" type="button" :title="playing ? t('mix.pause') : t('mix.play')" :disabled="previewing || !episodeId || !hasAnyAudio" @click="togglePlay">
-          <Pause v-if="playing" :size="13" />
+        <button class="mx-icon" type="button" :title="playing ? t('mix.pause') : t('mix.play')" :disabled="previewing || !episodeId || (!hasAnyAudio && !videoUrl)" @click="togglePlay">
+          <Loader2 v-if="previewing || playbackLoading" :size="13" class="animate-spin" />
+          <Pause v-else-if="playing" :size="13" />
           <Play v-else :size="13" />
         </button>
-        <label class="mx-check">
-          <input v-model="loopPreview" type="checkbox" />
+        <label class="mx-check" :title="t('mix.loopPreviewHint')">
+          <input v-model="loopPreview" type="checkbox" :disabled="!preview" />
           {{ t('mix.loopPreview') }}
         </label>
         <span v-if="preview" class="mx-muted">{{ t('mix.previewReady') }}<template v-if="preview.cached"> · {{ t('mix.previewCached') }}</template></span>
-        <span v-else class="mx-muted">{{ t('mix.previewLimit') }}</span>
+        <span v-else class="mx-muted">{{ t('mix.realtimeHint') }}</span>
       </div>
 
       <div class="mx-transport-group is-master">
@@ -215,10 +285,7 @@
       ref="previewAudio"
       class="mx-hidden-audio"
       :src="previewUrl"
-      :loop="loopPreview"
       preload="none"
-      @play="playing = true"
-      @pause="playing = false"
       @timeupdate="onPreviewTime"
       @ended="onPreviewEnded"
     />
@@ -242,9 +309,12 @@ import { toast } from 'vue-sonner'
 import {
   AudioLines,
   AudioWaveform,
+  Film,
   Loader2,
   Magnet,
   Minus,
+  PanelRightClose,
+  PanelRightOpen,
   Pause,
   Play,
   Plus,
@@ -263,12 +333,17 @@ import type {
   MixClip,
   MixRevision,
   MixTrack,
+  TimelineCue,
 } from '~/composables/useApi'
+import { useMixPlayback } from '~/composables/useMixPlayback'
 import { useMixStage, type StageClip, type StageTrack } from '~/composables/useMixStage'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
+import AppMenu from '~/components/AppMenu.vue'
+import AppMenuItem from '~/components/AppMenuItem.vue'
 import MixClipInspector from '~/components/MixClipInspector.vue'
 import MixTimeline from '~/components/MixTimeline.vue'
 import MixTrackHead from '~/components/MixTrackHead.vue'
+import SubtitlePreview from '~/components/SubtitlePreview.vue'
 
 const props = defineProps<{
   episodeId: number | null
@@ -276,6 +351,8 @@ const props = defineProps<{
   durationMs: number
   lineTexts?: Record<number, string>
   lineNumbers?: Record<number, number>
+  videoUrl?: string | null
+  cues?: TimelineCue[]
 }>()
 
 const emit = defineEmits<{
@@ -340,16 +417,65 @@ const {
 } = stage
 
 const rootRef = ref<HTMLElement | null>(null)
-const timelineRef = ref<{ scrollToMs: (ms: number) => void } | null>(null)
+const timelineRef = ref<{
+  scrollToMs: (ms: number) => void
+  scrollByY: (delta: number) => void
+} | null>(null)
+const videoPreview = ref<{
+  play: () => Promise<void>
+  pause: () => void
+  seekTo: (ms: number) => void
+  videoEl: HTMLVideoElement | null
+  currentMs: number
+  durationMs: number
+} | null>(null)
 const previewAudio = ref<HTMLAudioElement | null>(null)
+const videoDurationMs = ref(0)
 const scrollTop = ref(0)
 const activeTrackUid = ref<string | null>(null)
 const rangeStartMs = ref(0)
 const rangeEndMs = ref(0)
 const loopPreview = ref(false)
 const playing = ref(false)
+const renderedMode = ref(false)
+let previewToken = 0
+const addMenuOpen = ref(false)
+const emptyMenuOpen = ref(false)
+const inspectorOpen = ref(readInspectorPreference())
 
-const totalDuration = computed(() => Math.max(1000, planDuration.value || 0, props.durationMs || 0))
+const playback = useMixPlayback({
+  tracks: () => tracks.value,
+  buses: () => buses.value,
+})
+const playbackLoading = playback.loading
+const playbackMissing = playback.missing
+let engineRaf = 0
+let engineStarting = false
+let rescheduleTimer: ReturnType<typeof setTimeout> | null = null
+
+function readInspectorPreference(): boolean {
+  try {
+    return localStorage.getItem('huobao:mix:inspector') !== '0'
+  } catch {
+    return true
+  }
+}
+
+function toggleInspector() {
+  inspectorOpen.value = !inspectorOpen.value
+  try {
+    localStorage.setItem('huobao:mix:inspector', inspectorOpen.value ? '1' : '0')
+  } catch { /* localStorage 不可用时仅本次生效 */ }
+}
+
+const cues = computed(() => props.cues ?? [])
+const videoUrl = computed(() => String(props.videoUrl || '').trim())
+const totalDuration = computed(() => Math.max(1000, planDuration.value || 0, props.durationMs || 0, videoDurationMs.value || 0))
+const currentCueText = computed(() => {
+  const cue = cues.value.find(item =>
+    playheadMs.value >= item.subtitleStartMs && playheadMs.value <= item.subtitleEndMs)
+  return cue?.text || ''
+})
 const hasAssets = computed(() => assets.value.length > 0)
 const hasAnyAudio = computed(() => tracks.value.some(track => track.clips.length > 0))
 const showEmpty = computed(() => !hasAnyAudio.value && !tracks.value.some(track => !track.virtual))
@@ -377,8 +503,8 @@ const previewUrl = computed(() => {
   return /^(https?:|blob:|data:|\/)/i.test(url) ? url : `/${url}`
 })
 
-const ROLE_META: Record<string, { label: string; bus: MixBusKey }> = {
-  dialogue: { label: 'mix.roleDialogue', bus: 'dialogue' },
+const VIDEO_LANE_H = 58
+const ROLE_META: Record<string, { label: string; bus: MixBusKey }> = {  dialogue: { label: 'mix.roleDialogue', bus: 'dialogue' },
   crowd: { label: 'mix.roleCrowd', bus: 'dialogue' },
   original: { label: 'mix.roleOriginal', bus: 'original' },
   ambience: { label: 'mix.roleAmbience', bus: 'original' },
@@ -390,6 +516,18 @@ const ASSET_ROLE: Record<string, string> = {
   vocals: 'dialogue',
   instrumental: 'ambience',
   original: 'original',
+}
+const ADD_ROLES = ['dialogue', 'crowd', 'ambience', 'sfx', 'bgm', 'custom'] as const
+const BUS_LABEL: Record<string, string> = {
+  dialogue: 'mix.busDialogue',
+  original: 'mix.busOriginal',
+  sfx: 'mix.busSfx',
+  bgm: 'mix.busBgm',
+  master: 'mix.busMaster',
+}
+
+function busLabel(key: string): string {
+  return BUS_LABEL[key] ? t(BUS_LABEL[key]) : key
 }
 
 function roleLabel(role: string): string {
@@ -421,12 +559,23 @@ function clamp(value: number, min: number, max: number): number {
 watch(() => props.episodeId, (id, previous) => {
   if (id === previous) return
   pausePreview()
+  if (rescheduleTimer) {
+    clearTimeout(rescheduleTimer)
+    rescheduleTimer = null
+  }
+  playback.reset()
+  videoDurationMs.value = 0
   preview.value = null
   activeTrackUid.value = null
   rangeStartMs.value = 0
   rangeEndMs.value = 0
   if (id) void load()
 }, { immediate: true })
+
+watch(videoUrl, () => {
+  videoDurationMs.value = 0
+  pauseTransport()
+})
 
 watch(tracks, (list) => {
   if (!list.length) {
@@ -445,8 +594,50 @@ watch(totalDuration, (total) => {
   if (rangeStartMs.value >= total) rangeStartMs.value = 0
 }, { immediate: true })
 
+const mixStateSignature = computed(() => [
+  ...tracks.value.map(track => `${track._uid}:${track.volume}:${track.pan}:${track.effectiveMuted}:${track.busId}`),
+  ...buses.value.map(bus => `${bus.key}:${bus.volume}:${bus.effectiveMuted}`),
+].join('|'))
+watch(mixStateSignature, () => {
+  if (playback.playing.value) playback.applyMixState()
+})
+
+const clipSignature = computed(() => tracks.value
+  .map(track => `loop:${track.loop ? 1 : 0}:bus:${track.busId}:` + track.clips
+    .map(clip => [
+      clip._uid, clip.startMs, clip.endMs, clip.sourceStartMs, clip.audioUrl,
+      clip.muted, clip.loop, clip.gainDb, clip.pan, clip.fadeInMs, clip.fadeOutMs, clip.fadeCurve,
+    ].join(':'))
+    .join(','))
+  .join(';'))
+watch(clipSignature, () => {
+  if (!playback.playing.value) return
+  if (rescheduleTimer) clearTimeout(rescheduleTimer)
+  rescheduleTimer = setTimeout(() => {
+    rescheduleTimer = null
+    if (playback.playing.value) void playback.play(videoCurrentMs())
+  }, 220)
+})
+
+let notifiedMissing = ''
+watch(playbackMissing, (list) => {
+  const key = [...list].sort().join('|')
+  if (!key) {
+    notifiedMissing = ''
+    return
+  }
+  if (key === notifiedMissing) return
+  notifiedMissing = key
+  toast.error(t('mix.realtimeMissing', { n: list.length }))
+})
+
 onBeforeUnmount(() => {
+  if (rescheduleTimer) {
+    clearTimeout(rescheduleTimer)
+    rescheduleTimer = null
+  }
   pausePreview()
+  playback.dispose()
   dispose()
 })
 
@@ -485,16 +676,174 @@ function onTrimStart(clip: StageClip, ms: number) {
 function onTrimEnd(clip: StageClip, ms: number) {
   trimClip(clip, 'end', ms)
 }
+function videoCurrentMs(): number {
+  const el = videoPreview.value?.videoEl
+  return el ? Math.round(el.currentTime * 1000) : playheadMs.value
+}
+async function startRealtimeFrom(ms: number): Promise<boolean> {
+  if (renderedMode.value) return false
+  if (playback.playing.value) return true
+  if (engineStarting) return false
+  engineStarting = true
+  try {
+    const started = await playback.play(ms)
+    if (started) {
+      playing.value = true
+      startEngineClock()
+    }
+    return started
+  } finally {
+    engineStarting = false
+  }
+}
 function onSeek(ms: number) {
-  setPlayhead(ms)
+  const target = clamp(Math.round(ms), 0, totalDuration.value)
+  setPlayhead(target, totalDuration.value)
+  videoPreview.value?.seekTo(target)
+  const current = preview.value
+  if (renderedMode.value && current && target >= current.startMs && target <= current.endMs) {
+    syncPreviewAudio(target)
+    return
+  }
+  if (renderedMode.value) {
+    renderedMode.value = false
+    previewAudio.value?.pause()
+  }
+  if (playback.playing.value) playback.seek(target)
+  else if (playing.value) void startRealtimeFrom(target)
+}
+
+function onVideoTime(ms: number) {
+  setPlayhead(ms, totalDuration.value)
+  if (!renderedMode.value) {
+    playback.sync(ms)
+    return
+  }
+  const current = preview.value
+  if (current && ms >= current.endMs - 20) {
+    finishRenderedRange()
+    return
+  }
+  syncPreviewAudio(ms)
+}
+function onVideoDuration(ms: number) {
+  videoDurationMs.value = ms
+}
+function onVideoPlay() {
+  playing.value = true
+  startEngineClock()
+  if (renderedMode.value) return
+  void startRealtimeFrom(videoCurrentMs())
+}
+function onVideoPlaying() {
+  if (!playing.value) playing.value = true
+  startEngineClock()
+  if (renderedMode.value) {
+    syncPreviewAudio(videoCurrentMs())
+    return
+  }
+  void startRealtimeFrom(videoCurrentMs())
+}
+function onVideoPause() {
+  playing.value = false
+  stopEngineClock()
+  if (renderedMode.value) previewAudio.value?.pause()
+  else playback.pause()
+}
+function onVideoWaiting() {
+  stopEngineClock()
+  if (renderedMode.value) previewAudio.value?.pause()
+  else playback.pause()
+}
+function onVideoEnded() {
+  if (renderedMode.value && loopPreview.value && preview.value) {
+    restartRenderedPreview()
+    return
+  }
+  playing.value = false
+  stopEngineClock()
+  previewAudio.value?.pause()
+  playback.pause()
+  renderedMode.value = false
+}
+function syncPreviewAudio(ms: number) {
   const audio = previewAudio.value
   const current = preview.value
-  if (!audio || !current || audio.paused) return
+  if (!audio || !current) return
   if (ms < current.startMs || ms > current.endMs) {
     audio.pause()
     return
   }
-  audio.currentTime = (ms - current.startMs) / 1000
+  const target = clamp((ms - current.startMs) / 1000, 0, Math.max(0, (current.endMs - current.startMs) / 1000))
+  if (audio.paused) {
+    if (!playing.value) return
+    audio.currentTime = target
+    void audio.play().catch(() => {})
+    return
+  }
+  if (Math.abs(audio.currentTime - target) > 0.35) audio.currentTime = target
+}
+function finishRenderedRange() {
+  if (loopPreview.value && preview.value) {
+    restartRenderedPreview()
+    return
+  }
+  pauseTransport()
+}
+function restartRenderedPreview() {
+  const current = preview.value
+  if (!current) {
+    pauseTransport()
+    return
+  }
+  previewAudio.value?.pause()
+  playback.pause()
+  setPlayhead(current.startMs, totalDuration.value)
+  videoPreview.value?.seekTo(current.startMs)
+  renderedMode.value = true
+  if (videoPreview.value) void videoPreview.value.play()
+  void playRenderedFrom(current.startMs).then((started) => {
+    if (started) return
+    renderedMode.value = false
+    pauseTransport()
+    toast.error(t('mix.previewFailed'))
+  })
+}
+function startEngineClock() {
+  stopEngineClock()
+  const tick = () => {
+    engineRaf = 0
+    if (!playing.value) return
+    const el = videoPreview.value?.videoEl
+    if (el && !el.paused) {
+      const ms = videoCurrentMs()
+      setPlayhead(ms, totalDuration.value)
+      if (renderedMode.value) {
+        const current = preview.value
+        if (current && ms >= current.endMs - 20) {
+          finishRenderedRange()
+          return
+        }
+      }
+      engineRaf = requestAnimationFrame(tick)
+      return
+    }
+    if (renderedMode.value) return
+    if (playback.playing.value) {
+      const ms = playback.positionMs()
+      setPlayhead(ms, totalDuration.value)
+      if (ms >= totalDuration.value - 20) {
+        pauseTransport()
+        return
+      }
+    }
+    engineRaf = requestAnimationFrame(tick)
+  }
+  engineRaf = requestAnimationFrame(tick)
+}
+function stopEngineClock() {
+  if (engineRaf) cancelAnimationFrame(engineRaf)
+  engineRaf = 0
 }
 function onLocateClip(clip: StageClip) {
   if (clip.lineId) emit('locate-line', clip.lineId)
@@ -519,7 +868,7 @@ function deleteSelected() {
 }
 function toggleSelectedTrackMute() {
   const track = selectedTrack.value ?? activeTrack.value
-  if (track && !track.virtual) updateTrack(track, { muted: !track.muted })
+  if (track) updateTrack(track, { muted: !track.muted })
 }
 function toggleSnap() {
   snap.value = !snap.value
@@ -551,6 +900,8 @@ function toggleMasterMute() {
   if (bus) updateBus(bus, { muted: !bus.muted })
 }
 function addTrack(role: string) {
+  addMenuOpen.value = false
+  emptyMenuOpen.value = false
   const meta = ROLE_META[role]
   const track = addStageTrack({ role, busId: meta?.bus, name: roleLabel(role) })
   if (track) {
@@ -558,10 +909,6 @@ function addTrack(role: string) {
     clearSelection()
   }
 }
-function addAmbienceTrack() {
-  addTrack('ambience')
-}
-
 function insertAsset(asset: EpisodeAudioAsset) {
   if (!asset.url) {
     toast.error(t('mix.assetNoUrl'))
@@ -593,17 +940,28 @@ function insertAsset(asset: EpisodeAudioAsset) {
   }
 }
 
-function pausePreview() {
+function pauseTransport() {
+  previewToken += 1
+  videoPreview.value?.pause()
   const audio = previewAudio.value
   if (audio) audio.pause()
+  playback.pause()
+  stopEngineClock()
   playing.value = false
+  renderedMode.value = false
 }
-async function generatePreview(autoPlay: boolean) {
+function pausePreview() {
+  pauseTransport()
+}
+async function generatePreview() {
   if (!props.episodeId) return
+  const episode = props.episodeId
   if (!hasAnyAudio.value) {
     toast.error(t('mix.noAudio'))
     return
   }
+  pauseTransport()
+  const token = ++previewToken
   const start = clamp(Math.round(rangeStartMs.value), 0, Math.max(0, totalDuration.value - 200))
   let end = clamp(Math.round(rangeEndMs.value), start + 200, totalDuration.value)
   if (end - start > 30000) {
@@ -612,40 +970,100 @@ async function generatePreview(autoPlay: boolean) {
   }
   try {
     const result = await previewRange(start, end)
-    if (!result) return
-    if (!autoPlay) return
+    if (!result || token !== previewToken || props.episodeId !== episode) return
     await nextTick()
-    const audio = previewAudio.value
-    if (!audio) return
-    audio.currentTime = 0
-    await audio.play().catch(() => {})
+    if (token !== previewToken) return
+    const from = clamp(Math.round(result.startMs ?? start), 0, totalDuration.value)
+    renderedMode.value = true
+    setPlayhead(from, totalDuration.value)
+    videoPreview.value?.seekTo(from)
+    if (videoPreview.value) {
+      await videoPreview.value.play()
+      if (token !== previewToken) return
+    }
+    if (!await playRenderedFrom(from)) {
+      renderedMode.value = false
+      pauseTransport()
+      toast.error(t('mix.previewFailed'))
+    }
   } catch (err: any) {
+    renderedMode.value = false
     toast.error(err?.message || t('mix.previewFailed'))
   }
 }
-async function togglePlay() {
+async function playRenderedFrom(ms: number): Promise<boolean> {
   const audio = previewAudio.value
-  if (!preview.value) {
-    await generatePreview(true)
+  const current = preview.value
+  if (!audio || !current) return false
+  if (ms < current.startMs || ms > current.endMs) return false
+  playback.pause()
+  audio.currentTime = clamp((ms - current.startMs) / 1000, 0, Math.max(0, (current.endMs - current.startMs) / 1000))
+  try {
+    await audio.play()
+  } catch {
+    return false
+  }
+  renderedMode.value = true
+  playing.value = true
+  if (videoPreview.value?.videoEl) startEngineClock()
+  else setPlayhead(ms, totalDuration.value)
+  return true
+}
+async function togglePlay() {
+  if (previewing.value) return
+  if (playing.value) {
+    pauseTransport()
     return
   }
-  if (!audio) return
-  if (audio.paused) {
-    if (audio.ended) audio.currentTime = 0
-    await audio.play().catch(() => {})
-  } else {
-    audio.pause()
+  if (videoPreview.value) {
+    const el = videoPreview.value.videoEl
+    if (el?.ended) {
+      videoPreview.value.seekTo(0)
+      setPlayhead(0)
+    }
+    const current = preview.value
+    const keepRendered = renderedMode.value && current
+      && playheadMs.value >= current.startMs && playheadMs.value <= current.endMs
+    if (!keepRendered) {
+      renderedMode.value = false
+      previewAudio.value?.pause()
+    }
+    await videoPreview.value.play()
+    if (videoPreview.value?.videoEl?.paused) {
+      renderedMode.value = false
+      if (hasAnyAudio.value && await startRealtimeFrom(videoCurrentMs())) return
+      playing.value = false
+      toast.error(t('mix.videoPlayFailed'))
+    }
+    return
+  }
+  if (!hasAnyAudio.value) {
+    toast.error(t('mix.noAudio'))
+    return
+  }
+  renderedMode.value = false
+  if (!await startRealtimeFrom(playheadMs.value)) {
+    playing.value = false
+    toast.error(t('mix.noAudio'))
   }
 }
 function onPreviewTime() {
   const audio = previewAudio.value
   const current = preview.value
   if (!audio || !current) return
+  if (videoPreview.value?.videoEl) return
   playing.value = !audio.paused
-  setPlayhead(current.startMs + audio.currentTime * 1000)
+  setPlayhead(current.startMs + audio.currentTime * 1000, totalDuration.value)
 }
 function onPreviewEnded() {
+  if (videoPreview.value?.videoEl) return
+  if (loopPreview.value && preview.value) {
+    restartRenderedPreview()
+    return
+  }
   playing.value = false
+  renderedMode.value = false
+  stopEngineClock()
 }
 
 async function requestSeparate(force: boolean) {
@@ -806,6 +1224,19 @@ function onKeydown(event: KeyboardEvent) {
   }
   if (event.key === 'Escape') clearSelection()
 }
+function onHeadsWheel(event: WheelEvent) {
+  const delta = event.deltaY || 0
+  if (!delta) return
+  event.preventDefault()
+  timelineRef.value?.scrollByY(delta)
+}
+function seekTo(ms: number) {
+  onSeek(ms)
+}
+function pause() {
+  pausePreview()
+}
+defineExpose({ seekTo, pause, play: togglePlay })
 </script>
 
 <style scoped>
@@ -850,11 +1281,23 @@ function onKeydown(event: KeyboardEvent) {
 .mx-progress-bar span { display: block; height: 100%; background: var(--accent); transition: width .2s ease; }
 .mx-progress-text { font-size: 9px; color: var(--accent-text); white-space: nowrap; }
 .mx-error { margin: 0; padding: 5px 10px; border-bottom: 1px solid var(--border); background: var(--action-danger-bg); font-size: 10px; color: var(--action-danger); }
+.mx-monitor { flex: none; display: flex; align-items: stretch; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--bg-0); }
+.mx-monitor-stage { flex: none; width: 264px; }
+.mx-monitor-stage :deep(.sub-stage) { max-height: 148px; aspect-ratio: 16 / 9; }
+.mx-monitor-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+.mx-monitor-kicker { font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.mx-monitor-cue { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mx-monitor-time { font-size: 10px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.mx-monitor-hint { margin: 0; font-size: 9.5px; color: var(--text-3); }
 .mx-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 288px minmax(0, 1fr) 316px; }
+.mx-body.is-inspector-closed { grid-template-columns: 288px minmax(0, 1fr); }
 .mx-heads { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-1); overflow: hidden; }
 .mx-heads-label { flex: none; height: 30px; display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid var(--border); font-size: 9px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); }
 .mx-heads-clip { flex: 1; min-height: 0; overflow: hidden; }
 .mx-heads-inner { will-change: transform; }
+.mx-heads-video { display: flex; align-items: center; gap: 6px; padding: 0 10px; border-bottom: 1px solid var(--border); background: var(--bg-0); color: var(--text-1); font-size: 10.5px; font-weight: 600; box-sizing: border-box; }
+.mx-heads-video svg { color: var(--accent-text); }
+.mx-heads-video-tag { margin-left: auto; font-size: 8.5px; font-weight: 500; color: var(--text-3); }
 .mx-heads-spacer { height: 0; }
 .mx-canvas { position: relative; min-width: 0; min-height: 0; display: flex; }
 .mx-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; background: color-mix(in srgb, var(--bg-1) 86%, transparent); backdrop-filter: blur(2px); color: var(--text-2); font-size: 11px; text-align: center; z-index: 3; }
@@ -880,9 +1323,11 @@ function onKeydown(event: KeyboardEvent) {
 .mx-hidden-audio { display: none; }
 @container mx-stage (max-width: 1180px) {
   .mx-body { grid-template-columns: 232px minmax(0, 1fr) 272px; }
+  .mx-body.is-inspector-closed { grid-template-columns: 232px minmax(0, 1fr); }
 }
 @container mx-stage (max-width: 960px) {
   .mx-body { grid-template-columns: 210px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 230px; }
+  .mx-body.is-inspector-closed { grid-template-rows: minmax(0, 1fr); }
   .mx-heads { grid-row: 1; }
   .mx-canvas { grid-row: 1; }
   .mx-body :deep(.mx-ins) { grid-column: 1 / -1; grid-row: 2; border-left: none; border-top: 1px solid var(--border); }

@@ -50,19 +50,15 @@
     </header>
 
     <div class="mx-th-row">
-      <template v-if="track.virtual">
-        <span class="mx-th-note">{{ t('mix.trackVirtualHint', { n: track.clips.length }) }}</span>
-      </template>
-      <template v-else>
-        <button :class="['mx-th-toggle', { on: track.muted }]" type="button" :title="t('mix.trackMute')" @click.stop="toggle('muted')">M</button>
-        <button :class="['mx-th-toggle', { on: track.solo }]" type="button" :title="t('mix.trackSolo')" @click.stop="toggle('solo')">S</button>
-        <button :class="['mx-th-toggle', { on: track.ducking }]" type="button" :title="t('mix.trackDuck')" @click.stop="toggle('ducking')">D</button>
-        <button :class="['mx-th-toggle', { on: track.loop }]" type="button" :title="t('mix.trackLoop')" @click.stop="toggle('loop')">L</button>
-        <span class="mx-th-clips">{{ t('mix.clipCount', { n: track.clips.length }) }}</span>
-      </template>
+      <button :class="['mx-th-toggle', { on: track.muted }]" type="button" :title="t('mix.trackMute')" @click.stop="toggle('muted')">M</button>
+      <button :class="['mx-th-toggle', { on: track.solo }]" type="button" :title="t('mix.trackSolo')" @click.stop="toggle('solo')">S</button>
+      <button v-if="!track.virtual" :class="['mx-th-toggle', { on: track.ducking }]" type="button" :title="t('mix.trackDuck')" @click.stop="toggle('ducking')">D</button>
+      <button :class="['mx-th-toggle', { on: track.loop }]" type="button" :title="t('mix.trackLoop')" @click.stop="toggle('loop')">L</button>
+      <span v-if="track.virtual" class="mx-th-note">{{ t('mix.trackVirtualHint', { n: track.clips.length }) }}</span>
+      <span v-else class="mx-th-clips">{{ t('mix.clipCount', { n: track.clips.length }) }}</span>
     </div>
 
-    <div v-if="!track.virtual" class="mx-th-row is-faders">
+    <div class="mx-th-row is-faders">
       <span class="mx-th-fader-label" :title="t('mix.trackVolume')">{{ volumePct }}%</span>
       <input
         class="mx-th-range"
@@ -161,7 +157,7 @@ const meterPct = computed(() => {
 })
 
 function toggle(key: 'muted' | 'solo' | 'ducking' | 'loop' | 'locked' | 'hidden') {
-  if (props.track.virtual) return
+  if (props.track.virtual && key !== 'muted' && key !== 'solo' && key !== 'loop') return
   emit('update', props.track, { [key]: !props.track[key] })
 }
 

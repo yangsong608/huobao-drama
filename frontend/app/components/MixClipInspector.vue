@@ -228,6 +228,9 @@
         </div>
       </section>
 
+      <!-- 集级设置（由宿主注入：字幕模式、原声、BGM 等） -->
+      <slot name="settings" />
+
       <!-- 素材库 -->
       <section class="mx-card">
         <div class="mx-card-head">

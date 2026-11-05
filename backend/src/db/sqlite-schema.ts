@@ -1098,6 +1098,7 @@ export function initSqliteSchema(sqlite: Database.Database) {
     if (!clipColumns.has(name)) sqlite.exec(`ALTER TABLE episode_audio_clips ADD COLUMN ${name} ${type}`)
   }
   if (!episodeColumns.has('mix_revision_id')) sqlite.exec('ALTER TABLE episodes ADD COLUMN mix_revision_id INTEGER')
+  if (!episodeColumns.has('mix_virtual_tracks')) sqlite.exec('ALTER TABLE episodes ADD COLUMN mix_virtual_tracks TEXT')
   if (!episodeColumns.has('last_extract_at')) sqlite.exec('ALTER TABLE episodes ADD COLUMN last_extract_at TEXT')
   // 项目级旁白音色与默认 BGM
   if (!dramaColumns.has('narrator_voice_id')) sqlite.exec('ALTER TABLE dramas ADD COLUMN narrator_voice_id INTEGER')

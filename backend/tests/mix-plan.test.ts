@@ -27,6 +27,7 @@ const {
   hashMixPlan,
   listMixRevisions,
   restoreMixRevision,
+  saveMixPlan,
 } = await import('../src/services/mix-plan.ts')
 
 const ts = '2026-11-05T00:00:00.000Z'
@@ -242,6 +243,45 @@ test('合片原声总床与本集 BGM 进入虚拟轨', async () => {
   assert.equal(bgmTrack.clips[0].fadeOutMs, 2000)
   assert.equal(plan.durationMs, 2000)
   assert.equal(plan.tracks[0].role, 'voice', '虚拟对白轨保持第一')
+})
+
+test('虚拟轨覆盖可保存、参与 solo 派生并在版本恢复后回写', async () => {
+  const saved = await saveMixPlan(bedEpisode.id, 1, {
+    tracks: [],
+    clips: [],
+    virtualTracks: [
+      { role: 'voice', volume: 0.4, muted: true },
+      { role: 'bgm', solo: true },
+    ],
+  })
+  const voice = saved.tracks.find((track) => track.virtual && track.role === 'voice')!
+  const bgmVirtual = saved.tracks.find((track) => track.virtual && track.role === 'bgm')!
+  assert.equal(voice.volume, 0.4)
+  assert.equal(voice.muted, true)
+  assert.equal(voice.effectiveMuted, true)
+  assert.equal(bgmVirtual.solo, true)
+  assert.equal(bgmVirtual.effectiveMuted, false, '虚拟 BGM solo 后应可听')
+
+  const revision = await createMixRevision(bedEpisode.id, '虚拟轨快照')
+  await saveMixPlan(bedEpisode.id, 1, {
+    tracks: [],
+    clips: [],
+    virtualTracks: [
+      { role: 'voice', volume: 1, muted: false },
+      { role: 'bgm', solo: false },
+    ],
+  })
+  const reset = await compileMixPlan(bedEpisode.id, 1)
+  assert.equal(reset.tracks.find((track) => track.virtual && track.role === 'voice')!.volume, 1)
+  assert.equal(reset.tracks.find((track) => track.virtual && track.role === 'bgm')!.solo, false)
+
+  restoreMixRevision(bedEpisode.id, revision.id)
+  const restored = await compileMixPlan(bedEpisode.id, 1)
+  const restoredVoice = restored.tracks.find((track) => track.virtual && track.role === 'voice')!
+  const restoredBgm = restored.tracks.find((track) => track.virtual && track.role === 'bgm')!
+  assert.equal(restoredVoice.volume, 0.4)
+  assert.equal(restoredVoice.muted, true)
+  assert.equal(restoredBgm.solo, true)
 })
 
 test('已有原声/BGM 用户轨时不再生成重复虚拟轨', async () => {

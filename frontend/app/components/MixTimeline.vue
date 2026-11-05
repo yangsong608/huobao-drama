@@ -46,6 +46,9 @@ const props = defineProps<{
   activeTrackUid: string | null
   lineTexts?: Record<number, string>
   lineNumbers?: Record<number, number>
+  videoUrl?: string | null
+  videoDurationMs?: number
+  follow?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -66,6 +69,7 @@ const { t } = useI18n()
 const { resolvedTheme } = useTheme()
 
 const RULER_H = 30
+const VIDEO_LANE_H = 58
 const MIN_TRACK_H = 56
 const MAX_TRACK_H = 160
 const MIN_ZOOM = 8
@@ -112,7 +116,9 @@ const contentWidth = computed(() => Math.max(
   Math.ceil((props.durationMs / 1000) * props.zoom) + 160,
   600,
 ))
-const contentHeight = computed(() => RULER_H + props.tracks.reduce((sum, track) => sum + trackHeight(track), 0))
+const hasVideo = computed(() => Boolean(String(props.videoUrl || '').trim()))
+const lanesTop = computed(() => RULER_H + (hasVideo.value ? VIDEO_LANE_H : 0))
+const contentHeight = computed(() => lanesTop.value + props.tracks.reduce((sum, track) => sum + trackHeight(track), 0))
 
 function trackHeight(track: StageTrack): number {
   return Math.min(MAX_TRACK_H, Math.max(MIN_TRACK_H, Number(track.height) || 72))
@@ -256,6 +262,57 @@ function tickStep(): number {
   return TICK_STEPS[TICK_STEPS.length - 1]
 }
 
+function drawVideoLane(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  theme: { accent: string; border: string; text0: string },
+) {
+  const top = RULER_H
+  const videoEndMs = Math.max(1, Number(props.videoDurationMs) || props.durationMs || 1000)
+  const stripX = 8
+  const stripW = Math.max(24, toX(videoEndMs) - stripX)
+  ctx.fillStyle = hexToRgba(theme.accent, 0.055)
+  ctx.fillRect(0, top, width, VIDEO_LANE_H)
+
+  ctx.save()
+  roundedRect(ctx, stripX, top + 7, stripW, VIDEO_LANE_H - 14, 6)
+  ctx.clip()
+  ctx.fillStyle = 'rgba(8,12,18,0.42)'
+  ctx.fillRect(stripX, top + 7, stripW, VIDEO_LANE_H - 14)
+  const cell = 56
+  for (let x = stripX; x < stripX + stripW; x += cell) {
+    ctx.fillStyle = hexToRgba(theme.accent, 0.16)
+    ctx.fillRect(x + 2, top + 12, cell - 6, VIDEO_LANE_H - 24)
+    ctx.fillStyle = 'rgba(8,12,18,0.55)'
+    ctx.fillRect(x + 5, top + 15, cell - 12, 5)
+    ctx.fillRect(x + 5, top + VIDEO_LANE_H - 20, cell - 12, 5)
+  }
+  ctx.restore()
+  ctx.strokeStyle = hexToRgba(theme.accent, 0.40)
+  ctx.lineWidth = 1
+  roundedRect(ctx, stripX + 0.5, top + 7.5, stripW, VIDEO_LANE_H - 14, 6)
+  ctx.stroke()
+
+  ctx.save()
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.font = '600 10px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif'
+  const label = `${t('mix.videoLane')} · ${formatTime(videoEndMs)}`
+  const labelW = ctx.measureText(label).width
+  ctx.fillStyle = 'rgba(8,12,18,0.72)'
+  roundedRect(ctx, stripX + 6, top + VIDEO_LANE_H / 2 - 9, labelW + 14, 18, 5)
+  ctx.fill()
+  ctx.fillStyle = theme.text0
+  ctx.fillText(label, stripX + 13, top + VIDEO_LANE_H / 2)
+  ctx.restore()
+
+  ctx.strokeStyle = theme.border
+  ctx.beginPath()
+  ctx.moveTo(0, top + VIDEO_LANE_H + 0.5)
+  ctx.lineTo(width, top + VIDEO_LANE_H + 0.5)
+  ctx.stroke()
+}
+
 function draw() {
   const canvas = canvasRef.value
   if (!canvas) return
@@ -296,7 +353,9 @@ function draw() {
     ctx.stroke()
   }
 
-  let top = RULER_H
+  if (hasVideo.value) drawVideoLane(ctx, width, { accent, border, text0 })
+
+  let top = lanesTop.value
   for (const [index, track] of props.tracks.entries()) {
     const laneH = trackHeight(track)
     if (index % 2 === 1) {
@@ -332,7 +391,7 @@ function draw() {
     const x1 = toX(rangeStart)
     const x2 = toX(rangeEnd)
     ctx.fillStyle = hexToRgba(accent, 0.05)
-    ctx.fillRect(x1, RULER_H, x2 - x1, height - RULER_H)
+    ctx.fillRect(x1, lanesTop.value, x2 - x1, height - lanesTop.value)
   }
 
   const rulerTop = scrollTop.value
@@ -481,7 +540,8 @@ function drawClip(
   ctx.textAlign = 'left'
   ctx.textBaseline = 'top'
   ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif'
-  const label = lineLabel(clip)
+  const baseLabel = lineLabel(clip)
+  const label = warning ? `${t('mix.missingAudio')} · ${baseLabel}` : baseLabel
   const labelColor = warning ? theme.error : muted ? theme.text3 : theme.text0
   ctx.fillStyle = labelColor
   const labelText = fitText(ctx, label, w - 16)
@@ -514,8 +574,12 @@ function scheduleDraw() {
   })
 }
 
+function inVideoLane(y: number): boolean {
+  return hasVideo.value && y >= RULER_H && y < RULER_H + VIDEO_LANE_H
+}
+
 function laneAt(y: number): { track: StageTrack; top: number; height: number } | null {
-  let top = RULER_H
+  let top = lanesTop.value
   for (const track of props.tracks) {
     const height = trackHeight(track)
     if (y >= top && y < top + height) return { track, top, height }
@@ -605,6 +669,13 @@ function onPointerDown(event: PointerEvent) {
   hideHover()
 
   if (y >= scrollTop.value && y < scrollTop.value + RULER_H) {
+    interaction = { kind: 'seek', clip: null, track: null, startX: x, startY: y, originalStart: 0, originalEnd: 0, originalSource: 0, moved: false }
+    canvas.setPointerCapture(event.pointerId)
+    emit('seek', Math.min(toMs(x), props.durationMs))
+    return
+  }
+
+  if (inVideoLane(y)) {
     interaction = { kind: 'seek', clip: null, track: null, startX: x, startY: y, originalStart: 0, originalEnd: 0, originalSource: 0, moved: false }
     canvas.setPointerCapture(event.pointerId)
     emit('seek', Math.min(toMs(x), props.durationMs))
@@ -723,6 +794,21 @@ function updateHover(x: number, y: number) {
     hideHover()
     return
   }
+  if (inVideoLane(y)) {
+    cursor.value = 'pointer'
+    const host = hostRef.value
+    if (host) {
+      const rect = host.getBoundingClientRect()
+      const left = Math.min(Math.max(eventX(host, x), 70), rect.width - 70)
+      hover.value = {
+        x: left,
+        y: Math.max(38, eventY(host, y) - 8),
+        title: t('mix.videoLane'),
+        time: formatTimePrecise(toMs(x)),
+      }
+    }
+    return
+  }
   const hit = clipAt(x, y)
   if (hit) {
     const editable = !hit.track.virtual && !hit.track.locked && !hit.clip.locked
@@ -801,6 +887,21 @@ function scrollByY(delta: number) {
 }
 
 watch(
+  () => props.playheadMs,
+  (ms) => {
+    if (!props.follow) return
+    const wrap = wrapRef.value
+    if (!wrap) return
+    const x = toX(ms)
+    const left = wrap.scrollLeft
+    const width = wrap.clientWidth
+    if (x < left + 40 || x > left + width - 90) {
+      wrap.scrollLeft = Math.max(0, x - width * 0.25)
+    }
+  },
+)
+
+watch(
   () => [
     props.tracks,
     props.zoom,
@@ -810,6 +911,8 @@ watch(
     props.selected,
     props.activeTrackUid,
     props.durationMs,
+    props.videoUrl,
+    props.videoDurationMs,
   ],
   scheduleDraw,
   { deep: true },

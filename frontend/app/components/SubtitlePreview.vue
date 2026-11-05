@@ -6,17 +6,24 @@
         ref="video"
         class="sub-video"
         :src="normalizedSrc"
-        controls
+        :controls="controls"
+        :muted="muted"
         preload="metadata"
         @loadedmetadata="onLoadedMetadata"
+        @durationchange="onLoadedMetadata"
         @timeupdate="onTimeUpdate"
+        @play="onPlay"
+        @playing="onPlaying"
+        @pause="onPause"
+        @waiting="onWaiting"
+        @ended="onEnded"
       />
       <p v-else class="sub-placeholder">{{ t('workbench.previewNoVideo') }}</p>
       <div v-if="currentCue" :class="['sub-caption', `is-${currentCue.kind}`]">
         <span class="sub-caption-text">{{ currentCue.text }}</span>
       </div>
     </div>
-    <div class="sub-track">
+    <div v-if="showScrub" class="sub-track">
       <input
         class="sub-range"
         type="range"
@@ -37,9 +44,26 @@
 import { useI18n } from 'vue-i18n'
 import type { TimelineCue } from '~/composables/useApi'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   src?: string | null
   cues: TimelineCue[]
+  controls?: boolean
+  showScrub?: boolean
+  muted?: boolean
+}>(), {
+  controls: true,
+  showScrub: true,
+  muted: false,
+})
+
+const emit = defineEmits<{
+  'timeupdate': [ms: number]
+  'duration': [ms: number]
+  'play': []
+  'playing': []
+  'pause': []
+  'waiting': []
+  'ended': []
 }>()
 
 const { t } = useI18n()
@@ -58,6 +82,7 @@ const normalizedSrc = computed(() => {
 const cueEndMs = computed(() =>
   props.cues.reduce((max, cue) => Math.max(max, cue.subtitleEndMs || cue.endMs || 0), 0))
 const durationMs = computed(() => videoDurationMs.value || cueEndMs.value)
+const videoEl = computed(() => video.value)
 const currentCue = computed(() =>
   props.cues.find((cue) => currentMs.value >= cue.subtitleStartMs && currentMs.value <= cue.subtitleEndMs) || null)
 
@@ -65,6 +90,7 @@ function onLoadedMetadata() {
   const el = video.value
   if (!el) return
   videoDurationMs.value = Number.isFinite(el.duration) && el.duration > 0 ? Math.round(el.duration * 1000) : 0
+  if (videoDurationMs.value) emit('duration', videoDurationMs.value)
   if (pendingSeekMs.value != null) {
     el.currentTime = pendingSeekMs.value / 1000
     pendingSeekMs.value = null
@@ -75,6 +101,37 @@ function onTimeUpdate() {
   const el = video.value
   if (!el) return
   currentMs.value = Math.round(el.currentTime * 1000)
+  emit('timeupdate', currentMs.value)
+}
+
+function onPlay() {
+  emit('play')
+}
+
+function onPlaying() {
+  emit('playing')
+}
+
+function onPause() {
+  emit('pause')
+}
+
+function onWaiting() {
+  emit('waiting')
+}
+
+function onEnded() {
+  emit('ended')
+}
+
+function play() {
+  const el = video.value
+  if (!el) return Promise.resolve()
+  return el.play().catch(() => {})
+}
+
+function pause() {
+  video.value?.pause()
 }
 
 function onScrub(event: Event) {
@@ -100,7 +157,7 @@ function formatTime(ms: number) {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-defineExpose({ seekTo })
+defineExpose({ play, pause, seekTo, videoEl, currentMs, durationMs })
 </script>
 
 <style scoped>

@@ -85,6 +85,8 @@ export const episodes = sqliteTable('episodes', {
   bgmUrl: text('bgm_url'),
   /** 当前混音计划版本（mix_revisions.id） */
   mixRevisionId: integer('mix_revision_id'),
+  /** 虚拟轨（对白/原声/配乐）的混音覆盖 JSON */
+  mixVirtualTracks: text('mix_virtual_tracks'),
   /** 最近一次台词抽取时间 */
   lastExtractAt: text('last_extract_at'),
   /** 来源小说章节（V3） */

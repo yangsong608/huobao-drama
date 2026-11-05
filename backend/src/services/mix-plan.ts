@@ -43,6 +43,17 @@ const ROLE_BUS: Record<string, MixBusKey> = {
   bgm: 'bgm',
 }
 
+const VIRTUAL_ROLES = ['voice', 'original', 'bgm'] as const
+type VirtualRole = typeof VIRTUAL_ROLES[number]
+interface VirtualTrackOverride {
+  volume?: number
+  pan?: number
+  muted?: boolean
+  solo?: boolean
+  loop?: boolean
+}
+type VirtualOverrideMap = Partial<Record<VirtualRole, VirtualTrackOverride>>
+
 export const MIX_ASSET_ROLES = [
   'video', 'original', 'dialogue', 'crowd', 'ambience', 'sfx', 'bgm', 'voice', 'custom', 'subtitle',
 ] as const
@@ -499,6 +510,7 @@ export async function compileMixPlan(episodeId: number, dramaId: number): Promis
     const bgmTrack = await buildVirtualBgmTrack(episode, drama, targetDurationMs)
     if (bgmTrack) virtualTracks.push(bgmTrack)
   }
+  applyVirtualOverrides(virtualTracks, readVirtualOverrides(episode.mixVirtualTracks))
   tracks.unshift(...virtualTracks)
 
   const soloActive = tracks.some((track) => track.solo)
@@ -617,6 +629,8 @@ export interface MixPlanSaveInput {
   buses?: MixPlanInputBus[]
   tracks?: MixPlanInputTrack[]
   clips?: MixPlanInputClip[]
+  /** 虚拟轨覆盖（按 role 匹配 voice/original/bgm） */
+  virtualTracks?: MixPlanInputTrack[]
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
@@ -629,6 +643,78 @@ function optionalId(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null
   const n = Number(value)
   return Number.isSafeInteger(n) && n > 0 ? n : null
+}
+
+function readVirtualOverrides(raw: unknown): VirtualOverrideMap {
+  if (typeof raw !== 'string' || !raw.trim()) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (!parsed || typeof parsed !== 'object') return {}
+  const result: VirtualOverrideMap = {}
+  for (const role of VIRTUAL_ROLES) {
+    const value = (parsed as Record<string, unknown>)[role]
+    if (!value || typeof value !== 'object') continue
+    const source = value as Record<string, unknown>
+    const override: VirtualTrackOverride = {}
+    if (source.volume !== undefined) override.volume = clampNumber(source.volume, 0, 2, 1)
+    if (source.pan !== undefined) override.pan = clampNumber(source.pan, -1, 1, 0)
+    if (source.muted !== undefined) override.muted = Boolean(source.muted)
+    if (source.solo !== undefined) override.solo = Boolean(source.solo)
+    if (source.loop !== undefined) override.loop = Boolean(source.loop)
+    result[role] = override
+  }
+  return result
+}
+
+function applyVirtualOverrides(tracks: MixTrack[], overrides: VirtualOverrideMap) {
+  for (const track of tracks) {
+    if (!track.virtual) continue
+    const override = overrides[track.role as VirtualRole]
+    if (!override) continue
+    if (override.volume !== undefined) track.volume = override.volume
+    if (override.pan !== undefined) track.pan = override.pan
+    if (override.muted !== undefined) track.muted = override.muted
+    if (override.solo !== undefined) track.solo = override.solo
+    if (override.loop !== undefined) track.loop = override.loop
+  }
+}
+
+function serializeVirtualOverrides(inputs: MixPlanInputTrack[]): string {
+  const overrides: VirtualOverrideMap = {}
+  for (const input of inputs) {
+    if (!input || typeof input !== 'object') continue
+    const role = VIRTUAL_ROLES.find((item) => item === input.role)
+    if (!role) continue
+    const override: VirtualTrackOverride = {}
+    if (input.volume !== undefined) override.volume = clampNumber(input.volume, 0, 2, 1)
+    if (input.pan !== undefined) override.pan = clampNumber(input.pan, -1, 1, 0)
+    if (input.muted !== undefined) override.muted = Boolean(input.muted)
+    if (input.solo !== undefined) override.solo = Boolean(input.solo)
+    if (input.loop !== undefined) override.loop = Boolean(input.loop)
+    overrides[role] = override
+  }
+  return JSON.stringify(overrides)
+}
+
+function virtualOverridesFromPlan(plan: MixPlan): VirtualOverrideMap {
+  const overrides: VirtualOverrideMap = {}
+  for (const track of plan.tracks) {
+    if (!track.virtual) continue
+    const role = VIRTUAL_ROLES.find((item) => item === track.role)
+    if (!role) continue
+    overrides[role] = {
+      volume: clampNumber(track.volume, 0, 2, 1),
+      pan: clampNumber(track.pan, -1, 1, 0),
+      muted: Boolean(track.muted),
+      solo: Boolean(track.solo),
+      loop: Boolean(track.loop),
+    }
+  }
+  return overrides
 }
 
 function trackBusKey(raw: unknown): MixBusKey {
@@ -726,8 +812,16 @@ export async function saveMixPlan(
 
   const keyToBusId = new Map(ensureDefaultBuses(episodeId).map((bus) => [bus.key, bus.id]))
   applyBusInputs(episodeId, input.buses)
+  const virtualOverridesJson = input.virtualTracks !== undefined
+    ? serializeVirtualOverrides(input.virtualTracks)
+    : undefined
 
   db.transaction((tx) => {
+    if (virtualOverridesJson !== undefined) {
+      tx.update(schema.episodes).set({ mixVirtualTracks: virtualOverridesJson, updatedAt: now() })
+        .where(eq(schema.episodes.id, episodeId))
+        .run()
+    }
     tx.delete(schema.episodeAudioClips)
       .where(eq(schema.episodeAudioClips.episodeId, episodeId))
       .run()
@@ -873,6 +967,7 @@ export function restoreMixRevision(episodeId: number, revisionId: number): { rev
   const busIdByKey = new Map(buses.map((bus) => [bus.key, bus.id]))
   const persistTracks = plan.tracks.filter((track) => !track.virtual)
   const persistedIds = new Set(persistTracks.map((track) => track.id).filter((id): id is number => id != null))
+  const virtualOverridesJson = JSON.stringify(virtualOverridesFromPlan(plan))
 
   const clipValues = (trackId: number, clip: MixClip) => ({
     ...(clip.id != null ? { id: clip.id } : {}),
@@ -984,7 +1079,7 @@ export function restoreMixRevision(episodeId: number, revisionId: number): { rev
     tx.update(schema.mixRevisions).set({ isCurrent: true })
       .where(eq(schema.mixRevisions.id, revisionId))
       .run()
-    tx.update(schema.episodes).set({ mixRevisionId: revisionId })
+    tx.update(schema.episodes).set({ mixRevisionId: revisionId, mixVirtualTracks: virtualOverridesJson, updatedAt: now() })
       .where(eq(schema.episodes.id, episodeId))
       .run()
   })

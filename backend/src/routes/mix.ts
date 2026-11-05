@@ -144,6 +144,7 @@ app.put('/episodes/:id/mix', async (c) => {
       buses: Array.isArray(body.buses) ? body.buses.map(busInput) : undefined,
       tracks: Array.isArray(body.tracks) ? body.tracks : undefined,
       clips: Array.isArray(body.clips) ? body.clips : undefined,
+      virtualTracks: Array.isArray(body.virtualTracks) ? body.virtualTracks : undefined,
     })
     return success(c, plan)
   } catch (error: any) {
