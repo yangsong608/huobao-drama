@@ -302,4 +302,5 @@ Run: `cd backend && PATH=/Users/ysmac/.nvm/versions/node/v22.16.0/bin:$PATH npx 
 - Task 1–10 的实施与验证步骤全部完成；Task 1–7 的「Commit」步骤按用户要求未执行，改动保持未提交。
 - 全量验证：后端 `npm test` 703/703、`npm run build`、`npm run test:structure` 61/61、`npm run drift` 123 PASS / 0 FAIL；前端 `npm run build` 与全部前端测试 237/237；浏览器只读冒烟通过。
 - 阶段 5 完成后，配音工作台五阶段（台词、音色、生成、混音、导出）全部落地；V3-G5 验收仍待用户执行。
-- 2026-11-05 独立审查后修复：无声/无音轨合片不再作为原声床、同集并发启动 409、先合片后编译计划、字幕设置进入复用键、非当前导出不覆盖字幕、运行中禁止删除、pending 恢复、取消贯穿合片/响度/校验、导出检查就绪语义、前端卸载守卫与剧集切换收口、`vertical-high` 硬字幕降级、复用提示与混音下载；定向 29/29 + 结构 6/6，全量后端 710/710、前端 238/238、typecheck/build/structure/drift 全部通过。改动仍未提交。
+- 2026-11-05 独立审查后修复：无声/无音轨合片不再作为原声床、同集并发启动 409、先合片后编译计划、字幕设置进入复用键、非当前导出不覆盖字幕、运行中禁止删除、pending 恢复、取消贯穿合片/响度/校验、导出检查就绪语义、前端卸载守卫与剧集切换收口、`vertical-high` 硬字幕降级、复用提示与混音下载；定向 29/29 + 结构 6/6，全量后端 710/710、前端 238/238、typecheck/build/structure/drift 全部通过。
+- 2026-11-05 已提交 `466daf7`，并完成 macOS 双架构 dmg/zip 打包；arm64 安装到 `/Applications/HuobaoDrama.app`（4.0.10，未启动）。
