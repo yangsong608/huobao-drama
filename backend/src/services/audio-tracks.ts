@@ -21,6 +21,12 @@ import type { MixClipInput, MixTrackInput } from './audio-mix.js'
 export const AUDIO_TRACK_KINDS = ['ambience', 'sfx', 'bgm', 'voice', 'custom'] as const
 export type AudioTrackKind = typeof AUDIO_TRACK_KINDS[number]
 
+/** 新代码以 role 为准；kind 仅兼容旧数据 */
+export const AUDIO_TRACK_ROLES = [
+  'video', 'original', 'dialogue', 'crowd', 'ambience', 'sfx', 'bgm', 'voice', 'custom', 'subtitle',
+] as const
+export type AudioTrackRole = typeof AUDIO_TRACK_ROLES[number]
+
 const KIND_LABELS: Record<AudioTrackKind, string> = {
   ambience: '环境声',
   sfx: '音效',
@@ -43,12 +49,22 @@ export type AudioTrackWithClips = TrackRow & { clips: ClipRow[] }
 
 export interface AudioTrackInput {
   kind?: string
+  role?: string
   name?: string
   volume?: number
+  pan?: number
+  busId?: number | null
   muted?: boolean
   solo?: boolean
   ducking?: boolean
   loop?: boolean
+  locked?: boolean
+  hidden?: boolean
+  color?: string | null
+  height?: number
+  stemAssetId?: number | null
+  duckAttackMs?: number
+  duckReleaseMs?: number
   sortOrder?: number
 }
 
@@ -56,12 +72,23 @@ export interface AudioClipInput {
   startMs?: number
   endMs?: number
   sourceStartMs?: number
+  assetId?: number | null
+  gainDb?: number
+  pan?: number
   fadeInMs?: number
   fadeOutMs?: number
+  fadeCurve?: string
+  locked?: boolean
+  muted?: boolean
+  name?: string | null
+  color?: string | null
   sourceUrl?: string | null
   audioUrl?: string | null
   text?: string | null
   voiceId?: number | null
+  takeId?: number | null
+  followTake?: boolean
+  loop?: boolean
   lineId?: number | null
 }
 
@@ -90,6 +117,45 @@ function toMs(value: unknown, fallback = 0): number {
 function normalizeKind(raw: unknown): AudioTrackKind {
   const kind = String(raw || 'ambience') as AudioTrackKind
   return AUDIO_TRACK_KINDS.includes(kind) ? kind : 'ambience'
+}
+
+function normalizeRole(raw: unknown, kind: AudioTrackKind): AudioTrackRole {
+  const role = String(raw || '') as AudioTrackRole
+  if (AUDIO_TRACK_ROLES.includes(role)) return role
+  if (kind === 'voice') return 'voice'
+  return kind === 'ambience' || kind === 'sfx' || kind === 'bgm' ? kind : 'custom'
+}
+
+function normalizeBusId(raw: unknown, episodeId: number): number | null {
+  if (raw === null || raw === undefined || raw === '') return null
+  const id = Number(raw)
+  if (!Number.isSafeInteger(id) || id <= 0) throw new AudioTrackError('总线编号无效')
+  const bus = db.select().from(schema.audioBuses).where(eq(schema.audioBuses.id, id)).get()
+  if (!bus || bus.episodeId !== episodeId) throw new AudioTrackError('总线不存在', 404)
+  return id
+}
+
+function normalizeStemAssetId(raw: unknown, episodeId: number): number | null {
+  if (raw === null || raw === undefined || raw === '') return null
+  const id = Number(raw)
+  if (!Number.isSafeInteger(id) || id <= 0) throw new AudioTrackError('分离素材编号无效')
+  const asset = db.select().from(schema.episodeAudioAssets).where(eq(schema.episodeAudioAssets.id, id)).get()
+  if (!asset || asset.episodeId !== episodeId || asset.deletedAt) throw new AudioTrackError('分离素材不存在', 404)
+  return id
+}
+
+function normalizeFadeCurve(raw: unknown): string {
+  return raw === 'equal_power' ? 'equal_power' : 'linear'
+}
+
+function normalizeColor(raw: unknown): string | null {
+  const value = String(raw || '').trim()
+  return value ? value.slice(0, 32) : null
+}
+
+function optionalText(raw: unknown, max = 120): string | null {
+  const value = String(raw ?? '').trim()
+  return value ? value.slice(0, max) : null
 }
 
 function getEpisode(episodeId: number) {
@@ -148,12 +214,22 @@ export function createAudioTrack(episodeId: number, input: AudioTrackInput): Aud
     episodeId,
     dramaId: episode.dramaId,
     kind,
+    role: normalizeRole(input.role, kind),
     name,
     volume: clampNumber(input.volume, 0, 2, 1),
+    pan: clampNumber(input.pan, -1, 1, 0),
+    busId: normalizeBusId(input.busId, episodeId),
     muted: Boolean(input.muted),
     solo: Boolean(input.solo),
     ducking: input.ducking === undefined ? kind !== 'voice' : Boolean(input.ducking),
     loop: Boolean(input.loop),
+    locked: Boolean(input.locked),
+    hidden: Boolean(input.hidden),
+    color: normalizeColor(input.color),
+    height: clampNumber(input.height, 56, 120, 72),
+    stemAssetId: normalizeStemAssetId(input.stemAssetId, episodeId),
+    duckAttackMs: Math.round(clampNumber(input.duckAttackMs, 0, 2000, 20)),
+    duckReleaseMs: Math.round(clampNumber(input.duckReleaseMs, 0, 5000, 250)),
     sortOrder: Number.isFinite(Number(input.sortOrder)) ? Math.round(Number(input.sortOrder)) : maxOrder + 1,
     createdAt: now(),
     updatedAt: now(),
@@ -162,19 +238,33 @@ export function createAudioTrack(episodeId: number, input: AudioTrackInput): Aud
 }
 
 export function updateAudioTrack(episodeId: number, trackId: number, input: AudioTrackInput): AudioTrackWithClips {
-  requireTrack(trackId, episodeId)
+  const row = requireTrack(trackId, episodeId)
   const patch: Partial<TrackRow> = { updatedAt: now() }
   if (input.kind !== undefined) patch.kind = normalizeKind(input.kind)
+  if (input.role !== undefined) {
+    patch.role = normalizeRole(input.role, (patch.kind ?? row.kind) as AudioTrackKind)
+  } else if (input.kind !== undefined) {
+    patch.role = normalizeRole(row.role, patch.kind as AudioTrackKind)
+  }
   if (input.name !== undefined) {
     const name = String(input.name).trim().slice(0, 80)
     if (!name) throw new AudioTrackError('音轨名称不能为空')
     patch.name = name
   }
   if (input.volume !== undefined) patch.volume = clampNumber(input.volume, 0, 2, 1)
+  if (input.pan !== undefined) patch.pan = clampNumber(input.pan, -1, 1, 0)
+  if (input.busId !== undefined) patch.busId = normalizeBusId(input.busId, episodeId)
   if (input.muted !== undefined) patch.muted = Boolean(input.muted)
   if (input.solo !== undefined) patch.solo = Boolean(input.solo)
   if (input.ducking !== undefined) patch.ducking = Boolean(input.ducking)
   if (input.loop !== undefined) patch.loop = Boolean(input.loop)
+  if (input.locked !== undefined) patch.locked = Boolean(input.locked)
+  if (input.hidden !== undefined) patch.hidden = Boolean(input.hidden)
+  if (input.color !== undefined) patch.color = normalizeColor(input.color)
+  if (input.height !== undefined) patch.height = Math.round(clampNumber(input.height, 56, 120, 72))
+  if (input.stemAssetId !== undefined) patch.stemAssetId = normalizeStemAssetId(input.stemAssetId, episodeId)
+  if (input.duckAttackMs !== undefined) patch.duckAttackMs = Math.round(clampNumber(input.duckAttackMs, 0, 2000, 20))
+  if (input.duckReleaseMs !== undefined) patch.duckReleaseMs = Math.round(clampNumber(input.duckReleaseMs, 0, 5000, 250))
   if (input.sortOrder !== undefined && Number.isFinite(Number(input.sortOrder))) patch.sortOrder = Math.round(Number(input.sortOrder))
   db.update(schema.episodeAudioTracks).set(patch).where(eq(schema.episodeAudioTracks.id, trackId)).run()
   const updated = db.select().from(schema.episodeAudioTracks).where(eq(schema.episodeAudioTracks.id, trackId)).get()!
@@ -204,15 +294,26 @@ export function createAudioClip(episodeId: number, trackId: number, input: Audio
   const row = db.insert(schema.episodeAudioClips).values({
     trackId,
     episodeId,
+    assetId: input.assetId ? Number(input.assetId) : null,
     startMs,
     endMs,
     sourceStartMs: toMs(input.sourceStartMs, 0),
+    gainDb: clampNumber(input.gainDb, -60, 12, 0),
+    pan: clampNumber(input.pan, -1, 1, 0),
     fadeInMs: toMs(input.fadeInMs, 0),
     fadeOutMs: toMs(input.fadeOutMs, 0),
+    fadeCurve: normalizeFadeCurve(input.fadeCurve),
+    locked: Boolean(input.locked),
+    muted: Boolean(input.muted),
+    name: optionalText(input.name),
+    color: normalizeColor(input.color),
     sourceUrl: url,
     audioUrl: url,
     text: input.text ? String(input.text).slice(0, 2000) : null,
     voiceId: input.voiceId ? Number(input.voiceId) : null,
+    takeId: input.takeId ? Number(input.takeId) : null,
+    followTake: input.followTake === undefined ? true : Boolean(input.followTake),
+    loop: Boolean(input.loop),
     lineId: input.lineId ? Number(input.lineId) : null,
     status: 'ready',
     createdAt: now(),
@@ -233,12 +334,23 @@ export function updateAudioClip(episodeId: number, clipId: number, input: AudioC
     startMs,
     endMs,
     updatedAt: now(),
+    ...(input.assetId !== undefined ? { assetId: input.assetId ? Number(input.assetId) : null } : {}),
     ...(input.sourceStartMs !== undefined ? { sourceStartMs: toMs(input.sourceStartMs, 0) } : {}),
+    ...(input.gainDb !== undefined ? { gainDb: clampNumber(input.gainDb, -60, 12, 0) } : {}),
+    ...(input.pan !== undefined ? { pan: clampNumber(input.pan, -1, 1, 0) } : {}),
     ...(input.fadeInMs !== undefined ? { fadeInMs: toMs(input.fadeInMs, 0) } : {}),
     ...(input.fadeOutMs !== undefined ? { fadeOutMs: toMs(input.fadeOutMs, 0) } : {}),
+    ...(input.fadeCurve !== undefined ? { fadeCurve: normalizeFadeCurve(input.fadeCurve) } : {}),
+    ...(input.locked !== undefined ? { locked: Boolean(input.locked) } : {}),
+    ...(input.muted !== undefined ? { muted: Boolean(input.muted) } : {}),
+    ...(input.name !== undefined ? { name: optionalText(input.name) } : {}),
+    ...(input.color !== undefined ? { color: normalizeColor(input.color) } : {}),
     ...(url ? { sourceUrl: url, audioUrl: url, status: 'ready', error: null } : {}),
     ...(input.text !== undefined ? { text: input.text ? String(input.text).slice(0, 2000) : null } : {}),
     ...(input.voiceId !== undefined ? { voiceId: input.voiceId ? Number(input.voiceId) : null } : {}),
+    ...(input.takeId !== undefined ? { takeId: input.takeId ? Number(input.takeId) : null } : {}),
+    ...(input.followTake !== undefined ? { followTake: Boolean(input.followTake) } : {}),
+    ...(input.loop !== undefined ? { loop: Boolean(input.loop) } : {}),
     ...(input.lineId !== undefined ? { lineId: input.lineId ? Number(input.lineId) : null } : {}),
   }
   db.update(schema.episodeAudioClips).set(patch).where(eq(schema.episodeAudioClips.id, clipId)).run()

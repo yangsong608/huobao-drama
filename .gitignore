@@ -38,6 +38,8 @@ data/
 local-h3/scripts/files/
 local-h3/scripts/state.json
 local-h3/scripts/upload_cache.json
+# 独立 git 仓库的 ComfyUI 自定义节点部署（含 __pycache__），不纳入主仓库
+local-h3/ComfyUI-MiniMaxH3-WhaleTrans-Director/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -65,6 +67,7 @@ backend/workspace/*
 configs/config.yaml
 
 # Local tooling / agent state
+vibe_images/
 .superpowers/
 .zion-mcp/
 .qoder/

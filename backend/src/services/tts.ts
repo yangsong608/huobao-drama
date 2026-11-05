@@ -507,7 +507,7 @@ async function buildRequest(
   // 191 Base 只认固定参考音色，instruct 必须为空；其余模型优先用用户可编辑的中文提示词
   const instruct = base191 ? undefined : (params.voice.voicePrompt || params.voice.designInstruct || undefined)
   const voice191Base = base191 ? 'synthetic-reference' : undefined
-  const seed = config.settings.seed
+  const seed = params.seed ?? config.settings.seed
   const maxNewTokens = config.settings.maxNewTokens ?? (qwen191 ? 2048 : undefined)
 
   if (params.voice.refAudioUrl && !qwen191) {

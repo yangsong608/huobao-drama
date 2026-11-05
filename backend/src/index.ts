@@ -27,9 +27,14 @@ import pipelineRules from './routes/pipelineRules.js'
 import serverUpdate from './routes/serverUpdate.js'
 import projectFiles from './routes/project-files.js'
 import voices, { characterVoices } from './routes/voices.js'
+import ttsRoute from './routes/tts.js'
 import lines, { episodeLines } from './routes/lines.js'
+import takes from './routes/takes.js'
 import dubbing from './routes/dubbing.js'
 import audioTracks from './routes/audio-tracks.js'
+import audioPeaks from './routes/audio-peaks.js'
+import mix from './routes/mix.js'
+import exportsRoute from './routes/exports.js'
 import grid from './routes/grid.js'
 import scriptImport from './routes/scriptImport.js'
 import jobs from './routes/jobs.js'
@@ -91,13 +96,22 @@ api.route('/mcp', mcpRoute)
 api.route('/pipeline-rules', pipelineRules)
 // V2 新增路由：M0 先按契约挂载（501/503），后续里程碑逐项替换实现
 api.route('/voices', voices)
+api.route('/tts', ttsRoute)
 api.route('/characters', characterVoices)
 api.route('/lines', lines)
 api.route('/episodes', episodeLines)
+// Take 路由：/lines/:id/takes、/takes/:id、/episodes/:id/takes/batch|status
+api.route('/', takes)
 // 根路径挂载以匹配设计：/episodes/:id/dub、/episodes/:id/subtitles、/jobs/:id
 api.route('/', dubbing)
 // 多轨混音：/episodes/:id/audio/tracks、/audio/preview
 api.route('/', audioTracks)
+// 波形 peaks：/episodes/:id/audio/peaks
+api.route('/', audioPeaks)
+// 原声分离、素材与混音计划：/episodes/:id/audio/separate、/episodes/:id/mix
+api.route('/', mix)
+// 导出：/episodes/:id/export-checks、/episodes/:id/exports、/exports/:id
+api.route('/', exportsRoute)
 // 兼容 M0 的 /dubbing 前缀
 api.route('/dubbing', dubbing)
 api.route('/grid', grid)

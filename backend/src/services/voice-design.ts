@@ -474,3 +474,64 @@ export async function generateNarratorProfile(
   setNarratorVoice(dramaId, created.id)
   return getVoice(created.id) || created
 }
+
+/** 重新设计：始终创建新版本，旧版本与激活状态不动（设计 6.5） */
+export async function redesignVoice(
+  voiceId: number,
+  options: {
+    episodeId?: number
+    model?: string
+    configId?: number
+    language?: string
+    defaultSpeed?: number
+  } = {},
+) {
+  const source = getVoice(voiceId)
+  if (!source) throw new Error('音色不存在')
+  const drama = db.select().from(schema.dramas).where(eq(schema.dramas.id, source.dramaId)).get()
+  const character = source.characterId
+    ? db.select().from(schema.characters).where(eq(schema.characters.id, source.characterId)).get()
+    : null
+  const sampleLine = character && options.episodeId
+    ? collectSampleLines(options.episodeId).get(character.name)
+    : null
+
+  const [profile] = await generateVoiceProfiles({
+    characters: [{
+      name: character?.name || '旁白',
+      role: character?.role || '画外音',
+      description: character?.description || `为《${drama?.title || ''}》担任旁白，风格统一、克制、少情绪`,
+      appearance: character?.appearance,
+      personality: character?.personality,
+      sampleLine: source.sampleText || sampleLine,
+    }],
+    dramaId: source.dramaId,
+    episodeId: options.episodeId,
+    useAgent: false,
+    background: drama?.background,
+    genre: drama?.genre,
+    language: options.language || source.language || undefined,
+    defaultSpeed: options.defaultSpeed ?? (source.speed ?? 1),
+    model: options.model,
+    configId: options.configId,
+  })
+  if (!profile) throw new Error('重新设计失败：没有生成音色档案')
+
+  return createVoice({
+    dramaId: source.dramaId,
+    characterId: source.characterId,
+    scope: source.scope as 'character' | 'narrator',
+    name: source.name,
+    source: 'design',
+    voicePrompt: profile.voice_prompt,
+    voicePromptSource: profile.source,
+    designInstruct: profile.design_instruct,
+    sampleText: profile.sample_text,
+    gender: profile.gender,
+    ageRange: profile.age_range,
+    speed: profile.speed,
+    emotion: profile.emotion,
+    language: options.language || source.language || 'Chinese',
+    status: 'draft',
+  })
+}

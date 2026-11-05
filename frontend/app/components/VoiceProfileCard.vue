@@ -46,6 +46,10 @@
             <Play :size="11" />
             {{ t('episode.voice.audition') }}
           </button>
+          <button class="btn btn-sm" type="button" :disabled="busy" @click="auditionOpen = !auditionOpen">
+            <AudioLines :size="11" />
+            {{ t('voiceProfile.auditionPanel') }}
+          </button>
           <button class="btn btn-sm" type="button" :disabled="busy" @click="rewriteNow">
             <Sparkles :size="11" />
             {{ t('episode.voice.rewritePrompt') }}
@@ -61,6 +65,13 @@
         preload="none"
         :src="mediaUrl(currentSampleUrl)"
         data-voice-profile
+      />
+
+      <VoiceAuditionPanel
+        v-if="auditionOpen && selectedVoice"
+        :voice="selectedVoice"
+        :episode-id="episodeId ?? null"
+        @updated="emit('updated')"
       />
 
       <p v-if="selectedVoice.status === 'failed'" class="vpc-error" role="alert">
@@ -136,7 +147,7 @@
 </template>
 
 <script setup lang="ts">
-import { Check, Copy, Link2, Loader2, Mic, Pencil, Play, Sparkles, Trash2, Upload } from 'lucide-vue-next'
+import { AudioLines, Check, Copy, Link2, Loader2, Mic, Pencil, Play, Sparkles, Trash2, Upload } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { CharacterVoice as CharacterVoiceAsset, VoiceProfile } from '~/composables/useApi'
@@ -175,6 +186,7 @@ const store = useVoiceProfiles({
 })
 
 const editOpen = ref(Boolean(props.defaultExpanded))
+const auditionOpen = ref(false)
 const selectedId = ref(0)
 const cloneTarget = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -267,6 +279,8 @@ watch(selectedVoice, voice => {
   })
 }, { immediate: true })
 
+watch(selectedId, () => { auditionOpen.value = false })
+
 function statusLabel(voice: VoiceProfile): string {
   const map: Record<string, string> = {
     draft: t('episode.voice.statusDraft'),
@@ -326,12 +340,9 @@ async function generateVoiceNow() {
 }
 
 async function rewriteNow() {
-  if (!selectedVoice.value) return
-  if (props.scope === 'narrator') {
-    await store.generateNarrator(true)
-  } else if (props.characterId) {
-    await store.generateCharacter(props.characterId, true)
-  }
+  const voice = selectedVoice.value
+  if (!voice) return
+  await store.redesign(voice, props.episodeId ?? null)
 }
 
 async function auditionNow() {

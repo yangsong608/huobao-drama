@@ -22,13 +22,15 @@ import { prepareTransitionInsertion } from './transition-merge.js'
 import { computeMergeSourceHash } from './merge-plan.js'
 import { normalizeVideoAudioMode, resolveDubbingOriginalAudio } from './video-audio.js'
 import { buildTimeline, scaleClipsToDuration, type TimelineLine } from './timeline.js'
-import { buildDialogueTrack, mixEpisodeAudio, probeDurationMs, renderAudioRange } from './audio-mix.js'
+import { buildDialogueTrack, probeDurationMs, renderAudioRange } from './audio-mix.js'
 import { collectMixTracks } from './audio-tracks.js'
 import { buildSubtitleCues, maxCharsForAspect, toAss, toSrt } from './subtitles.js'
-import { synthesize, type SynthResult } from './tts.js'
-import { resolveVoiceForLine, getVoice, type VoiceRow } from './voice-profile.js'
+import { getAudioConfig, type SynthResult } from './tts.js'
+import { getVoice, type VoiceRow } from './voice-profile.js'
+import { generateTake } from './line-takes.js'
 import { getDubbingDefaults } from './app-settings.js'
-import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { startEpisodeExport, getExport, cancelExport } from './export-service.js'
+import { logTaskError, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 
 export type SubtitleMode = 'soft' | 'burn' | 'none'
 export type OriginalAudioMode = 'keep' | 'duck' | 'mute'
@@ -60,7 +62,7 @@ export interface DubState {
   error?: string
 }
 
-const running = new Map<number, { state: DubState; cancelled: boolean }>()
+const running = new Map<number, { state: DubState; cancelled: boolean; exportId?: number }>()
 
 export function getDubbingState(episodeId: number): DubState {
   const local = running.get(episodeId)
@@ -98,6 +100,7 @@ export function stopDubbing(episodeId: number): boolean {
   job.cancelled = true
   job.state.status = 'stopped'
   job.state.note = '已请求停止'
+  if (job.exportId) void cancelExport(job.exportId).catch(() => undefined)
   return true
 }
 
@@ -105,7 +108,7 @@ export function isDubbing(episodeId: number): boolean {
   return running.get(episodeId)?.state.status === 'running'
 }
 
-interface EnsureMergedResult {
+export interface EnsureMergedResult {
   videoPath: string
   videoUrl: string
   durationMs: number
@@ -131,8 +134,9 @@ function hasAiTransitionSnapshot(transitions: string | null | undefined): boolea
 export async function ensureMergedVideo(
   episodeId: number,
   dramaId: number,
-  options: { onProgress?: (note: string) => void } = {},
+  options: { onProgress?: (note: string) => void; signal?: AbortSignal } = {},
 ): Promise<EnsureMergedResult> {
+  if (options.signal?.aborted) throw new Error('已取消')
   const storyboards = db.select().from(schema.storyboards)
     .where(and(eq(schema.storyboards.episodeId, episodeId), isNull(schema.storyboards.deletedAt)))
     .orderBy(asc(schema.storyboards.storyboardNumber))
@@ -190,6 +194,7 @@ export async function ensureMergedVideo(
     const mergeId = await mergeEpisodeVideos(episodeId, dramaId, undefined, undefined, { useAiTransitions })
     const deadline = Date.now() + 10 * 60 * 1000
     for (;;) {
+      if (options.signal?.aborted) throw new Error('已取消')
       const row = db.select().from(schema.videoMerges).where(eq(schema.videoMerges.id, mergeId)).get()
       if (row?.status === 'completed' && row.mergedUrl) {
         videoUrl = row.mergedUrl
@@ -225,8 +230,12 @@ export async function synthesizeEpisodeLines(
   dramaId: number,
   options: { force?: boolean; limit?: number; onProgress?: (done: number, total: number, note: string) => void } = {},
 ): Promise<{ outcomes: SynthOutcome[]; ok: number; failed: number; skipped: number }> {
+  void dramaId
   const rows = db.select().from(schema.storyboardLines)
-    .where(eq(schema.storyboardLines.episodeId, episodeId))
+    .where(and(
+      eq(schema.storyboardLines.episodeId, episodeId),
+      isNull(schema.storyboardLines.deletedAt),
+    ))
     .orderBy(asc(schema.storyboardLines.storyboardId), asc(schema.storyboardLines.lineNo))
     .all()
     .filter((l) => !l.stale)
@@ -236,6 +245,7 @@ export async function synthesizeEpisodeLines(
   let ok = 0
   let failed = 0
   let skipped = 0
+  const config = await getAudioConfig()
 
   for (const [i, line] of targets.entries()) {
     const text = (line.speakText || line.text || '').trim()
@@ -261,44 +271,29 @@ export async function synthesizeEpisodeLines(
       continue
     }
 
-    const voice = resolveVoiceForLine({ voiceId: line.voiceId, characterId: line.characterId, dramaId })
     try {
-      if (!voice) throw new Error('没有可用音色（角色未激活音色，项目也未绑定旁白）')
-      const result = await synthesize({
-        text,
-        voice: {
-          externalVoiceId: voice.externalVoiceId || undefined,
-          voicePrompt: voice.voicePrompt || undefined,
-          designInstruct: voice.designInstruct || undefined,
-          refAudioUrl: voice.refAudioUrl || undefined,
-          refText: voice.refText || undefined,
-          xVectorOnly: Boolean(voice.xVectorOnly),
-        },
-        speed: line.speed ?? voice.speed ?? 1,
-        emotion: line.emotion ?? voice.emotion ?? undefined,
-        language: voice.language ?? undefined,
-        meta: { dramaId, episodeId, lineId: line.id, characterId: line.characterId ?? undefined },
-      })
-      db.update(schema.storyboardLines)
-        .set({
-          audioUrl: result.url,
-          audioDurationMs: result.durationMs,
-          audioHash: result.hash,
-          voiceId: voice.id,
-          status: 'ready',
-          error: null,
-          updatedAt: now(),
-        })
-        .where(eq(schema.storyboardLines.id, line.id))
-        .run()
+      const generated = await generateTake({
+        lineId: line.id,
+        contextMode: 'light',
+        reuse: true,
+        activate: true,
+      }, { config })
+      const take = generated.take
       ok += 1
-      outcomes.push({ lineId: line.id, ok: true, result, voice })
+      outcomes.push({
+        lineId: line.id,
+        ok: true,
+        result: {
+          url: take.audioUrl!,
+          durationMs: take.durationMs || 0,
+          format: take.audioUrl?.endsWith('.mp3') ? 'mp3' : 'wav',
+          hash: take.hash || lineHash(line),
+          cached: generated.cached,
+        },
+        voice: take.voiceId ? getVoice(take.voiceId) : null,
+      })
     } catch (error: any) {
       failed += 1
-      db.update(schema.storyboardLines)
-        .set({ status: 'failed', error: String(error?.message || error).slice(0, 500), updatedAt: now() })
-        .where(eq(schema.storyboardLines.id, line.id))
-        .run()
       outcomes.push({ lineId: line.id, ok: false, error: String(error?.message || error) })
     }
     options.onProgress?.(i + 1, targets.length, `合成 ${i + 1}/${targets.length}`)
@@ -386,31 +381,6 @@ export async function buildEpisodeSubtitles(
   }
 }
 
-function computeSourceHash(input: {
-  clips: EnsureMergedResult['clips']
-  rows: { id: number; audioHash?: string | null; voiceStartMs?: number | null; voiceDurationMs?: number | null }[]
-  options: DubOptions
-  audioMode: string
-  width: number
-  height: number
-  tracksSignature?: string
-}) {
-  const payload = JSON.stringify({
-    clips: input.clips.map((c) => [c.storyboardId, c.videoUrl, c.durationMs]),
-    audio: input.rows.map((r) => [r.id, r.audioHash || '', r.voiceStartMs ?? null, r.voiceDurationMs ?? null]),
-    subtitle: input.options.subtitleMode || 'soft',
-    original: input.options.originalAudio || 'duck',
-    audioMode: input.audioMode,
-    bgm: input.options.bgmUrl || null,
-    bgmVolume: input.options.bgmVolume ?? 0.18,
-    duckingRatio: input.options.duckingRatio ?? 6,
-    targetLufs: input.options.targetLufs ?? -16,
-    canvas: [input.width, input.height],
-    tracks: input.tracksSignature || '',
-  })
-  return crypto.createHash('sha256').update(payload).digest('hex')
-}
-
 /** 依项目比例决定字幕字号与断行 */
 function aspectOf(dramaId: number): { width: number; height: number } {
   const drama = db.select().from(schema.dramas).where(eq(schema.dramas.id, dramaId)).get()
@@ -435,6 +405,16 @@ export function startDubbing(episodeId: number, options: DubOptions = {}): DubSt
 
   void runDubbing(episodeId, episode.dramaId, options, job).catch((error: any) => {
     const message = String(error?.message || error)
+    if (job.cancelled) {
+      job.state.status = 'stopped'
+      job.state.note = '已停止'
+      job.state.error = undefined
+      job.state.finishedAt = now()
+      updateEpisode(episodeId, { dubStatus: 'stopped', dubNote: '已停止' })
+      logTaskProgress('Dub', 'stopped', { episodeId })
+      running.delete(episodeId)
+      return
+    }
     job.state.status = 'failed'
     job.state.error = message
     job.state.note = message
@@ -447,7 +427,7 @@ export function startDubbing(episodeId: number, options: DubOptions = {}): DubSt
   return state
 }
 
-async function runDubbing(episodeId: number, dramaId: number, options: DubOptions, job: { state: DubState; cancelled: boolean }) {
+async function runDubbing(episodeId: number, dramaId: number, options: DubOptions, job: { state: DubState; cancelled: boolean; exportId?: number }) {
   const state = job.state
   logTaskStart('Dub', 'episode', { episodeId, ...options })
   const assertRunning = () => {
@@ -455,20 +435,10 @@ async function runDubbing(episodeId: number, dramaId: number, options: DubOption
   }
 
   const defaults = getDubbingDefaults()
-  const episodeRow = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
-  const audioMode = normalizeVideoAudioMode(episodeRow?.videoAudioMode)
   const subtitleMode: SubtitleMode = options.subtitleMode || defaults.subtitleMode
-  const originalAudio: OriginalAudioMode = resolveDubbingOriginalAudio(
-    episodeRow?.videoAudioMode,
-    options.originalAudio,
-    defaults.originalAudio,
-  )
-  const bgmVolume = options.bgmVolume ?? defaults.bgmVolume
-  const targetLufs = options.targetLufs ?? defaults.targetLufs
-  const duckingRatio = options.duckingRatio ?? defaults.duckingRatio
 
   setProgress(episodeId, state, 3, '检查合片')
-  const merged = await ensureMergedVideo(episodeId, dramaId, {
+  await ensureMergedVideo(episodeId, dramaId, {
     onProgress: (note) => setProgress(episodeId, state, 6, note),
   })
   assertRunning()
@@ -484,132 +454,61 @@ async function runDubbing(episodeId: number, dramaId: number, options: DubOption
   assertRunning()
   if (!synth.ok) throw new Error(`没有成功合成任何台词（失败 ${synth.failed} 句）`)
 
-  setProgress(episodeId, state, 58, '计算时间轴')
-  const rows = db.select().from(schema.storyboardLines)
-    .where(eq(schema.storyboardLines.episodeId, episodeId))
-    .all()
-    .filter((l) => !l.stale && l.audioUrl && l.audioDurationMs)
-
   const aspect = aspectOf(dramaId)
-  const subs = await buildEpisodeSubtitles(episodeId, dramaId, merged, {
+  const preset = aspect.width === 1080 && aspect.height === 1920 ? 'vertical-hd' : 'horizontal-hd'
+  setProgress(episodeId, state, 58, '准备导出')
+
+  const started = await startEpisodeExport(episodeId, {
+    kind: 'video',
+    preset,
     subtitleMode,
-    width: aspect.width,
-    height: aspect.height,
-    markNarration: defaults.narratorPrefix,
-    fontSize: defaults.subtitleFontSize,
-    marginV: defaults.subtitleMargin,
+    setCurrent: true,
   })
+  job.exportId = started.record.id
   assertRunning()
 
-  setProgress(episodeId, state, 64, '拼装对话轨')
-  const workDir = projectSubdirPath(dramaId, 'temp')
-  fs.mkdirSync(workDir, { recursive: true })
-  const dialoguePath = path.join(workDir, `dialogue-${episodeId}-${Date.now()}.wav`)
-  const cueAudio = new Map(subs.timeline.cues.map((c) => {
-    const row = rows.find((r) => r.id === c.lineId)
-    return [c.lineId, row?.audioUrl ? getAbsolutePath(row.audioUrl) : '']
-  }))
-  try {
-    await buildDialogueTrack(
-      subs.timeline.cues.map((c) => ({ audioPath: cueAudio.get(c.lineId) || '', startMs: c.startMs, lineId: c.lineId })),
-      merged.durationMs,
-      dialoguePath,
-      workDir,
-    )
+  let record = started.record
+  const terminal = new Set(['completed', 'failed', 'cancelled'])
+  while (!terminal.has(String(record.status || ''))) {
+    if (job.cancelled) {
+      await cancelExport(record.id).catch(() => undefined)
+      throw new Error('已停止')
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500))
     assertRunning()
-
-    setProgress(episodeId, state, 72, '混音')
-    const outputName = `dub-${episodeId}-${Date.now()}.mp4`
-    const outputDir = projectSubdirPath(dramaId, 'merged')
-    fs.mkdirSync(outputDir, { recursive: true })
-    const outputPath = path.join(outputDir, outputName)
-    const dramaRow = db.select().from(schema.dramas).where(eq(schema.dramas.id, dramaId)).get()
-    const bgmSource = options.bgmUrl || episodeRow?.bgmUrl || dramaRow?.bgmUrl || null
-    const bgmPath = bgmSource ? (path.isAbsolute(bgmSource) ? bgmSource : getAbsolutePath(bgmSource)) : null
-
-    const collected = collectMixTracks(episodeId)
-
-    const sourceHash = computeSourceHash({
-      clips: merged.clips,
-      rows: rows.map((r) => ({ id: r.id, audioHash: r.audioHash, voiceStartMs: r.voiceStartMs, voiceDurationMs: r.voiceDurationMs })),
-      options: { ...options, subtitleMode, originalAudio, bgmVolume, targetLufs, duckingRatio },
-      audioMode,
-      width: aspect.width,
-      height: aspect.height,
-      tracksSignature: collected.signature,
-    })
-
-    const mergeRow = db.insert(schema.videoMerges).values({
-      episodeId,
-      dramaId,
-      title: `Episode ${episodeId} Dub`,
-      provider: 'ffmpeg',
-      model: 'ffmpeg-mix-h264-aac',
-      status: 'processing',
-      kind: 'mix',
-      scenes: JSON.stringify(merged.clips.map((c) => c.videoUrl)),
-      sourceHash,
-      subtitleUrl: subs.srtUrl,
-      dialogueTrackUrl: null,
-      bgmUrl: options.bgmUrl ?? null,
-      mixOptions: JSON.stringify({
-        subtitleMode, originalAudio, audioMode, bgmVolume, targetLufs, duckingRatio,
-        trackCount: collected.count, tracksHash: collected.signature.slice(0, 16),
-      }),
-      createdAt: now(),
-    }).run()
-    const mergeId = Number((mergeRow as any).lastInsertRowid)
-
-    setProgress(episodeId, state, 80, '混音编码中')
-    const mix = await mixEpisodeAudio({
-      videoPath: merged.videoPath,
-      dialoguePath,
-      outputPath,
-      options: {
-        originalAudio,
-        subtitlePath: subtitleMode === 'none' ? null : subs.srtPath,
-        subtitleAssPath: subtitleMode === 'burn' ? subs.assPath : null,
-        subtitleMode,
-        durationMs: merged.durationMs,
-        bgmPath,
-        bgmVolume,
-        targetLufs,
-        duckingRatio,
-        tracks: collected.tracks,
-      },
-    })
-
-    const outputUrl = projectStorageRelative(dramaId, 'merged', outputName)
-    db.update(schema.videoMerges).set({
-      status: 'completed',
-      mergedUrl: outputUrl,
-      duration: Math.round(mix.durationMs / 1000),
-      subtitleUrl: subs.srtUrl,
-      completedAt: now(),
-    }).where(eq(schema.videoMerges.id, mergeId)).run()
-
-    updateEpisode(episodeId, {
-      videoUrl: outputUrl,
-      subtitleUrl: subs.srtUrl,
-      dubStatus: 'done',
-      dubProgress: 100,
-      dubNote: synth.failed ? `完成，${synth.failed} 句合成失败` : '完成',
-      duration: Math.round(mix.durationMs / 1000),
-    })
-
-    state.status = 'done'
-    state.progress = 100
-    state.note = synth.failed ? `完成，${synth.failed} 句合成失败` : '完成'
-    state.outputUrl = outputUrl
-    state.subtitleUrl = subs.srtUrl
-    state.finishedAt = now()
-    logTaskSuccess('Dub', 'episode', {
-      episodeId, mergeId, output: outputUrl, lines: rows.length, failed: synth.failed, durationMs: mix.durationMs,
-    })
-  } finally {
-    fs.rmSync(dialoguePath, { force: true })
-    running.delete(episodeId)
+    record = getExport(record.id) || record
+    setProgress(episodeId, state, 58 + ((record.progress || 0) / 100) * 42, `导出中 ${record.progress || 0}%`)
   }
+
+  if (job.cancelled && record.status !== 'completed') {
+    await cancelExport(record.id).catch(() => undefined)
+    throw new Error('已停止')
+  }
+  if (record.status === 'cancelled') throw new Error('已停止')
+  if (record.status !== 'completed' || !record.outputUrl) {
+    throw new Error(record.error || '视频导出失败')
+  }
+
+  const outputUrl = record.outputUrl
+  const note = synth.failed ? `完成，${synth.failed} 句合成失败` : '完成'
+  updateEpisode(episodeId, {
+    videoUrl: outputUrl,
+    dubStatus: 'done',
+    dubProgress: 100,
+    dubNote: note,
+    duration: Math.round((record.durationMs || 0) / 1000),
+  })
+
+  state.status = 'done'
+  state.progress = 100
+  state.note = note
+  state.outputUrl = outputUrl
+  state.subtitleUrl = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()?.subtitleUrl || undefined
+  state.finishedAt = now()
+  logTaskSuccess('Dub', 'episode', {
+    episodeId, exportId: record.id, output: outputUrl, failed: synth.failed, durationMs: record.durationMs,
+  })
+  running.delete(episodeId)
 }
 
 /** 只出字幕（不混音），供字幕预览/下载 */

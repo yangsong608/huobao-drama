@@ -198,7 +198,8 @@ export async function renderMotionPost(episodeId: number, dramaId: number, optio
 
     const defaults = getDubbingDefaults()
     const subtitleMode = defaults.subtitleMode
-    const voiced = lines.filter((l) => l.audioUrl && l.audioDurationMs && clips.some((c) => c.storyboardId === l.storyboardId))
+    const voiced = lines.filter((l) => l.audioUrl && l.audioDurationMs
+      && (l.storyboardId == null ? l.voiceStartMs != null : clips.some((c) => c.storyboardId === l.storyboardId)))
     const bgmSource = options.bgmUrl || episode.bgmUrl || null
     const bgmPath = bgmSource ? (path.isAbsolute(bgmSource) ? bgmSource : getAbsolutePath(bgmSource)) : null
     const bgmExists = bgmPath && fs.existsSync(bgmPath) ? bgmPath : null
@@ -219,6 +220,8 @@ export async function renderMotionPost(episodeId: number, dramaId: number, optio
           speaker: row.speakerName || '旁白',
           kind: (row.speakerType as TimelineLine['kind']) || 'narration',
           plannedStartMs: row.plannedStartMs ?? 0,
+          startOverrideMs: row.voiceStartMs ?? null,
+          durationOverrideMs: row.voiceDurationMs ?? null,
           audioDurationMs: row.audioDurationMs || 0,
           audioUrl: row.audioUrl,
           speed: row.speed ?? 1,

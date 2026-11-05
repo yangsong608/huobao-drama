@@ -1,7 +1,7 @@
 /**
  * 音色资产化：项目级复用与逐句改派。
  * - 复制音色只新增目标版本，不改源音色；
- * - 台词改派音色后必须作废旧音频，等待按新音色重合成。
+ * - 台词改派音色后保留旧音频，只标记 audio_stale，等待按新音色重合成。
  */
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -98,7 +98,7 @@ test('复制到其他项目角色会被拒绝', () => {
   assert.throws(() => cloneVoice(source.id, { characterId: foreign.id }), /不属于同一项目/)
 })
 
-test('台词改派音色会作废旧音频并等待重合成', async () => {
+test('台词改派音色保留旧音频并标记待更新', async () => {
   const oldVoice = makeVoice(hero.id, '旧声线')
   const newVoice = makeVoice(hero.id, '新声线')
   const [line] = db.insert(schema.storyboardLines).values({
@@ -130,10 +130,11 @@ test('台词改派音色会作废旧音频并等待重合成', async () => {
   const row = db.select().from(schema.storyboardLines).all().find((item) => item.id === line.id)!
   assert.equal(row.voiceId, newVoice.id)
   assert.equal(row.voiceLocked, true)
-  assert.equal(row.status, 'pending')
-  assert.equal(row.audioUrl, null)
-  assert.equal(row.audioDurationMs, null)
-  assert.equal(row.audioHash, null)
+  assert.equal(row.status, 'ready')
+  assert.equal(row.audioUrl, 'static/tts/old.wav')
+  assert.equal(row.audioDurationMs, 1200)
+  assert.equal(row.audioHash, 'old-hash')
+  assert.equal(row.audioStale, true)
 })
 
 test('切换激活音色：未锁定台词自动跟随新音色，锁定台词保留指定音色', () => {
@@ -174,15 +175,17 @@ test('切换激活音色：未锁定台词自动跟随新音色，锁定台词�
   const autoAfter = rows.find((item) => item.id === autoLine.id)!
   const lockedAfter = rows.find((item) => item.id === lockedLine.id)!
   assert.equal(autoAfter.voiceId, null)
-  assert.equal(autoAfter.status, 'pending')
-  assert.equal(autoAfter.audioUrl, null)
-  assert.equal(autoAfter.audioHash, null)
+  assert.equal(autoAfter.status, 'ready')
+  assert.equal(autoAfter.audioUrl, 'static/tts/old.wav')
+  assert.equal(autoAfter.audioDurationMs, 800)
+  assert.equal(autoAfter.audioHash, 'old-hash')
+  assert.equal(autoAfter.audioStale, true)
   assert.equal(lockedAfter.voiceId, oldVoice.id)
   assert.equal(lockedAfter.voiceLocked, true)
   assert.equal(lockedAfter.audioUrl, 'static/tts/old.wav')
 })
 
-test('切换旁白音色：未锁定旁白台词解绑并作废音频，锁定保留', () => {
+test('切换旁白音色：未锁定旁白台词解绑并保留音频待更新，锁定保留', () => {
   const oldNarrator = createVoice({
     dramaId: 1, characterId: null, scope: 'narrator', name: '旁白旧版', source: 'design', status: 'ready',
   })
@@ -221,8 +224,32 @@ test('切换旁白音色：未锁定旁白台词解绑并作废音频，锁定�
   const autoAfter = rows.find((item) => item.id === autoLine.id)!
   const lockedAfter = rows.find((item) => item.id === lockedLine.id)!
   assert.equal(autoAfter.voiceId, null)
-  assert.equal(autoAfter.status, 'pending')
-  assert.equal(autoAfter.audioUrl, null)
+  assert.equal(autoAfter.status, 'ready')
+  assert.equal(autoAfter.audioUrl, 'static/tts/narrator.wav')
+  assert.equal(autoAfter.audioStale, true)
   assert.equal(lockedAfter.voiceId, oldNarrator.id)
   assert.equal(lockedAfter.audioUrl, 'static/tts/narrator.wav')
+})
+
+test('切换音色时无旧音频的台词不产生 audio_stale 标记', () => {
+  const [character] = db.insert(schema.characters).values({
+    dramaId: 1, name: '阿七', role: '船工', createdAt: ts, updatedAt: ts,
+  }).returning().all()
+  const oldVoice = makeVoice(character.id, '旧版声线')
+  const newVoice = makeVoice(character.id, '新版声线')
+  activateVoice(character.id, oldVoice.id)
+  const [line] = db.insert(schema.storyboardLines).values({
+    episodeId: episode.id, dramaId: 1, storyboardId: storyboard.id, lineNo: 30,
+    speakerType: 'dialogue', speakerName: '阿七', characterId: character.id,
+    text: '还没录音。', speakText: '还没录音。', voiceId: oldVoice.id,
+    status: 'pending', voiceLocked: false, createdAt: ts, updatedAt: ts,
+  }).returning().all()
+
+  activateVoice(character.id, newVoice.id)
+
+  const after = db.select().from(schema.storyboardLines).all().find(row => row.id === line.id)!
+  assert.equal(after.voiceId, null)
+  assert.equal(after.status, 'pending')
+  assert.equal(after.audioUrl, null)
+  assert.equal(after.audioStale, false)
 })

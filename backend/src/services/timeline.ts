@@ -25,7 +25,8 @@ export type CueKind = 'dialogue' | 'narration' | 'inner'
 
 export interface TimelineLine {
   lineId: number
-  storyboardId: number
+  /** 为空表示绝对锚点台词，必须提供 startOverrideMs */
+  storyboardId: number | null
   lineNo?: number
   text: string
   speaker: string
@@ -44,7 +45,7 @@ export interface TimelineLine {
 
 export interface TimelineCue {
   lineId: number
-  shotId: number
+  shotId: number | null
   startMs: number
   endMs: number
   subtitleStartMs: number
@@ -99,8 +100,8 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
   clips.forEach((c, i) => order.set(c.storyboardId, i))
 
   const lines = [...(input.lines || [])].sort((a, b) => {
-    const oa = order.get(a.storyboardId) ?? Number.MAX_SAFE_INTEGER
-    const ob = order.get(b.storyboardId) ?? Number.MAX_SAFE_INTEGER
+    const oa = a.storyboardId == null ? Number.MAX_SAFE_INTEGER : order.get(a.storyboardId) ?? Number.MAX_SAFE_INTEGER
+    const ob = b.storyboardId == null ? Number.MAX_SAFE_INTEGER : order.get(b.storyboardId) ?? Number.MAX_SAFE_INTEGER
     if (oa !== ob) return oa - ob
     return (a.lineNo ?? a.lineId) - (b.lineNo ?? b.lineId)
   })
@@ -114,25 +115,26 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
   let trimmedCount = 0
 
   for (const line of lines) {
-    const shot = clipStart.get(line.storyboardId)
-    if (!shot) {
+    const shot = line.storyboardId == null ? undefined : clipStart.get(line.storyboardId)
+    const planned = Number.isFinite(line.plannedStartMs) ? Math.max(0, Number(line.plannedStartMs)) : 0
+    const overrideStart = Number.isFinite(line.startOverrideMs) ? Math.max(0, Number(line.startOverrideMs)) : null
+    // 绝对锚点必须给 startOverrideMs；镜头内台词必须有对应镜头
+    if (!shot && (line.storyboardId != null || overrideStart === null)) {
       skippedLineIds.push(line.lineId)
       continue
     }
-    if (totalDurationMs > 0 && shot.startMs >= totalDurationMs) {
+    if (shot && totalDurationMs > 0 && shot.startMs >= totalDurationMs) {
       skippedLineIds.push(line.lineId)
       continue
     }
 
-    const planned = Number.isFinite(line.plannedStartMs) ? Math.max(0, Number(line.plannedStartMs)) : 0
-    const overrideStart = Number.isFinite(line.startOverrideMs) ? Math.max(0, Number(line.startOverrideMs)) : null
     let start: number
     if (overrideStart !== null) {
       start = overrideStart
     } else {
-      const relStart = Math.max(MIN_LEAD_MS, planned, cursor - shot.startMs)
-      start = shot.startMs + relStart
-      if (start < shot.startMs) start = shot.startMs
+      const relStart = Math.max(MIN_LEAD_MS, planned, cursor - shot!.startMs)
+      start = shot!.startMs + relStart
+      if (start < shot!.startMs) start = shot!.startMs
     }
     // 只有手动绝对排布越过片尾才丢弃；自动排布保持旧行为（允许贴片尾）
     if (overrideStart !== null && totalDurationMs > 0 && start >= totalDurationMs) {
@@ -144,11 +146,11 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
     let speed = 1
     let duration = Math.max(MIN_LINE_MS, Math.round(line.audioDurationMs || 0))
     const durationOverride = Number.isFinite(line.durationOverrideMs) ? Math.max(0, Number(line.durationOverrideMs)) : null
-    const toleratedEnd = shot.endMs + OVERFLOW_TOLERANCE_MS
+    const toleratedEnd = (shot ? shot.endMs : totalDurationMs) + OVERFLOW_TOLERANCE_MS
 
     if (durationOverride && durationOverride > 0) {
       duration = Math.max(MIN_LINE_MS, Math.round(durationOverride))
-    } else if (overrideStart === null && start + duration > toleratedEnd && duration > 0) {
+    } else if (overrideStart === null && shot && start + duration > toleratedEnd && duration > 0) {
       const available = Math.max(MIN_LINE_MS, toleratedEnd - start)
       const needed = duration / available
       if (needed > 1.001) {
@@ -174,7 +176,7 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
     // 手动绝对排布可跨镜头，溢出按整集片尾计算；自动排布沿用镜头容差
     const overflowLimit = overrideStart !== null && totalDurationMs > 0
       ? totalDurationMs
-      : shot.endMs + OVERFLOW_TOLERANCE_MS
+      : shot ? shot.endMs + OVERFLOW_TOLERANCE_MS : totalDurationMs
     const overflowMs = Math.max(0, end - overflowLimit)
     if (overflowMs > maxOverflowMs) maxOverflowMs = overflowMs
     if (overlap) overlapCount += 1
@@ -197,8 +199,11 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
       audioUrl: line.audioUrl ?? null,
     })
 
-    cursor = end + LINE_GAP_MS
+    cursor = Math.max(cursor, end + LINE_GAP_MS)
   }
+
+  // 绝对锚点可能早于镜头台词，字幕与重叠判断按实际时间排序
+  cues.sort((a, b) => a.startMs - b.startMs || a.lineId - b.lineId)
 
   // 字幕结束时间：不越过下一句开始前 100ms，也不越过片尾
   for (let i = 0; i < cues.length; i += 1) {

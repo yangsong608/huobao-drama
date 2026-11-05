@@ -2,13 +2,14 @@
  * 本地 H3 提示词编译器
  *
  * 实验结论（local-h3/experiments/README.md）：H3 会把中文提示词正文当成字幕烧进画面，
- * 而英文提示词 + 干净参考图可消除字幕；对话原文既无法被本地音频驱动，也会加重字幕。
+ * 而英文提示词 + 干净参考图可消除字幕；台词必须放进 H3 官方的 `<d>[Chinese] 原文</d>` 标签，
+ * 语音模块才会按原文念出，标签外的中文仍会被当作字幕。
  * 因此本地 shim 提交前统一做一次「结构英文化」：
  * - @图片N → <Picture N>，去掉 #音色 / 音色参考音频N 等后端标记
  * - 人物/场景/音频/时间轴标签 → 英文结构
- * - 对白 → "X speaks in Mandarin, mouth moving"（不保留台词原文）
- * - 旁白按声音模式保留为画外音或移除
- * - 其余中文交给文本模型翻译；失败时退回确定性结果，绝不阻断生成
+ * - native：对白 → `X says, <d>[Chinese] 台词原文</d>`；旁白 → 画外音 + 同样的标签
+ * - ambient/silent：对白只保留说话动作（留给后期配音），旁白移除
+ * - 其余中文交给文本模型翻译；`<d>` 标签用占位符保护，标签丢失时退回确定性结果
  */
 import { callText } from './text-call.js'
 import { logTaskWarn } from '../utils/task-logger.js'
@@ -23,9 +24,10 @@ export const H3_TRANSLATOR_SYSTEM = `You translate Chinese video-generation prom
 Rules:
 - Output only the English prompt. No markdown, no explanations, no extra shots.
 - Preserve exactly: <Picture N> placeholders, [0-3s] time markers, and the line labels Characters:, Scene:, Audio:, Time:, Shot:.
-- Translate every Chinese word, including character and place names. Transliterate Chinese names consistently to pinyin.
-- Never write dialogue, subtitles, captions, quoted speech, or on-screen text.
-- When a character speaks, describe it as "X speaks in Mandarin, mouth moving" without the spoken words.
+- Dialogue is supplied as tokens like [[H3_DLG_N]]. Each token stands for an H3 dialogue tag of the form <d>[Chinese] ...</d>.
+- Copy every [[H3_DLG_N]] token exactly once, unchanged, in its original position. Never translate, remove, duplicate, split or rewrite a token.
+- Translate every other Chinese word, including character and place names. Transliterate Chinese names consistently to pinyin.
+- Never write subtitles, captions, quoted speech, or on-screen text outside the tokens.
 - Keep the original line order and every time marker.`
 
 interface NamedDialogue {
@@ -44,20 +46,32 @@ const DIALOGUE: NamedDialogue[] = [
   },
 ]
 
-function stripQuotedDialogue(text: string): string {
+function stripQuotedDialogue(
+  text: string,
+  audioMode: VideoAudioMode,
+  tagDialogue: (line: string) => string,
+): string {
   return text
     .replace(/[「“"]([^」”"]*)[」”"]/g, (_match, inner: string) => {
       const value = String(inner || '')
-      // 短词多为专有名词（如“陆缘”）；长句或带句读的才按台词整段删除，避免变成字幕
-      return value.length > 16 || /[。！？!?，,；;]/.test(value) ? '' : value
+      // 短词多为专有名词（如“陆缘”）；长句或带句读的才按台词处理
+      if (value.length <= 16 && !/[。！？!?，,；;]/.test(value)) return value
+      return audioMode === 'native' ? tagDialogue(value) : ''
     })
     .replace(/[「」“”]/g, '')
 }
 
-/** 确定性转换：不依赖文本模型，输出去掉所有字幕源（对白原文/引号/标记） */
+/** 确定性转换：不依赖文本模型；台词进入 H3 `<d>` 标签，其余结构英文化 */
 export function compileH3Prompt(prompt: string, audioMode: VideoAudioMode = 'native'): string {
   if (!prompt) return ''
   let text = String(prompt).replace(/\r\n?/g, '\n')
+
+  // 台词原文只在最后还原，避免后续清洗规则改动标签内的字句
+  const dialogueTags: string[] = []
+  const tagDialogue = (line: string) => {
+    dialogueTags.push(`<d>[Chinese] ${line}</d>`)
+    return `[[H3_DLG_${dialogueTags.length - 1}]]`
+  }
 
   // 参考图统一成 H3 训练时使用的 <Picture N> 标记
   text = text.replace(/@图片\s*(\d+)/g, '<Picture $1>')
@@ -76,19 +90,25 @@ export function compileH3Prompt(prompt: string, audioMode: VideoAudioMode = 'nat
   // 环境声交给模型自然生成，不把混音指令「压低」写进提示词
   text = text.replace(/环境音压低/g, '环境音自然')
 
-  // 旁白：原生模式保留画外音描述；ambient/silent 由后期配音，画面不需要旁白
+  // 旁白：原生模式念出原文；ambient/silent 由后期配音，画面不需要旁白
   const narration = /(?:旁白\s*[（(]画外音[）)]|画外音|旁白)\s*(?:说|讲述|念白)?\s*[：:]?\s*[「“"]([^」”"]*)[」”"]/g
-  text = text.replace(narration, audioMode === 'native' ? 'Off-screen narrator speaks in Mandarin, mouth moving' : '')
+  text = audioMode === 'native'
+    ? text.replace(narration, (_match, line: string) => `Off-screen narrator says, ${tagDialogue(line)}`)
+    : text.replace(narration, '')
 
-  // 对白：只保留说话动作与口型，台词原文一律不进入 H3 提示词
+  // 对白：原生模式用 H3 官方的 <d>[Chinese] 原文</d> 标签驱动语音；其余模式只保留口型
   for (const { quote } of DIALOGUE) {
-    text = text.replace(quote, (_match, name: string) => `${name} speaks in Mandarin, mouth moving`)
+    text = text.replace(quote, (_match, name: string, line: string) =>
+      audioMode === 'native'
+        ? `${name} says, ${tagDialogue(line)}`
+        : `${name} speaks in Mandarin, mouth moving`)
   }
   text = text.replace(
     new RegExp(`(?:${SPEECH_MANNER})?\\s*(?:${SPEECH_VERBS})\\s*[：:]?\\s*[「“"]([^」”"]*)[」”"]`, 'g'),
-    'speaks in Mandarin, mouth moving',
+    (_match, line: string) =>
+      audioMode === 'native' ? `says, ${tagDialogue(line)}` : 'speaks in Mandarin, mouth moving',
   )
-  text = stripQuotedDialogue(text)
+  text = stripQuotedDialogue(text, audioMode, tagDialogue)
 
   // 残留的旁白标签（没有引号的情况）
   text = text.replace(/旁白\s*[（(]画外音[）)]|画外音|旁白/g,
@@ -115,12 +135,17 @@ export function compileH3Prompt(prompt: string, audioMode: VideoAudioMode = 'nat
   // 没有索引的 @名字 只保留名字文本
   text = text.replace(/@([^\s@#，。！？；、：,.!?;:「」“”"'（）()\[\]{}<>]+)/g, '$1')
 
-  return text
+  const compiled = text
     .replace(/[，,]\s*[：:]\s*/g, '，')
     .replace(/^[：:]\s*/gm, '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
+
+  return dialogueTags.reduce(
+    (value, tag, index) => value.split(`[[H3_DLG_${index}]]`).join(tag),
+    compiled,
+  )
 }
 
 function normalizeTranslation(text: string): string {
@@ -128,6 +153,32 @@ function normalizeTranslation(text: string): string {
   const fenced = value.match(/^```(?:[a-z]+)?\s*([\s\S]*?)```$/i)
   if (fenced) value = fenced[1].trim()
   return value.replace(/\n{3,}/g, '\n\n').slice(0, H3_PROMPT_MAX_CHARS).trim()
+}
+
+const DIALOGUE_TAG_RE = /<d>\[Chinese\][\s\S]*?<\/d>/g
+const DIALOGUE_PLACEHOLDER_RE = /\[\[H3_DLG_\d+\]\]/
+
+/** 翻译前把 <d> 标签换成占位符，避免模型改写台词原文 */
+function extractDialogueTags(text: string): { text: string; tags: string[] } {
+  const tags: string[] = []
+  const stripped = text.replace(DIALOGUE_TAG_RE, match => {
+    tags.push(match)
+    return `[[H3_DLG_${tags.length - 1}]]`
+  })
+  return { text: stripped, tags }
+}
+
+/** 翻译后按原样还原；缺失、重复或未知占位符视为翻译失败 */
+function restoreDialogueTags(text: string, tags: string[]): string {
+  let restored = text
+  for (const [index, tag] of tags.entries()) {
+    const token = `[[H3_DLG_${index}]]`
+    const occurrences = restored.split(token).length - 1
+    if (occurrences !== 1) throw new Error(`翻译结果中的对白标记 ${token} 出现 ${occurrences} 次`)
+    restored = restored.split(token).join(tag)
+  }
+  if (DIALOGUE_PLACEHOLDER_RE.test(restored)) throw new Error('翻译结果包含未知对白标记')
+  return restored
 }
 
 function defaultTranslate(text: string): Promise<string> {
@@ -191,14 +242,19 @@ export async function compileLocalH3Prompt(
   const cached = translationCache.get(key)
   if (cached) return cached
 
+  const { text: translatable, tags } = extractDialogueTags(deterministic)
+  // 标签外没有中文时无需翻译，直接保留原文台词
+  if (!CJK_RE.test(translatable)) return deterministic
+
   try {
-    const translated = normalizeTranslation(await (options.translate ?? defaultTranslate)(deterministic))
+    const translated = normalizeTranslation(await (options.translate ?? defaultTranslate)(translatable))
     if (!translated) throw new Error('翻译结果为空')
+    const restored = tags.length ? restoreDialogueTags(translated, tags) : translated
     if (translationCache.size >= CACHE_LIMIT) {
       translationCache.delete(translationCache.keys().next().value as string)
     }
-    translationCache.set(key, translated)
-    return translated
+    translationCache.set(key, restored)
+    return restored
   } catch (err: any) {
     logTaskWarn('H3Prompt', 'translate-fallback', { error: err?.message || String(err) })
     return deterministic

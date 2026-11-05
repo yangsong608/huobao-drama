@@ -6,6 +6,57 @@
  */
 import type Database from 'better-sqlite3'
 
+/**
+ * 台词行 DDL：新库与旧库重建共用。
+ * storyboard_id 可空以支持不绑定镜头的绝对锚点台词。
+ */
+function storyboardLinesDdl(tableName = 'storyboard_lines') {
+  return `CREATE TABLE IF NOT EXISTS ${tableName} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    storyboard_id INTEGER,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    line_no INTEGER NOT NULL,
+    speaker_type TEXT NOT NULL DEFAULT 'dialogue',
+    character_id INTEGER,
+    voice_id INTEGER,
+    voice_locked INTEGER DEFAULT 0,
+    speaker_name TEXT,
+    text TEXT NOT NULL,
+    speak_text TEXT,
+    subtitle_text TEXT,
+    emotion TEXT,
+    direction TEXT,
+    speed REAL DEFAULT 1.0,
+    planned_start_ms INTEGER,
+    planned_end_ms INTEGER,
+    start_ms INTEGER,
+    end_ms INTEGER,
+    voice_start_ms INTEGER,
+    voice_duration_ms INTEGER,
+    audio_url TEXT,
+    audio_duration_ms INTEGER,
+    audio_hash TEXT,
+    status TEXT DEFAULT 'pending',
+    overflow_ms INTEGER DEFAULT 0,
+    stale INTEGER DEFAULT 0,
+    source TEXT DEFAULT 'auto',
+    locked INTEGER DEFAULT 0,
+    needs_review INTEGER DEFAULT 0,
+    error TEXT,
+    anchor_type TEXT DEFAULT 'shot',
+    sort_order INTEGER DEFAULT 0,
+    origin_key TEXT,
+    text_revision INTEGER DEFAULT 1,
+    audio_stale INTEGER DEFAULT 0,
+    active_take_id INTEGER,
+    deleted_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (storyboard_id, line_no)
+  )`
+}
+
 export const sqliteSchemaStatements = [
   `CREATE TABLE IF NOT EXISTS dramas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -386,43 +437,8 @@ export const sqliteSchemaStatements = [
     deleted_at TEXT
   )`,
 
-  // 最小配音单位：一个分镜里的一句话
-  `CREATE TABLE IF NOT EXISTS storyboard_lines (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    storyboard_id INTEGER NOT NULL,
-    episode_id INTEGER NOT NULL,
-    drama_id INTEGER NOT NULL,
-    line_no INTEGER NOT NULL,
-    speaker_type TEXT NOT NULL DEFAULT 'dialogue',
-    character_id INTEGER,
-    voice_id INTEGER,
-    voice_locked INTEGER DEFAULT 0,
-    speaker_name TEXT,
-    text TEXT NOT NULL,
-    speak_text TEXT,
-    subtitle_text TEXT,
-    emotion TEXT,
-    speed REAL DEFAULT 1.0,
-    planned_start_ms INTEGER,
-    planned_end_ms INTEGER,
-    start_ms INTEGER,
-    end_ms INTEGER,
-    voice_start_ms INTEGER,
-    voice_duration_ms INTEGER,
-    audio_url TEXT,
-    audio_duration_ms INTEGER,
-    audio_hash TEXT,
-    status TEXT DEFAULT 'pending',
-    overflow_ms INTEGER DEFAULT 0,
-    stale INTEGER DEFAULT 0,
-    source TEXT DEFAULT 'auto',
-    locked INTEGER DEFAULT 0,
-    needs_review INTEGER DEFAULT 0,
-    error TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE (storyboard_id, line_no)
-  )`,
+  // 最小配音单位：一个分镜里的一句话（storyboard_id 为空表示绝对锚点）
+  storyboardLinesDdl(),
 
   // 成片附加音轨与时间段片段（V3 多轨混音）
   `CREATE TABLE IF NOT EXISTS episode_audio_tracks (
@@ -456,6 +472,169 @@ export const sqliteSchemaStatements = [
     status TEXT DEFAULT 'ready',
     error TEXT,
     line_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+
+  // 配音工作台：每句台词的多次合成结果；同句最多一条 is_active=1
+  `CREATE TABLE IF NOT EXISTS line_takes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    line_id INTEGER NOT NULL,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    take_no INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    speak_text TEXT,
+    text_revision INTEGER DEFAULT 1,
+    voice_id INTEGER,
+    voice_fingerprint TEXT,
+    provider TEXT,
+    model TEXT,
+    config_id INTEGER,
+    params_json TEXT,
+    context_mode TEXT DEFAULT 'off',
+    context_json TEXT,
+    context_hash TEXT,
+    audio_url TEXT,
+    duration_ms INTEGER,
+    hash TEXT,
+    status TEXT DEFAULT 'generating',
+    error TEXT,
+    is_active INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    deleted_at TEXT
+  )`,
+
+  // 音色试听 / 自由试音历史
+  `CREATE TABLE IF NOT EXISTS voice_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    voice_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    kind TEXT DEFAULT 'audition',
+    text TEXT NOT NULL,
+    text_source TEXT DEFAULT 'default',
+    seed INTEGER,
+    provider TEXT,
+    model TEXT,
+    params_json TEXT,
+    audio_url TEXT,
+    duration_ms INTEGER,
+    hash TEXT,
+    status TEXT DEFAULT 'generating',
+    error TEXT,
+    created_at TEXT NOT NULL,
+    deleted_at TEXT
+  )`,
+
+  // 已删除台词的墓碑：重抽时跳过，避免已删台词复活
+  `CREATE TABLE IF NOT EXISTS line_tombstones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    storyboard_id INTEGER,
+    origin_key TEXT NOT NULL,
+    text_hash TEXT,
+    speaker_key TEXT,
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    deleted_at TEXT
+  )`,
+
+  // 原声分离素材：原声 / 人声 / 伴奏 / 对白 / 环境等
+  `CREATE TABLE IF NOT EXISTS episode_audio_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    source_hash TEXT,
+    url TEXT,
+    duration_ms INTEGER,
+    sample_rate INTEGER,
+    channels INTEGER,
+    engine TEXT,
+    model TEXT,
+    model_license TEXT,
+    confidence REAL,
+    status TEXT DEFAULT 'ready',
+    error TEXT,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL,
+    deleted_at TEXT
+  )`,
+
+  // 混音总线：dialogue / original / sfx / bgm / master
+  `CREATE TABLE IF NOT EXISTS audio_buses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    volume REAL DEFAULT 1.0,
+    muted INTEGER DEFAULT 0,
+    solo INTEGER DEFAULT 0,
+    ducking INTEGER DEFAULT 1,
+    duck_ratio REAL DEFAULT 6,
+    duck_attack_ms INTEGER DEFAULT 20,
+    duck_release_ms INTEGER DEFAULT 250,
+    lufs_target REAL,
+    limiter_ceiling REAL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (episode_id, key)
+  )`,
+
+  // 混音计划版本快照
+  `CREATE TABLE IF NOT EXISTS mix_revisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    revision_no INTEGER NOT NULL,
+    plan_json TEXT NOT NULL,
+    plan_hash TEXT,
+    note TEXT,
+    is_current INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    UNIQUE (episode_id, revision_no)
+  )`,
+
+  // 导出记录：混音 / 成片 / 分轨 / 字幕
+  `CREATE TABLE IF NOT EXISTS episode_exports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    preset TEXT,
+    params_json TEXT,
+    plan_revision_id INTEGER,
+    plan_hash TEXT,
+    source_video_hash TEXT,
+    subtitle_hash TEXT,
+    status TEXT DEFAULT 'pending',
+    progress INTEGER DEFAULT 0,
+    error TEXT,
+    output_url TEXT,
+    duration_ms INTEGER,
+    size_bytes INTEGER,
+    lufs REAL,
+    true_peak REAL,
+    lra REAL,
+    is_current INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    finished_at TEXT,
+    deleted_at TEXT
+  )`,
+
+  // 配音持久化任务（试听不落库；批量生成/分离/导出走这里）
+  `CREATE TABLE IF NOT EXISTS dubbing_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER,
+    kind TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    progress INTEGER DEFAULT 0,
+    step TEXT,
+    payload_json TEXT,
+    result_json TEXT,
+    error TEXT,
+    started_at TEXT,
+    finished_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
@@ -656,6 +835,17 @@ export const sqliteSchemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_character_voices_drama ON character_voices (drama_id, scope)`,
   `CREATE INDEX IF NOT EXISTS idx_lines_storyboard ON storyboard_lines (storyboard_id, line_no)`,
   `CREATE INDEX IF NOT EXISTS idx_lines_episode ON storyboard_lines (episode_id, start_ms)`,
+  `CREATE INDEX IF NOT EXISTS idx_line_takes_line ON line_takes (line_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_line_takes_active ON line_takes (line_id) WHERE is_active = 1`,
+  `CREATE INDEX IF NOT EXISTS idx_line_takes_episode_status ON line_takes (episode_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_voice_samples_voice ON voice_samples (voice_id, created_at)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_line_tombstones_origin ON line_tombstones (episode_id, origin_key)`,
+  `CREATE INDEX IF NOT EXISTS idx_audio_assets_episode ON episode_audio_assets (episode_id, kind, source_hash)`,
+  `CREATE INDEX IF NOT EXISTS idx_mix_revisions_episode ON mix_revisions (episode_id, revision_no)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_mix_revisions_current ON mix_revisions (episode_id) WHERE is_current = 1`,
+  `CREATE INDEX IF NOT EXISTS idx_episode_exports_episode ON episode_exports (episode_id, created_at)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_episode_exports_current ON episode_exports (episode_id, kind) WHERE is_current = 1`,
+  `CREATE INDEX IF NOT EXISTS idx_dubbing_jobs_episode ON dubbing_jobs (episode_id, kind, status)`,
   `CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_status ON pipeline_jobs (status, resource, priority)`,
   `CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_episode ON pipeline_jobs (episode_id)`,
   `CREATE INDEX IF NOT EXISTS idx_script_chapters_import ON script_chapters (import_id, chapter_index)`,
@@ -738,6 +928,37 @@ const SEED_SQL = 'INSERT INTO style_presets ("name", "value", "prompt", "descrip
 const UPGRADE_SQL = 'UPDATE style_presets SET "name" = ?, "prompt" = ?, "description" = ?, "sort_order" = ?, "updated_at" = ? WHERE "value" = ? AND "prompt" = ?'
 // 内容寻址下架：命中下架种子原文才删除
 const REMOVE_SQL = 'DELETE FROM style_presets WHERE "value" = ? AND "prompt" = ?'
+
+/**
+ * SQLite 不能直接移除 NOT NULL：按官方流程在事务内重建 storyboard_lines。
+ * 只在旧库的 storyboard_id 仍为 NOT NULL 时执行；行数不一致或外键校验失败即回滚。
+ */
+function rebuildStoryboardLinesIfNeeded(sqlite: Database.Database) {
+  const columns = sqlite.prepare('PRAGMA table_info(storyboard_lines)').all() as { name: string; notnull: number }[]
+  const storyboardId = columns.find((column) => column.name === 'storyboard_id')
+  if (!storyboardId || storyboardId.notnull === 0) return
+
+  const names = columns.map((column) => `"${column.name}"`)
+  const before = Number((sqlite.prepare('SELECT COUNT(*) AS count FROM storyboard_lines').get() as { count: number }).count)
+  sqlite.pragma('foreign_keys = OFF')
+  try {
+    sqlite.transaction(() => {
+      sqlite.exec('DROP TABLE IF EXISTS storyboard_lines_rebuild')
+      sqlite.exec(storyboardLinesDdl('storyboard_lines_rebuild').replace('CREATE TABLE IF NOT EXISTS', 'CREATE TABLE'))
+      sqlite.exec(`INSERT INTO storyboard_lines_rebuild (${names.join(', ')}) SELECT ${names.join(', ')} FROM storyboard_lines`)
+      sqlite.exec('DROP TABLE storyboard_lines')
+      sqlite.exec('ALTER TABLE storyboard_lines_rebuild RENAME TO storyboard_lines')
+      sqlite.exec('CREATE INDEX IF NOT EXISTS idx_lines_storyboard ON storyboard_lines (storyboard_id, line_no)')
+      sqlite.exec('CREATE INDEX IF NOT EXISTS idx_lines_episode ON storyboard_lines (episode_id, start_ms)')
+      const after = Number((sqlite.prepare('SELECT COUNT(*) AS count FROM storyboard_lines').get() as { count: number }).count)
+      if (after !== before) throw new Error(`storyboard_lines 重建前后行数不一致：${before} → ${after}`)
+    })()
+    const violations = sqlite.prepare('PRAGMA foreign_key_check').all()
+    if (violations.length > 0) throw new Error('storyboard_lines 重建后外键校验失败')
+  } finally {
+    sqlite.pragma('foreign_keys = ON')
+  }
+}
 
 export function initSqliteSchema(sqlite: Database.Database) {
   for (const statement of sqliteSchemaStatements) {
@@ -824,6 +1045,60 @@ export function initSqliteSchema(sqlite: Database.Database) {
   const lineColumns = new Set((sqlite.prepare('PRAGMA table_info(storyboard_lines)').all() as { name: string }[]).map(c => c.name))
   if (!lineColumns.has('voice_start_ms')) sqlite.exec('ALTER TABLE storyboard_lines ADD COLUMN voice_start_ms INTEGER')
   if (!lineColumns.has('voice_duration_ms')) sqlite.exec('ALTER TABLE storyboard_lines ADD COLUMN voice_duration_ms INTEGER')
+  // ===== 配音工作台：台词锚点/排序/修订字段；旧库重建为 storyboard_id 可空 =====
+  const workbenchLineColumns: Record<string, string> = {
+    anchor_type: "TEXT DEFAULT 'shot'",
+    sort_order: 'INTEGER DEFAULT 0',
+    origin_key: 'TEXT',
+    text_revision: 'INTEGER DEFAULT 1',
+    audio_stale: 'INTEGER DEFAULT 0',
+    active_take_id: 'INTEGER',
+    deleted_at: 'TEXT',
+    direction: 'TEXT',
+  }
+  for (const [name, type] of Object.entries(workbenchLineColumns)) {
+    if (!lineColumns.has(name)) {
+      sqlite.exec(`ALTER TABLE storyboard_lines ADD COLUMN ${name} ${type}`)
+      lineColumns.add(name)
+    }
+  }
+  rebuildStoryboardLinesIfNeeded(sqlite)
+  // 多轨混音增量字段：只加可空列/带默认值列，历史轨道与片段保持可读。
+  const trackColumns = new Set((sqlite.prepare('PRAGMA table_info(episode_audio_tracks)').all() as { name: string }[]).map(c => c.name))
+  const trackWorkbenchColumns: Record<string, string> = {
+    role: 'TEXT',
+    pan: 'REAL DEFAULT 0',
+    bus_id: 'INTEGER',
+    locked: 'INTEGER DEFAULT 0',
+    hidden: 'INTEGER DEFAULT 0',
+    color: 'TEXT',
+    height: 'INTEGER DEFAULT 72',
+    stem_asset_id: 'INTEGER',
+    duck_attack_ms: 'INTEGER DEFAULT 20',
+    duck_release_ms: 'INTEGER DEFAULT 250',
+  }
+  for (const [name, type] of Object.entries(trackWorkbenchColumns)) {
+    if (!trackColumns.has(name)) sqlite.exec(`ALTER TABLE episode_audio_tracks ADD COLUMN ${name} ${type}`)
+  }
+  const clipColumns = new Set((sqlite.prepare('PRAGMA table_info(episode_audio_clips)').all() as { name: string }[]).map(c => c.name))
+  const clipWorkbenchColumns: Record<string, string> = {
+    asset_id: 'INTEGER',
+    gain_db: 'REAL DEFAULT 0',
+    pan: 'REAL DEFAULT 0',
+    fade_curve: "TEXT DEFAULT 'linear'",
+    locked: 'INTEGER DEFAULT 0',
+    muted: 'INTEGER DEFAULT 0',
+    name: 'TEXT',
+    color: 'TEXT',
+    take_id: 'INTEGER',
+    follow_take: 'INTEGER DEFAULT 1',
+    loop: 'INTEGER DEFAULT 0',
+  }
+  for (const [name, type] of Object.entries(clipWorkbenchColumns)) {
+    if (!clipColumns.has(name)) sqlite.exec(`ALTER TABLE episode_audio_clips ADD COLUMN ${name} ${type}`)
+  }
+  if (!episodeColumns.has('mix_revision_id')) sqlite.exec('ALTER TABLE episodes ADD COLUMN mix_revision_id INTEGER')
+  if (!episodeColumns.has('last_extract_at')) sqlite.exec('ALTER TABLE episodes ADD COLUMN last_extract_at TEXT')
   // 项目级旁白音色与默认 BGM
   if (!dramaColumns.has('narrator_voice_id')) sqlite.exec('ALTER TABLE dramas ADD COLUMN narrator_voice_id INTEGER')
   if (!dramaColumns.has('bgm_url')) sqlite.exec('ALTER TABLE dramas ADD COLUMN bgm_url TEXT')
@@ -868,6 +1143,57 @@ export function initSqliteSchema(sqlite: Database.Database) {
     sqlite.exec(`DELETE FROM ${table} WHERE id NOT IN (SELECT MIN(id) FROM ${table} GROUP BY episode_id, ${assetColumn})`)
     sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_${table}_unique ON ${table} (episode_id, ${assetColumn})`)
   }
+  // ===== 配音工作台回填：旧音频生成首个 Take、轨道 role、每集默认总线 =====
+  const nowIso = new Date().toISOString()
+  sqlite.prepare(
+    `INSERT INTO line_takes (
+       line_id, episode_id, drama_id, take_no, text, speak_text, text_revision, voice_id,
+       params_json, context_mode, audio_url, duration_ms, hash, status, is_active, created_at
+     )
+     SELECT l.id, l.episode_id, l.drama_id, 1, l.text, l.speak_text, COALESCE(l.text_revision, 1), l.voice_id,
+            NULL, 'off', l.audio_url, l.audio_duration_ms, l.audio_hash, 'ready', 1, COALESCE(l.updated_at, ?)
+     FROM storyboard_lines l
+     WHERE l.audio_url IS NOT NULL AND l.status = 'ready' AND l.deleted_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM line_takes t WHERE t.line_id = l.id AND t.is_active = 1)`,
+  ).run(nowIso)
+  sqlite.exec(
+    `UPDATE storyboard_lines
+     SET active_take_id = (SELECT t.id FROM line_takes t WHERE t.line_id = storyboard_lines.id AND t.is_active = 1)
+     WHERE deleted_at IS NULL AND active_take_id IS NULL
+       AND EXISTS (SELECT 1 FROM line_takes t WHERE t.line_id = storyboard_lines.id AND t.is_active = 1)`,
+  )
+  sqlite.exec(
+    `UPDATE episode_audio_tracks
+     SET role = CASE kind
+       WHEN 'voice' THEN 'dialogue'
+       WHEN 'ambience' THEN 'ambience'
+       WHEN 'sfx' THEN 'sfx'
+       WHEN 'bgm' THEN 'bgm'
+       WHEN 'custom' THEN 'custom'
+       ELSE 'custom'
+     END
+     WHERE role IS NULL`,
+  )
+  const defaultBuses = [
+    { key: 'dialogue', name: '对白', ducking: 0, lufs: -16, ceiling: null },
+    { key: 'original', name: '原声', ducking: 1, lufs: null, ceiling: null },
+    { key: 'sfx', name: '音效', ducking: 0, lufs: null, ceiling: null },
+    { key: 'bgm', name: '配乐', ducking: 1, lufs: null, ceiling: null },
+    { key: 'master', name: '总输出', ducking: 0, lufs: -16, ceiling: -1.5 },
+  ]
+  const insertBus = sqlite.prepare(
+    `INSERT INTO audio_buses (
+       episode_id, key, name, volume, muted, solo, ducking, duck_ratio, duck_attack_ms, duck_release_ms,
+       lufs_target, limiter_ceiling, created_at, updated_at
+     )
+     SELECT e.id, ?, ?, 1, 0, 0, ?, 6, 20, 250, ?, ?, ?, ?
+     FROM episodes e
+     WHERE NOT EXISTS (SELECT 1 FROM audio_buses b WHERE b.episode_id = e.id AND b.key = ?)`,
+  )
+  for (const bus of defaultBuses) {
+    insertBus.run(bus.key, bus.name, bus.ducking, bus.lufs, bus.ceiling, nowIso, nowIso, bus.key)
+  }
+
   const insertSeed = sqlite.prepare(SEED_SQL)
   const upgradeSeed = sqlite.prepare(UPGRADE_SQL)
   const removeSeed = sqlite.prepare(REMOVE_SQL)

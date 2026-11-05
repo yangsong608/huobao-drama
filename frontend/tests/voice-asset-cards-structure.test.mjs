@@ -111,18 +111,18 @@ test('dubbing session consumes the shared voice store instead of owning voice st
   assert.doesNotMatch(session, /async function generateCharacterVoice/)
 })
 
-test('generate step re-synthesizes all lines with their current voices', () => {
-  assert.match(dubbingStage, /@click="resynthesizeAll"/)
-  assert.match(dubbingStage, /window\.confirm\(t\('workbench\.resynthesizeAllConfirm'\)\)/)
-  assert.match(dubbingStage, /synthesizeAll\(true\)/)
-  assert.match(session, /async function synthesizeAll\(force = false\)/)
-  assert.match(session, /dubbingAPI\.synthesizeAll\(episodeId, force\)/)
+test('generate step can force-regenerate all lines with their current voices', () => {
+  assert.match(dubbingStage, /@click="startGenerationBatch"/)
+  assert.match(dubbingStage, /window\.confirm\(t\('generate\.forceConfirm'\)\)/)
+  assert.match(dubbingStage, /force: batchForce\.value/)
+  assert.match(session, /async function synthesizeAll\(optionsBatch: SynthesizeAllOptions = \{\}\)/)
+  assert.match(session, /takeStore\.startBatch\(/)
   assert.doesNotMatch(dubbingStage, /@click="synthesizeAll"/)
   assert.match(dubbingStage, /@updated="onVoiceChanged"/)
   for (const name of ['zh', 'en', 'ja', 'ko']) {
     const messages = locale(name)
-    assert.ok(messages.workbench?.resynthesizeAll, `${name} missing workbench.resynthesizeAll`)
-    assert.ok(messages.workbench?.resynthesizeAllConfirm, `${name} missing workbench.resynthesizeAllConfirm`)
+    assert.ok(messages.generate?.force, `${name} missing generate.force`)
+    assert.ok(messages.generate?.forceConfirm, `${name} missing generate.forceConfirm`)
   }
 })
 

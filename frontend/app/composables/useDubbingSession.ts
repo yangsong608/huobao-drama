@@ -8,12 +8,37 @@ import {
   settingsAPI,
   type DubState,
   type DubbingDefaults,
+  type MergeDecision,
+  type MergePlan,
   type StoryboardLine,
   type TimelineCue,
   type VoiceProfile,
 } from '~/composables/useApi'
 import { toastError } from '~/composables/useToast'
+import { useLineTakes } from '~/composables/useLineTakes'
 import { useVoiceProfiles } from '~/composables/useVoiceProfiles'
+
+export interface SynthesizeAllOptions {
+  force?: boolean
+  filter?: 'pending' | 'failed' | 'audio_stale' | 'all'
+  contextMode?: 'off' | 'light' | 'deep'
+  concurrency?: number
+  lineIds?: number[] | null
+}
+
+export interface NewLinePayload {
+  text: string
+  speaker_type: 'dialogue' | 'narration' | 'inner'
+  character_id?: number | null
+  speaker_name?: string | null
+  direction?: string | null
+  anchor: {
+    type: 'shot' | 'absolute'
+    storyboard_id?: number | null
+    start_ms?: number
+    after_line_id?: number | null
+  }
+}
 
 /**
  * 配音会话：抽屉快速试听与左侧「配音」阶段共用同一份数据与动作。
@@ -49,10 +74,17 @@ export function useDubbingSession(options: {
   const timelineCues = ref<TimelineCue[]>([])
   const timelineTotalMs = ref(0)
   const videoUrl = ref('')
+  const mergePlan = ref<MergePlan | null>(null)
+  const mergePreviewing = ref(false)
+  const mergeApplying = ref(false)
   // 音色数据统一来自 useVoiceProfiles：配音步骤、资产弹窗、角色详情共用同一份状态。
   const voiceStore = useVoiceProfiles({
     dramaId: () => options.dramaId(),
     episodeId: () => options.episodeId(),
+  })
+  const takeStore = useLineTakes({
+    episodeId: () => options.episodeId(),
+    onChanged: () => options.onUpdated?.(),
   })
   const voiceProfiles = voiceStore.groups
   const narratorVoice = voiceStore.activeNarrator
@@ -310,32 +342,166 @@ export function useDubbingSession(options: {
     }
   }
 
-  async function synthesizeAll(force = false) {
+  async function addLine(payload: NewLinePayload): Promise<boolean> {
+    const episodeId = options.episodeId()
+    if (!episodeId) return false
+    saving.value = true
+    try {
+      await dubbingAPI.addLine(episodeId, payload)
+      await load()
+      toast.success(t('workbench.lineAdded'))
+      options.onUpdated?.()
+      return true
+    } catch (error) {
+      toastError(error)
+      return false
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** 软删除并给出撤销入口；撤销失败不吞掉原错误。 */
+  async function removeLine(line: StoryboardLine) {
+    const episodeId = options.episodeId()
+    if (!episodeId) return
+    try {
+      await dubbingAPI.deleteLine(line.id)
+      await load()
+      options.onUpdated?.()
+      toast.success(t('workbench.lineDeleted'), {
+        action: {
+          label: t('workbench.undo'),
+          onClick: () => { void restoreDeletedLine(line.id) },
+        },
+      })
+    } catch (error) {
+      toastError(error)
+    }
+  }
+
+  async function restoreDeletedLine(lineId: number) {
+    try {
+      await dubbingAPI.restoreLine(lineId)
+      await load()
+      toast.success(t('workbench.lineRestored'))
+      options.onUpdated?.()
+    } catch (error) {
+      toastError(error)
+    }
+  }
+
+  /** visibleIds 支持筛选视图：把台词移动到当前可见的相邻项前后。 */
+  async function moveLine(line: StoryboardLine, direction: -1 | 1, visibleIds?: number[]) {
+    const episodeId = options.episodeId()
+    if (!episodeId) return
+    const visible = visibleIds?.length ? visibleIds : lines.value.map(item => item.id)
+    const visibleIndex = visible.indexOf(line.id)
+    const neighborId = visibleIndex >= 0 ? visible[visibleIndex + direction] : undefined
+    const target = neighborId ? lines.value.find(item => item.id === neighborId) : null
+    if (!target) return
+    if ((target.storyboardId ?? null) !== (line.storyboardId ?? null)) {
+      toast.info(t('workbench.moveAcrossShot'))
+      return
+    }
+    const ordered = lines.value.map(item => item.id)
+    const from = ordered.indexOf(line.id)
+    if (from < 0) return
+    ordered.splice(from, 1)
+    const targetIndex = ordered.indexOf(target.id)
+    if (targetIndex < 0) return
+    ordered.splice(direction === 1 ? targetIndex + 1 : targetIndex, 0, line.id)
+    try {
+      await dubbingAPI.reorderLines(episodeId, ordered)
+      await load()
+      options.onUpdated?.()
+    } catch (error) {
+      toastError(error)
+    }
+  }
+
+  async function toggleLock(line: StoryboardLine) {
+    try {
+      await dubbingAPI.updateLine(line.id, { locked: !line.locked })
+      await load()
+      options.onUpdated?.()
+    } catch (error) {
+      toastError(error)
+    }
+  }
+
+  async function previewExtract(): Promise<MergePlan | null> {
+    const episodeId = options.episodeId()
+    if (!episodeId) return null
+    mergePreviewing.value = true
+    try {
+      const plan = await dubbingAPI.extractPreview(episodeId, { force: true })
+      mergePlan.value = plan
+      return plan
+    } catch (error) {
+      toastError(error)
+      return null
+    } finally {
+      mergePreviewing.value = false
+    }
+  }
+
+  async function applyExtract(decisions: MergeDecision[] = []): Promise<boolean> {
+    const episodeId = options.episodeId()
+    const plan = mergePlan.value
+    if (!episodeId || !plan) return false
+    mergeApplying.value = true
+    try {
+      const result = await dubbingAPI.extractApply(episodeId, plan.extractionId, decisions)
+      mergePlan.value = null
+      await load()
+      toast.success(t('workbench.extractApplyDone', {
+        inserted: result.inserted,
+        updated: result.updated,
+        removed: result.removed,
+      }))
+      options.onUpdated?.()
+      return true
+    } catch (error) {
+      toastError(error)
+      return false
+    } finally {
+      mergeApplying.value = false
+    }
+  }
+
+  function clearMergePlan() {
+    mergePlan.value = null
+  }
+
+  async function synthesizeAll(optionsBatch: SynthesizeAllOptions = {}) {
     const episodeId = options.episodeId()
     if (!episodeId) return
     synthesizing.value = true
     try {
-      const result: any = await dubbingAPI.synthesizeAll(episodeId, force)
+      const job = await takeStore.startBatch({
+        filter: optionsBatch.filter ?? (optionsBatch.force ? 'all' : 'pending'),
+        contextMode: optionsBatch.contextMode ?? 'light',
+        force: Boolean(optionsBatch.force),
+        ...(optionsBatch.concurrency ? { concurrency: optionsBatch.concurrency } : {}),
+        ...(optionsBatch.lineIds ? { lineIds: optionsBatch.lineIds } : {}),
+      })
+      if (!job) return
       serviceError.value = ''
+      if (job.failed && job.errors[0]) noteServiceError(new Error(job.errors[0].message))
       await Promise.all([load(), loadTimeline()])
-      toast.success(t('workbench.synthDone', { ok: result?.ok ?? 0, failed: result?.failed ?? 0 }))
+      toast.success(t('workbench.synthDone', { ok: job.ok, failed: job.failed }))
       options.onUpdated?.()
-    } catch (error) {
-      if (!noteServiceError(error)) toastError(error)
     } finally {
       synthesizing.value = false
     }
   }
 
   async function synthesizeLine(line: StoryboardLine) {
-    try {
-      await dubbingAPI.synthesizeLine(line.id)
-      serviceError.value = ''
-      await Promise.all([load(), loadTimeline()])
-      options.onUpdated?.()
-    } catch (error) {
-      if (!noteServiceError(error)) toastError(error)
-    }
+    const result = await takeStore.generate(line.id, { contextMode: 'light' })
+    if (!result) return
+    serviceError.value = ''
+    await Promise.all([load(), loadTimeline()])
+    options.onUpdated?.()
   }
 
   async function saveLineText(line: StoryboardLine, text: string) {
@@ -458,6 +624,9 @@ export function useDubbingSession(options: {
     timelineCues,
     timelineTotalMs,
     videoUrl,
+    mergePlan,
+    mergePreviewing,
+    mergeApplying,
     voiceProfiles,
     narratorVoice,
     voiceLoading,
@@ -493,8 +662,17 @@ export function useDubbingSession(options: {
     applyBgm,
     uploadBgm,
     extract,
+    addLine,
+    removeLine,
+    restoreDeletedLine,
+    moveLine,
+    toggleLock,
+    previewExtract,
+    applyExtract,
+    clearMergePlan,
     synthesizeAll,
     synthesizeLine,
+    takes: takeStore,
     saveLineText,
     assignLineVoice,
     assignVoiceToLines,

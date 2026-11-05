@@ -83,6 +83,10 @@ export const episodes = sqliteTable('episodes', {
   videoAudioMode: text('video_audio_mode').default('auto'),
   /** 单集 BGM */
   bgmUrl: text('bgm_url'),
+  /** 当前混音计划版本（mix_revisions.id） */
+  mixRevisionId: integer('mix_revision_id'),
+  /** 最近一次台词抽取时间 */
+  lastExtractAt: text('last_extract_at'),
   /** 来源小说章节（V3） */
   sourceChapterNo: integer('source_chapter_no'),
   sourcePartNo: integer('source_part_no'),
@@ -441,10 +445,10 @@ export const characterVoices = sqliteTable('character_voices', {
   deletedAt: text('deleted_at'),
 })
 
-/** 台词行：最小配音单位 */
+/** 台词行：最小配音单位；storyboard_id 为空表示绝对锚点 */
 export const storyboardLines = sqliteTable('storyboard_lines', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  storyboardId: integer('storyboard_id').notNull(),
+  storyboardId: integer('storyboard_id'),
   episodeId: integer('episode_id').notNull(),
   dramaId: integer('drama_id').notNull(),
   lineNo: integer('line_no').notNull(),
@@ -457,6 +461,7 @@ export const storyboardLines = sqliteTable('storyboard_lines', {
   speakText: text('speak_text'),
   subtitleText: text('subtitle_text'),
   emotion: text('emotion'),
+  direction: text('direction'),
   speed: real('speed').default(1.0),
   plannedStartMs: integer('planned_start_ms'),
   plannedEndMs: integer('planned_end_ms'),
@@ -476,6 +481,177 @@ export const storyboardLines = sqliteTable('storyboard_lines', {
   locked: integer('locked', { mode: 'boolean' }).default(false),
   needsReview: integer('needs_review', { mode: 'boolean' }).default(false),
   error: text('error'),
+  /** 锚点类型：shot（镜头内）/ absolute（整集绝对时间） */
+  anchorType: text('anchor_type').default('shot'),
+  sortOrder: integer('sort_order').default(0),
+  /** 自动抽取内容匹配键：镜头 + 规范化文本 + 说话人 + 重复序号 */
+  originKey: text('origin_key'),
+  textRevision: integer('text_revision').default(1),
+  /** 文本/音色已变化但旧音频保留，待重新生成 */
+  audioStale: integer('audio_stale', { mode: 'boolean' }).default(false),
+  activeTakeId: integer('active_take_id'),
+  deletedAt: text('deleted_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** 台词 Take：同一句的多次合成结果 */
+export const lineTakes = sqliteTable('line_takes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  lineId: integer('line_id').notNull(),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  takeNo: integer('take_no').notNull(),
+  text: text('text').notNull(),
+  speakText: text('speak_text'),
+  textRevision: integer('text_revision').default(1),
+  voiceId: integer('voice_id'),
+  voiceFingerprint: text('voice_fingerprint'),
+  provider: text('provider'),
+  model: text('model'),
+  configId: integer('config_id'),
+  paramsJson: text('params_json'),
+  contextMode: text('context_mode').default('off'),
+  contextJson: text('context_json'),
+  contextHash: text('context_hash'),
+  audioUrl: text('audio_url'),
+  durationMs: integer('duration_ms'),
+  hash: text('hash'),
+  status: text('status').default('generating'),
+  error: text('error'),
+  isActive: integer('is_active', { mode: 'boolean' }).default(false),
+  createdAt: text('created_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+/** 音色试听/自由试音历史 */
+export const voiceSamples = sqliteTable('voice_samples', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  voiceId: integer('voice_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  kind: text('kind').default('audition'),
+  text: text('text').notNull(),
+  textSource: text('text_source').default('default'),
+  seed: integer('seed'),
+  provider: text('provider'),
+  model: text('model'),
+  paramsJson: text('params_json'),
+  audioUrl: text('audio_url'),
+  durationMs: integer('duration_ms'),
+  hash: text('hash'),
+  status: text('status').default('generating'),
+  error: text('error'),
+  createdAt: text('created_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+/** 已删除台词墓碑：重抽时跳过 */
+export const lineTombstones = sqliteTable('line_tombstones', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  storyboardId: integer('storyboard_id'),
+  originKey: text('origin_key').notNull(),
+  textHash: text('text_hash'),
+  speakerKey: text('speaker_key'),
+  reason: text('reason'),
+  createdAt: text('created_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+/** 原声分离素材 */
+export const episodeAudioAssets = sqliteTable('episode_audio_assets', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  kind: text('kind').notNull(),
+  sourceHash: text('source_hash'),
+  url: text('url'),
+  durationMs: integer('duration_ms'),
+  sampleRate: integer('sample_rate'),
+  channels: integer('channels'),
+  engine: text('engine'),
+  model: text('model'),
+  modelLicense: text('model_license'),
+  confidence: real('confidence'),
+  status: text('status').default('ready'),
+  error: text('error'),
+  metadataJson: text('metadata_json'),
+  createdAt: text('created_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+/** 混音总线 */
+export const audioBuses = sqliteTable('audio_buses', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  key: text('key').notNull(),
+  name: text('name').notNull(),
+  volume: real('volume').default(1),
+  muted: integer('muted', { mode: 'boolean' }).default(false),
+  solo: integer('solo', { mode: 'boolean' }).default(false),
+  ducking: integer('ducking', { mode: 'boolean' }).default(true),
+  duckRatio: real('duck_ratio').default(6),
+  duckAttackMs: integer('duck_attack_ms').default(20),
+  duckReleaseMs: integer('duck_release_ms').default(250),
+  lufsTarget: real('lufs_target'),
+  limiterCeiling: real('limiter_ceiling'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** 混音计划版本 */
+export const mixRevisions = sqliteTable('mix_revisions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  revisionNo: integer('revision_no').notNull(),
+  planJson: text('plan_json').notNull(),
+  planHash: text('plan_hash'),
+  note: text('note'),
+  isCurrent: integer('is_current', { mode: 'boolean' }).default(false),
+  createdAt: text('created_at').notNull(),
+})
+
+/** 导出记录 */
+export const episodeExports = sqliteTable('episode_exports', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  kind: text('kind').notNull(),
+  preset: text('preset'),
+  paramsJson: text('params_json'),
+  planRevisionId: integer('plan_revision_id'),
+  planHash: text('plan_hash'),
+  sourceVideoHash: text('source_video_hash'),
+  subtitleHash: text('subtitle_hash'),
+  status: text('status').default('pending'),
+  progress: integer('progress').default(0),
+  error: text('error'),
+  outputUrl: text('output_url'),
+  durationMs: integer('duration_ms'),
+  sizeBytes: integer('size_bytes'),
+  lufs: real('lufs'),
+  truePeak: real('true_peak'),
+  lra: real('lra'),
+  isCurrent: integer('is_current', { mode: 'boolean' }).default(false),
+  createdAt: text('created_at').notNull(),
+  finishedAt: text('finished_at'),
+  deletedAt: text('deleted_at'),
+})
+
+/** 配音持久化任务 */
+export const dubbingJobs = sqliteTable('dubbing_jobs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id'),
+  kind: text('kind').notNull(),
+  status: text('status').default('pending'),
+  progress: integer('progress').default(0),
+  step: text('step'),
+  payloadJson: text('payload_json'),
+  resultJson: text('result_json'),
+  error: text('error'),
+  startedAt: text('started_at'),
+  finishedAt: text('finished_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })
@@ -486,12 +662,23 @@ export const episodeAudioTracks = sqliteTable('episode_audio_tracks', {
   episodeId: integer('episode_id').notNull(),
   dramaId: integer('drama_id').notNull(),
   kind: text('kind').notNull().default('ambience'),
+  /** 新代码以 role 为准；kind 仅兼容旧数据 */
+  role: text('role'),
   name: text('name').notNull(),
   volume: real('volume').default(1),
+  pan: real('pan').default(0),
+  busId: integer('bus_id'),
   muted: integer('muted', { mode: 'boolean' }).default(false),
   solo: integer('solo', { mode: 'boolean' }).default(false),
   ducking: integer('ducking', { mode: 'boolean' }).default(true),
   loop: integer('loop', { mode: 'boolean' }).default(false),
+  locked: integer('locked', { mode: 'boolean' }).default(false),
+  hidden: integer('hidden', { mode: 'boolean' }).default(false),
+  color: text('color'),
+  height: integer('height').default(72),
+  stemAssetId: integer('stem_asset_id'),
+  duckAttackMs: integer('duck_attack_ms').default(20),
+  duckReleaseMs: integer('duck_release_ms').default(250),
   sortOrder: integer('sort_order').default(0),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
@@ -502,14 +689,25 @@ export const episodeAudioClips = sqliteTable('episode_audio_clips', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   trackId: integer('track_id').notNull(),
   episodeId: integer('episode_id').notNull(),
+  assetId: integer('asset_id'),
   startMs: integer('start_ms').notNull(),
   endMs: integer('end_ms').notNull(),
   sourceStartMs: integer('source_start_ms').default(0),
+  gainDb: real('gain_db').default(0),
+  pan: real('pan').default(0),
   fadeInMs: integer('fade_in_ms').default(0),
   fadeOutMs: integer('fade_out_ms').default(0),
+  fadeCurve: text('fade_curve').default('linear'),
+  locked: integer('locked', { mode: 'boolean' }).default(false),
+  muted: integer('muted', { mode: 'boolean' }).default(false),
+  name: text('name'),
+  color: text('color'),
   sourceUrl: text('source_url'),
   text: text('text'),
   voiceId: integer('voice_id'),
+  takeId: integer('take_id'),
+  followTake: integer('follow_take', { mode: 'boolean' }).default(true),
+  loop: integer('loop', { mode: 'boolean' }).default(false),
   audioUrl: text('audio_url'),
   status: text('status').default('ready'),
   error: text('error'),

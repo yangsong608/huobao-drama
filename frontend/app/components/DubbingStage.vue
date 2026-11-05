@@ -35,7 +35,7 @@
       </button>
     </div>
 
-    <div class="dub-body">
+    <div :class="['dub-body', { 'is-generate': currentStep === 2 }]">
       <section class="dub-main">
         <!-- 1. 台词准备 -->
         <template v-if="currentStep === 0">
@@ -53,9 +53,14 @@
               </button>
             </div>
             <div class="dub-toolbar-actions">
-              <button class="btn btn-sm" type="button" :disabled="busy || !episodeId" @click="extract">
-                <Loader2 v-if="loading" :size="11" class="animate-spin" />
-                {{ t('workbench.extract') }}
+              <button class="btn btn-sm" type="button" :disabled="busy || !episodeId" @click="showLineEditor = true">
+                <Plus :size="11" />
+                {{ t('workbench.addLine') }}
+              </button>
+              <button class="btn btn-sm is-primary" type="button" :disabled="busy || !episodeId || mergePreviewing" @click="openExtractPreview">
+                <Loader2 v-if="mergePreviewing" :size="11" class="animate-spin" />
+                <ScanSearch v-else :size="11" />
+                {{ t('workbench.extractPreview') }}
               </button>
             </div>
           </div>
@@ -64,41 +69,35 @@
             <ListTodo :size="28" />
             <div class="dub-empty-title">{{ t('workbench.stepEmptyLines') }}</div>
             <div class="dub-empty-desc">{{ t('workbench.empty') }}</div>
-            <button class="btn btn-primary btn-sm" type="button" @click="emit('go-stage', 'videos')">
-              {{ t('workbench.gotoVideos') }}
-            </button>
+            <div class="dub-empty-actions">
+              <button class="btn btn-primary btn-sm" type="button" @click="showLineEditor = true">{{ t('workbench.addLine') }}</button>
+              <button class="btn btn-sm" type="button" @click="emit('go-stage', 'videos')">
+                {{ t('workbench.gotoVideos') }}
+              </button>
+            </div>
           </div>
           <template v-else>
             <div v-if="voiceFallbackNotice" class="dub-notice is-warn">
               <AlertCircle :size="13" />
               <span>{{ t('workbench.voiceFallback') }}</span>
             </div>
-            <div class="dub-batch-bar">
-              <span class="dub-batch-count">{{ t('workbench.batchSelectHint', { n: selectedLineIds.length }) }}</span>
-              <BaseSelect v-model="batchVoiceId" :options="allVoiceOptions" class="dub-batch-select" />
-              <button class="btn btn-sm" type="button" :disabled="!selectedLineIds.length || batchAssigning" @click="applyBatchVoice">
-                <Loader2 v-if="batchAssigning" :size="11" class="animate-spin" />
-                {{ t('workbench.batchAssign') }}
-              </button>
-            </div>
             <LineList
-              ref="lineListRef"
               :lines="filteredLines"
               :busy="busy"
               :saving="saving"
               :empty-text="t('workbench.empty')"
               show-issues
-              selectable
+              mode="script"
               :missing-voice-character-ids="missingVoiceCharacterIds"
               :narrator-missing-voice="narratorMissingVoice"
               :voice-groups="voiceProfiles"
               :narrator-voice="narratorVoice"
               @play="playLine"
-              @synthesize="synthesizeLine"
               @save="saveLineText"
               @locate="locateLine"
-              @assign-voice="assignLineVoice"
-              @selection-change="selectedLineIds = $event"
+              @move="handleMove"
+              @remove="removeLine"
+              @toggle-lock="toggleLock"
             />
             <div class="dub-next-bar">
               <span class="dub-next-copy">
@@ -116,6 +115,18 @@
         <template v-else-if="currentStep === 1">
           <div class="dub-toolbar">
             <span class="dub-toolbar-title">{{ t('workbench.voiceSummary', { ready: voiceReadyCount, total: voiceTotalCount }) }}</span>
+            <div class="dub-tabs">
+              <button
+                type="button"
+                :class="['dub-tab', { on: voiceView === 'profiles' }]"
+                @click="voiceView = 'profiles'"
+              >{{ t('workbench.voiceViewProfiles') }}</button>
+              <button
+                type="button"
+                :class="['dub-tab', { on: voiceView === 'lines' }]"
+                @click="voiceView = 'lines'"
+              >{{ t('workbench.voiceViewLines') }}</button>
+            </div>
             <div class="dub-toolbar-actions">
               <button class="btn btn-sm" type="button" :disabled="voiceLoading" @click="loadVoices">
                 <Loader2 v-if="voiceLoading" :size="11" class="animate-spin" />
@@ -133,34 +144,77 @@
             </div>
           </div>
 
-          <div v-if="!voiceTotalCount" class="dub-empty">
-            <Mic :size="28" />
-            <div class="dub-empty-title">{{ t('workbench.stepEmptyVoices') }}</div>
-            <div class="dub-empty-desc">{{ t('workbench.empty') }}</div>
-            <button class="btn btn-primary btn-sm" type="button" @click="goStep(0)">{{ t('workbench.stepLines') }}</button>
-          </div>
-          <div v-else class="dub-voice-list">
-            <VoiceProfileCard
-              v-if="narratorLineCount"
-              scope="narrator"
-              :drama-id="dramaId"
-              :episode-id="episodeId"
-              :name="t('workbench.narrator')"
-              :line-count="narratorLineCount"
-              @updated="onVoiceChanged"
+          <template v-if="voiceView === 'profiles'">
+            <div v-if="!voiceTotalCount" class="dub-empty">
+              <Mic :size="28" />
+              <div class="dub-empty-title">{{ t('workbench.stepEmptyVoices') }}</div>
+              <div class="dub-empty-desc">{{ t('workbench.empty') }}</div>
+              <button class="btn btn-primary btn-sm" type="button" @click="goStep(0)">{{ t('workbench.stepLines') }}</button>
+            </div>
+            <div v-else class="dub-voice-list">
+              <VoiceProfileCard
+                v-if="narratorLineCount"
+                scope="narrator"
+                :drama-id="dramaId"
+                :episode-id="episodeId"
+                :name="t('workbench.narrator')"
+                :line-count="narratorLineCount"
+                @updated="onVoiceChanged"
+              />
+              <VoiceProfileCard
+                v-for="speaker in dialogueSpeakers"
+                :key="speaker.characterId"
+                scope="character"
+                :drama-id="dramaId"
+                :episode-id="episodeId"
+                :character-id="speaker.characterId"
+                :name="speaker.name"
+                :line-count="speaker.lineCount"
+                @updated="onVoiceChanged"
+              />
+            </div>
+          </template>
+          <template v-else>
+            <div class="dub-filters">
+              <button
+                v-for="filter in lineFilters"
+                :key="filter.key"
+                type="button"
+                :class="['dub-filter', { on: lineFilter === filter.key }]"
+                @click="lineFilter = filter.key"
+              >
+                {{ filter.label }}
+                <span class="dub-filter-count">{{ filter.count }}</span>
+              </button>
+            </div>
+            <div class="dub-batch-bar">
+              <span class="dub-batch-count">{{ t('workbench.batchSelectHint', { n: selectedLineIds.length }) }}</span>
+              <BaseSelect v-model="batchVoiceId" :options="allVoiceOptions" class="dub-batch-select" />
+              <button class="btn btn-sm" type="button" :disabled="!selectedLineIds.length || batchAssigning" @click="applyBatchVoice">
+                <Loader2 v-if="batchAssigning" :size="11" class="animate-spin" />
+                {{ t('workbench.batchAssign') }}
+              </button>
+            </div>
+            <LineList
+              ref="lineListRef"
+              :lines="filteredLines"
+              :busy="busy"
+              :saving="saving"
+              :empty-text="t('workbench.empty')"
+              mode="voice"
+              selectable
+              show-issues
+              :missing-voice-character-ids="missingVoiceCharacterIds"
+              :narrator-missing-voice="narratorMissingVoice"
+              :voice-groups="voiceProfiles"
+              :narrator-voice="narratorVoice"
+              @play="playLine"
+              @save="saveLineText"
+              @locate="locateLine"
+              @assign-voice="assignLineVoice"
+              @selection-change="selectedLineIds = $event"
             />
-            <VoiceProfileCard
-              v-for="speaker in dialogueSpeakers"
-              :key="speaker.characterId"
-              scope="character"
-              :drama-id="dramaId"
-              :episode-id="episodeId"
-              :character-id="speaker.characterId"
-              :name="speaker.name"
-              :line-count="speaker.lineCount"
-              @updated="onVoiceChanged"
-            />
-          </div>
+          </template>
           <div class="dub-next-bar">
             <span class="dub-next-copy">
               {{ missingVoiceSpeakers.length ? t('workbench.voiceMissingBatchHint', { n: missingVoiceSpeakers.length }) : t('workbench.voiceAllReady') }}
@@ -192,30 +246,68 @@
                 v-if="failedCount"
                 class="btn btn-sm"
                 type="button"
-                :disabled="synthesizing || retryingFailed"
+                :disabled="generationRunning || retryingFailed"
                 @click="retryFailed"
               >
                 <Loader2 v-if="retryingFailed" :size="11" class="animate-spin" />
                 {{ t('workbench.retryFailed') }}
               </button>
-              <button
-                class="btn btn-sm"
-                type="button"
-                :disabled="synthesizing || !lines.length"
-                @click="resynthesizeAll"
-              >
-                {{ t('workbench.resynthesizeAll') }}
-              </button>
-              <button
-                class="btn btn-sm is-primary"
-                type="button"
-                :disabled="synthesizing || !lines.length"
-                @click="synthesizeAll()"
-              >
-                <Loader2 v-if="synthesizing" :size="11" class="animate-spin" />
-                {{ t('workbench.synthesizeAll') }}
-              </button>
             </div>
+          </div>
+
+          <div class="dub-gen-batch">
+            <div class="dub-gen-batch-row">
+              <label class="dub-gen-field">
+                <span>{{ t('generate.filter') }}</span>
+                <BaseSelect v-model="batchFilter" :options="batchFilterOptions" />
+              </label>
+              <label class="dub-gen-field">
+                <span>{{ t('generate.contextMode') }}</span>
+                <BaseSelect v-model="batchContextMode" :options="batchContextOptions" />
+              </label>
+              <label class="dub-gen-field is-narrow">
+                <span>{{ t('generate.concurrency') }}</span>
+                <BaseSelect v-model="batchConcurrency" :options="batchConcurrencyOptions" />
+              </label>
+              <label class="dub-gen-check">
+                <input v-model="batchForce" type="checkbox" />
+                <span>{{ t('generate.force') }}</span>
+              </label>
+              <div class="dub-gen-batch-actions">
+                <button
+                  v-if="!generationRunning"
+                  class="btn btn-sm is-primary"
+                  type="button"
+                  :disabled="!lines.length"
+                  @click="startGenerationBatch"
+                >
+                  <Play :size="11" />
+                  {{ t('generate.start') }}
+                </button>
+                <button v-else class="btn btn-sm" type="button" @click="cancelGenerationBatch">
+                  {{ t('generate.cancel') }}
+                </button>
+              </div>
+            </div>
+            <div v-if="batchJob" class="dub-gen-batch-progress">
+              <div class="dub-bar"><span :style="{ width: batchProgress + '%' }" /></div>
+              <div class="dub-gen-batch-copy">
+                <span>{{ t('generate.summary', {
+                  done: batchJob.done,
+                  total: batchJob.total,
+                  ok: batchJob.ok,
+                  failed: batchJob.failed,
+                  skipped: batchJob.skipped,
+                  cached: batchJob.cached,
+                }) }}</span>
+                <span v-if="batchJob.status === 'running' && batchJob.currentLineId">
+                  {{ t('generate.progressNote', { id: batchJob.currentLineId }) }}
+                </span>
+                <span v-else-if="batchJob.status === 'cancelled'">{{ t('generate.cancelled') }}</span>
+                <span v-else-if="batchJob.status === 'done'">{{ t('generate.done') }}</span>
+              </div>
+            </div>
+            <p v-else class="dub-hint">{{ t('generate.startHint') }}</p>
           </div>
 
           <div class="dub-generation-summary">
@@ -231,9 +323,13 @@
             :busy="busy"
             :saving="saving"
             :empty-text="t('workbench.genEmpty')"
+            mode="generate"
+            :active-line-id="activeLineId"
+            :take-counts="takeCounts"
+            :generating-ids="generatingLineIds"
             @play="playLine"
             @synthesize="synthesizeLine"
-            @save="saveLineText"
+            @inspect="inspectLine"
             @locate="locateLine"
           />
           <div class="dub-next-bar">
@@ -302,15 +398,14 @@
                 <p class="dub-hint">{{ t('workbench.mixHint') }}</p>
               </aside>
             </div>
-            <AudioMixBoard
+            <MixStage
               :episode-id="episodeId"
-              :bgm-items="bgmItems"
-              :voice-options="allVoiceOptions"
+              :drama-id="dramaId"
               :duration-ms="timelineTotalMs"
-              :bgm-url="selectedBgmUrl"
-              :bgm-volume="bgmVolumePct / 100"
-              :original-audio="originalAudio"
-              :ducking-ratio="duckingRatio"
+              :line-texts="mixLineTexts"
+              :line-numbers="mixLineNumbers"
+              @locate-line="locateMixLine"
+              @regenerate-line="regenerateMixLine"
             />
             <div class="dub-next-bar">
               <span class="dub-next-copy">{{ t('workbench.previewDoneHint') }}</span>
@@ -322,57 +417,34 @@
           </div>
         </template>
 
-        <!-- 5. 导出 -->
+        <!-- 5. 合成导出 -->
         <template v-else>
-          <div class="dub-export-grid">
-            <section class="dub-export-card">
-              <h3 class="dub-card-title">{{ t('workbench.startDub') }}</h3>
-              <div class="dub-export-status">
-                <span :class="['dub-chip', `is-${state?.status || 'idle'}`]">{{ statusLabel }}</span>
-                <span class="dub-hint">{{ t('workbench.exportReadyCount', { ready: readyCount, total: lines.length }) }}</span>
-              </div>
-              <div v-if="state?.status === 'running'" class="dub-progress">
-                <div class="dub-bar"><span :style="{ width: (state.progress || 0) + '%' }" /></div>
-                <span>{{ state.progress }}% · {{ state.note }}</span>
-              </div>
-              <p v-else-if="state?.error" class="dub-error">{{ state.error }}</p>
-              <p v-else-if="state?.status === 'done'" class="dub-ok">{{ t('workbench.doneHint') }}</p>
-              <div class="dub-export-actions">
-                <button
-                  v-if="state?.status !== 'running'"
-                  class="btn btn-primary btn-sm"
-                  type="button"
-                  :disabled="busy || !readyCount"
-                  @click="startDub"
-                >
-                  <Play :size="11" />
-                  {{ t('workbench.startDub') }}
-                </button>
-                <button v-else class="btn btn-sm" type="button" @click="stopDub">{{ t('workbench.stopDub') }}</button>
-                <a v-if="state?.outputUrl" class="dub-link" :href="'/' + state.outputUrl" target="_blank" rel="noreferrer">
-                  {{ t('workbench.openVideo') }}
-                </a>
-              </div>
-              <p class="dub-hint">{{ t('workbench.startDubHint') }}</p>
-            </section>
-
-            <section class="dub-export-card">
-              <h3 class="dub-card-title">{{ t('workbench.subtitleTimeline') }}</h3>
-              <div class="dub-export-actions">
-                <button class="btn btn-sm" type="button" :disabled="busy || !lines.length" @click="exportSubtitle('srt')">SRT</button>
-                <button class="btn btn-sm" type="button" :disabled="busy || !lines.length" @click="exportSubtitle('ass')">ASS</button>
-              </div>
-              <p class="dub-hint">{{ t('workbench.exportHint') }}</p>
-              <button class="btn btn-sm" type="button" @click="emit('go-stage', 'export')">
-                {{ t('workbench.goExportStage') }}
-                <ArrowRight :size="11" />
-              </button>
-            </section>
-          </div>
+          <ExportStage
+            :episode-id="episodeId"
+            :drama-id="dramaId"
+            @go-stage="goStep"
+            @changed="exportDone = $event"
+          />
         </template>
       </section>
 
-      <aside class="dub-inspector">
+      <aside v-if="currentStep === 2" class="dub-inspector is-take">
+        <TakeInspector
+          :line="activeLine"
+          :takes="activeTakes"
+          :preview="activePreview"
+          :generating="generatingActive"
+          :analyzing="analyzingLine"
+          :activating-take-id="activatingTakeId"
+          :removing-take-id="removingTakeId"
+          @preview="requestTakePreview"
+          @analyze="analyzeTakeContext"
+          @generate="generateActiveTake"
+          @activate="activateTake"
+          @remove="removeTake"
+        />
+      </aside>
+      <aside v-else class="dub-inspector">
         <section class="dub-inspector-card">
           <div class="dub-inspector-head">
             <h4>{{ stepDefs[currentStep].label }}</h4>
@@ -439,6 +511,22 @@
       </div>
       <audio ref="player" class="dub-player-audio" controls preload="none" />
     </footer>
+
+    <LineEditorDialog
+      :open="showLineEditor"
+      :episode-id="episodeId"
+      :lines="lines"
+      :submitting="saving"
+      @close="showLineEditor = false"
+      @submit="submitNewLine"
+    />
+    <DialogueMergeDialog
+      :open="showMergeDialog"
+      :plan="mergePlan"
+      :applying="mergeApplying"
+      @close="closeMergeDialog"
+      @apply="applyMerge"
+    />
   </div>
 </template>
 
@@ -454,16 +542,23 @@ import {
   Loader2,
   Mic,
   Play,
+  Plus,
   RefreshCw,
+  ScanSearch,
   SlidersHorizontal,
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import type { StoryboardLine } from '~/composables/useApi'
+import type { MergeDecision, StoryboardLine, TakeOverrides } from '~/composables/useApi'
+import type { NewLinePayload } from '~/composables/useDubbingSession'
 import BaseSelect from '~/components/BaseSelect.vue'
-import AudioMixBoard from '~/components/AudioMixBoard.vue'
+import DialogueMergeDialog from '~/components/DialogueMergeDialog.vue'
+import ExportStage from '~/components/ExportStage.vue'
+import LineEditorDialog from '~/components/LineEditorDialog.vue'
 import LineList from '~/components/LineList.vue'
+import MixStage from '~/components/MixStage.vue'
 import SubtitlePreview from '~/components/SubtitlePreview.vue'
+import TakeInspector from '~/components/TakeInspector.vue'
 
 const props = defineProps<{
   episodeId: number | null
@@ -509,6 +604,7 @@ const {
   originalOptions,
   bgmOptions,
   serviceBanner,
+  serviceError,
   dialogueSpeakers,
   narratorLineCount,
   voiceProfiles,
@@ -527,22 +623,32 @@ const {
   timelineCues,
   timelineTotalMs,
   videoUrl,
+  mergePlan,
+  mergePreviewing,
+  mergeApplying,
   load,
   loadVoices,
   loadTimeline,
   applyBgm,
   uploadBgm,
-  extract,
+  addLine,
+  removeLine,
+  moveLine,
+  toggleLock,
+  previewExtract,
+  applyExtract,
+  clearMergePlan,
   synthesizeAll,
   synthesizeLine,
+  takes,
   saveLineText,
   assignLineVoice,
   assignVoiceToLines,
-  startDub,
-  stopDub,
-  exportSubtitle,
   generateMissingVoices,
 } = session
+
+const exportDone = ref(false)
+watch(() => props.episodeId, () => { exportDone.value = false })
 
 const stepDefs = computed(() => [
   { key: 'lines', label: t('workbench.stepLines'), hint: t('workbench.stepHintLines'), icon: ListTodo },
@@ -553,26 +659,39 @@ const stepDefs = computed(() => [
 ])
 
 const currentStep = computed(() => Math.max(0, Math.min(props.step || 0, stepDefs.value.length - 1)))
-const selectedBgmUrl = computed(() => bgmItems.value.find(item => item.name === bgmName.value)?.url || null)
+const mixLineTexts = computed<Record<number, string>>(() => {
+  const map: Record<number, string> = {}
+  for (const line of lines.value) map[line.id] = line.text
+  return map
+})
+const mixLineNumbers = computed<Record<number, number>>(() => {
+  const map: Record<number, number> = {}
+  for (const line of lines.value) map[line.id] = line.lineNo
+  return map
+})
 const stepDone = (index: number) => {
   if (index === 0) return lines.value.length > 0 && emptyLines.value.length === 0
   if (index === 1) return voiceTotalCount.value > 0 && voiceReadyCount.value === voiceTotalCount.value
   if (index === 2) return lines.value.length > 0 && readyCount.value === lines.value.length
   if (index === 3) return timelineCues.value.length > 0
-  return state.value?.status === 'done' || Boolean(state.value?.outputUrl)
+  return exportDone.value || state.value?.status === 'done' || Boolean(state.value?.outputUrl)
 }
 
-function goStep(index: number) {
+const stageIndex: Record<string, number> = { lines: 0, voices: 1, generate: 2, preview: 3, export: 4 }
+function goStep(index: number | string) {
+  if (typeof index === 'string') {
+    const mapped = stageIndex[index]
+    if (mapped === undefined) {
+      emit('go-stage', index)
+      return
+    }
+    index = mapped
+  }
   if (index < 0 || index >= stepDefs.value.length) return
   emit('update:step', index)
   if (index === 3) void loadTimeline()
 }
 function nextStep() { goStep(currentStep.value + 1) }
-function resynthesizeAll() {
-  if (!lines.value.length) return
-  if (!window.confirm(t('workbench.resynthesizeAllConfirm'))) return
-  void synthesizeAll(true)
-}
 async function onVoiceChanged() {
   await Promise.all([load(), loadVoices()])
 }
@@ -610,6 +729,35 @@ async function applyBatchVoice() {
   }
 }
 
+const voiceView = ref<'profiles' | 'lines'>('profiles')
+const showLineEditor = ref(false)
+const showMergeDialog = ref(false)
+
+function handleMove(line: StoryboardLine, direction: -1 | 1) {
+  void moveLine(line, direction, filteredLines.value.map(item => item.id))
+}
+
+async function submitNewLine(payload: NewLinePayload) {
+  const ok = await addLine(payload)
+  if (ok) showLineEditor.value = false
+}
+
+async function openExtractPreview() {
+  const plan = await previewExtract()
+  if (plan) showMergeDialog.value = true
+}
+
+async function applyMerge(decisions: MergeDecision[]) {
+  const ok = await applyExtract(decisions)
+  if (ok) showMergeDialog.value = false
+}
+
+function closeMergeDialog() {
+  if (mergeApplying.value) return
+  showMergeDialog.value = false
+  clearMergePlan()
+}
+
 const genFilter = ref<'all' | 'pending' | 'failed' | 'ready'>('all')
 const genFilters = computed(() => [
   { key: 'all' as const, label: t('workbench.filterAll'), count: lines.value.length },
@@ -624,7 +772,121 @@ const genLines = computed(() => {
   return lines.value
 })
 
+const batchFilter = ref<'pending' | 'failed' | 'audio_stale' | 'all'>('pending')
+const batchFilterOptions = computed(() => [
+  { label: t('generate.filterPending'), value: 'pending' },
+  { label: t('generate.filterFailed'), value: 'failed' },
+  { label: t('generate.filterStale'), value: 'audio_stale' },
+  { label: t('generate.filterAll'), value: 'all' },
+])
+const batchContextMode = ref<'off' | 'light' | 'deep'>('light')
+const batchContextOptions = computed(() => [
+  { label: t('take.modeOff'), value: 'off' },
+  { label: t('take.modeLight'), value: 'light' },
+  { label: t('take.modeDeep'), value: 'deep' },
+])
+const batchConcurrency = ref(2)
+const batchConcurrencyOptions = [1, 2, 3, 4].map(value => ({
+  label: t('generate.concurrencyValue', { n: value }),
+  value,
+}))
+const batchForce = ref(false)
 const retryingFailed = ref(false)
+const batchJob = computed(() => takes.batchJob.value)
+const batchProgress = computed(() => takes.batchProgress.value)
+const generationRunning = computed(() =>
+  synthesizing.value || takes.batchRunning.value || retryingFailed.value)
+
+function startGenerationBatch() {
+  if (!lines.value.length || generationRunning.value) return
+  if (batchForce.value && !window.confirm(t('generate.forceConfirm'))) return
+  void synthesizeAll({
+    filter: batchFilter.value,
+    contextMode: batchContextMode.value,
+    force: batchForce.value,
+    concurrency: batchConcurrency.value,
+  })
+}
+function cancelGenerationBatch() {
+  void takes.cancelBatch()
+}
+
+const activeLineId = ref<number | null>(null)
+const activeLine = computed(() => lines.value.find(line => line.id === activeLineId.value) || null)
+const activeTakes = computed(() => activeLine.value ? takes.takesFor(activeLine.value.id) : [])
+const activePreview = computed(() => activeLine.value ? takes.previewFor(activeLine.value.id) : null)
+const generatingActive = computed(() => activeLine.value ? takes.isGenerating(activeLine.value.id) : false)
+const generatingLineIds = computed(() => takes.generatingLineIds.value)
+const activatingTakeId = computed(() => takes.activatingTakeId.value)
+const removingTakeId = computed(() => takes.removingTakeId.value)
+const analyzingLine = ref(false)
+const takeCounts = computed(() => {
+  const counts: Record<number, number> = {}
+  for (const line of lines.value) {
+    const count = takes.takesFor(line.id).length
+    if (count) counts[line.id] = count
+  }
+  return counts
+})
+
+function inspectLine(line: StoryboardLine) {
+  activeLineId.value = line.id
+  selectedLine.value = line
+  void Promise.all([
+    takes.loadTakes(line.id),
+    takes.previewContext(line.id, 'light'),
+  ])
+}
+
+async function requestTakePreview(mode: 'off' | 'light' | 'deep') {
+  if (!activeLine.value) return
+  analyzingLine.value = mode === 'deep'
+  try {
+    await takes.previewContext(activeLine.value.id, mode)
+  } finally {
+    analyzingLine.value = false
+  }
+}
+
+async function analyzeTakeContext() {
+  await requestTakePreview('deep')
+}
+
+async function generateActiveTake(payload: { mode: 'off' | 'light' | 'deep'; overrides: TakeOverrides }) {
+  if (!activeLine.value) return
+  const result = await takes.generate(activeLine.value.id, {
+    contextMode: payload.mode,
+    overrides: payload.overrides,
+    force: true,
+  })
+  if (!result) return
+  serviceError.value = ''
+  await Promise.all([load(), loadTimeline()])
+}
+
+async function activateTake(takeId: number) {
+  const take = await takes.activate(takeId)
+  if (take) await Promise.all([load(), loadTimeline()])
+}
+
+async function removeTake(takeId: number) {
+  const removed = await takes.remove(takeId)
+  if (removed) await Promise.all([load(), loadTimeline()])
+}
+
+watch(
+  [() => currentStep.value, () => genLines.value.map(line => line.id).join(',')],
+  ([step]) => {
+    if (step === 2) void takes.loadTakesForLines(genLines.value.map(line => line.id))
+  },
+  { immediate: true },
+)
+watch(lines, (list) => {
+  if (activeLineId.value && !list.some(line => line.id === activeLineId.value)) {
+    activeLineId.value = null
+  }
+})
+
 async function retryFailed() {
   const failed = lines.value.filter(line => line.status === 'failed')
   if (!failed.length) return
@@ -658,6 +920,20 @@ function locateLine(line: StoryboardLine) {
   goStep(3)
   nextTick(() => previewRef.value?.seekTo(cue.subtitleStartMs))
 }
+function locateMixLine(lineId: number) {
+  const cue = timelineCues.value.find(item => item.lineId === lineId)
+  if (!cue) {
+    toast.error(t('workbench.locateMissing'))
+    return
+  }
+  previewRef.value?.seekTo(cue.subtitleStartMs)
+}
+function regenerateMixLine(lineId: number) {
+  const line = lines.value.find(item => item.id === lineId)
+  if (!line) return
+  inspectLine(line)
+  goStep(2)
+}
 
 const summaryPayload = computed(() => ({
   total: lines.value.length,
@@ -673,7 +949,11 @@ watch(summaryPayload, payload => emit('summary', payload), { immediate: true })
 
 onMounted(() => { void load() })
 watch(() => props.episodeId, (id, previous) => {
-  if (id && id !== previous) void load()
+  if (id && id !== previous) {
+    activeLineId.value = null
+    takes.resetBatch()
+    void load()
+  }
 })
 watch(() => props.step, step => {
   if (step === 3) void loadTimeline()
@@ -711,6 +991,7 @@ watch(() => props.step, step => {
 .dub-banner-btn { background: none; border: 1px solid currentColor; border-radius: 6px; padding: 2px 9px; font: inherit; font-size: 11px; color: inherit; cursor: pointer; white-space: nowrap; }
 .dub-banner-btn:hover { background: rgba(127, 127, 127, .1); }
 .dub-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 288px; gap: 8px; }
+.dub-body.is-generate { grid-template-columns: minmax(0, 1fr) 372px; }
 .dub-main {
   min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px;
   border: 1px solid var(--surface-outline); border-radius: var(--radius-lg);
@@ -720,7 +1001,29 @@ watch(() => props.step, step => {
 .dub-batch-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-2); }
 .dub-batch-count { font-size: 11px; color: var(--text-3); }
 .dub-batch-select { min-width: 180px; }
+.dub-gen-batch { display: flex; flex-direction: column; gap: 7px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-2); }
+.dub-gen-batch-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.dub-gen-field { display: flex; flex-direction: column; gap: 3px; min-width: 120px; font-size: 10px; color: var(--text-3); }
+.dub-gen-field.is-narrow { min-width: 84px; }
+.dub-gen-check { display: flex; align-items: center; gap: 5px; padding-bottom: 5px; font-size: 10.5px; color: var(--text-2); cursor: pointer; }
+.dub-gen-check input { margin: 0; accent-color: var(--accent); }
+.dub-gen-batch-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.dub-gen-batch-progress { display: flex; flex-direction: column; gap: 4px; }
+.dub-gen-batch-copy { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 10.5px; color: var(--text-3); }
 .dub-toolbar-title { font-size: 11.5px; color: var(--text-2); font-weight: 600; }
+.dub-tabs { display: inline-flex; gap: 3px; padding: 2px; border-radius: var(--radius-pill); background: var(--bg-0); }
+.dub-tab {
+  padding: 3px 10px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.dub-tab:hover { color: var(--text-1); }
+.dub-tab.on { color: var(--accent); background: var(--accent-bg); }
 .dub-toolbar-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .dub-filters { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .dub-filter {
@@ -734,6 +1037,7 @@ watch(() => props.step, step => {
 .dub-empty { flex: 1; min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--text-3); text-align: center; }
 .dub-empty-title { font-size: 14px; font-weight: 700; color: var(--text-1); }
 .dub-empty-desc { font-size: 12px; max-width: 420px; line-height: 1.7; }
+.dub-empty-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .dub-notice { display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: 8px; font-size: 11.5px; }
 .dub-notice.is-warn { color: #8a5a00; background: rgba(196, 138, 27, .1); }
 .dub-next-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 2px; }
@@ -791,7 +1095,7 @@ watch(() => props.step, step => {
 .dub-player-audio { width: min(360px, 50%); height: 34px; }
 .mono { font-family: var(--font-mono); color: var(--text-1); }
 @media (max-width: 1100px) {
-  .dub-body { grid-template-columns: minmax(0, 1fr); }
+  .dub-body, .dub-body.is-generate { grid-template-columns: minmax(0, 1fr); }
   .dub-inspector { display: none; }
   .dub-preview-grid { grid-template-columns: minmax(0, 1fr); }
 }

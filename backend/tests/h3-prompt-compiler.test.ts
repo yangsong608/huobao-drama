@@ -18,18 +18,18 @@ const SHOT = [
   '3-6秒：旁白（画外音）：「三年前的冬天，她第一次来到这里。」',
 ].join('\n')
 
-test('deterministic compiler removes subtitle sources and rewrites structure', () => {
+test('native dialogue and narration compile to H3 <d> tags with their original words', () => {
   const out = compileH3Prompt(SHOT, 'native')
   assert.match(out, /Characters: <Picture 2>林小雨/)
   assert.match(out, /Scene: <Picture 1>包子铺门前/)
   assert.match(out, /Audio: /)
   assert.match(out, /\[0-3s\]/)
   assert.match(out, /\[3-6s\]/)
-  assert.match(out, /林小雨 speaks in Mandarin, mouth moving/)
-  assert.match(out, /Off-screen narrator/)
+  assert.match(out, /林小雨 says, <d>\[Chinese\] 早上好。<\/d>/)
+  assert.match(out, /Off-screen narrator says, <d>\[Chinese\] 三年前的冬天，她第一次来到这里。<\/d>/)
+  assert.doesNotMatch(out, /speaks in Mandarin, mouth moving/)
   assert.doesNotMatch(out, /[「」“”]/)
   assert.doesNotMatch(out, /#|@|音色参考音频/)
-  assert.doesNotMatch(out, /早上好|三年前的冬天/)
 })
 
 const GENERIC_AUDIO_LINE_SHOT = [
@@ -57,16 +57,18 @@ test('generic audio line plus real narration yields exactly one narrator action'
   ].join('\n')
   const out = compileH3Prompt(prompt, 'native')
   assert.equal((out.match(/Off-screen narrator/g) || []).length, 1)
+  assert.match(out, /Off-screen narrator says, <d>\[Chinese\] 三年前的冬天，她第一次来到这里。<\/d>/)
   assert.match(out, /^Audio: .*环境音自然/m)
   assert.doesNotMatch(out, /环境音压低|旁白\/心声/)
 })
 
-test('ambient and silent modes drop audio and narration lines but keep mouth movement', () => {
+test('ambient and silent modes drop audio and narration lines but keep mouth movement without tags', () => {
   for (const mode of ['ambient', 'silent'] as const) {
     const out = compileH3Prompt(SHOT, mode)
     assert.doesNotMatch(out, /^Audio:/m)
     assert.doesNotMatch(out, /Off-screen narrator/)
-    assert.doesNotMatch(out, /清晨集市环境声|三年前的冬天/)
+    assert.doesNotMatch(out, /<d>|<\/d>/)
+    assert.doesNotMatch(out, /清晨集市环境声|早上好|三年前的冬天/)
     assert.match(out, /speaks in Mandarin, mouth moving/)
   }
 })
@@ -75,11 +77,12 @@ test('short quoted terms keep their text while quote marks are removed', () => {
   const out = compileH3Prompt('场景：寻找“陆缘”，四周是无尽海。', 'native')
   assert.match(out, /寻找陆缘/)
   assert.doesNotMatch(out, /[「」“”]/)
+  assert.doesNotMatch(out, /<d>/)
 })
 
-test('unmatched sentence-like quoted dialogue is still removed', () => {
+test('sentence-like quoted dialogue without a known speaker is kept inside an H3 dialogue tag', () => {
   const out = compileH3Prompt('0-3秒：林小雨：「早上好。」', 'native')
-  assert.doesNotMatch(out, /早上好/)
+  assert.match(out, /<d>\[Chinese\] 早上好。<\/d>/)
   assert.doesNotMatch(out, /[「」“”]/)
 })
 
@@ -90,20 +93,38 @@ test('unknown hash and at tokens are removed without losing surrounding action',
   assert.match(out, /林小雨推门/)
 })
 
-test('translation runs once per compiled prompt and its English result is used', async () => {
+test('translation preserves dialogue tags exactly and translates only the prompt around them', async () => {
   clearH3TranslationCache()
   let calls = 0
   const translate = async (text: string) => {
     calls += 1
     assert.match(text, /Characters:/)
     assert.match(text, /<Picture 2>/)
-    return '```text\nCharacters: <Picture 2> Lin Xiaoyu. [0-3s] She looks up and speaks in Mandarin, mouth moving.\n```'
+    assert.match(text, /\[\[H3_DLG_0\]\][\s\S]*\[\[H3_DLG_1\]\]/)
+    assert.doesNotMatch(text, /早上好|三年前的冬天/)
+    return '```text\nCharacters: <Picture 2> Lin Xiaoyu. [0-3s] She looks up. [[H3_DLG_0]] [3-6s] [[H3_DLG_1]]\n```'
   }
+  const expected = 'Characters: <Picture 2> Lin Xiaoyu. [0-3s] She looks up. <d>[Chinese] 早上好。</d> [3-6s] <d>[Chinese] 三年前的冬天，她第一次来到这里。</d>'
   const first = await compileLocalH3Prompt(SHOT, 'native', { translate })
-  assert.equal(first, 'Characters: <Picture 2> Lin Xiaoyu. [0-3s] She looks up and speaks in Mandarin, mouth moving.')
+  assert.equal(first, expected)
   const second = await compileLocalH3Prompt(SHOT, 'native', { translate })
   assert.equal(second, first)
   assert.equal(calls, 1)
+})
+
+test('translation that drops, duplicates or alters dialogue placeholders falls back to the deterministic prompt', async () => {
+  clearH3TranslationCache()
+  const dropped = await compileLocalH3Prompt(SHOT, 'native', {
+    translate: async () => 'Characters: Lin Xiaoyu. [0-3s] She looks up.',
+  })
+  assert.match(dropped, /Characters: <Picture 2>林小雨/)
+  assert.match(dropped, /林小雨 says, <d>\[Chinese\] 早上好。<\/d>/)
+
+  clearH3TranslationCache()
+  const duplicated = await compileLocalH3Prompt(SHOT, 'native', {
+    translate: async () => '[[H3_DLG_0]] [[H3_DLG_0]] [[H3_DLG_1]]',
+  })
+  assert.equal(duplicated, compileH3Prompt(SHOT, 'native'))
 })
 
 test('translation failure falls back to the deterministic prompt instead of failing generation', async () => {
@@ -124,10 +145,11 @@ test('english-only prompts skip the text model entirely', async () => {
   assert.equal(calls, 0)
 })
 
-test('translator instructions forbid dialogue text and subtitle sources', () => {
-  assert.match(H3_TRANSLATOR_SYSTEM, /<Picture N>/)
+test('translator instructions require dialogue placeholders to survive unchanged', () => {
+  assert.match(H3_TRANSLATOR_SYSTEM, /\[\[H3_DLG_N\]\]/)
+  assert.match(H3_TRANSLATOR_SYSTEM, /<d>\[Chinese\]/)
+  assert.match(H3_TRANSLATOR_SYSTEM, /never translate|do not translate/i)
   assert.match(H3_TRANSLATOR_SYSTEM, /subtitles/i)
-  assert.match(H3_TRANSLATOR_SYSTEM, /never write dialogue/i)
 })
 
 test('visual background translation that echoes Chinese is rejected', async () => {

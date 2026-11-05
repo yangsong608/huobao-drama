@@ -132,6 +132,46 @@ test('非法时间段与不存在的音频文件被拒绝', async () => {
   await app.request(`/episodes/${episode.id}/audio/tracks/${track.id}`, { method: 'DELETE' })
 })
 
+test('轨道与片段的混音字段可透传', async () => {
+  const bus = db.insert(schema.audioBuses).values({
+    episodeId: episode.id, key: 'sfx', name: '音效', createdAt: ts, updatedAt: ts,
+  }).returning().get()
+  const track = await createTrack({
+    role: 'crowd', pan: 0.3, bus_id: bus.id, locked: true, color: '#22d3ee',
+    height: 88, duck_attack_ms: 30, duck_release_ms: 400,
+  })
+  assert.equal(track.role, 'crowd')
+  assert.equal(track.pan, 0.3)
+  assert.equal(track.busId, bus.id)
+  assert.equal(track.locked, true)
+  assert.equal(track.color, '#22d3ee')
+  assert.equal(track.height, 88)
+  assert.equal(track.duckAttackMs, 30)
+
+  const clipResponse = await app.request(`/episodes/${episode.id}/audio/tracks/${track.id}/clips`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      start_ms: 0, end_ms: 500, source_url: sourceUrl,
+      gain_db: -6, pan: -0.4, fade_curve: 'equal_power', muted: true, locked: true,
+      name: '人群', color: '#f97316', follow_take: false, loop: true,
+    }),
+  })
+  assert.equal(clipResponse.status, 200, await clipResponse.clone().text())
+  const clip = (await body(clipResponse)).data
+  assert.equal(clip.gainDb, -6)
+  assert.equal(clip.pan, -0.4)
+  assert.equal(clip.fadeCurve, 'equal_power')
+  assert.equal(clip.muted, true)
+  assert.equal(clip.locked, true)
+  assert.equal(clip.name, '人群')
+  assert.equal(clip.color, '#f97316')
+  assert.equal(clip.followTake, false)
+  assert.equal(clip.loop, true)
+
+  await app.request(`/episodes/${episode.id}/audio/tracks/${track.id}`, { method: 'DELETE' })
+})
+
 test('没有可用音色时语音片段返回 400，不发起 TTS', async () => {
   const response = await app.request(`/episodes/${episode.id}/audio/voice-clips`, {
     method: 'POST',

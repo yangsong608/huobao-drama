@@ -58,6 +58,33 @@ test('手动起点越过片尾的台词被跳过并记录', () => {
   assert.deepEqual(r.skippedLineIds, [1])
 })
 
+test('绝对锚点台词不依赖镜头，按整集时间排布', () => {
+  const r = buildTimeline({
+    clips: [clip(1, 3000), clip(2, 3000)],
+    lines: [
+      line(2, 2, 800),
+      { ...line(1, 0, 1200), storyboardId: null, lineNo: 1, startOverrideMs: 500 },
+    ],
+    totalDurationMs: 6000,
+  })
+  assert.equal(r.cues.length, 2)
+  assert.equal(r.cues[0].lineId, 1)
+  assert.equal(r.cues[0].shotId, null)
+  assert.equal(r.cues[0].startMs, 500)
+  assert.equal(r.cues[0].endMs, 1700)
+  assert.equal(r.cues[1].startMs, 3250)
+})
+
+test('绝对锚点缺少手动起点时跳过，不静默排到 0', () => {
+  const r = buildTimeline({
+    clips: [clip(1, 3000)],
+    lines: [{ ...line(1, 0, 1000), storyboardId: null }],
+    totalDurationMs: 3000,
+  })
+  assert.equal(r.cues.length, 0)
+  assert.deepEqual(r.skippedLineIds, [1])
+})
+
 test('首句至少留 250ms 呼吸，同镜内不重叠', () => {
   const r = buildTimeline({
     clips: [clip(1, 8000)],

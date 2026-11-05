@@ -128,6 +128,54 @@ export interface VoiceProfile {
   ageRange?: string | null
   pitch?: string | null
   language?: string | null
+  seed?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface VoiceSample {
+  id: number
+  voiceId: number
+  dramaId: number
+  kind: 'audition' | 'speech' | 'clone_test'
+  text: string
+  textSource: 'default' | 'custom' | 'line'
+  seed: number | null
+  provider: string | null
+  model: string | null
+  paramsJson: string | null
+  audioUrl: string | null
+  durationMs: number | null
+  hash: string | null
+  status: 'generating' | 'ready' | 'failed'
+  error?: string | null
+  createdAt: string
+}
+
+export interface VoiceAuditionMeta {
+  items: VoiceSample[]
+  text: string
+  text_source: 'default' | 'custom' | 'line'
+  seed: number | null
+  max_chars: number
+  max_speech_chars: number
+  channel: { provider: string | null; model: string | null }
+}
+
+export interface TtsCapabilities {
+  provider: string
+  model: string | null
+  voicePrompt: boolean
+  designInstruct: boolean
+  emotion: boolean
+  speed: boolean
+  seed: boolean
+  refAudio: boolean
+  maxInputChars: number
+  maxAuditionChars: number
+  maxSpeechChars: number
+  ignored: string[]
+  note: string | null
 }
 
 export interface VoiceProfileList {
@@ -162,6 +210,21 @@ export const voiceProfileAPI = {
     }),
   sync: (characterId: number, voiceId: number) =>
     api.post<{ voice_audio_url: string }>(`/characters/${characterId}/voice-sync`, { voice_id: voiceId }),
+  auditions: (voiceId: number, episodeId?: number | null) =>
+    api.get<VoiceAuditionMeta>(`/voices/${voiceId}/auditions${episodeId ? `?episode_id=${episodeId}` : ''}`),
+  generateAudition: (voiceId: number, body: { text?: string; seed?: number | null; text_source?: string; episode_id?: number | null; set_sample?: boolean }) =>
+    api.post<{ sample: VoiceSample; text: string; text_source: string; seed: number; truncated: boolean; cached: boolean }>(`/voices/${voiceId}/auditions`, body),
+  setSample: (voiceId: number, sampleId: number) =>
+    api.post<VoiceProfile>(`/voices/${voiceId}/auditions/${sampleId}/set-sample`, {}),
+  removeSample: (voiceId: number, sampleId: number) =>
+    api.del<{ deleted: boolean }>(`/voices/${voiceId}/auditions/${sampleId}`),
+  speech: (voiceId: number, body: { text: string; seed?: number | null; params?: Record<string, any> }) =>
+    api.post<{ sample: VoiceSample; text: string; seed: number; cached: boolean }>(`/voices/${voiceId}/speech`, body),
+  applyLines: (voiceId: number, body: { episode_id: number; line_ids: number[] }) =>
+    api.post<{ updated: number }>(`/voices/${voiceId}/apply-lines`, body),
+  design: (voiceId: number, body: { episode_id?: number | null; model?: string; config_id?: number } = {}) =>
+    api.post<VoiceProfile>(`/voices/${voiceId}/design`, body),
+  capabilities: () => api.get<TtsCapabilities>('/tts/capabilities'),
   cloneTo: (voiceId: number, target: { character_id?: number; scope?: 'character' | 'narrator'; activate?: boolean; name?: string }) =>
     api.post<VoiceProfile>(`/voices/${voiceId}/clone`, target),
   narrator: {
@@ -183,16 +246,26 @@ async function uploadForm<T = any>(path: string, file: File, fields: Record<stri
 
 export interface StoryboardLine {
   id: number
-  storyboardId: number
+  storyboardId: number | null
   storyboardNumber?: number | null
   lineNo: number
   speakerType: 'dialogue' | 'narration' | 'inner'
   speakerName: string | null
   characterId: number | null
+  characterName?: string | null
   text: string
   subtitleText?: string | null
   speakText?: string | null
   speed: number | null
+  direction?: string | null
+  anchorType?: 'shot' | 'absolute'
+  sortOrder?: number
+  originKey?: string | null
+  textRevision?: number
+  audioStale?: boolean
+  voiceLocked?: boolean
+  activeTakeId?: number | null
+  deletedAt?: string | null
   status: 'pending' | 'ready' | 'failed' | string
   plannedStartMs?: number | null
   overflowMs: number | null
@@ -205,9 +278,175 @@ export interface StoryboardLine {
   error?: string | null
 }
 
+export interface ContextLine {
+  speaker: string
+  text: string
+  emotion: string | null
+}
+
+export interface LineContext {
+  episodeId: number
+  lineId: number
+  mode: 'off' | 'light' | 'deep'
+  scene: {
+    storyboardId: number | null
+    shotNumber: number | null
+    shotSummary: string | null
+    durationMs: number | null
+  }
+  previous: ContextLine[]
+  current: ContextLine & { direction: string | null }
+  next: ContextLine[]
+  arc: string | null
+  pronunciation: Record<string, string>
+}
+
+export interface PerformanceParams {
+  emotion: string | null
+  speed: number
+  instruct: string | null
+  pause_hints: { after: string; ms: number }[]
+  pronunciation: Record<string, string>
+  notes: string | null
+}
+
+export interface LineTake {
+  id: number
+  lineId: number
+  takeNo: number
+  text: string
+  speakText: string | null
+  textRevision: number | null
+  voiceId: number | null
+  voiceFingerprint: string | null
+  provider: string | null
+  model: string | null
+  configId: number | null
+  params: Record<string, any>
+  seed: number | null
+  ignored: string[]
+  contextMode: 'off' | 'light' | 'deep'
+  context: LineContext | null
+  contextHash: string | null
+  audioUrl: string | null
+  durationMs: number | null
+  hash: string | null
+  status: 'generating' | 'ready' | 'failed' | string
+  error: string | null
+  isActive: boolean
+  createdAt: string
+}
+
+export interface LineContextPreview {
+  context: LineContext
+  params: PerformanceParams
+  source: 'light' | 'deep' | 'fallback' | string
+  error?: string
+  capability: TtsCapabilities
+  ignored: string[]
+}
+
+export interface TakeBatchJob {
+  id: string
+  episodeId: number
+  status: 'running' | 'done' | 'failed' | 'cancelled'
+  total: number
+  done: number
+  ok: number
+  failed: number
+  skipped: number
+  cached: number
+  currentLineId: number | null
+  errors: { lineId: number; message: string }[]
+  cancelRequested: boolean
+  startedAt: string
+  finishedAt: string | null
+}
+
+export interface TakeStatus {
+  total: number
+  ready: number
+  pending: number
+  failed: number
+  stale: number
+  takes: number
+}
+
+export interface TakeGenerateResult {
+  take: LineTake
+  line: StoryboardLine
+  cached: boolean
+  context: LineContext
+  params: PerformanceParams
+  source: string
+}
+
+export type MergeKind = 'added' | 'updated' | 'removed' | 'kept' | 'tombstoned'
+
+export interface MergeItem {
+  kind: MergeKind
+  lineId: number | null
+  text: string
+  previousText: string | null
+  speakerType: string
+  speakerName: string | null
+  characterId: number | null
+  originKey: string
+  lineNo: number
+  order: number
+  plannedStartMs: number | null
+  plannedEndMs: number | null
+  needsReview: boolean
+  stale: boolean
+}
+
+export interface MergeGroup {
+  storyboardId: number
+  storyboardNumber: number
+  skipped: boolean
+  sourceHash: string
+  added: MergeItem[]
+  updated: MergeItem[]
+  removed: MergeItem[]
+  kept: MergeItem[]
+  tombstoned: MergeItem[]
+}
+
+export interface MergePlan {
+  extractionId: string
+  episodeId: number
+  createdAt: string
+  groups: MergeGroup[]
+  summary: {
+    added: number
+    updated: number
+    removed: number
+    kept: number
+    tombstoned: number
+    skipped: number
+  }
+}
+
+export interface MergeDecision {
+  storyboardId: number
+  kind: MergeKind
+  lineId?: number | null
+  text?: string
+  action: 'apply' | 'skip'
+}
+
+export interface MergeResult {
+  inserted: number
+  updated: number
+  removed: number
+  kept: number
+  tombstoned: number
+  skipped: number
+}
+
 export interface TimelineCue {
   lineId: number
-  shotId: number
+  shotId: number | null
   startMs: number
   endMs: number
   subtitleStartMs: number
@@ -330,6 +569,155 @@ export interface EpisodeAudioTrack {
   clips: EpisodeAudioClip[]
 }
 
+/* ---------- V3 · 阶段 4：原声分离与混音计划 ---------- */
+
+export type MixBusKey = 'dialogue' | 'original' | 'sfx' | 'bgm' | 'master'
+
+export interface MixBus {
+  id: number
+  key: MixBusKey
+  name: string
+  volume: number
+  muted: boolean
+  solo: boolean
+  effectiveMuted: boolean
+  ducking: boolean
+  duckRatio: number
+  duckAttackMs: number
+  duckReleaseMs: number
+  lufsTarget: number | null
+  limiterCeiling: number | null
+}
+
+export interface MixClip {
+  id: number | null
+  assetId: number | null
+  takeId: number | null
+  lineId: number | null
+  name: string | null
+  startMs: number
+  endMs: number
+  sourceStartMs: number
+  gainDb: number
+  pan: number
+  fadeInMs: number
+  fadeOutMs: number
+  fadeCurve: string
+  loop: boolean
+  muted: boolean
+  locked: boolean
+  audioUrl: string | null
+  usable: boolean
+  reason: string | null
+}
+
+export interface MixTrack {
+  id: number | null
+  role: string
+  name: string
+  busId: MixBusKey
+  virtual: boolean
+  volume: number
+  pan: number
+  muted: boolean
+  solo: boolean
+  effectiveMuted: boolean
+  ducking: boolean
+  locked: boolean
+  hidden: boolean
+  loop: boolean
+  color: string | null
+  height: number
+  sortOrder: number
+  stemAssetId: number | null
+  clips: MixClip[]
+}
+
+export interface MixPlan {
+  version: 1
+  episodeId: number
+  durationMs: number
+  sampleRate: number
+  buses: MixBus[]
+  tracks: MixTrack[]
+  master: { lufs: number; truePeak: number; limiter: string }
+}
+
+export interface EpisodeAudioAsset {
+  id: number
+  episodeId: number
+  dramaId: number
+  kind: string
+  sourceHash: string | null
+  url: string | null
+  durationMs: number | null
+  sampleRate: number | null
+  channels: number | null
+  engine: string | null
+  model: string | null
+  modelLicense: string | null
+  confidence: number | null
+  status: string | null
+  error: string | null
+  metadataJson: string | null
+  createdAt: string
+  deletedAt: string | null
+}
+
+export interface SeparationStatus {
+  jobId: number | null
+  status: 'idle' | 'running' | 'done' | 'failed' | 'cancelled'
+  progress: number
+  step: string | null
+  error: string | null
+  engine: string | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export interface SeparationStart {
+  jobId: number | null
+  status: 'running' | 'done'
+  reused: boolean
+}
+
+export interface MixRevision {
+  id: number
+  episodeId: number
+  revisionNo: number
+  planJson: string
+  planHash: string | null
+  note: string | null
+  isCurrent: boolean
+  createdAt: string
+}
+
+export interface PeaksPayload {
+  assetId?: number
+  takeId?: number
+  sampleId?: number
+  sampleRate: number
+  durationMs: number
+  levels: { spp: number; peaks: [number, number][] }[]
+}
+
+export interface MixPreviewResult {
+  url: string
+  startMs: number
+  endMs: number
+  durationMs: number
+  planHash: string
+  cached: boolean
+}
+
+export interface MixRenderResult {
+  url: string
+  outputPath: string
+  format: 'wav' | 'm4a'
+  durationMs: number
+  planHash: string
+}
+
 /** 多轨混音（V3 · C）：环境声/音效/语音轨 + 时间段试听 */
 export const audioTrackAPI = {
   list: (episodeId: number) => api.get<{ items: EpisodeAudioTrack[] }>(`/episodes/${episodeId}/audio/tracks`),
@@ -350,11 +738,136 @@ export const audioTrackAPI = {
   summary: (episodeId: number) => api.get<{ count: number; solo_active: boolean; signature: string; tracks: { id: number; kind: string; name: string; volume: number; muted: boolean; clips: number }[] }>(`/episodes/${episodeId}/audio/summary`),
 }
 
+/** 原声分离、素材、波形与 MixPlan（V3 · 阶段 4） */
+export const mixAPI = {
+  separate: (
+    episodeId: number,
+    data: { engine?: 'uvr' | 'demucs' | 'basic'; model?: string; diarization?: boolean; force?: boolean } = {},
+  ) => api.post<SeparationStart>(`/episodes/${episodeId}/audio/separate`, data),
+  separationStatus: (episodeId: number) =>
+    api.get<SeparationStatus>(`/episodes/${episodeId}/audio/separate/status`),
+  cancelSeparation: (episodeId: number) =>
+    api.post<{ cancelled: boolean }>(`/episodes/${episodeId}/audio/separate/cancel`),
+  assets: (episodeId: number) =>
+    api.get<{ items: EpisodeAudioAsset[] }>(`/episodes/${episodeId}/audio/assets`),
+  removeAsset: (episodeId: number, assetId: number) =>
+    api.del<{ deleted: boolean }>(`/episodes/${episodeId}/audio/assets/${assetId}`),
+  autoTracks: (episodeId: number, assetId: number) =>
+    api.post<{ tracks: EpisodeAudioTrack[]; clips: EpisodeAudioClip[] }>(`/episodes/${episodeId}/audio/assets/${assetId}/tracks`),
+  getPlan: (episodeId: number) => api.get<MixPlan>(`/episodes/${episodeId}/mix`),
+  savePlan: (
+    episodeId: number,
+    data: { buses?: Partial<MixBus>[]; tracks?: any[]; clips?: any[] },
+  ) => api.put<MixPlan>(`/episodes/${episodeId}/mix`, data),
+  buses: (episodeId: number) =>
+    api.get<{ items: MixBus[] }>(`/episodes/${episodeId}/mix/buses`),
+  saveBuses: (episodeId: number, buses: Partial<MixBus>[]) =>
+    api.put<{ items: MixBus[] }>(`/episodes/${episodeId}/mix/buses`, { buses }),
+  revisions: (episodeId: number) =>
+    api.get<{ items: MixRevision[] }>(`/episodes/${episodeId}/mix/revisions`),
+  saveRevision: (episodeId: number, note?: string) =>
+    api.post<MixRevision>(`/episodes/${episodeId}/mix/revisions`, { note }),
+  restoreRevision: (episodeId: number, revisionId: number) =>
+    api.post<{ revision: MixRevision; plan: MixPlan }>(`/episodes/${episodeId}/mix/revisions/${revisionId}/restore`),
+  preview: (episodeId: number, data: { start_ms: number; end_ms: number }) =>
+    api.post<MixPreviewResult>(`/episodes/${episodeId}/mix/preview`, data),
+  render: (episodeId: number, data: { format?: 'wav' | 'm4a' } = {}) =>
+    api.post<MixRenderResult>(`/episodes/${episodeId}/mix/render`, data),
+  peaks: (episodeId: number, source: { assetId?: number; takeId?: number; sampleId?: number }) => {
+    const query = source.assetId ? `asset_id=${source.assetId}`
+      : source.takeId ? `take_id=${source.takeId}`
+        : source.sampleId ? `sample_id=${source.sampleId}`
+          : ''
+    if (!query) throw new Error('波形来源缺失')
+    return api.get<PeaksPayload>(`/episodes/${episodeId}/audio/peaks?${query}`)
+  },
+}
+
+export type ExportKind = 'mix' | 'video' | 'stems'
+export type ExportSubtitleMode = 'soft' | 'burn' | 'none'
+export type ExportStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+export interface ExportRecord {
+  id: number
+  episodeId: number
+  kind: ExportKind
+  preset: string | null
+  paramsJson: string | null
+  planRevisionId: number | null
+  planHash: string | null
+  sourceVideoHash: string | null
+  subtitleHash: string | null
+  status: ExportStatus | null
+  progress: number | null
+  error: string | null
+  outputUrl: string | null
+  durationMs: number | null
+  sizeBytes: number | null
+  lufs: number | null
+  truePeak: number | null
+  lra: number | null
+  isCurrent: boolean | null
+  createdAt: string
+  finishedAt: string | null
+  deletedAt: string | null
+}
+
+export interface ExportCheckItem {
+  ok: boolean
+  message: string
+}
+
+export interface ExportChecks {
+  episodeId: number
+  lines: ExportCheckItem & { total: number; ready: number }
+  video: ExportCheckItem & { durationMs: number; clips: number }
+  mix: ExportCheckItem & { durationMs: number; trackCount: number; planHash: string | null }
+  subtitles: ExportCheckItem & { count: number }
+  ffmpeg: ExportCheckItem
+  disk: ExportCheckItem & { freeBytes: number | null; requiredBytes: number }
+  mixReady: boolean
+  videoReady: boolean
+  stemsReady: boolean
+}
+
+/** 导出（V3 · 阶段 5）：检查、启动、记录、取消/重试/当前/删除 */
+export const exportAPI = {
+  checks: (episodeId: number) => api.get<ExportChecks>(`/episodes/${episodeId}/export-checks`),
+  start: (
+    episodeId: number,
+    data: { kind?: ExportKind; preset?: string; subtitle_mode?: ExportSubtitleMode; set_current?: boolean } = {},
+  ) => api.post<{ record: ExportRecord; reused: boolean }>(`/episodes/${episodeId}/exports`, data),
+  list: (episodeId: number) => api.get<{ items: ExportRecord[] }>(`/episodes/${episodeId}/exports`),
+  get: (id: number) => api.get<ExportRecord>(`/exports/${id}`),
+  cancel: (id: number) => api.post<ExportRecord>(`/exports/${id}/cancel`),
+  retry: (id: number) => api.post<ExportRecord>(`/exports/${id}/retry`),
+  setCurrent: (id: number, episodeId?: number) =>
+    api.post<ExportRecord>(`/exports/${id}/current`, episodeId ? { episode_id: episodeId } : {}),
+  remove: (id: number) => api.del<ExportRecord>(`/exports/${id}`),
+}
+
 export const dubbingAPI = {
   lines: (episodeId: number) => api.get<{ items: StoryboardLine[] }>(`/episodes/${episodeId}/lines`),
   extract: (episodeId: number, force = false) => api.post(`/episodes/${episodeId}/lines/extract?force=${force ? 1 : 0}`),
+  extractPreview: (episodeId: number, options: { force?: boolean; storyboardIds?: number[] } = {}) =>
+    api.post<MergePlan>(`/episodes/${episodeId}/lines/extract/preview`, {
+      force: Boolean(options.force),
+      ...(options.storyboardIds?.length ? { storyboard_ids: options.storyboardIds } : {}),
+    }),
+  extractApply: (episodeId: number, extractionId: string, decisions: MergeDecision[] = []) =>
+    api.post<MergeResult>(`/episodes/${episodeId}/lines/extract/apply`, { extraction_id: extractionId, decisions }),
   lineStatus: (episodeId: number) => api.get(`/episodes/${episodeId}/lines/status`),
   synthesizeAll: (episodeId: number, force = false) => api.post(`/episodes/${episodeId}/lines/synthesize`, { force }),
+  addLine: (episodeId: number, data: {
+    text: string
+    speaker_type?: string
+    character_id?: number | null
+    speaker_name?: string | null
+    direction?: string | null
+    anchor: { type: 'shot' | 'absolute'; storyboard_id?: number | null; start_ms?: number; after_line_id?: number | null }
+  }) => api.post<StoryboardLine>(`/episodes/${episodeId}/lines`, data),
+  reorderLines: (episodeId: number, ids: number[]) => api.post<{ updated: number }>(`/episodes/${episodeId}/lines/reorder`, { ids }),
+  restoreLine: (lineId: number) => api.post<StoryboardLine>(`/lines/${lineId}/restore`),
   updateLine: (lineId: number, data: Record<string, any>) => api.put(`/lines/${lineId}`, data),
   synthesizeLine: (lineId: number) => api.post(`/lines/${lineId}/synthesize`),
   deleteLine: (lineId: number) => api.del(`/lines/${lineId}`),
@@ -370,6 +883,46 @@ export const dubbingAPI = {
     api.post<{ video_url: string; kind: string }>(`/episodes/${episodeId}/video-version`, { merge_id: mergeId }),
   status: () => api.get<{ enabled: boolean }>('/dubbing/status'),
   setEnabled: (enabled: boolean) => api.put('/dubbing/enabled', { enabled }),
+}
+
+export interface TakeOverrides {
+  emotion?: string | null
+  speed?: number | null
+  instruct?: string | null
+  pause_hints?: { after: string; ms: number }[]
+  pronunciation?: Record<string, string>
+  notes?: string | null
+  seed?: number | null
+  note?: string | null
+  language?: string | null
+}
+
+export const takeAPI = {
+  list: (lineId: number) => api.get<{ items: LineTake[] }>(`/lines/${lineId}/takes`),
+  generate: (lineId: number, body: {
+    context_mode?: 'off' | 'light' | 'deep'
+    overrides?: TakeOverrides
+    voice_id?: number | null
+    force?: boolean
+    reuse?: boolean
+    activate?: boolean
+  } = {}) => api.post<TakeGenerateResult>(`/lines/${lineId}/takes`, body),
+  activate: (takeId: number) => api.post<{ take: LineTake; line: StoryboardLine }>(`/takes/${takeId}/activate`),
+  remove: (takeId: number) => api.del<{ lineId: number; fallbackTakeId: number | null }>(`/takes/${takeId}`),
+  previewContext: (lineId: number, body: { mode?: 'off' | 'light' | 'deep'; overrides?: TakeOverrides } = {}) =>
+    api.post<LineContextPreview>(`/lines/${lineId}/context/preview`, body),
+  batch: (episodeId: number, body: {
+    line_ids?: number[] | null
+    filter?: 'pending' | 'failed' | 'audio_stale' | 'all'
+    context_mode?: 'off' | 'light' | 'deep'
+    force?: boolean
+    concurrency?: number
+  } = {}) => api.post<{ job_id: string }>(`/episodes/${episodeId}/takes/batch`, body),
+  batchStatus: (episodeId: number, jobId: string) =>
+    api.get<TakeBatchJob>(`/episodes/${episodeId}/takes/batch/${jobId}`),
+  cancelBatch: (episodeId: number, jobId: string) =>
+    api.post<TakeBatchJob>(`/episodes/${episodeId}/takes/batch/${jobId}/cancel`),
+  status: (episodeId: number) => api.get<TakeStatus>(`/episodes/${episodeId}/takes/status`),
 }
 
 /** 宫格图（V2 · M4-2）：一次生成多格，再切分/人工校正 */

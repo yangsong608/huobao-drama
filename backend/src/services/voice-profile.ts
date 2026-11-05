@@ -8,7 +8,7 @@
  */
 import fs from 'fs'
 import path from 'path'
-import { and, eq, isNull, or } from 'drizzle-orm'
+import { and, eq, isNull, or, sql } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { STORAGE_ROOT } from '../utils/paths.js'
@@ -175,10 +175,7 @@ export function activateVoice(characterId: number, voiceId: number): { active_vo
     tx.update(schema.storyboardLines)
       .set({
         voiceId: null,
-        status: 'pending',
-        audioUrl: null,
-        audioDurationMs: null,
-        audioHash: null,
+        audioStale: sql`case when ${schema.storyboardLines.audioUrl} is not null then 1 else 0 end`,
         error: null,
         updatedAt: now(),
       })
@@ -206,10 +203,7 @@ export function deactivateVoice(characterId: number): { active_voice_id: null } 
     tx.update(schema.storyboardLines)
       .set({
         voiceId: null,
-        status: 'pending',
-        audioUrl: null,
-        audioDurationMs: null,
-        audioHash: null,
+        audioStale: sql`case when ${schema.storyboardLines.audioUrl} is not null then 1 else 0 end`,
         error: null,
         updatedAt: now(),
       })
@@ -339,10 +333,7 @@ export function setNarratorVoice(dramaId: number, voiceId: number | null): Voice
       tx.update(schema.storyboardLines)
         .set({
           voiceId: null,
-          status: 'pending',
-          audioUrl: null,
-          audioDurationMs: null,
-          audioHash: null,
+          audioStale: sql`case when ${schema.storyboardLines.audioUrl} is not null then 1 else 0 end`,
           error: null,
           updatedAt: now(),
         })
@@ -375,10 +366,7 @@ export function setNarratorVoice(dramaId: number, voiceId: number | null): Voice
     tx.update(schema.storyboardLines)
       .set({
         voiceId: null,
-        status: 'pending',
-        audioUrl: null,
-        audioDurationMs: null,
-        audioHash: null,
+        audioStale: sql`case when ${schema.storyboardLines.audioUrl} is not null then 1 else 0 end`,
         error: null,
         updatedAt: now(),
       })

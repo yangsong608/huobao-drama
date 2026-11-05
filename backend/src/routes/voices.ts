@@ -13,8 +13,6 @@ import { badRequest, created, notFound, now, success } from '../utils/response.j
 import { AUDIO_MAX_BYTES, AudioUploadError, saveAudioUpload } from '../utils/audio-upload.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import { ffmpeg } from '../utils/ffmpeg.js'
-import { synthesize, type VoiceRef } from '../services/tts.js'
-import { getAudioConfig } from '../services/tts.js'
 import {
   activateVoice,
   cloneVoice,
@@ -31,8 +29,17 @@ import {
   syncVoiceToVideoReference,
   updateVoice,
 } from '../services/voice-profile.js'
-import { applyVoiceProfiles, collectSampleLines, generateNarratorProfile, generateVoiceProfiles } from '../services/voice-design.js'
-import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { applyVoiceProfiles, collectSampleLines, generateNarratorProfile, generateVoiceProfiles, redesignVoice } from '../services/voice-design.js'
+import {
+  assignVoiceToLines,
+  deleteVoiceSample,
+  generateVoiceSample,
+  listVoiceSamples,
+  resolveAuditionText,
+  setVoiceSample,
+  AUDITION_MAX_CHARS,
+  SPEECH_MAX_CHARS,
+} from '../services/voice-samples.js'
 
 const voices = new Hono()
 const characterVoices = new Hono()
@@ -40,18 +47,6 @@ const characterVoices = new Hono()
 function parseId(raw: string | undefined): number | null {
   const id = Number(raw)
   return Number.isSafeInteger(id) && id > 0 ? id : null
-}
-
-function toVoiceRef(voice: ReturnType<typeof getVoice>): VoiceRef {
-  if (!voice) return {}
-  return {
-    externalVoiceId: voice.externalVoiceId || undefined,
-    voicePrompt: voice.voicePrompt || undefined,
-    designInstruct: voice.designInstruct || undefined,
-    refAudioUrl: voice.refAudioUrl || undefined,
-    refText: voice.refText || undefined,
-    xVectorOnly: Boolean(voice.xVectorOnly),
-  }
 }
 
 function probeAudioDuration(file: string): Promise<number> {
@@ -67,35 +62,21 @@ function probeAudioDuration(file: string): Promise<number> {
 
 /** 合成试听并回写档案；失败把错误落到 status/error，方便前端提示 */
 async function synthesizeSample(voiceId: number, options: { text?: string; seed?: number } = {}) {
-  const voice = getVoice(voiceId)
-  if (!voice) throw new Error('音色不存在')
-
-  const config = await getAudioConfig()
-  if (!config) {
-    updateVoice(voiceId, { status: 'pending_model' })
-    const err = new Error('未配置语音服务，请先在设置中添加并启用 audio 服务')
-    ;(err as Error & { code?: string }).code = 'no_audio_config'
-    throw err
-  }
-
-  const text = (options.text || voice.sampleText || `我是${voice.name}，很高兴见到你。`).slice(0, 120)
-  logTaskStart('Voice', 'sample', { voiceId, chars: [...text].length })
-  try {
-    const result = await synthesize({
-      text,
-      voice: toVoiceRef(voice),
-      speed: voice.speed ?? 1,
-      emotion: voice.emotion ?? undefined,
-      language: voice.language ?? undefined,
-      seed: options.seed ?? voice.seed ?? undefined,
-    })
-    updateVoice(voiceId, { sampleUrl: result.url, status: 'ready' })
-    logTaskSuccess('Voice', 'sample', { voiceId, durationMs: result.durationMs, cached: result.cached })
-    return { sample_url: result.url, duration_ms: result.durationMs, cached: result.cached }
-  } catch (error: any) {
-    updateVoice(voiceId, { status: 'failed', error: error?.message || String(error) } as any)
-    logTaskError('Voice', 'sample', { voiceId, error: error?.message || String(error) })
-    throw error
+  const result = await generateVoiceSample({
+    voiceId,
+    kind: 'audition',
+    text: options.text,
+    seed: options.seed,
+    setSample: true,
+  })
+  return {
+    sample_url: result.sample.audioUrl,
+    duration_ms: result.sample.durationMs,
+    cached: result.cached,
+    sample_id: result.sample.id,
+    text: result.text,
+    text_source: result.textSource,
+    seed: result.seed,
   }
 }
 
@@ -242,6 +223,130 @@ voices.post('/:id/activate', async (c) => {
     return success(c, activateVoice(characterId, id))
   } catch (error: any) {
     return badRequest(c, error?.message || '激活失败')
+  }
+})
+
+voices.get('/:id/auditions', (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '音色编号无效')
+  const voice = getVoice(id)
+  if (!voice) return notFound(c, '音色不存在')
+  const episodeId = parseId(c.req.query('episode_id'))
+  const resolved = resolveAuditionText(voice, episodeId)
+  return success(c, {
+    items: listVoiceSamples(id, Number(c.req.query('limit') || 20)),
+    text: resolved.text,
+    text_source: resolved.source,
+    seed: voice.seed ?? null,
+    max_chars: AUDITION_MAX_CHARS,
+    max_speech_chars: SPEECH_MAX_CHARS,
+    channel: {
+      provider: voice.provider,
+      model: voice.model,
+    },
+  })
+})
+
+voices.post('/:id/auditions', async (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '音色编号无效')
+  const body = await c.req.json().catch(() => ({}))
+  try {
+    const result = await generateVoiceSample({
+      voiceId: id,
+      kind: 'audition',
+      text: body.text,
+      textSource: body.text_source,
+      seed: body.seed === undefined || body.seed === null ? undefined : Number(body.seed),
+      episodeId: body.episode_id ? Number(body.episode_id) : undefined,
+      setSample: Boolean(body.set_sample),
+    })
+    return success(c, {
+      sample: result.sample,
+      text: result.text,
+      text_source: result.textSource,
+      seed: result.seed,
+      truncated: result.truncated,
+      cached: result.cached,
+    })
+  } catch (error: any) {
+    if (error?.code === 'no_audio_config') return c.json({ success: false, error: error.message }, 503)
+    return badRequest(c, error?.message || '试听生成失败')
+  }
+})
+
+voices.post('/:id/auditions/:sampleId/set-sample', (c) => {
+  const id = parseId(c.req.param('id'))
+  const sampleId = parseId(c.req.param('sampleId'))
+  if (!id || !sampleId) return badRequest(c, '编号无效')
+  try {
+    return success(c, setVoiceSample(id, sampleId))
+  } catch (error: any) {
+    return badRequest(c, error?.message || '设为样例失败')
+  }
+})
+
+voices.delete('/:id/auditions/:sampleId', (c) => {
+  const id = parseId(c.req.param('id'))
+  const sampleId = parseId(c.req.param('sampleId'))
+  if (!id || !sampleId) return badRequest(c, '编号无效')
+  if (!deleteVoiceSample(id, sampleId)) return notFound(c, '试听记录不存在')
+  return success(c, { deleted: true })
+})
+
+voices.post('/:id/speech', async (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '音色编号无效')
+  const body = await c.req.json().catch(() => ({}))
+  try {
+    const result = await generateVoiceSample({
+      voiceId: id,
+      kind: 'speech',
+      text: body.text,
+      textSource: 'custom',
+      seed: body.seed === undefined || body.seed === null ? undefined : Number(body.seed),
+      params: body.params && typeof body.params === 'object' ? body.params : undefined,
+    })
+    return success(c, {
+      sample: result.sample,
+      text: result.text,
+      seed: result.seed,
+      cached: result.cached,
+    })
+  } catch (error: any) {
+    if (error?.code === 'no_audio_config') return c.json({ success: false, error: error.message }, 503)
+    return badRequest(c, error?.message || '自由试音失败')
+  }
+})
+
+voices.post('/:id/apply-lines', async (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '音色编号无效')
+  const body = await c.req.json().catch(() => ({}))
+  const episodeId = parseId(String(body.episode_id ?? ''))
+  if (!episodeId) return badRequest(c, 'episode_id 必填')
+  const lineIds = Array.isArray(body.line_ids) ? body.line_ids.map(Number) : []
+  try {
+    return success(c, assignVoiceToLines(id, episodeId, lineIds))
+  } catch (error: any) {
+    return badRequest(c, error?.message || '应用到台词失败')
+  }
+})
+
+voices.post('/:id/design', async (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '音色编号无效')
+  const body = await c.req.json().catch(() => ({}))
+  try {
+    const voice = await redesignVoice(id, {
+      episodeId: body.episode_id ? Number(body.episode_id) : undefined,
+      model: body.model,
+      configId: body.config_id ? Number(body.config_id) : undefined,
+      language: body.language,
+    })
+    return created(c, voice)
+  } catch (error: any) {
+    return badRequest(c, error?.message || '重新设计失败')
   }
 })
 

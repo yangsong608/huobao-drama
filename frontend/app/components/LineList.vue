@@ -4,7 +4,7 @@
       <article
         v-for="row in visibleRows"
         :key="row.line.id"
-        :class="['line-row', `is-${row.line.status}`, row.line.stale && 'is-stale']"
+        :class="['line-row', `is-${row.line.status}`, row.line.stale && 'is-stale', activeLineId === row.line.id && 'is-active']"
         :style="{ transform: `translateY(${row.index * ROW_HEIGHT}px)` }"
       >
         <div class="line-head">
@@ -25,8 +25,12 @@
           <span class="line-dur">{{ row.line.audioDurationMs ? `${(row.line.audioDurationMs / 1000).toFixed(1)}s` : '—' }}</span>
           <span v-if="row.line.overflowMs && row.line.overflowMs > 0" class="line-warn">+{{ (row.line.overflowMs / 1000).toFixed(1) }}s</span>
           <span v-if="row.line.stale" class="line-chip is-stale">{{ t('workbench.stale') }}</span>
+          <span v-if="row.line.audioStale" class="line-chip is-stale">{{ t('workbench.audioStale') }}</span>
+          <span v-if="row.line.locked" class="line-chip is-locked">{{ t('workbench.locked') }}</span>
           <span v-if="row.line.needsReview" class="line-chip is-review">{{ t('workbench.review') }}</span>
           <span v-if="row.line.status === 'failed'" class="line-chip is-failed">{{ t('workbench.failed') }}</span>
+          <span v-if="generatingIds.includes(row.line.id)" class="line-chip is-generating">{{ t('take.statusGenerating') }}</span>
+          <span v-if="mode === 'generate' && takeCounts[row.line.id]" class="line-chip is-take">{{ t('take.countChip', { n: takeCounts[row.line.id] }) }}</span>
           <span v-if="crossCharacter(row.line)" class="line-chip is-warn">{{ t('workbench.voiceCross') }}</span>
           <span v-if="missingVoice(row.line)" class="line-chip is-warn">{{ t('workbench.issueNoVoice') }}</span>
           <span v-if="longText(row.line)" class="line-chip is-warn">{{ t('workbench.issueLong') }}</span>
@@ -43,33 +47,72 @@
           @keydown.enter.exact.prevent="commit(row.line)"
           @keydown.esc="editingId = null"
         />
-        <p v-else class="line-text" :title="row.line.text" @dblclick="beginEdit(row.line)">{{ row.line.text }}</p>
+        <p
+          v-else
+          class="line-text"
+          :class="{ 'is-readonly': !editable(row.line) }"
+          :title="row.line.text"
+          @dblclick="editable(row.line) && beginEdit(row.line)"
+        >{{ row.line.text }}</p>
 
         <div class="line-actions">
-          <select
-            class="line-voice-select"
-            :class="{ 'is-cross': crossCharacter(row.line) }"
-            :value="row.line.voiceId ?? ''"
-            :title="t('workbench.voiceAssignHint')"
-            @change="onVoiceChange(row.line, $event)"
-          >
-            <option value="">{{ t('workbench.voiceAuto') }}</option>
-            <optgroup v-if="ownVoices(row.line).length" :label="t('workbench.voiceOwnGroup')">
-              <option v-for="voice in ownVoices(row.line)" :key="voice.id" :value="voice.id">{{ voiceLabel(voice) }}</option>
-            </optgroup>
-            <optgroup v-if="narratorVoice" :label="t('workbench.narrator')">
-              <option :value="narratorVoice.id">{{ voiceLabel(narratorVoice) }}</option>
-            </optgroup>
-            <optgroup v-if="otherVoiceOptions(row.line).length" :label="t('workbench.voiceOtherGroup')">
-              <option v-for="item in otherVoiceOptions(row.line)" :key="item.voice.id" :value="item.voice.id">
-                {{ item.characterName }} · {{ voiceLabel(item.voice) }}
-              </option>
-            </optgroup>
-          </select>
-          <button v-if="row.line.audioUrl" class="line-mini" type="button" @click="emit('play', row.line)">{{ t('workbench.play') }}</button>
-          <button class="line-mini" type="button" :disabled="busy" @click="emit('synthesize', row.line)">{{ t('workbench.resynthesize') }}</button>
-          <button class="line-mini" type="button" @click="emit('locate', row.line)">{{ t('workbench.locate') }}</button>
-          <button class="line-mini" type="button" @click="beginEdit(row.line)">{{ t('common.edit') }}</button>
+          <template v-if="mode === 'script'">
+            <span
+              class="line-voice-chip"
+              :class="{ 'is-cross': crossCharacter(row.line), 'is-missing': !voiceChipLabel(row.line) }"
+              :title="t('workbench.voiceAssignHint')"
+            >
+              {{ voiceChipLabel(row.line) || t('workbench.voiceNone') }}
+            </span>
+            <button v-if="row.line.audioUrl" class="line-mini" type="button" @click="emit('play', row.line)">{{ t('workbench.play') }}</button>
+            <button class="line-mini" type="button" @click="emit('locate', row.line)">{{ t('workbench.locate') }}</button>
+            <button class="line-mini" type="button" :disabled="!editable(row.line)" @click="beginEdit(row.line)">{{ t('common.edit') }}</button>
+            <button class="line-mini" type="button" :disabled="!canMove(row.line, -1)" @click="emit('move', row.line, -1)">{{ t('workbench.moveUp') }}</button>
+            <button class="line-mini" type="button" :disabled="!canMove(row.line, 1)" @click="emit('move', row.line, 1)">{{ t('workbench.moveDown') }}</button>
+            <button class="line-mini" type="button" @click="emit('toggleLock', row.line)">
+              {{ row.line.locked ? t('workbench.unlock') : t('workbench.lock') }}
+            </button>
+            <button
+              class="line-mini is-danger"
+              type="button"
+              :disabled="row.line.locked"
+              :title="row.line.locked ? t('workbench.lockedHint') : t('workbench.delete')"
+              @click="emit('remove', row.line)"
+            >
+              {{ t('workbench.delete') }}
+            </button>
+          </template>
+          <template v-else>
+            <select
+              v-if="mode === 'voice'"
+              class="line-voice-select"
+              :class="{ 'is-cross': crossCharacter(row.line) }"
+              :value="row.line.voiceId ?? ''"
+              :title="t('workbench.voiceAssignHint')"
+              @change="onVoiceChange(row.line, $event)"
+            >
+              <option value="">{{ t('workbench.voiceAuto') }}</option>
+              <optgroup v-if="ownVoices(row.line).length" :label="t('workbench.voiceOwnGroup')">
+                <option v-for="voice in ownVoices(row.line)" :key="voice.id" :value="voice.id">{{ voiceLabel(voice) }}</option>
+              </optgroup>
+              <optgroup v-if="narratorVoice" :label="t('workbench.narrator')">
+                <option :value="narratorVoice.id">{{ voiceLabel(narratorVoice) }}</option>
+              </optgroup>
+              <optgroup v-if="otherVoiceOptions(row.line).length" :label="t('workbench.voiceOtherGroup')">
+                <option v-for="item in otherVoiceOptions(row.line)" :key="item.voice.id" :value="item.voice.id">
+                  {{ item.characterName }} · {{ voiceLabel(item.voice) }}
+                </option>
+              </optgroup>
+            </select>
+            <span v-else-if="mode !== 'generate'" class="line-voice-chip" :class="{ 'is-cross': crossCharacter(row.line), 'is-missing': !voiceChipLabel(row.line) }">
+              {{ voiceChipLabel(row.line) || t('workbench.voiceNone') }}
+            </span>
+            <button v-if="row.line.audioUrl" class="line-mini" type="button" @click="emit('play', row.line)">{{ t('workbench.play') }}</button>
+            <button v-if="mode === 'generate'" class="line-mini" type="button" @click="emit('inspect', row.line)">{{ t('take.inspect') }}</button>
+            <button v-if="mode === 'generate'" class="line-mini" type="button" :disabled="busy || generatingIds.includes(row.line.id)" @click="emit('synthesize', row.line)">{{ t('workbench.resynthesize') }}</button>
+            <button class="line-mini" type="button" @click="emit('locate', row.line)">{{ t('workbench.locate') }}</button>
+            <button v-if="mode === 'voice'" class="line-mini" type="button" :disabled="!editable(row.line)" @click="beginEdit(row.line)">{{ t('common.edit') }}</button>
+          </template>
           <span v-if="row.line.error" class="line-error" :title="row.line.error">{{ row.line.error }}</span>
         </div>
       </article>
@@ -93,6 +136,10 @@ const props = withDefaults(defineProps<{
   voiceGroups?: VoiceProfileList[]
   narratorVoice?: VoiceProfile | null
   selectable?: boolean
+  mode?: 'script' | 'voice' | 'generate'
+  activeLineId?: number | null
+  takeCounts?: Record<number, number>
+  generatingIds?: number[]
 }>(), {
   busy: false,
   saving: false,
@@ -103,15 +150,23 @@ const props = withDefaults(defineProps<{
   voiceGroups: () => [],
   narratorVoice: null,
   selectable: false,
+  mode: 'voice',
+  activeLineId: null,
+  takeCounts: () => ({}),
+  generatingIds: () => [],
 })
 
 const emit = defineEmits<{
   play: [line: StoryboardLine]
   synthesize: [line: StoryboardLine]
+  inspect: [line: StoryboardLine]
   locate: [line: StoryboardLine]
   save: [line: StoryboardLine, text: string]
   assignVoice: [line: StoryboardLine, voiceId: number | null]
   selectionChange: [ids: number[]]
+  move: [line: StoryboardLine, direction: -1 | 1]
+  remove: [line: StoryboardLine]
+  toggleLock: [line: StoryboardLine]
 }>()
 
 const { t } = useI18n()
@@ -166,6 +221,26 @@ function voiceById(id: number | null | undefined): VoiceProfile | null {
     if (voice) return voice
   }
   return props.narratorVoice?.id === id ? props.narratorVoice : null
+}
+
+function editable(line: StoryboardLine) {
+  return props.mode !== 'generate' && !line.locked
+}
+
+function canMove(line: StoryboardLine, direction: -1 | 1) {
+  if (line.locked) return false
+  const index = props.lines.findIndex(item => item.id === line.id)
+  const target = index >= 0 ? props.lines[index + direction] : null
+  return Boolean(target && target.storyboardId === line.storyboardId)
+}
+
+/** 无法读取当前音色时返回空串，由模板降级为「未生成」。 */
+function voiceChipLabel(line: StoryboardLine) {
+  const assigned = voiceById(line.voiceId)
+  if (assigned) return assigned.name
+  if (line.speakerType !== 'dialogue') return props.narratorVoice?.name || ''
+  const group = props.voiceGroups.find(item => item.character_id === line.characterId)
+  return group?.voices.find(voice => voice.id === group.active_voice_id)?.name || ''
 }
 
 function ownVoices(line: StoryboardLine): VoiceProfile[] {
@@ -272,6 +347,7 @@ onBeforeUnmount(() => {
 }
 .line-row.is-failed { border-color: rgba(217, 83, 79, .4); }
 .line-row.is-stale { background: rgba(196, 138, 27, .06); }
+.line-row.is-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
 .line-head { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-3); flex-wrap: nowrap; overflow: hidden; }
 .line-select { margin: 0; flex: 0 0 auto; }
 .line-no { font-variant-numeric: tabular-nums; }
@@ -285,6 +361,9 @@ onBeforeUnmount(() => {
 .line-chip.is-failed { color: #d9534f; background: rgba(217, 83, 79, .14); }
 .line-chip.is-warn { color: #c48a1b; background: rgba(196, 138, 27, .16); }
 .line-chip.is-danger { color: #d9534f; background: rgba(217, 83, 79, .14); }
+.line-chip.is-locked { color: var(--text-2); background: rgba(127, 127, 127, .2); }
+.line-chip.is-generating { color: var(--accent); background: var(--accent-bg); }
+.line-chip.is-take { color: var(--text-2); background: rgba(127, 127, 127, .14); }
 .line-text {
   margin: 0;
   font-size: 12.5px;
@@ -296,6 +375,7 @@ onBeforeUnmount(() => {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.line-text.is-readonly { cursor: default; }
 .line-edit {
   width: 100%;
   height: 44px;
@@ -310,7 +390,20 @@ onBeforeUnmount(() => {
   color: var(--text-1);
   box-sizing: border-box;
 }
-.line-actions { display: flex; align-items: center; gap: 10px; min-height: 14px; }
+.line-actions { display: flex; align-items: center; gap: 8px; min-height: 14px; overflow: hidden; }
+.line-voice-chip {
+  max-width: 150px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, .12);
+  color: var(--text-2);
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.line-voice-chip.is-cross { color: #c48a1b; background: rgba(196, 138, 27, .16); }
+.line-voice-chip.is-missing { color: #c48a1b; background: rgba(196, 138, 27, .12); }
 .line-voice-select {
   max-width: 190px;
   font: inherit;
@@ -325,6 +418,8 @@ onBeforeUnmount(() => {
 .line-mini { background: none; border: none; padding: 0; font: inherit; font-size: 11px; color: var(--text-3); cursor: pointer; }
 .line-mini:hover { color: var(--accent, #2b7bd6); }
 .line-mini:disabled { opacity: .45; cursor: default; }
+.line-mini.is-danger { color: var(--action-danger, #d9534f); }
+.line-mini.is-danger:hover { color: var(--action-danger, #d9534f); opacity: .8; }
 .line-error { margin-left: auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d9534f; font-size: 11px; }
 .line-empty { color: var(--text-3); font-size: 12px; text-align: center; padding: 24px 0; }
 </style>

@@ -146,7 +146,7 @@ test('local H3 shim never receives voice references; tags are compiled away', as
   const task = await waitForSubmission(data.id)
   const request = received.at(-1)
   const text = request.content.find((c: any) => c.type === 'text').text
-  assert.match(text, /林小雨 speaks in Mandarin/)
+  assert.match(text, /林小雨 says, <d>\[Chinese\] 早上好。<\/d>/)
   assert.doesNotMatch(text, /音频1|音色参考音频/)
   assert.equal(request.content.some((c: any) => c.type === 'audio_url'), false)
   assert.deepEqual(JSON.parse(task.params!).referenceAudioUrls, [])

@@ -1,6 +1,13 @@
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
-import { voiceProfileAPI, type VoiceProfile, type VoiceProfileList } from '~/composables/useApi'
+import {
+  voiceProfileAPI,
+  type TtsCapabilities,
+  type VoiceAuditionMeta,
+  type VoiceProfile,
+  type VoiceProfileList,
+  type VoiceSample,
+} from '~/composables/useApi'
 import { toastError } from '~/composables/useToast'
 
 /**
@@ -25,6 +32,9 @@ const voiceLoadedDramaId = ref(0)
 const voiceBusyKeys = ref<string[]>([])
 const voiceBatchRunning = ref(false)
 const voiceLastSynced = ref<Record<number, { voiceId: number; url: string }>>({})
+const samplesByVoice = ref<Record<number, VoiceSample[]>>({})
+const auditionMetaByVoice = ref<Record<number, VoiceAuditionMeta>>({})
+const capabilities = ref<TtsCapabilities | null>(null)
 let loadPromise: Promise<void> | null = null
 
 export interface UseVoiceProfilesOptions {
@@ -118,6 +128,161 @@ export function useVoiceProfiles(options: UseVoiceProfilesOptions) {
 
   function ensureLoaded(): Promise<void> {
     return load(false)
+  }
+
+  async function loadCapabilities(): Promise<TtsCapabilities | null> {
+    if (capabilities.value) return capabilities.value
+    try {
+      capabilities.value = await voiceProfileAPI.capabilities()
+      return capabilities.value
+    } catch {
+      return null
+    }
+  }
+
+  async function loadAuditions(voice: VoiceProfile, episodeId?: number | null): Promise<VoiceAuditionMeta | null> {
+    try {
+      const meta = await voiceProfileAPI.auditions(voice.id, episodeId)
+      samplesByVoice.value = { ...samplesByVoice.value, [voice.id]: meta.items || [] }
+      auditionMetaByVoice.value = { ...auditionMetaByVoice.value, [voice.id]: meta }
+      return meta
+    } catch (error) {
+      toastError(error)
+      return null
+    }
+  }
+
+  async function generateAudition(
+    voice: VoiceProfile,
+    input: { text?: string; seed?: number | null; textSource?: string; episodeId?: number | null; setSample?: boolean },
+  ): Promise<VoiceSample | null> {
+    const key = busyKeyFor(voice)
+    if (isBusy(key)) return null
+    markBusy(key)
+    try {
+      const result = await voiceProfileAPI.generateAudition(voice.id, {
+        text: input.text,
+        seed: input.seed ?? undefined,
+        text_source: input.textSource,
+        episode_id: input.episodeId ?? undefined,
+        set_sample: Boolean(input.setSample),
+      })
+      samplesByVoice.value = {
+        ...samplesByVoice.value,
+        [voice.id]: [result.sample, ...(samplesByVoice.value[voice.id] || [])].slice(0, 20),
+      }
+      patchVoice(voice.id, {
+        seed: result.seed,
+        status: 'ready',
+        ...(input.setSample ? { sampleUrl: result.sample.audioUrl, sampleText: result.sample.text } : {}),
+      })
+      notify()
+      return result.sample
+    } catch (error) {
+      toastError(error)
+      return null
+    } finally {
+      clearBusy(key)
+    }
+  }
+
+  async function setAsSample(voice: VoiceProfile, sampleId: number): Promise<void> {
+    const key = busyKeyFor(voice)
+    if (isBusy(key)) return
+    markBusy(key)
+    try {
+      const updated = await voiceProfileAPI.setSample(voice.id, sampleId)
+      const sample = (samplesByVoice.value[voice.id] || []).find(item => item.id === sampleId)
+      patchVoice(voice.id, {
+        sampleUrl: updated.sampleUrl,
+        sampleText: updated.sampleText,
+        ...(sample ? { seed: sample.seed } : {}),
+      })
+      notify()
+      toast.success(t('voiceProfile.sampleSet'))
+    } catch (error) {
+      toastError(error)
+    } finally {
+      clearBusy(key)
+    }
+  }
+
+  async function deleteAudition(voice: VoiceProfile, sampleId: number): Promise<void> {
+    const key = busyKeyFor(voice)
+    if (isBusy(key)) return
+    markBusy(key)
+    try {
+      await voiceProfileAPI.removeSample(voice.id, sampleId)
+      samplesByVoice.value = {
+        ...samplesByVoice.value,
+        [voice.id]: (samplesByVoice.value[voice.id] || []).filter(item => item.id !== sampleId),
+      }
+      toast.success(t('voiceProfile.sampleDeleted'))
+    } catch (error) {
+      toastError(error)
+    } finally {
+      clearBusy(key)
+    }
+  }
+
+  async function generateSpeech(
+    voice: VoiceProfile,
+    input: { text: string; seed?: number | null; params?: Record<string, any> },
+  ): Promise<VoiceSample | null> {
+    const key = busyKeyFor(voice)
+    if (isBusy(key)) return null
+    markBusy(key)
+    try {
+      const result = await voiceProfileAPI.speech(voice.id, input)
+      samplesByVoice.value = {
+        ...samplesByVoice.value,
+        [voice.id]: [result.sample, ...(samplesByVoice.value[voice.id] || [])].slice(0, 20),
+      }
+      patchVoice(voice.id, { seed: result.seed, status: 'ready' })
+      notify()
+      return result.sample
+    } catch (error) {
+      toastError(error)
+      return null
+    } finally {
+      clearBusy(key)
+    }
+  }
+
+  async function applyToLines(voice: VoiceProfile, episodeId: number, lineIds: number[]): Promise<boolean> {
+    if (!lineIds.length) return false
+    const key = busyKeyFor(voice)
+    if (isBusy(key)) return false
+    markBusy(key)
+    try {
+      const result = await voiceProfileAPI.applyLines(voice.id, { episode_id: episodeId, line_ids: lineIds })
+      notify()
+      toast.success(t('voiceProfile.appliedToLines', { n: result.updated }))
+      return true
+    } catch (error) {
+      toastError(error)
+      return false
+    } finally {
+      clearBusy(key)
+    }
+  }
+
+  async function redesign(voice: VoiceProfile, episodeId?: number | null): Promise<VoiceProfile | null> {
+    const key = busyKeyFor(voice)
+    if (isBusy(key)) return null
+    markBusy(key)
+    try {
+      const created = await voiceProfileAPI.design(voice.id, { episode_id: episodeId ?? undefined })
+      await load(true)
+      notify()
+      toast.success(t('voiceProfile.redesignDone'))
+      return created
+    } catch (error) {
+      toastError(error)
+      return null
+    } finally {
+      clearBusy(key)
+    }
   }
 
   async function persistVoice(voice: VoiceProfile, draft: VoiceDraft): Promise<boolean> {
@@ -362,8 +527,19 @@ export function useVoiceProfiles(options: UseVoiceProfilesOptions) {
     busyKeys: voiceBusyKeys,
     batchRunning: voiceBatchRunning,
     lastSynced: voiceLastSynced,
+    samplesByVoice,
+    auditionMetaByVoice,
+    capabilities,
     load,
     ensureLoaded,
+    loadCapabilities,
+    loadAuditions,
+    generateAudition,
+    setAsSample,
+    deleteAudition,
+    generateSpeech,
+    applyToLines,
+    redesign,
     saveVoice,
     generateFromDraft,
     generateCharacter,

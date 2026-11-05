@@ -317,6 +317,24 @@ describe('合成与缓存', () => {
     }
   })
 
+  it('params.seed 覆盖配置默认 seed 并进入请求', async () => {
+    const cfg: AudioConfig = {
+      ...config,
+      baseUrl,
+      model: 'qwen3-tts-customvoice',
+      settings: { concurrency: 1, retryDelaysMs: [0], seed: 7 },
+    }
+    const before = speechBodies.length
+    const result = await synthesize(
+      { text: '显式种子测试。', voice: { externalVoiceId: 'Serena' }, seed: 20261105 },
+      { config: cfg, cacheDir: tmpDir },
+    )
+    assert.equal(result.cached, false)
+    const requests = speechBodies.slice(before)
+    assert.equal(requests.length, 1)
+    assert.equal(requests[0].body.seed, 20261105)
+  })
+
   it('191 VoiceDesign 走 /v1/audio/speech 并携带 instruct', async () => {
     const cfg: AudioConfig = {
       ...config,
