@@ -249,6 +249,7 @@ test('总线 solo 只隔离其他总线，不覆盖轨自身静音', async () =>
 test('plan hash 内容稳定，改音量后变化', async () => {
   const first = await compileMixPlan(episode.id, 1)
   const second = await compileMixPlan(episode.id, 1)
+  assert.match(hashMixPlan(first), /^[0-9a-f]{32}$/, 'planHash 与剪辑侧 shortHash 同为 32 位')
   assert.equal(hashMixPlan(first), hashMixPlan(second))
   db.update(schema.episodeAudioTracks).set({ volume: 0.5 }).where(eq(schema.episodeAudioTracks.id, ambience.id)).run()
   const changed = await compileMixPlan(episode.id, 1)
@@ -260,7 +261,7 @@ test('版本创建与恢复保持 is_current 唯一', async () => {
   const v1 = await createMixRevision(episode.id, '初版')
   assert.equal(v1.revisionNo, 1)
   assert.equal(v1.isCurrent, true)
-  assert.match(v1.planHash || '', /^[0-9a-f]{64}$/)
+  assert.match(v1.planHash || '', /^[0-9a-f]{32}$/)
 
   db.update(schema.episodeAudioTracks).set({ volume: 0.7 }).where(eq(schema.episodeAudioTracks.id, ambience.id)).run()
   const v2 = await createMixRevision(episode.id, '调整')

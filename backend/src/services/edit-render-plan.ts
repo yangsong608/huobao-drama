@@ -65,6 +65,8 @@ function clampSpeed(clip: EditClip): number {
 /** 计划里的源地址是存储相对路径；测试与外部导入允许绝对路径 */
 function resolveSourceUrl(url: string): string {
   if (/^https?:\/\//i.test(url)) throw new Error(`源素材必须为本地文件：${url}`)
+  // /static/... 是站点内部地址而非文件系统路径（如定格帧 / 插入图片片段），先归一化再解析
+  if (url.startsWith('/static/')) return getAbsolutePath(url.slice(1))
   if (path.isAbsolute(url)) return url
   return getAbsolutePath(url)
 }

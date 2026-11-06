@@ -1111,6 +1111,28 @@ interface EditProjectSettings {
 14. 截图留证：成片列表、混音首屏、右键菜单、字幕检查器、导出结果；
 15. 回归：配音、TTS、ComfyUI 网关、其他工作流不受影响。
 
+### 9.4 指纹与哈希位数口径（终审收口）
+
+- **计划哈希（planHash）统一 32 位 hex**：剪辑侧 `planHashOf`（`edit-plan.ts` 的 `shortHash`）与混音侧 `hashMixPlan`（`mix-plan.ts`）均为 sha256 前 32 位。2026-11-07 起混音侧从 64 位收口为 32 位。
+- 其余域内指纹保持域内一致、不跨域混用：TTS 缓存 `audioHash` 16 位、transition/soundscape/separation 的 `sourceHash` 与 `workflowHash` 64 位、媒体指纹 `size:mtime` 字符串。前端 `edit-recovery.ts` 的 `planFingerprint` 仅用于本机恢复快照对比，不与后端哈希互换。
+- **stale planHash 一次性迁移窗口（fail-safe）**：哈希口径变化后，库中历史行的旧哈希不会回填重算。命中路径：
+  - 剪辑草稿：`draft.planHash ≠ revision.planHash` 视为草稿过期，自动保存/帧操作返回 409 `EDIT_VERSION_CONFLICT`（附当前计划基线），客户端强制重存后恢复——无需人工处理；
+  - 混音/导出：`planHash` 仅作记录与复用键成分（`reuseKeyOf`），不存在等值判定；口径切换后最多导致一次复用未命中（重新渲染），预览缓存文件名变化产生一份孤儿文件，均无功能影响；
+  - 结论：无需数据迁移脚本；唯一的用户可见现象是升级后第一次打开剪辑工程可能要求重新保存草稿。
+
+### 9.5 可靠性观察项处置（终审收口，2026-11-07）
+
+| 观察项 | 处置 |
+| --- | --- |
+| 失败渲染残留文件 | **已修**：`markFailed` 增加可选 `dir` 参数并清理半成品输出目录（与取消的 `removeExportFiles` 同口径）；preset 失效与渲染异常两条路径都已传入目录，配套测试「失败导出清理残留输出文件」。 |
+| completed-with-warning 语义 | **已修**：剪辑导出弹窗在 `status === 'completed'` 但后端带 `status.error` 时展示警告且不自动关闭（主导出流程 `ExportStage` 此前已展示 `record.error`），配套结构测试。 |
+| 启动恢复 kind 范围 | 维持现状观察：export-service 启动恢复按状态扫描而非按 kind 过滤；当前仅剪辑导出使用 pending/running 持久状态，其他域无同状态行，无实际误伤路径；未来新增使用方时再收口。 |
+| onProgress 到 100% | 已验证：`export-service.ts` 在完成分支显式置 100%，无悬挂进度。 |
+| 轮询瞬时错误 | 已验证：`useExportSession.ts` 已有 `POLL_MAX_ERRORS` 上限 + 递增退避（`POLL_INTERVAL_MS × failures`），瞬时错误不会中断导出。 |
+| AudioContext resume | 已验证：`useEditClock.ts` 与 `useMixPlayback.ts` 的 `ctx.resume()` 均已带 `.catch(() => {})`，自动播放策略拒绝不再抛未捕获异常。 |
+| 1 帧容差与帧对齐 | 联调观察项：图片感知的 1 帧最小片段（`edit-commands`）与帧级操作的真实边界在真实工程上联调确认；当前单元测试覆盖逻辑正确性。 |
+| ASS 转义真实路径 | **已修**：字幕文本先 `\` → 全角 `＼`，再大括号 → 全角（），换行 → `\N`；用户文本中的反斜杠不再落入 ASS 控制符（`\pos`、`\t` 注入路径封死），配套测试。 |
+
 ---
 
 ## 10. 分阶段实施

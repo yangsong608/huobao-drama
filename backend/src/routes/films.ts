@@ -83,7 +83,7 @@ app.post('/episodes/:id/exports/:exportId/project-film', (c) => {
   const exportId = parseId(c.req.param('exportId'))
   if (!episodeId || !exportId) return badRequest(c, '编号无效')
   try {
-    const filmId = projectFilmFromExport(exportId)
+    const filmId = projectFilmFromExport(exportId, episodeId)
     return success(c, { film_id: filmId })
   } catch (error) {
     return handleFilmError(c, error)

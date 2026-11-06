@@ -114,6 +114,8 @@ test('导出主流程：完成后写入台账并投影剪辑成片', async () =>
   assert.equal(films.length, 1)
   assert.equal(films[0].mergedUrl, row.output_url)
   assert.equal(films[0].status, 'completed')
+  // video_merges.duration 语义为秒（混音导出同样写秒）；写毫秒会让列表显示成 677:05 这类天文时长
+  assert.ok(films[0].duration >= 1.5 && films[0].duration <= 3, `film.duration=${films[0].duration}`)
   const episodeRow = db.select().from(schema.episodes).all().find((e) => e.id === episode.id)!
   assert.equal(episodeRow.currentFilmId, films[0].id) // set_current 生效
 })

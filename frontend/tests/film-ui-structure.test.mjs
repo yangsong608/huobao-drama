@@ -35,6 +35,12 @@ test('拼接导出页接入成片动作', () => {
   }
 })
 
+test('成片卡片按钮独立成行并可换行，不与时间挤同一行', () => {
+  assert.match(episode, /class="merge-card-actions"/, '成片卡片缺少独立按钮行')
+  assert.match(episode, /\.merge-card-actions \{[^}]*flex-wrap:\s*wrap/, '按钮行必须可换行')
+  assert.doesNotMatch(episode, /\.merge-card-meta \.btn \{ margin-left: auto; \}/, '旧的单按钮右推规则仍在，会挤爆卡片')
+})
+
 test('中文文案包含成片中心 key', () => {
   for (const key of ['films.kind.concat', 'films.kind.mix', 'films.kind.edit', 'films.current', 'films.edited']) {
     assert.ok(key.split('.').reduce((obj, part) => obj?.[part], zh) !== undefined, `缺少 ${key}`)

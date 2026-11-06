@@ -245,7 +245,7 @@ async function runEditExport(ctx: {
       origin: 'export',
       status: 'completed',
       mergedUrl: outputRel,
-      duration: Math.round(durationMs),
+      duration: Math.round(durationMs / 1000),
       sourceMergeId: ctx.project.sourceMergeId,
       exportId: ctx.exportId,
       editRevisionId: ctx.revisionId,

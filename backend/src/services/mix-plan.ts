@@ -16,6 +16,7 @@ import { probeDurationMs } from './audio-mix.js'
 import { normalizeVideoAudioMode } from './video-audio.js'
 import type { previewTimeline } from './dubbing.js'
 import {
+  MixSourceError,
   resolveMixSource,
   type MixPlanSource,
   type MixSourceWarning,
@@ -610,6 +611,227 @@ export async function compileMixPlan(
   return (await compileMixPlanDetailed(episodeId, dramaId, options)).plan
 }
 
+function fallbackClipSource(raw: string | null | undefined): { url: string | null; usable: boolean; reason: string | null } {
+  const url = String(raw || '').trim()
+  if (!url) return { url: null, usable: false, reason: '缺少音频素材' }
+  if (/^https?:\/\//i.test(url)) return { url, usable: true, reason: null }
+  try {
+    if (!fs.existsSync(getAbsolutePath(url))) return { url, usable: false, reason: '音频文件不存在' }
+  } catch {
+    return { url, usable: false, reason: '音频路径无效' }
+  }
+  return { url, usable: true, reason: null }
+}
+
+/**
+ * 本集没有任何可用成片时的降级编译：保留总线、音轨片段与虚拟对白轨，无原声床。
+ * 源成片是混音的主输入，但空集也要能打开混音台并校验试听范围，因此在编译层兜底。
+ */
+export async function compilePlanWithoutSource(episodeId: number, dramaId: number): Promise<MixPlan> {
+  const buses: MixBus[] = ensureDefaultBuses(episodeId)
+    .map((row) => (MIX_BUS_KEYS as readonly string[]).includes(row.key)
+      ? {
+        id: row.id,
+        key: row.key as MixBusKey,
+        name: row.name,
+        volume: row.volume ?? 1,
+        muted: Boolean(row.muted),
+        solo: Boolean(row.solo),
+        effectiveMuted: false,
+        ducking: Boolean(row.ducking),
+        duckRatio: row.duckRatio ?? 6,
+        duckAttackMs: row.duckAttackMs ?? 20,
+        duckReleaseMs: row.duckReleaseMs ?? 250,
+        lufsTarget: row.lufsTarget ?? null,
+        limiterCeiling: row.limiterCeiling ?? null,
+      }
+      : null)
+    .filter((bus): bus is MixBus => bus !== null)
+  const busByKey = new Map<MixBusKey, MixBus>(buses.map((bus) => [bus.key, bus]))
+
+  const trackRows = db.select().from(schema.episodeAudioTracks)
+    .where(eq(schema.episodeAudioTracks.episodeId, episodeId))
+    .orderBy(asc(schema.episodeAudioTracks.sortOrder), asc(schema.episodeAudioTracks.id))
+    .all()
+  const clipRows = db.select().from(schema.episodeAudioClips)
+    .where(eq(schema.episodeAudioClips.episodeId, episodeId))
+    .orderBy(asc(schema.episodeAudioClips.startMs), asc(schema.episodeAudioClips.id))
+    .all()
+  const tracks: MixTrack[] = trackRows.map((row) => {
+    const role = String(row.role || '').trim() || row.kind || 'custom'
+    const explicitBus = row.busId
+      ? buses.find((bus) => bus.id === row.busId)?.key
+      : undefined
+    return {
+      id: row.id,
+      role,
+      name: row.name,
+      busId: explicitBus ?? ROLE_BUS[role] ?? 'sfx',
+      virtual: false,
+      volume: row.volume ?? 1,
+      pan: row.pan ?? 0,
+      muted: Boolean(row.muted),
+      solo: Boolean(row.solo),
+      effectiveMuted: false,
+      ducking: Boolean(row.ducking),
+      locked: Boolean(row.locked),
+      hidden: Boolean(row.hidden),
+      loop: Boolean(row.loop),
+      color: row.color ?? null,
+      height: row.height ?? 72,
+      sortOrder: row.sortOrder ?? 0,
+      origin: row.origin ?? null,
+      stemAssetId: row.stemAssetId ?? null,
+      clips: clipRows.filter((clip) => clip.trackId === row.id).map((clip) => {
+        const src = fallbackClipSource(clip.audioUrl || clip.sourceUrl)
+        return {
+          id: clip.id,
+          assetId: clip.assetId ?? null,
+          takeId: clip.takeId ?? null,
+          lineId: clip.lineId ?? null,
+          name: clip.name ?? null,
+          startMs: clip.startMs,
+          endMs: clip.endMs,
+          sourceStartMs: clip.sourceStartMs ?? 0,
+          gainDb: clip.gainDb ?? 0,
+          pan: clip.pan ?? 0,
+          fadeInMs: clip.fadeInMs ?? 0,
+          fadeOutMs: clip.fadeOutMs ?? 0,
+          fadeCurve: clip.fadeCurve || 'linear',
+          loop: Boolean(clip.loop),
+          muted: Boolean(clip.muted),
+          locked: Boolean(clip.locked),
+          audioUrl: src.url,
+          usable: src.usable,
+          reason: src.reason,
+        }
+      }),
+    }
+  })
+
+  // 动态加载：dubbing 依赖 export-service，静态引用会形成循环
+  const { previewTimeline: readTimeline } = await import('./dubbing.js')
+  const timeline = await readTimeline(episodeId, dramaId)
+  const takes = db.select().from(schema.lineTakes)
+    .where(eq(schema.lineTakes.episodeId, episodeId))
+    .orderBy(asc(schema.lineTakes.takeNo))
+    .all()
+  const activeByLine = new Map<number, (typeof takes)[number]>()
+  for (const take of takes) {
+    if (!take.isActive || take.deletedAt) continue
+    activeByLine.set(take.lineId, take)
+  }
+  const dialogueClips: MixClip[] = []
+  for (const cue of timeline.cues) {
+    const take = activeByLine.get(cue.lineId)
+    const src = fallbackClipSource(take?.audioUrl || cue.audioUrl)
+    if (!src.url) continue
+    dialogueClips.push({
+      id: null,
+      assetId: null,
+      takeId: take?.id ?? null,
+      lineId: cue.lineId,
+      name: null,
+      startMs: cue.startMs,
+      endMs: cue.endMs,
+      sourceStartMs: 0,
+      gainDb: 0,
+      pan: 0,
+      fadeInMs: 0,
+      fadeOutMs: 0,
+      fadeCurve: 'linear',
+      loop: false,
+      muted: false,
+      locked: false,
+      audioUrl: src.url,
+      usable: src.usable,
+      reason: src.reason,
+    })
+  }
+  tracks.unshift({
+    id: null,
+    role: 'voice',
+    name: '对白',
+    busId: 'dialogue',
+    virtual: true,
+    volume: 1,
+    pan: 0,
+    muted: false,
+    solo: false,
+    effectiveMuted: false,
+    ducking: false,
+    locked: false,
+    hidden: false,
+    loop: false,
+    color: '#f59e0b',
+    height: 72,
+    sortOrder: -1,
+    origin: null,
+    stemAssetId: null,
+    clips: dialogueClips,
+  })
+
+  const soloActive = tracks.some((track) => track.solo)
+    || buses.some((bus) => bus.key !== 'master' && bus.solo)
+  const soloedBusKeys = new Set<MixBusKey>()
+  for (const track of tracks) {
+    const bus = busByKey.get(track.busId)!
+    if (!soloActive) {
+      track.effectiveMuted = track.muted || bus.muted
+      continue
+    }
+    if (track.solo) {
+      track.effectiveMuted = false
+      if (bus.key !== 'master') soloedBusKeys.add(bus.key)
+      continue
+    }
+    track.effectiveMuted = bus.solo ? track.muted : true
+  }
+  for (const bus of buses) {
+    bus.effectiveMuted = bus.key === 'master'
+      ? bus.muted
+      : soloActive ? !(bus.solo || soloedBusKeys.has(bus.key)) : bus.muted
+  }
+
+  const clipEnd = tracks.reduce(
+    (max, track) => track.clips.reduce((inner, clip) => Math.max(inner, clip.endMs), max),
+    0,
+  )
+  const master = busByKey.get('master')!
+  return {
+    version: 1,
+    episodeId,
+    durationMs: Math.max(0, timeline.totalDurationMs, clipEnd),
+    sampleRate: 48000,
+    buses,
+    tracks,
+    master: {
+      lufs: master.lufsTarget ?? -16,
+      truePeak: master.limiterCeiling ?? -1.5,
+      limiter: 'alimiter',
+    },
+  }
+}
+
+/** 统一编译入口：源成片缺失（集内无任何可用成片）时降级为无源计划，其余错误原样抛出 */
+export async function compileEpisodePlan(
+  episodeId: number,
+  dramaId: number,
+  sourceFilmId?: number | null,
+): Promise<{ plan: MixPlan; warnings: MixSourceWarning[] }> {
+  try {
+    return await compileMixPlanDetailed(episodeId, dramaId, { sourceFilmId })
+  } catch (error) {
+    if (error instanceof MixSourceError && error.status === 400 && error.code === 'MIX_SOURCE_MISSING') {
+      return {
+        plan: await compilePlanWithoutSource(episodeId, dramaId),
+        warnings: [{ code: 'MIX_SOURCE_FALLBACK', message: '本集还没有可用成片，可先添加配音与音效。' }],
+      }
+    }
+    throw error
+  }
+}
+
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize)
   if (value && typeof value === 'object') {
@@ -622,9 +844,11 @@ function canonicalize(value: unknown): unknown {
 }
 
 export function hashMixPlan(plan: MixPlan): string {
+  // 32 位：与剪辑侧 planHashOf（shortHash）同口径，见设计「指纹与哈希位数」说明
   return crypto.createHash('sha256')
     .update(JSON.stringify(canonicalize(plan)))
     .digest('hex')
+    .slice(0, 32)
 }
 
 export interface MixRevision extends RevisionRow {

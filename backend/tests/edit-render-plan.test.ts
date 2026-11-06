@@ -119,6 +119,28 @@ test('图片片段循环为视频帧且无声', async () => {
   assert.ok(Math.abs(durationMs - 2500) <= 40)
 })
 
+test('图片片段用 /static/ 站点地址也能渲染（定格帧来源）', async () => {
+  const sharp = (await import('sharp')).default
+  fs.mkdirSync(path.join(root, 'static'), { recursive: true })
+  const img = path.join(root, 'static', 'frame.png')
+  await sharp({ create: { width: 320, height: 240, channels: 3, background: 'blue' } }).png().toFile(img)
+  const plan = basePlan()
+  plan.clips.push({
+    ...structuredClone(plan.clips[0]),
+    id: 'img_site',
+    kind: 'image',
+    source: { kind: 'asset', id: 'img_site', url: '/static/frame.png', durationMs: 1500, width: 320, height: 240, fps: null, hasAudio: false, fingerprint: 'img_site' },
+    sourceInMs: 0,
+    sourceOutMs: 1500,
+    gapBeforeMs: 0,
+  })
+  const output = path.join(root, 'img-site-out.mp4')
+  const { durationMs } = await renderEditVideo({ plan, outputPath: output, subtitleMode: 'none' })
+  const media = probe(output)
+  assert.ok(Math.abs(media.format.duration * 1000 - 2500) <= 40)
+  assert.ok(Math.abs(durationMs - 2500) <= 40)
+})
+
 test('变速 2× 与淡入淡出按参数生效（时长减半）', async () => {
   const plan = basePlan()
   plan.clips[0].sourceOutMs = 2000

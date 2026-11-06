@@ -147,6 +147,12 @@ async function pollStatus(exportId) {
       error.value = status.error || t('edit.exportFailed')
       return
     }
+    if (status.error) {
+      error.value = status.error
+      progressText.value = ''
+      emit('exported', status)
+      return
+    }
     progressText.value = ''
     emit('exported', status)
     emit('close')

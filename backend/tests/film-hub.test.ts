@@ -107,6 +107,23 @@ test('删除当前成片返回 FILM_IS_CURRENT；删除其他成片软删除并�
   assert.equal(episodeRow.editProjectId, null)
 })
 
+test('project-film 校验导出归属集：跨集访问返回 404', () => {
+  const otherEpisode = db.insert(schema.episodes).values({
+    dramaId: drama.id, episodeNumber: 4, title: '第四集', createdAt: ts, updatedAt: ts,
+  }).returning().get()
+  const exportRow = db.insert(schema.episodeExports).values({
+    episodeId: episode.id, kind: 'video', preset: 'vertical-hd', status: 'completed', progress: 100,
+    outputUrl, paramsJson: JSON.stringify({ setCurrent: false }), isCurrent: false, createdAt: ts,
+  }).returning().get()
+
+  assert.throws(
+    () => projectFilmFromExport(exportRow.id, otherEpisode.id),
+    (error: any) => error.code === 'EXPORT_NOT_FOUND' && error.status === 404,
+  )
+  const filmId = projectFilmFromExport(exportRow.id, episode.id)
+  assert.ok(filmId)
+})
+
 test('重命名只接受 1–80 字', () => {
   const target = film({ title: '旧标题' })
   assert.equal(renameFilm(target.id, '  新标题  ').title, '新标题')

@@ -88,7 +88,7 @@ export function buildEditAss(plan: EditPlanV1): string {
   const sorted = [...plan.subtitles].sort((a, b) => a.startMs - b.startMs)
   const events = sorted.map((cue) => {
     const appearance = resolveSubtitleAppearance(cue, plan)
-    const text = cue.text.replace(/\{/g, '（').replace(/\}/g, '）').replace(/\r?\n/g, '\\N')
+    const text = cue.text.replace(/\\/g, '＼').replace(/\{/g, '（').replace(/\}/g, '）').replace(/\r?\n/g, '\\N')
     return `Dialogue: 0,${formatAssTime(cue.startMs)},${formatAssTime(cue.endMs)},${styleOf(appearance)},,0,0,0,,${overrideTags(appearance, width, height)}${text}`
   })
   return `${header}\n${events.join('\n')}\n`

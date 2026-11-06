@@ -33,6 +33,7 @@ const {
   setCurrentExport,
   recoverInterruptedExports,
   resetExportRuntime,
+  markFailed,
 } = await import('../src/services/export-service.ts')
 const { computeMergeSourceHash } = await import('../src/services/merge-plan.ts')
 const { measureLoudness } = await import('../src/services/export-validation.ts')
@@ -314,6 +315,55 @@ test('删除当前成片导出被拒绝，切换后可删除并软删成片', as
   const episodeRow = db.select().from(schema.episodes).where(eq(schema.episodes.id, episode.id)).get()!
   assert.equal(episodeRow.currentFilmId, other.filmId)
   assert.equal(episodeRow.videoUrl, other.outputUrl)
+})
+
+test('删除导出级联软删其剪辑工程并清空工程指针', async () => {
+  const filmRow = db.insert(schema.videoMerges).values({
+    episodeId: episode.id, dramaId: 1, title: '级联成片', provider: 'ffmpeg', model: 'test',
+    status: 'completed', kind: 'edit', origin: 'export', mergedUrl: `static/projects/1/videos/cascade.mp4`,
+    duration: 10, createdAt: ts,
+  }).returning().get()
+  const exportRow = db.insert(schema.episodeExports).values({
+    episodeId: episode.id, kind: 'video', preset: 'vertical-hd', status: 'completed', progress: 100,
+    outputUrl: `static/projects/1/videos/cascade.mp4`, filmId: filmRow.id,
+    paramsJson: JSON.stringify({ setCurrent: false }), isCurrent: false, createdAt: ts,
+  }).returning().get()
+  const project = db.insert(schema.editProjects).values({
+    episodeId: episode.id, dramaId: 1, sourceMergeId: filmRow.id,
+    sourceUrl: `static/projects/1/videos/cascade.mp4`,
+    title: '级联工程', status: 'active', createdAt: ts, updatedAt: ts,
+  }).returning().get()
+  db.update(schema.episodes).set({ editProjectId: project.id })
+    .where(eq(schema.episodes.id, episode.id)).run()
+
+  const removed = await deleteExport(exportRow.id)
+  assert.ok(removed.deletedAt)
+  const deletedProject = db.select().from(schema.editProjects)
+    .where(eq(schema.editProjects.id, project.id)).get()!
+  assert.ok(deletedProject.deletedAt, '删除导出应级联软删其剪辑工程')
+  assert.equal(deletedProject.status, 'deleted')
+  const episodeAfter = db.select().from(schema.episodes)
+    .where(eq(schema.episodes.id, episode.id)).get()!
+  assert.equal(episodeAfter.editProjectId, null)
+})
+
+test('失败导出清理残留输出文件', async () => {
+  const inserted = db.insert(schema.episodeExports).values({
+    episodeId: episode.id, kind: 'mix', preset: 'audio-wav', status: 'running', progress: 40,
+    isCurrent: false, createdAt: ts,
+  }).returning().get()!
+  const id = inserted.id
+  const dir = exportDirOf(id)
+  await fs.mkdir(dir, { recursive: true })
+  const partial = path.join(dir, 'partial.wav')
+  await fs.writeFile(partial, Buffer.from('partial'))
+
+  markFailed(id, '渲染中断', dir)
+  const failed = getExport(id)!
+  assert.equal(failed.status, 'failed')
+  assert.equal(failed.error, '渲染中断')
+  const entries = await fs.readdir(dir).catch(() => [] as string[])
+  assert.equal(entries.length, 0, entries.join('|'))
 })
 
 test('启动恢复把遗留的 pending/running 标记为失败', () => {

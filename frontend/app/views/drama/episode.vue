@@ -1080,6 +1080,8 @@
                   <div class="merge-card-meta">
                     <span class="mono">{{ formatHistoryTime(m.created_at) }}</span>
                     <span v-if="m.duration">· {{ m.duration }}s</span>
+                  </div>
+                  <div class="merge-card-actions">
                     <a
                       v-if="m.status === 'completed' && m.merged_url"
                       :href="'/' + m.merged_url"
@@ -7915,9 +7917,10 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .merge-card-pending.is-failed { color: var(--error); background: var(--error-bg); }
 .merge-card-title { font-size: 12px; font-weight: 600; color: var(--text-1); padding: 6px 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .merge-card-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); min-width: 0; }
-.merge-card-meta .btn { margin-left: auto; }
-.merge-card-meta .merge-card-del { margin-left: 0; color: var(--text-3); }
-.merge-card-meta .merge-card-del:hover { color: var(--error); }
+.merge-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.merge-card-actions .btn { padding: 3px 8px; }
+.merge-card-actions .merge-card-del { margin-left: auto; color: var(--text-3); }
+.merge-card-actions .merge-card-del:hover { color: var(--error); }
 .merge-card.playable { cursor: pointer; }
 .merge-card.playable:hover { border-color: var(--border-strong); box-shadow: var(--shadow-card); }
 .merge-card-thumb { position: relative; }

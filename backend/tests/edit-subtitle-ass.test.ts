@@ -52,6 +52,15 @@ test('底部居中映射 \\an2 与 \\pos(540, 1632)', () => {
   assert.ok(line!.includes('\\pos(540,1632)'), line)
 })
 
+test('转义：大括号与反斜杠不进入 ASS 控制符', () => {
+  const plan = planWithCue('default', null)
+  plan.subtitles[0].text = '看{这个}路径\\projects\\1'
+  const line = buildEditAss(plan).split('\n').find((l) => l.startsWith('Dialogue:'))
+  assert.ok(line!.includes('看（这个）'), line)
+  assert.ok(!line!.includes('\\projects'), line)
+  assert.ok(line!.includes('＼projects'), line)
+})
+
 test('对齐 × 纵向区映射九宫格 an 值', () => {
   assert.equal(assAlignmentFor('left', 10), 7)
   assert.equal(assAlignmentFor('center', 10), 8)

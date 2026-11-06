@@ -1282,6 +1282,15 @@
                   <span v-if="gwError" class="field-hint gw-error">{{ gwError }}</span>
                   <span class="field-hint">{{ t('settings.cfg.gatewayWorkflowHint') }}</span>
                 </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.gatewayAdminUrl') }}</span>
+                  <div class="gateway-workflow-row">
+                    <input v-model="gatewayAdminUrl" class="input mono" :placeholder="t('settings.cfg.gatewayAdminUrlPlaceholder')" />
+                    <button type="button" class="btn btn-sm" @click="openGatewayAdmin">{{ t('settings.cfg.gatewayAdminOpen') }}</button>
+                    <button type="button" class="btn btn-sm" @click="copyGatewayAdminUrl">{{ t('settings.cfg.gatewayAdminCopy') }}</button>
+                  </div>
+                  <span class="field-hint">{{ t('settings.cfg.gatewayAdminHint') }}</span>
+                </label>
               </template>
               <template v-else>
                 <label class="field">
@@ -1356,6 +1365,15 @@
                   </div>
                   <span v-if="gwError" class="field-hint gw-error">{{ gwError }}</span>
                   <span class="field-hint">{{ t('settings.cfg.gatewayWorkflowHint') }}</span>
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.gatewayAdminUrl') }}</span>
+                  <div class="gateway-workflow-row">
+                    <input v-model="gatewayAdminUrl" class="input mono" :placeholder="t('settings.cfg.gatewayAdminUrlPlaceholder')" />
+                    <button type="button" class="btn btn-sm" @click="openGatewayAdmin">{{ t('settings.cfg.gatewayAdminOpen') }}</button>
+                    <button type="button" class="btn btn-sm" @click="copyGatewayAdminUrl">{{ t('settings.cfg.gatewayAdminCopy') }}</button>
+                  </div>
+                  <span class="field-hint">{{ t('settings.cfg.gatewayAdminHint') }}</span>
                 </label>
               </template>
               <template v-else>
@@ -1884,6 +1902,26 @@ const cfgComfyMode = ref('gateway')
 const gwWorkflows = ref([])
 const gwLoading = ref(false)
 const gwError = ref('')
+// 管理端网页地址只存本机 localStorage（不入库）：管理端仅服务器 127.0.0.1:8193 可达，需 SSH 隧道
+const gatewayAdminUrl = ref(localStorage.getItem('huobao.gatewayAdminUrl') || '')
+watch(gatewayAdminUrl, (value) => {
+  localStorage.setItem('huobao.gatewayAdminUrl', value)
+})
+function openGatewayAdmin() {
+  const url = gatewayAdminUrl.value.trim()
+  if (!url) {
+    toast.warning(t('settings.cfg.gatewayAdminUrlRequired'))
+    return
+  }
+  window.open(url, '_blank', 'noopener')
+}
+function copyGatewayAdminUrl() {
+  if (!gatewayAdminUrl.value.trim()) {
+    toast.warning(t('settings.cfg.gatewayAdminUrlRequired'))
+    return
+  }
+  copyText(gatewayAdminUrl.value.trim(), 'settings.cfg.gatewayAdminCopied')
+}
 const gatewayWorkflowOptions = computed(() => gwWorkflows.value.map(item => ({
   label: item.name ? `${item.name} · ${item.slug}` : item.slug,
   value: item.slug,

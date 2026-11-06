@@ -278,9 +278,12 @@ function exportKindOf(record: typeof schema.episodeExports.$inferSelect): FilmKi
   return record.projectId ? 'edit' : 'mix'
 }
 
-export function projectFilmFromExport(exportId: number): number {
+export function projectFilmFromExport(exportId: number, episodeId?: number): number {
   const record = db.select().from(schema.episodeExports).where(eq(schema.episodeExports.id, exportId)).get()
   if (!record) throw new FilmError(404, 'EXPORT_NOT_FOUND', '导出记录不存在')
+  if (episodeId && record.episodeId !== episodeId) {
+    throw new FilmError(404, 'EXPORT_NOT_FOUND', '该集下没有这条导出记录')
+  }
   if (record.filmId) {
     const existing = db.select().from(schema.videoMerges).where(eq(schema.videoMerges.id, record.filmId)).get()
     if (existing && !existing.deletedAt) return existing.id

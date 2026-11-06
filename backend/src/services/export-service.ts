@@ -787,7 +787,8 @@ async function runVideoPipeline(context: PipelineContext): Promise<PipelineResul
   }
 }
 
-function markFailed(recordId: number, message: string): void {
+/** 标记失败并清理半成品输出目录（与取消的 removeExportFiles 同口径） */
+export function markFailed(recordId: number, message: string, dir?: string): void {
   db.update(schema.episodeExports)
     .set({ status: 'failed', error: message.slice(0, 2000), finishedAt: now() })
     .where(and(
@@ -795,6 +796,7 @@ function markFailed(recordId: number, message: string): void {
       inArray(schema.episodeExports.status, ['pending', 'running']),
     ))
     .run()
+  if (dir) removeExportFiles(dir)
 }
 
 function markCancelled(recordId: number, dir: string): void {
@@ -842,7 +844,7 @@ async function executeExport(recordId: number, signal: AbortSignal, token: numbe
   }
   const preset = EXPORT_PRESETS[(row.preset || '') as keyof typeof EXPORT_PRESETS]
   if (!preset) {
-    markFailed(recordId, '导出预设无效')
+    markFailed(recordId, '导出预设无效', exportDirOf(episode.dramaId, episode.id, recordId))
     return
   }
   const params = (() => {
@@ -989,7 +991,7 @@ async function executeExport(recordId: number, signal: AbortSignal, token: numbe
       markCancelled(recordId, dir)
       return
     }
-    markFailed(recordId, message || '导出失败')
+    markFailed(recordId, message || '导出失败', dir)
   } finally {
     releaseRun(recordId, token)
   }
@@ -1226,13 +1228,35 @@ export async function deleteExport(id: number): Promise<ExportRecord> {
   if (film && episode?.currentFilmId === film.id) {
     throw new ExportError('这是当前成片的导出记录，请先把其他成片设为当前', 409)
   }
-  db.update(schema.episodeExports)
-    .set({ deletedAt: now(), isCurrent: false })
-    .where(eq(schema.episodeExports.id, id))
-    .run()
-  if (film && !film.deletedAt) {
-    db.update(schema.videoMerges).set({ deletedAt: now() }).where(eq(schema.videoMerges.id, film.id)).run()
-  }
+  const ts = now()
+  db.transaction((tx) => {
+    tx.update(schema.episodeExports)
+      .set({ deletedAt: ts, isCurrent: false })
+      .where(eq(schema.episodeExports.id, id))
+      .run()
+    if (film && !film.deletedAt) {
+      tx.update(schema.videoMerges).set({ deletedAt: ts }).where(eq(schema.videoMerges.id, film.id)).run()
+    }
+    // 与 deleteFilm 同口径：成片删除时级联软删其剪辑工程并清空工程指针
+    if (film) {
+      const project = tx.select().from(schema.editProjects)
+        .where(and(
+          eq(schema.editProjects.episodeId, record.episodeId),
+          eq(schema.editProjects.sourceMergeId, film.id),
+          isNull(schema.editProjects.deletedAt),
+        ))
+        .get()
+      if (project) {
+        tx.update(schema.editProjects).set({ status: 'deleted', deletedAt: ts, updatedAt: ts })
+          .where(eq(schema.editProjects.id, project.id)).run()
+        tx.update(schema.episodes).set({ editProjectId: null, updatedAt: ts })
+          .where(and(
+            eq(schema.episodes.id, record.episodeId),
+            eq(schema.episodes.editProjectId, project.id),
+          )).run()
+      }
+    }
+  }, { behavior: 'immediate' })
   return getExport(id)!
 }
 

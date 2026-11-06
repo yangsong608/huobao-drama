@@ -15,6 +15,16 @@ test('导出对话框：降级警告、模式与确认', () => {
   assert.match(dialog, /base_version|baseVersion/)
 })
 
+test('导出完成但带后端警告：展示提示且不自动关闭', () => {
+  const dialog = read('app/components/edit/EditExportDialog.vue')
+  const poll = dialog.slice(dialog.indexOf('async function pollStatus'))
+  assert.match(
+    poll,
+    /if \(status\.error\)[\s\S]*?emit\('exported', status\)[\s\S]*?return/,
+    'completed 带警告需展示 status.error 且跳过自动关闭',
+  )
+})
+
 test('导出警告镜像后端编码', () => {
   const src = read('app/utils/edit-export-warnings.ts')
   for (const code of ['TRANSITION_HARD_CUT', 'FILTER_UNSUPPORTED', 'TRANSFORM_UNSUPPORTED', 'OVERLAY_UNSUPPORTED']) {
