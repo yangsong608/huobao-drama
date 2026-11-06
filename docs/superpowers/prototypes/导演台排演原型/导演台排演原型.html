@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>导演台 · 排演原型</title>
+  <link rel="stylesheet" href="./导演台排演原型.css">
+</head>
+<body>
+  <div class="dw" id="dw">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="icon-btn" id="backBtn" type="button" title="返回分集" aria-label="返回分集">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        </button>
+        <span class="brand">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v13H4zM8 7V4h8v3M4 11h16M8 15h3"/></svg>
+          导演台
+        </span>
+        <span class="episode-label">第 3 集 · 雨夜来信</span>
+        <span class="chip chip-on"><i></i>可编辑</span>
+        <span class="chip chip-proto" title="本地交互原型，不连接后端">原型</span>
+      </div>
+
+      <div class="topbar-center">
+        <div class="segmented" role="group" aria-label="排演视图">
+          <button class="seg-btn is-active" type="button" data-view="2d" aria-pressed="true" title="切换到俯视排演（快捷键 1）">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+            <span>2D 俯视</span>
+          </button>
+          <button class="seg-btn" type="button" data-view="3d" aria-pressed="false" title="切换到机位预演（快捷键 2）">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>
+            <span>3D 预演</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <div class="save-state is-saved" id="saveState" aria-live="polite">
+          <i class="save-dot"></i><span id="saveText">已保存</span>
+        </div>
+        <button class="btn btn-ghost" id="saveBtn" type="button" title="保存导演计划（⌘S）">保存</button>
+        <button class="btn btn-primary" id="applyBtn" type="button">
+          应用到分镜<span class="btn-count" id="applyCount" hidden>0</span>
+        </button>
+        <button class="icon-btn" id="moreBtn" type="button" title="更多" aria-label="更多" aria-haspopup="menu" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>
+        </button>
+        <div class="menu" id="moreMenu" role="menu" hidden>
+          <button class="menu-item is-danger" type="button" data-action="reset-prototype" role="menuitem">重置原型数据</button>
+          <div class="menu-note">1 / 2 切换视图 · ⌘S 保存</div>
+        </div>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="shot-panel">
+        <div class="panel-head">
+          <h2>镜头列表</h2>
+          <span class="count" id="shotCount">9</span>
+        </div>
+        <div class="scene-line">
+          <span>场景 3 · 老宅书房</span>
+          <span id="totalDuration">1:40</span>
+        </div>
+        <div class="shot-list" id="shotList"></div>
+        <div class="shot-panel-foot">
+          <span class="legend-item"><i class="legend-dot is-ready"></i>已生成 <b id="readyCount">5</b></span>
+          <span class="legend-item"><i class="legend-dot"></i>未生成 <b id="pendingCount">4</b></span>
+        </div>
+      </aside>
+
+      <section class="stage-panel">
+        <div class="stage-toolbar">
+          <div class="stage-title">
+            <strong id="stageTitle">2D 俯视排演</strong>
+            <span class="chip chip-ghost" id="sceneChip">场景底图 · 示意</span>
+          </div>
+          <div class="stage-tools" id="tools2d">
+            <span class="tool-hint">拖拽人物 / 摄影机 · 拖空白平移</span>
+            <span class="tool-divider"></span>
+            <button class="tool-btn" id="zoomOutBtn" type="button" title="缩小" aria-label="缩小">−</button>
+            <span class="zoom-label" id="zoomLabel">100%</span>
+            <button class="tool-btn" id="zoomInBtn" type="button" title="放大" aria-label="放大">+</button>
+            <button class="tool-btn" id="zoomFitBtn" type="button">适应</button>
+          </div>
+          <div class="stage-tools" id="tools3d" hidden>
+            <span class="tool-hint">拖拽环绕 · 滚轮缩放 · 双击复位</span>
+            <span class="tool-divider"></span>
+            <button class="tool-btn is-accent" id="povBtn" type="button">切到机位</button>
+          </div>
+        </div>
+
+        <div class="stage-viewport" id="stageViewport">
+          <div class="stage-grid-bg" aria-hidden="true"></div>
+
+          <div class="stage-2d" id="stage2d">
+            <div class="world" id="world">
+              <svg class="floor-svg" id="floorSvg" viewBox="0 0 616 437" role="img" aria-label="老宅书房俯视平面图"></svg>
+              <div class="world-overlay" id="worldOverlay">
+                <div class="path-handles" id="pathHandles"></div>
+                <div class="actor-handles" id="actorHandles"></div>
+                <button class="camera-handle" id="cameraHandle" type="button" data-drag="camera" aria-label="摄影机，可拖拽，方向键微调">
+                  <span class="cam-plate">
+                    <span class="cam-body">
+                      <svg viewBox="0 0 32 24" aria-hidden="true"><rect x="3" y="6" width="19" height="13" rx="2"/><path d="M22 10l7-3v11l-7-3z"/><circle cx="11" cy="12.5" r="3.2"/></svg>
+                    </span>
+                  </span>
+                  <span class="cam-tag" id="camTag">CAM 01</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="pip" id="pipCard">
+              <div class="pip-head">
+                <span>机位预览</span>
+                <span class="pip-meta" id="pipMeta">35mm · 中景</span>
+              </div>
+              <div class="pip-frame" id="pipFrame">
+                <i class="pip-window"></i>
+                <i class="pip-desk"></i>
+                <i class="pip-vignette"></i>
+                <span class="pip-corner tl"></span><span class="pip-corner tr"></span>
+                <span class="pip-corner bl"></span><span class="pip-corner br"></span>
+                <span class="pip-cross"></span>
+                <div class="pip-actors" id="pipActors"></div>
+                <div class="pip-empty" id="pipEmpty" hidden>画面中暂无人物</div>
+              </div>
+              <div class="pip-foot">
+                <span id="pipShot">镜 01 · 12.25s</span>
+                <button class="pip-link" id="pip3dBtn" type="button">在 3D 中查看</button>
+              </div>
+            </div>
+
+            <div class="stage-hint">滚轮缩放 · 方向键微调选中对象 · 双击复位</div>
+          </div>
+
+          <div class="stage-3d" id="stage3d" hidden>
+            <canvas id="canvas3d" tabindex="0" aria-label="3D 代理预演。拖拽环绕，滚轮缩放，方向键旋转，数字 0 复位。"></canvas>
+            <div class="pov-overlay" id="povOverlay" hidden aria-hidden="true">
+              <span class="pov-corner tl"></span><span class="pov-corner tr"></span>
+              <span class="pov-corner bl"></span><span class="pov-corner br"></span>
+              <span class="pov-safe"></span>
+              <span class="pov-cross"></span>
+              <div class="pov-top">
+                <span class="pov-chip is-live"><i></i>机位视角</span>
+                <span class="pov-chip" id="povLens">35mm · 中景</span>
+              </div>
+              <div class="pov-bottom">
+                <span id="povShot">镜 01 · 第 3 集</span>
+                <span>按“回到自由视角”退出</span>
+              </div>
+            </div>
+            <div class="gizmo" aria-hidden="true">
+              <span class="gizmo-n">北</span>
+              <span class="gizmo-x">X</span>
+              <span class="gizmo-z">Z</span>
+              <i class="gizmo-axis gizmo-axis-x"></i>
+              <i class="gizmo-axis gizmo-axis-z"></i>
+            </div>
+            <div class="stage-hint" id="hint3d">拖拽环绕 · 滚轮缩放 · 双击复位</div>
+            <div class="loading3d" id="loading3d" hidden>
+              <div class="orbit-loader" aria-hidden="true"><i></i><i></i><i></i></div>
+              <strong>正在加载 3D 代理场景…</strong>
+              <span>仅加载当前镜头相关的代理素材</span>
+            </div>
+          </div>
+
+          <div class="view-toast" id="viewToast" role="status" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <aside class="inspector" id="inspector" aria-label="检查器"></aside>
+    </main>
+
+    <footer class="shot-strip">
+      <div class="strip-head">
+        <strong>镜头条</strong>
+        <span class="strip-hint">点击跳转 · 不改变顺序</span>
+        <span class="strip-summary" id="stripSummary">9 镜 · 1:40</span>
+      </div>
+      <div class="strip-track" id="stripTrack"></div>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span class="toast-icon" id="toastIcon"></span>
+    <span id="toastText"></span>
+  </div>
+
+  <dialog class="dialog" id="applyDialog" aria-labelledby="applyTitle">
+    <div class="dlg-shell">
+      <div class="dlg-head">
+        <div>
+          <h2 id="applyTitle">应用到分镜</h2>
+          <p>只写回勾选字段，不触发视频生成。</p>
+        </div>
+        <button class="icon-btn" id="applyCloseBtn" type="button" title="关闭" aria-label="关闭" autofocus>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="dlg-body" id="applyBody"></div>
+      <div class="dlg-foot">
+        <span class="dlg-note" id="applyNote">写回前会保存当前导演计划。</span>
+        <div class="dlg-actions">
+          <button class="btn btn-ghost" id="applyCancelBtn" type="button">取消</button>
+          <button class="btn btn-primary" id="applyConfirmBtn" type="button">应用到分镜</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <noscript><p class="noscript">此原型需要启用 JavaScript。</p></noscript>
+  <script src="./导演台排演原型.js" defer></script>
+</body>
+</html>

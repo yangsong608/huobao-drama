@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>剪辑工作台原型 · 长夜将至</title>
+  <link rel="stylesheet" href="剪辑工作台原型.css">
+</head>
+<body>
+  <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+    <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></symbol>
+    <symbol id="i-panel-left" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></symbol>
+    <symbol id="i-panel-left-close" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M16 9l-3 3 3 3"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-skip-start" viewBox="0 0 24 24"><path d="M19 20L9 12l10-8v16z" fill="currentColor" stroke="none"/><rect x="5" y="4" width="2" height="16" rx="1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-skip-end" viewBox="0 0 24 24"><path d="M5 4l10 8-10 8V4z" fill="currentColor" stroke="none"/><rect x="17" y="4" width="2" height="16" rx="1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-step-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+    <symbol id="i-step-forward" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-magnet" viewBox="0 0 24 24"><path d="M6 4v7a6 6 0 0 0 12 0V4h-4v7a2 2 0 0 1-4 0V4z"/><path d="M6 8h4M14 8h4"/></symbol>
+    <symbol id="i-captions" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 12h3M14 12h3M7 16h2M13 16h4"/></symbol>
+    <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></symbol>
+    <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.09A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.09A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3.01V3h4v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.99 10H21v4h-.09A1.7 1.7 0 0 0 19.4 15z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3L2 20h20L12 3z"/><path d="M12 9v5M12 17h.01"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3L2 8l10 5 10-5-10-5z"/><path d="M2 12l10 5 10-5M2 16l10 5 10-5"/></symbol>
+    <symbol id="i-wand" viewBox="0 0 24 24"><path d="M15 4V2M15 10V8M12 6h2M16 6h2M4 20L14 10"/><path d="M13 6l5 5"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+    <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 7V5h16v2M12 5v14M9 19h6"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-split" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20"/></symbol>
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 12h2l2-7 3 14 3-11 2 6 2-3h4"/></symbol>
+    <symbol id="i-corner" viewBox="0 0 24 24"><path d="M20 4v7a4 4 0 0 1-4 4H5"/><path d="M9 11l-4 4 4 4"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"/><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16z"/></symbol>
+    <symbol id="i-brush" viewBox="0 0 24 24"><path d="M9.5 14.5L3 21M14 3l7 7-8.5 8.5a4 4 0 0 1-5.7-5.7L14 3z"/></symbol>
+    <symbol id="i-closed-caption" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 10a3 3 0 1 0 0 4M17 10a3 3 0 1 0 0 4"/></symbol>
+  </svg>
+
+  <div class="app" id="app">
+    <header class="topbar" id="topbar">
+      <div class="topbar-left">
+        <button class="icon-btn" id="backBtn" title="返回剧集" aria-label="返回剧集"><svg class="icon"><use href="#i-arrow-left"/></svg></button>
+        <div class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-scissors"/></svg></div>
+        <div class="brand-text">
+          <b>剪辑工作台</b>
+          <span>长夜将至</span>
+        </div>
+        <button class="episode-pill" id="episodeBtn" title="当前剧集">
+          <span class="ep-no">EP.03</span>
+          <span class="ep-name">雨夜来客</span>
+          <svg class="icon icon-sm"><use href="#i-chevron-down"/></svg>
+        </button>
+        <span class="chip chip-mode is-on" id="modeChip"><span class="chip-dot"></span><span id="modeChipText">剪辑开启</span></span>
+        <button class="chip chip-mix is-aligned" id="mixChip" aria-haspopup="dialog" title="查看混音对齐状态">
+          <span class="chip-dot"></span><span id="mixChipText">混音已对齐</span>
+        </button>
+      </div>
+
+      <div class="topbar-center">
+        <button class="icon-btn" id="undoBtn" title="撤销（⌘Z）" aria-label="撤销" disabled><svg class="icon"><use href="#i-undo"/></svg></button>
+        <button class="icon-btn" id="redoBtn" title="重做（⇧⌘Z）" aria-label="重做" disabled><svg class="icon"><use href="#i-redo"/></svg></button>
+        <span class="topbar-divider"></span>
+        <button class="save-pill is-saved" id="saveBtn" title="保存（⌘S）">
+          <span class="save-dot"></span><span id="saveText">已保存</span>
+        </button>
+      </div>
+
+      <div class="topbar-right">
+        <button class="tool-btn" id="suggestBtn"><svg class="icon"><use href="#i-closed-caption"/></svg><span>字幕建议</span></button>
+        <button class="tool-btn" id="roughBtn"><svg class="icon"><use href="#i-wand"/></svg><span>粗剪</span></button>
+        <button class="tool-btn" id="versionsBtn"><svg class="icon"><use href="#i-history"/></svg><span>版本</span><span class="badge" id="versionBadge">v5</span></button>
+        <span class="topbar-divider"></span>
+        <button class="icon-btn" id="mediaToggleBtn" title="收起/展开素材库" aria-label="收起或展开素材库"><svg class="icon"><use href="#i-panel-left-close"/></svg></button>
+        <button class="icon-btn" id="shortcutsBtn" title="快捷键" aria-label="快捷键"><svg class="icon"><use href="#i-keyboard"/></svg></button>
+        <button class="icon-btn" id="moreBtn" title="更多" aria-label="更多" aria-haspopup="menu"><svg class="icon"><use href="#i-more"/></svg></button>
+        <button class="export-btn" id="exportBtn"><svg class="icon"><use href="#i-download"/></svg><span id="exportBtnText">导出</span></button>
+      </div>
+    </header>
+
+    <div class="export-strip" id="exportStrip" hidden>
+      <span class="export-strip-icon"><svg class="icon"><use href="#i-download"/></svg></span>
+      <span class="export-strip-phase" id="exportStripPhase">正在导出成片</span>
+      <span class="export-strip-bar"><span id="exportStripFill"></span></span>
+      <span class="export-strip-pct" id="exportStripPct">0%</span>
+      <button class="mini-link" id="exportStripOpen">查看</button>
+      <button class="mini-link is-danger" id="exportStripCancel">取消</button>
+    </div>
+
+    <div class="recovery-bar" id="recoveryBar" hidden>
+      <svg class="icon"><use href="#i-clock"/></svg>
+      <span>检测到上次未保存的修改，已恢复为草稿。</span>
+      <button class="mini-link" id="recoverySaveBtn">保存草稿</button>
+      <button class="mini-link is-muted" id="recoveryDiscardBtn">丢弃修改</button>
+    </div>
+
+    <div class="readonly-bar" id="readonlyBar" hidden>
+      <svg class="icon"><use href="#i-lock"/></svg>
+      <span>当前为只读模式：可以预览、播放和导出，不能修改剪辑计划。</span>
+      <button class="mini-link" id="readonlyReasonBtn">查看原因</button>
+    </div>
+
+    <div class="workspace" id="workspace">
+      <aside class="media-panel" id="mediaPanel">
+        <header class="panel-head">
+          <div class="panel-title"><svg class="icon"><use href="#i-layers"/></svg><b>素材库</b></div>
+          <div class="panel-head-actions">
+            <span class="source-chip">EP.03</span>
+            <button class="mini-icon" id="collapseMediaBtn" title="收起素材库" aria-label="收起素材库"><svg class="icon icon-sm"><use href="#i-chevron-left"/></svg></button>
+          </div>
+        </header>
+        <div class="media-tabs" role="tablist" aria-label="素材分类">
+          <button class="is-active" data-tab="storyboards" role="tab" aria-selected="true">分镜 <span id="tabCountSb">6</span></button>
+          <button data-tab="lines" role="tab" aria-selected="false">台词 <span id="tabCountLine">5</span></button>
+          <button data-tab="mix" role="tab" aria-selected="false">混音</button>
+        </div>
+        <label class="search-box">
+          <svg class="icon icon-sm"><use href="#i-search"/></svg>
+          <input id="mediaSearch" type="search" placeholder="搜索分镜、台词…" autocomplete="off">
+          <kbd>⌘K</kbd>
+        </label>
+        <div class="media-scroll" id="mediaList"></div>
+        <footer class="media-foot">
+          <span id="mediaFootText">4 / 6 已使用</span>
+          <button class="link-btn" id="addAllBtn">全部加入</button>
+        </footer>
+      </aside>
+
+      <main class="stage">
+        <section class="preview-panel" id="previewPanel">
+          <header class="panel-head preview-head">
+            <div class="panel-title">
+              <span class="eyebrow">节目监视器</span>
+              <b id="previewTitle">分镜 01 · 雨夜巷口</b>
+            </div>
+            <div class="preview-meta">
+              <span class="badge-soft" title="Canvas 代理画面，不加载真实视频">代理预览</span>
+              <span id="previewRes">1920×1080</span>
+              <span>25 fps</span>
+              <span class="badge-soft is-muted" id="audioPreviewBadge" title="原型不播放声音">音频模拟</span>
+            </div>
+          </header>
+          <div class="preview-body" id="previewBody">
+            <div class="preview-screen" id="previewScreen">
+              <canvas id="previewCanvas" aria-label="剪辑预览画面"></canvas>
+              <div class="safe-frame" aria-hidden="true"></div>
+              <div class="preview-subtitle" id="previewSubtitle" hidden></div>
+              <div class="preview-hud is-top-left"><span class="hud-dot"></span><span id="hudClip">分镜 01</span></div>
+              <div class="preview-hud is-top-right"><span id="hudTc">00:00:00:00</span></div>
+              <div class="preview-hud is-bottom-left"><span id="hudSource">源 00:00:01:05</span></div>
+              <div class="preview-hud is-bottom-right"><span>16:9</span><span>全画幅</span></div>
+              <div class="preview-empty" id="previewEmpty" hidden>
+                <svg class="icon icon-xl"><use href="#i-film"/></svg>
+                <b>时间线还没有片段</b>
+                <p>从左侧素材库加入分镜，或运行粗剪。</p>
+              </div>
+            </div>
+          </div>
+          <div class="transport">
+            <div class="tc-group">
+              <span class="tc" id="tcNow">00:00:00:00</span>
+              <span class="tc-total">/ <span id="tcTotal">00:00:30:02</span></span>
+            </div>
+            <div class="transport-main">
+              <button class="icon-btn" id="homeBtn" title="回到开头（Home）" aria-label="回到开头"><svg class="icon"><use href="#i-skip-start"/></svg></button>
+              <button class="icon-btn" id="prevCutBtn" title="上一个剪辑点" aria-label="上一个剪辑点"><svg class="icon"><use href="#i-step-back"/></svg></button>
+              <button class="play-btn" id="playBtn" title="播放/暂停（空格）" aria-label="播放">
+                <svg class="icon icon-play"><use href="#i-play"/></svg>
+                <svg class="icon icon-pause" hidden><use href="#i-pause"/></svg>
+              </button>
+              <button class="icon-btn" id="nextCutBtn" title="下一个剪辑点" aria-label="下一个剪辑点"><svg class="icon"><use href="#i-step-forward"/></svg></button>
+              <button class="icon-btn" id="endBtn" title="到结尾（End）" aria-label="到结尾"><svg class="icon"><use href="#i-skip-end"/></svg></button>
+            </div>
+            <div class="transport-side">
+              <button class="mini-btn" id="markerAddBtn" title="添加标记（M）"><svg class="icon"><use href="#i-flag"/></svg><span>标记</span></button>
+              <button class="mini-icon" id="prevMarkerBtn" title="上一个标记" aria-label="上一个标记"><svg class="icon icon-sm"><use href="#i-chevron-left"/></svg></button>
+              <button class="mini-icon" id="nextMarkerBtn" title="下一个标记" aria-label="下一个标记"><svg class="icon icon-sm"><use href="#i-chevron-right"/></svg></button>
+              <span class="transport-sep"></span>
+              <span class="active-clip-label" id="activeClipLabel">分镜 01 · 雨夜巷口</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="timeline-panel">
+          <header class="timeline-head">
+            <div class="panel-title">
+              <b>时间线</b>
+              <span class="muted" id="clipCount">4 个片段</span>
+              <span class="muted" id="timelineDuration">00:00:30:02</span>
+            </div>
+            <div class="timeline-tools">
+              <button class="tl-tool is-on" id="snapBtn" title="磁吸：吸附剪辑点、播放头与标记" aria-pressed="true"><svg class="icon"><use href="#i-magnet"/></svg><span>磁吸</span></button>
+              <span class="tool-sep"></span>
+              <button class="tl-icon" id="zoomOutBtn" title="缩小（−）" aria-label="缩小">−</button>
+              <span class="zoom-label" id="zoomLabel">100%</span>
+              <button class="tl-icon" id="zoomInBtn" title="放大（+）" aria-label="放大">+</button>
+              <span class="tool-sep"></span>
+              <button class="tl-tool" id="splitBtn" title="在播放头分割（S）"><svg class="icon"><use href="#i-scissors"/></svg><span>分割</span></button>
+              <button class="tl-tool" id="markerListBtn" title="显示/隐藏标记列表" aria-pressed="true"><svg class="icon"><use href="#i-flag"/></svg><span>标记</span></button>
+            </div>
+          </header>
+          <div class="timeline-body">
+            <div class="track-heads" aria-hidden="true">
+              <div class="ruler-head"></div>
+              <div class="track-head is-video"><span class="track-badge">V1</span><svg class="icon icon-sm"><use href="#i-film"/></svg><span>画面</span></div>
+              <div class="track-head is-subtitle"><span class="track-badge">S1</span><svg class="icon icon-sm"><use href="#i-captions"/></svg><span>字幕</span></div>
+              <div class="track-head is-audio"><span class="track-badge">A1</span><svg class="icon icon-sm"><use href="#i-music"/></svg><span>音频</span></div>
+            </div>
+            <div class="timeline-scroll" id="timelineScroll">
+              <div class="timeline-stage" id="timelineStage">
+                <div class="ruler" id="ruler"></div>
+                <div class="track video-track" id="videoTrack"></div>
+                <div class="track subtitle-track" id="subtitleTrack"></div>
+                <div class="track audio-track" id="audioTrack">
+                  <canvas id="waveCanvas"></canvas>
+                  <div class="audio-label" id="audioLabel">混音 v7 · 已对齐</div>
+                </div>
+                <div class="transition-layer" id="transitionLayer"></div>
+                <div class="marker-layer" id="markerLayer"></div>
+                <div class="playhead" id="playhead"><span class="playhead-cap"></span></div>
+                <div class="snap-line" id="snapLine" hidden></div>
+                <div class="timeline-empty" id="timelineEmpty" hidden>
+                  <svg class="icon"><use href="#i-film"/></svg>
+                  <span>时间线为空，从素材库加入分镜</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="marker-bar" id="markerBar"></div>
+        </section>
+      </main>
+
+      <aside class="inspector" id="inspector" aria-label="检查器"></aside>
+    </div>
+
+    <footer class="statusbar">
+      <div class="status-left">
+        <span class="status-dot is-saved" id="statusDot"></span>
+        <span id="statusSave">草稿已保存</span>
+        <span class="status-sep"></span>
+        <span id="statusProject">1920×1080 · 25 fps · 16:9</span>
+        <span class="status-sep"></span>
+        <span id="statusMix">混音 v7 已对齐</span>
+        <span class="status-sep"></span>
+        <span id="statusSelection">已选：分镜 01</span>
+      </div>
+      <div class="status-right">
+        <span>空格 播放</span><span>S 分割</span><span>M 标记</span><span>⌘Z 撤销</span><span>⌘S 保存</span><span>⌘E 导出</span>
+        <button class="status-help" id="statusHelpBtn">全部快捷键</button>
+      </div>
+    </footer>
+  </div>
+
+  <div class="context-menu" id="contextMenu" role="menu" hidden></div>
+
+  <div class="popover mix-popover" id="mixPopover" role="dialog" aria-label="混音状态" hidden>
+    <header class="popover-head">
+      <div><span class="eyebrow">音频工作台</span><b id="mixPopTitle">混音已对齐</b></div>
+      <span class="chip chip-mix is-aligned" id="mixPopChip"><span class="chip-dot"></span><span>aligned</span></span>
+    </header>
+    <p class="popover-desc" id="mixPopDesc">剪辑时间与混音版本一致，导出时默认使用当前混音。</p>
+    <dl class="popover-grid">
+      <div><dt>混音版本</dt><dd id="mixPopRev">v7</dd></div>
+      <div><dt>生成时间</dt><dd id="mixPopTime">今天 14:12</dd></div>
+      <div><dt>时长</dt><dd id="mixPopDuration">00:00:30:02</dd></div>
+      <div><dt>对齐哈希</dt><dd class="mono" id="mixPopHash">e7c1a2f0</dd></div>
+    </dl>
+    <div class="popover-note" id="mixPopNote" hidden></div>
+    <div class="popover-actions">
+      <button class="btn ghost sm" id="mixGotoBtn"><svg class="icon"><use href="#i-music"/></svg>去混音工作台</button>
+      <button class="btn primary sm" id="mixRegenBtn"><svg class="icon"><use href="#i-refresh"/></svg>重新生成混音</button>
+    </div>
+  </div>
+
+  <div class="popover more-menu" id="moreMenu" role="menu" hidden>
+    <div class="menu-group-label">工作台模式</div>
+    <button class="menu-item" data-more="readonly" role="menuitem"><svg class="icon"><use href="#i-lock"/></svg><span>只读模式</span><span class="menu-check" id="chkReadonly"></span></button>
+    <button class="menu-item" data-more="export-enabled" role="menuitem"><svg class="icon"><use href="#i-download"/></svg><span>允许导出</span><span class="menu-check" id="chkExport"></span></button>
+    <button class="menu-item is-danger" data-more="off" role="menuitem"><svg class="icon"><use href="#i-x"/></svg><span>关闭剪辑工作台</span><span class="menu-check" id="chkOff"></span></button>
+    <div class="menu-sep"></div>
+    <div class="menu-group-label">混音状态演示</div>
+    <button class="menu-item" data-more="mix-aligned" role="menuitem"><span class="mix-dot is-aligned"></span><span>已对齐</span><span class="menu-check" id="chkMixAligned"></span></button>
+    <button class="menu-item" data-more="mix-stale" role="menuitem"><span class="mix-dot is-stale"></span><span>已过期（时间变化）</span><span class="menu-check" id="chkMixStale"></span></button>
+    <button class="menu-item" data-more="mix-missing" role="menuitem"><span class="mix-dot is-missing"></span><span>未生成混音</span><span class="menu-check" id="chkMixMissing"></span></button>
+    <div class="menu-sep"></div>
+    <button class="menu-item" data-more="about" role="menuitem"><svg class="icon"><use href="#i-spark"/></svg><span>原型说明</span></button>
+    <button class="menu-item is-danger" data-more="reset" role="menuitem"><svg class="icon"><use href="#i-trash"/></svg><span id="resetMenuText">重置原型数据</span></button>
+  </div>
+
+  <dialog class="modal export-modal" id="exportDialog">
+    <div class="modal-card">
+      <header class="modal-head">
+        <div>
+          <span class="eyebrow">剪辑成片</span>
+          <h2>导出成片</h2>
+          <p>只渲染已保存的剪辑版本，导出后仍可继续编辑。</p>
+        </div>
+        <button class="icon-btn" id="exportCloseBtn" title="关闭" aria-label="关闭导出对话框"><svg class="icon"><use href="#i-x"/></svg></button>
+      </header>
+
+      <div class="export-view" id="exportFormView">
+        <div class="modal-body export-form-body">
+          <section class="form-section">
+            <div class="form-label"><span>画幅预设</span><small>自动会按剧集画幅匹配</small></div>
+            <div class="option-grid" id="presetOptions">
+              <button type="button" class="option-card is-active" data-preset="auto"><b>自动</b><small id="presetAutoRes">横屏 1920×1080</small></button>
+              <button type="button" class="option-card" data-preset="vertical-hd"><b>竖屏高清</b><small>1080×1920</small></button>
+              <button type="button" class="option-card" data-preset="horizontal-hd"><b>横屏高清</b><small>1920×1080</small></button>
+            </div>
+          </section>
+
+          <section class="form-section">
+            <div class="form-label"><span>字幕</span><small>来源为当前剪辑计划</small></div>
+            <div class="segmented" id="subtitleOptions">
+              <button type="button" class="is-active" data-subtitle="soft"><b>软字幕</b><small>播放器可开关</small></button>
+              <button type="button" data-subtitle="burn"><b>烧录</b><small>写入画面</small></button>
+              <button type="button" data-subtitle="none"><b>无字幕</b><small>不封装字幕</small></button>
+            </div>
+          </section>
+
+          <section class="form-section">
+            <div class="form-label"><span>音频来源</span><small id="audioAutoHint">自动：混音已对齐，使用混音</small></div>
+            <div class="option-list" id="audioOptions">
+              <button type="button" class="is-active" data-audio="auto"><b>自动</b><small>优先使用已对齐混音，否则回退剪辑原声</small></button>
+              <button type="button" data-audio="mix"><b>当前混音</b><small id="mixOptionHint">混音 v7 · 已对齐</small></button>
+              <button type="button" data-audio="clip"><b>剪辑原声</b><small>从片段音轨拼接，空隙补静音</small></button>
+              <button type="button" data-audio="silent"><b>静音</b><small>生成等长静音轨</small></button>
+            </div>
+            <div class="inline-warning" id="audioWarning" hidden>
+              <svg class="icon"><use href="#i-alert"/></svg>
+              <span></span>
+            </div>
+          </section>
+
+          <section class="form-section export-summary">
+            <div class="summary-row"><span>预计时长</span><b id="exportDuration">00:00:30:02</b></div>
+            <div class="summary-row"><span>预计大小</span><b id="exportSize">约 37 MB</b></div>
+            <div class="summary-row"><span>输出文件</span><span class="mono export-filename" id="exportFilename">长夜将至_EP03_剪辑版_横屏高清_v5.mp4</span></div>
+            <label class="switch-row">
+              <span><b>设为当前成片</b><small>导出完成后替换交付中心的当前版本</small></span>
+              <input type="checkbox" id="setCurrentToggle">
+              <span class="switch" aria-hidden="true"></span>
+            </label>
+          </section>
+
+          <section class="recent-exports" id="recentExports"></section>
+        </div>
+        <footer class="modal-foot">
+          <div class="export-state" id="exportFormHint">将渲染 4 个片段 · 4 条字幕 · 混音 v7</div>
+          <div class="modal-actions">
+            <button type="button" class="btn ghost" id="exportCancelBtn">取消</button>
+            <button type="button" class="btn primary" id="exportStartBtn"><svg class="icon"><use href="#i-download"/></svg><span>开始导出</span></button>
+          </div>
+        </footer>
+      </div>
+
+      <div class="export-view" id="exportRunningView" hidden>
+        <div class="modal-body running-body">
+          <div class="running-hero">
+            <div class="running-ring" id="runningRing"><span id="runningPct">0%</span></div>
+            <div>
+              <span class="eyebrow" id="runningEyebrow">正在渲染</span>
+              <h3 id="runningTitle">正在导出成片</h3>
+              <p id="runningPhase">校验剪辑计划…</p>
+              <span class="running-note">关闭对话框不会取消导出，可在顶栏继续查看进度。</span>
+            </div>
+          </div>
+          <div class="progress-bar"><span id="runningFill"></span></div>
+          <div class="phase-list" id="runningPhases"></div>
+          <div class="running-meta">
+            <span id="runningElapsed">已用时 0.0s</span>
+            <span id="runningTarget">输出 1920×1080 · 软字幕 · 混音</span>
+          </div>
+        </div>
+        <footer class="modal-foot">
+          <div class="export-state">同计划同参数再次导出会命中复用。</div>
+          <div class="modal-actions">
+            <button type="button" class="btn ghost" id="runningCollapseBtn">收起对话框</button>
+            <button type="button" class="btn danger" id="runningCancelBtn"><svg class="icon"><use href="#i-x"/></svg><span>取消导出</span></button>
+          </div>
+        </footer>
+      </div>
+
+      <div class="export-view" id="exportDoneView" hidden>
+        <div class="modal-body done-body">
+          <div class="done-icon"><svg class="icon"><use href="#i-check"/></svg></div>
+          <span class="eyebrow" id="doneEyebrow">导出完成</span>
+          <h3 id="doneTitle">成片已进入交付中心</h3>
+          <p id="doneDesc">长夜将至_EP03_剪辑版_横屏高清_v5.mp4</p>
+          <div class="done-stats" id="doneStats"></div>
+          <div class="done-note" id="doneNote" hidden></div>
+        </div>
+        <footer class="modal-foot">
+          <div class="export-state" id="doneHint">可在交付中心继续设为当前、重试或删除。</div>
+          <div class="modal-actions">
+            <button type="button" class="btn ghost" id="doneCopyBtn"><svg class="icon"><use href="#i-copy"/></svg><span>复制路径</span></button>
+            <button type="button" class="btn ghost" id="doneDeliveryBtn"><svg class="icon"><use href="#i-folder"/></svg><span>交付中心</span></button>
+            <button type="button" class="btn primary" id="doneOpenBtn"><svg class="icon"><use href="#i-play"/></svg><span>打开成片</span></button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="drawer-mask" id="versionsMask" hidden>
+    <aside class="drawer" id="versionsDrawer" role="dialog" aria-modal="true" aria-label="剪辑版本">
+      <header class="drawer-head">
+        <div><span class="eyebrow">版本历史</span><b>剪辑版本</b><p>恢复版本会替换当前草稿，可撤销。</p></div>
+        <button class="icon-btn" id="versionsCloseBtn" title="关闭" aria-label="关闭版本抽屉"><svg class="icon"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="drawer-body" id="versionsList"></div>
+      <footer class="drawer-foot">
+        <span id="versionsFootHint">当前 v5 · 4 个片段</span>
+        <button class="btn primary sm" id="createVersionBtn"><svg class="icon"><use href="#i-save"/></svg>保存为新版本</button>
+      </footer>
+    </aside>
+  </div>
+
+  <div class="drawer-mask" id="deliveryMask" hidden>
+    <aside class="drawer delivery-drawer" id="deliveryDrawer" role="dialog" aria-modal="true" aria-label="交付中心">
+      <header class="drawer-head">
+        <div><span class="eyebrow">交付中心</span><b>剪辑成片</b><p>复用现有 episode_exports 记录，不新建成片表。</p></div>
+        <button class="icon-btn" id="deliveryCloseBtn" title="关闭" aria-label="关闭交付抽屉"><svg class="icon"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="drawer-body" id="deliveryList"></div>
+      <footer class="drawer-foot">
+        <span id="deliveryFootHint">本集共 0 条剪辑成片</span>
+        <button class="btn ghost sm" id="deliveryBackBtn"><svg class="icon"><use href="#i-arrow-left"/></svg>回到剪辑台</button>
+      </footer>
+    </aside>
+  </div>
+
+  <dialog class="modal shortcuts-modal" id="shortcutsDialog">
+    <div class="modal-card">
+      <header class="modal-head">
+        <div><span class="eyebrow">操作提示</span><h2>快捷键</h2><p>输入框聚焦时不会触发剪辑快捷键。</p></div>
+        <button class="icon-btn" id="shortcutsCloseBtn" title="关闭" aria-label="关闭快捷键"><svg class="icon"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="modal-body shortcut-grid">
+        <div><kbd>空格</kbd><span>播放 / 暂停</span></div>
+        <div><kbd>← / →</kbd><span>逐帧后退 / 前进</span></div>
+        <div><kbd>⇧ ← / →</kbd><span>后退 / 前进 1 秒</span></div>
+        <div><kbd>Home / End</kbd><span>回到开头 / 结尾</span></div>
+        <div><kbd>S</kbd><span>在播放头分割片段</span></div>
+        <div><kbd>⌫</kbd><span>删除选中片段或字幕</span></div>
+        <div><kbd>M</kbd><span>在播放头添加标记</span></div>
+        <div><kbd>⌘ Z</kbd><span>撤销</span></div>
+        <div><kbd>⇧ ⌘ Z</kbd><span>重做</span></div>
+        <div><kbd>⌘ S</kbd><span>保存</span></div>
+        <div><kbd>⌘ E</kbd><span>打开导出</span></div>
+        <div><kbd>+ / −</kbd><span>时间线缩放</span></div>
+        <div><kbd>Esc</kbd><span>关闭弹层 / 取消选择</span></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="modal about-modal" id="aboutDialog">
+    <div class="modal-card">
+      <header class="modal-head">
+        <div><span class="eyebrow">可运行原型</span><h2>剪辑工作台原型说明</h2><p>严格离线运行，不连接后端、不调用 FFmpeg、不写入真实文件。</p></div>
+        <button class="icon-btn" id="aboutCloseBtn" title="关闭" aria-label="关闭原型说明"><svg class="icon"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="modal-body about-body">
+        <section>
+          <h4><span class="about-dot is-ok"></span>可交互</h4>
+          <ul>
+            <li>三栏工作台、素材库、预览、时间线、检查器与状态栏。</li>
+            <li>播放/逐帧/跳剪辑点；片段选择、修剪、分割、删除、波纹删除与重排。</li>
+            <li>字幕拖动、裁剪、文本编辑、样式与批量应用；标记增删与跳转。</li>
+            <li>撤销/重做、自动保存、刷新恢复、版本保存与恢复。</li>
+            <li>混音对齐/过期/缺失联动；导出表单、进度、取消、复用、刷新恢复。</li>
+            <li>只读模式、工作台关闭、导出开关与交付中心抽屉。</li>
+          </ul>
+        </section>
+        <section>
+          <h4><span class="about-dot is-warn"></span>模拟</h4>
+          <ul>
+            <li>预览为 Canvas 代理画面，不加载真实视频，也不播放声音。</li>
+            <li>导出进度约 7.5 秒走完，用于演示阶段、取消与复用，不执行 FFmpeg。</li>
+            <li>重新生成混音、字幕建议、粗剪按钮为演示反馈或本地数据变更。</li>
+            <li>交付中心为抽屉模拟，复用现有 episode_exports 字段结构。</li>
+          </ul>
+        </section>
+        <section>
+          <h4><span class="about-dot is-muted"></span>未实现</h4>
+          <ul>
+            <li>真实渲染、文件落盘、下载与 ffprobe 校验。</li>
+            <li>多视频轨、关键帧、滤镜/变换/叠加层的可视化编辑。</li>
+            <li>真实音频波形解析、监听、J/L 切与音量包络。</li>
+            <li>后端 /settings/edit、POST /edit/exports 与 403/409 真实校验。</li>
+          </ul>
+        </section>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="off-overlay" id="offOverlay" hidden>
+    <div class="off-card">
+      <div class="off-icon"><svg class="icon"><use href="#i-lock"/></svg></div>
+      <span class="eyebrow">配置：off</span>
+      <h2>剪辑工作台已关闭</h2>
+      <p>当前模式会拒绝所有编辑与导出请求，并返回 403；不会写入任何成片记录。</p>
+      <div class="off-actions">
+        <button class="btn ghost" id="offReasonBtn">查看配置说明</button>
+        <button class="btn primary" id="offRestoreBtn">恢复演示（开启工作台）</button>
+      </div>
+      <small>正式环境请在 设置 → 剪辑与导出 中开启。</small>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="false"></div>
+
+  <script src="剪辑工作台原型.js"></script>
+</body>
+</html>
