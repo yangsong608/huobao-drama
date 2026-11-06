@@ -1,6 +1,20 @@
 <template>
   <div ref="viewport" class="line-list" @scroll="onScroll">
-    <div v-if="lines.length" class="line-spacer" :style="{ height: `${totalHeight}px` }">
+    <div v-if="speakerFilter && speakers.length > 1" class="line-speakers">
+      <button
+        type="button"
+        :class="['line-speaker-chip', { on: !activeSpeaker }]"
+        @click="activeSpeaker = ''"
+      >{{ t('workbench.filterAll') }} <em>{{ lines.length }}</em></button>
+      <button
+        v-for="speaker in speakers"
+        :key="speaker.name"
+        type="button"
+        :class="['line-speaker-chip', { on: activeSpeaker === speaker.name }]"
+        @click="activeSpeaker = speaker.name"
+      >{{ speaker.name }} <em>{{ speaker.count }}</em></button>
+    </div>
+    <div v-if="filteredLines.length" class="line-spacer" :style="{ height: `${totalHeight}px` }">
       <article
         v-for="row in visibleRows"
         :key="row.line.id"
@@ -120,7 +134,6 @@
     <p v-else class="line-empty">{{ emptyText }}</p>
   </div>
 </template>
-
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import type { StoryboardLine, VoiceProfile, VoiceProfileList } from '~/composables/useApi'
@@ -137,6 +150,7 @@ const props = withDefaults(defineProps<{
   narratorVoice?: VoiceProfile | null
   selectable?: boolean
   mode?: 'script' | 'voice' | 'generate'
+  speakerFilter?: boolean
   activeLineId?: number | null
   takeCounts?: Record<number, number>
   generatingIds?: number[]
@@ -151,6 +165,7 @@ const props = withDefaults(defineProps<{
   narratorVoice: null,
   selectable: false,
   mode: 'voice',
+  speakerFilter: false,
   activeLineId: null,
   takeCounts: () => ({}),
   generatingIds: () => [],
@@ -181,12 +196,35 @@ const editingText = ref('')
 const selectedIds = ref<number[]>([])
 let observer: ResizeObserver | null = null
 
-const totalHeight = computed(() => props.lines.length * ROW_HEIGHT)
 const startIndex = computed(() =>
   Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN))
+const totalHeight = computed(() => filteredLines.value.length * ROW_HEIGHT)
+const speakerLabel = (line: StoryboardLine) => line.speakerName || t('workbench.narrator')
+const speakers = computed(() => {
+  const counts = new Map<string, number>()
+  for (const line of props.lines) {
+    const name = speakerLabel(line)
+    counts.set(name, (counts.get(name) || 0) + 1)
+  }
+  return [...counts.entries()].map(([name, count]) => ({ name, count }))
+})
+const activeSpeaker = ref('')
+const filteredLines = computed(() =>
+  activeSpeaker.value
+    ? props.lines.filter(line => speakerLabel(line) === activeSpeaker.value)
+    : props.lines)
+watch(speakers, (list) => {
+  if (activeSpeaker.value && !list.some(item => item.name === activeSpeaker.value)) {
+    activeSpeaker.value = ''
+  }
+})
+watch(activeSpeaker, () => {
+  scrollTop.value = 0
+  if (viewport.value) viewport.value.scrollTop = 0
+})
 const visibleRows = computed(() => {
   const count = Math.ceil(viewportHeight.value / ROW_HEIGHT) + OVERSCAN * 2
-  return props.lines
+  return filteredLines.value
     .slice(startIndex.value, startIndex.value + count)
     .map((line, i) => ({ line, index: startIndex.value + i }))
 })
@@ -228,9 +266,11 @@ function editable(line: StoryboardLine) {
 }
 
 function canMove(line: StoryboardLine, direction: -1 | 1) {
+  // 角色筛选下相邻行可能被隐藏，移动会跨角色换序，直接禁用
+  if (activeSpeaker.value) return false
   if (line.locked) return false
-  const index = props.lines.findIndex(item => item.id === line.id)
-  const target = index >= 0 ? props.lines[index + direction] : null
+  const index = filteredLines.value.findIndex(item => item.id === line.id)
+  const target = index >= 0 ? filteredLines.value[index + direction] : null
   return Boolean(target && target.storyboardId === line.storyboardId)
 }
 
@@ -422,4 +462,15 @@ onBeforeUnmount(() => {
 .line-mini.is-danger:hover { color: var(--action-danger, #d9534f); opacity: .8; }
 .line-error { margin-left: auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d9534f; font-size: 11px; }
 .line-empty { color: var(--text-3); font-size: 12px; text-align: center; padding: 24px 0; }
+.line-speakers { display: flex; flex-wrap: wrap; gap: 5px; padding-bottom: 6px; }
+.line-speaker-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 9px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-1, #fff); color: var(--text-2);
+  font: inherit; font-size: 11px; cursor: pointer;
+}
+.line-speaker-chip em { font-style: normal; font-size: 10px; color: var(--text-3); }
+.line-speaker-chip:hover { color: var(--text-1); border-color: var(--accent); }
+.line-speaker-chip.on { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-text); }
+.line-speaker-chip.on em { color: var(--accent-text); }
 </style>

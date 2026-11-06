@@ -22,7 +22,10 @@ import {
   compilePlanWithoutSource,
   compileMixPlanDetailed,
   ensureDefaultBuses,
+  excludeMixLine,
   hashMixPlan,
+  listMixExcludedLines,
+  restoreMixLine,
   saveMixPlan,
   saveMixBuses,
   createMixRevision,
@@ -47,10 +50,13 @@ import {
   startEpisodeSeparation,
   getSeparationStatus,
   cancelEpisodeSeparation,
+  importEpisodeAudioAsset,
   listEpisodeAssets,
   deleteEpisodeAsset,
   autoCreateStemTracks,
 } from '../services/audio-separation.js'
+import { AudioUploadError, AUDIO_MAX_BYTES } from '../utils/audio-upload.js'
+import { bodyLimit } from 'hono/body-limit'
 import { AudioEngineError, type SeparationEngine } from '../services/audio-engine.js'
 import {
   cancelSoundscape,
@@ -281,6 +287,49 @@ app.post('/episodes/:id/mix/revisions/:revisionId/restore', (c) => {
   }
 })
 
+app.get('/episodes/:id/mix/lines/excluded', (c) => {
+  const episodeId = parseId(c.req.param('id'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  if (!findEpisode(episodeId)) return notFound(c, '集不存在')
+  try {
+    return success(c, { items: listMixExcludedLines(episodeId) })
+  } catch (error: any) {
+    return handleError(c, error, '读取已移除台词失败')
+  }
+})
+
+app.delete('/episodes/:id/mix/lines/:lineId', async (c) => {
+  const episodeId = parseId(c.req.param('id'))
+  const lineId = parseId(c.req.param('lineId'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  if (!lineId) return badRequest(c, '台词编号无效')
+  const episode = findEpisode(episodeId)
+  if (!episode) return notFound(c, '集不存在')
+  try {
+    const items = excludeMixLine(episodeId, lineId)
+    const { plan, warnings } = await compileEpisodePlan(episodeId, episode.dramaId)
+    return success(c, { items, plan: planResponse(plan, warnings) })
+  } catch (error: any) {
+    return handleError(c, error, '移除台词失败')
+  }
+})
+
+app.post('/episodes/:id/mix/lines/:lineId/restore', async (c) => {
+  const episodeId = parseId(c.req.param('id'))
+  const lineId = parseId(c.req.param('lineId'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  if (!lineId) return badRequest(c, '台词编号无效')
+  const episode = findEpisode(episodeId)
+  if (!episode) return notFound(c, '集不存在')
+  try {
+    const items = restoreMixLine(episodeId, lineId)
+    const { plan, warnings } = await compileEpisodePlan(episodeId, episode.dramaId)
+    return success(c, { items, plan: planResponse(plan, warnings) })
+  } catch (error: any) {
+    return handleError(c, error, '恢复台词失败')
+  }
+})
+
 app.post('/episodes/:id/mix/preview', async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
@@ -393,6 +442,22 @@ app.get('/episodes/:id/audio/assets', (c) => {
     return success(c, { items: listEpisodeAssets(episodeId) })
   } catch (error: any) {
     return handleError(c, error, '读取音频素材失败')
+  }
+})
+
+app.post('/episodes/:id/audio/assets/import', bodyLimit({
+  maxSize: AUDIO_MAX_BYTES + 64 * 1024,
+  onError: (c) => badRequest(c, '音频文件大小不能超过 20MB'),
+}), async (c) => {
+  const episodeId = parseId(c.req.param('id'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  if (!findEpisode(episodeId)) return notFound(c, '集不存在')
+  const body = await c.req.parseBody()
+  try {
+    return success(c, { asset: await importEpisodeAudioAsset(episodeId, body.file) })
+  } catch (error: any) {
+    if (error instanceof AudioUploadError) return badRequest(c, error.message)
+    return handleError(c, error, '导入音频素材失败')
   }
 })
 

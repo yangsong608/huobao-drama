@@ -239,6 +239,7 @@ test('时长夹取与提示词覆盖解析', () => {
     sceneIds: [11],
     overwrite: true,
     overrides: [{ itemId: 'bgm:episode', prompt: 'custom', seconds: 99 }],
+    categoryHints: {},
     configId: undefined,
   })
 })
@@ -432,4 +433,88 @@ test('工作流哈希稳定且区分内容', () => {
   assert.match(a, /^[0-9a-f]{64}$/)
   assert.equal(a, b)
   assert.notEqual(a, c)
+})
+
+test('categoryHints 解析：去空白、丢空串、拒绝非法结构', () => {
+  const request = parseSoundscapeRequest({
+    categories: ['ambience', 'crowd'],
+    categoryHints: {
+      ambience: ' 海水拍打甲板 ',
+      crowd: '菜市场早市，十几个人叫卖讨价还价',
+      sfx: '   ',
+      bgm: null,
+    },
+  })
+  assert.deepEqual(request.categoryHints, {
+    ambience: '海水拍打甲板',
+    crowd: '菜市场早市，十几个人叫卖讨价还价',
+  })
+  assert.throws(
+    () => parseSoundscapeRequest({ categories: ['ambience'], categoryHints: { voice: '非法类别' } }),
+    (error: any) => error.status === 400 && /类别/.test(error.message),
+  )
+  assert.throws(
+    () => parseSoundscapeRequest({ categories: ['ambience'], categoryHints: { ambience: 'x'.repeat(2001) } }),
+    (error: any) => error.status === 400 && /2000/.test(error.message),
+  )
+  assert.throws(
+    () => parseSoundscapeRequest({ categories: ['ambience'], categoryHints: '海水' }),
+    (error: any) => error.status === 400,
+  )
+  assert.throws(
+    () => parseSoundscapeRequest({ categories: ['ambience'], categoryHints: { ambience: 42 } }),
+    (error: any) => error.status === 400,
+  )
+})
+
+test('用户声音描述进入降级提示词（各类别）', () => {
+  const plan = buildSoundscapeDraft(draftInput({
+    categoryHints: {
+      ambience: '海水拍打甲板',
+      sfx: '木门吱呀作响',
+      crowd: '菜市场早市，十几个人叫卖讨价还价',
+      bgm: '悲壮的弦乐',
+    },
+  }))
+  assert.match(plan.items.find((item) => item.itemId === 'ambience:scene:10')!.prompt, /海水拍打甲板/)
+  assert.match(plan.items.find((item) => item.itemId === 'sfx:scene:10')!.prompt, /木门吱呀作响/)
+  assert.match(plan.items.find((item) => item.itemId === 'crowd:scene:10')!.prompt, /菜市场早市/)
+  assert.match(plan.items.find((item) => item.itemId === 'bgm:episode')!.prompt, /悲壮的弦乐/)
+  const noHint = buildSoundscapeDraft(draftInput())
+  assert.doesNotMatch(noHint.items.find((item) => item.itemId === 'ambience:scene:10')!.prompt, /海水拍打甲板/)
+})
+
+test('声音描述转发给 LLM 编译输入，LLM 结果优先且不重复追加', async () => {
+  let captured: unknown = null
+  const plan = await compileSoundscapePlan(1, 2, {
+    ...compileOptions({
+      compileScenePrompts: async (input) => {
+        captured = input
+        return { prompts: { 10: { ambiencePrompt: 'waves hitting wooden deck' } }, degraded: false, warnings: [] }
+      },
+    }),
+    request: parseSoundscapeRequest({
+      categories: ['ambience'],
+      categoryHints: { ambience: '海水拍打甲板' },
+    }),
+  })
+  assert.deepEqual((captured as any).categoryHints, { ambience: '海水拍打甲板' })
+  const item = plan.items.find((entry) => entry.itemId === 'ambience:scene:10')!
+  assert.equal(item.prompt, 'waves hitting wooden deck')
+  assert.doesNotMatch(item.prompt, /海水拍打甲板/)
+})
+
+test('声音描述改变降级项的 sourceHash', async () => {
+  const base = await compileSoundscapePlan(1, 2, compileOptions())
+  const baseHash = base.items.find((item) => item.itemId === 'ambience:scene:11')!.sourceHash
+  const plan = await compileSoundscapePlan(1, 2, {
+    ...compileOptions(),
+    request: parseSoundscapeRequest({
+      categories: ['ambience'],
+      categoryHints: { ambience: '海水拍打甲板' },
+    }),
+  })
+  const item = plan.items.find((entry) => entry.itemId === 'ambience:scene:11')!
+  assert.notEqual(item.sourceHash, baseHash)
+  assert.match(item.prompt, /海水拍打甲板/)
 })

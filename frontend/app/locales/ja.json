@@ -2661,8 +2661,9 @@
     },
     "stems": {
       "title": "音声素材ライブラリ（任意）",
-      "intro": "原音からボーカルや伴奏などの音声素材を取り出し、個別に調整や差し替えができます。抽出しても現在のミックスは自動では変わりません。使うときは素材をタイムラインに置いてください。",
-      "extract": "音声素材を抽出"
+      "intro": "原音からボーカルや伴奏などの音声素材を取り出し、個別に調整や差し替えができます。抽出しても現在のミックスは自動では変わりません。使うときは素材をタイムラインに置いてください。音を挿入する際、利用できる適切なトラックがない場合は自動的に新しいトラックを作成します。",
+      "extract": "音声素材を抽出",
+      "importAudio": "オーディオを読み込む"
     },
     "advanced": {
       "title": "詳細"
@@ -2686,17 +2687,29 @@
       "aiBadge": "AI",
       "aiTrack": "シーン設定から生成された AI トラック",
       "modeLabel": "生成範囲",
-      "mode": { "scenes": "シーン単位", "episodeBed": "エピソード全体", "assetsOnly": "素材のみ" },
+      "mode": {
+        "scenes": "シーン単位",
+        "episodeBed": "エピソード全体",
+        "assetsOnly": "素材のみ"
+      },
       "modeHint": {
         "scenes": "シーンごとに環境音・効果音・群衆音を生成し、シーン時間に配置します",
         "episodeBed": "エピソード全体を覆う環境音ベッドを1本生成します",
         "assetsOnly": "音声素材のみ生成し、トラック作成やクリップ配置は行いません"
       },
       "categoriesLabel": "サウンド種別",
-      "categories": { "ambience": "環境音", "sfx": "効果音", "crowd": "群衆音", "bgm": "BGM" },
+      "categories": {
+        "ambience": "環境音",
+        "sfx": "効果音",
+        "crowd": "群衆音",
+        "bgm": "BGM"
+      },
       "categoryRequired": "少なくとも1つの種別を選択してください",
       "crowdModeLabel": "群衆音の方式",
-      "crowdMode": { "walla": "群衆のざわめき", "lines": "既存の吹替台詞を再利用" },
+      "crowdMode": {
+        "walla": "群衆のざわめき",
+        "lines": "既存の吹替台詞を再利用"
+      },
       "crowdModeHint": {
         "walla": "台詞を含まない群衆のざわめきを生成します",
         "lines": "既に吹き替えた群衆台詞を群衆トラックに配置し、再生成しません"
@@ -2718,7 +2731,19 @@
       "itemDegraded": "このプロンプトはルールで生成されました",
       "preview": "プレビュー",
       "start": "生成開始",
-      "wholeEpisode": "エピソード全体"
+      "wholeEpisode": "エピソード全体",
+      "hints": {
+        "label": "補足説明（任意）",
+        "hint": "欲しい音を自由に記述すると、生成プロンプトに反映されます",
+        "placeholder": {
+          "ambience": "例：波が木の甲板に打ち寄せ、海風が吹き荒ぶ",
+          "sfx": "例：木のドアがきしむ、金属のぶつかる音",
+          "crowd": "例：朝の市場、十数人が値段の駆け引き",
+          "bgm": "例：悲壮なストリングス、次第に高まる"
+        }
+      },
+      "secondsLabel": "生成時間（秒）",
+      "secondsHint": "カテゴリごとに生成オーディオの長さを調整できます。デフォルトのままであれば変更されません。生成される音のみに適用されます。変更はプレビューをやり直すと反映されます。"
     },
     "title": "マルチトラックミキサー",
     "monitorKicker": "プログラムモニター",
@@ -2917,7 +2942,16 @@
     "timelineAria": "ミックスタイムライン",
     "hiddenLane": "非表示",
     "unnamedClip": "無名クリップ",
-    "actionFailed": "操作に失敗しました"
+    "actionFailed": "操作に失敗しました",
+    "excludeLine": "ミックスから除外",
+    "excludeLineHint": "このセリフをミックスから除外するだけで、セリフ準備と配音には影響しません。下のリストから復元できます。",
+    "excludeLineConfirm": "このセリフをミックスから除外しますか？\n「{text}」\nミックスにのみ影響し、後でここから復元できます。",
+    "excludedLines": "ミックスから除外したセリフ",
+    "restoreLine": "復元",
+    "excludedLineEmpty": "（テキストなし）",
+    "assetKindImport": "読み込み",
+    "importDone": "オーディオを取り込みました：{name}",
+    "importFailed": "オーディオの読み込みに失敗しました"
   },
   "export": {
     "noEpisode": "先にエピソードを選択してください",

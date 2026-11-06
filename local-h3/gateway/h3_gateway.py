@@ -905,7 +905,7 @@ class Gateway:
             self.tasks[task_id] = task
             self._jobs[task_id] = payload
             self._persist_locked()
-        self._queue.put(task_id)
+            self._queue.put(task_id)
         return task_id
 
     def _worker_loop(self):

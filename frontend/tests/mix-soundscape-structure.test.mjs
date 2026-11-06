@@ -201,3 +201,55 @@ test('soundscape copy exists in all four locales', () => {
     for (const key of settingsKeys) assert.equal(typeof dict.settings?.cfg?.[key], 'string', `${lang} missing settings.cfg.${key}`)
   }
 })
+
+test('soundscape dialog collects per-category descriptions before preview', () => {
+  const dialog = read('app/components/MixSoundscapeDialog.vue')
+  assert.match(dialog, /const hintDraft = reactive<Record<string, string>>\(\{\}\)/)
+  assert.match(dialog, /v-model="hintDraft\[category\]"/)
+  assert.match(dialog, /maxlength="2000"/)
+  assert.match(
+    dialog,
+    /function buildHints\(\)[\s\S]*?categoryHints/,
+    'buildRequest 必须携带 categoryHints',
+  )
+  assert.match(dialog, /:placeholder="t\(`mix\.soundscape\.hints\.placeholder\.\$\{category\}`\)"/)
+  const api = read('app/composables/useApi.ts')
+  assert.match(api, /categoryHints\?: Partial<Record<SoundscapeCategory, string>>/)
+})
+
+test('soundscape hints copy exists in all four locales', () => {
+  for (const locale of ['zh', 'en', 'ja', 'ko']) {
+    const data = JSON.parse(read(`app/locales/${locale}.json`))
+    const hints = data.mix?.soundscape?.hints
+    assert.ok(hints?.label, `${locale} 缺少 hints.label`)
+    assert.ok(hints?.hint, `${locale} 缺少 hints.hint`)
+    for (const category of ['ambience', 'sfx', 'crowd', 'bgm']) {
+      assert.ok(hints?.placeholder?.[category], `${locale} 缺少 hints.placeholder.${category}`)
+    }
+  }
+})
+
+test('soundscape dialog supports adjustable per-category seconds with defaults', () => {
+  const dialog = read('app/components/MixSoundscapeDialog.vue')
+  assert.match(dialog, /const DURATION_DEFAULTS: Record<SoundscapeCategory, number> = \{\s*ambience: 45,\s*sfx: 5,\s*crowd: 30,\s*bgm: 45,\s*\}/)
+  assert.match(dialog, /const DURATION_RANGES: Record<SoundscapeCategory, readonly \[number, number\]> = \{\s*ambience: \[30, 45\],\s*sfx: \[2, 10\],\s*crowd: \[20, 45\],\s*bgm: \[30, 45\],\s*\}/)
+  assert.match(dialog, /const durationDraft = reactive<Record<SoundscapeCategory, number>>\(\{/)
+  assert.match(dialog, /v-model(\.number)?="durationDraft\[category\]"/, '每个类别应有时长输入')
+  assert.match(dialog, /:min="DURATION_RANGES\[category\]\[0\]"/)
+  assert.match(dialog, /:max="DURATION_RANGES\[category\]\[1\]"/)
+  assert.match(dialog, /resetDurations\(\)/, '打开弹窗时必须恢复默认时长')
+  assert.match(
+    dialog,
+    /const seconds = clampDuration\(item\.category\)/,
+    'buildRequest 必须把归一后的时长放进覆盖项',
+  )
+  assert.match(dialog, /:disabled="!preview"/, '未预览前时长输入应禁用（覆盖项需要预览的 itemId）')
+})
+
+test('soundscape duration copy exists in all four locales', () => {
+  for (const locale of ['zh', 'en', 'ja', 'ko']) {
+    const data = JSON.parse(read(`app/locales/${locale}.json`))
+    assert.ok(data.mix?.soundscape?.secondsLabel, `${locale} 缺少 mix.soundscape.secondsLabel`)
+    assert.ok(data.mix?.soundscape?.secondsHint, `${locale} 缺少 mix.soundscape.secondsHint`)
+  }
+})

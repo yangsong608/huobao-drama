@@ -65,6 +65,8 @@ export interface SoundscapeRequest {
   sceneIds: number[]
   overwrite: boolean
   overrides: SoundscapeOverride[]
+  /** 用户按类别补充的生成描述（中文即可），预览前填写 */
+  categoryHints: Partial<Record<SoundscapeCategory, string>>
   configId?: number
 }
 
@@ -137,6 +139,7 @@ export interface BuildSoundscapeDraftInput {
   cues: TimelineCue[]
   lines: LineRecord[]
   prompts?: Record<number, ScenePromptSet>
+  categoryHints?: Partial<Record<SoundscapeCategory, string>>
 }
 
 interface SceneSlice {
@@ -212,22 +215,23 @@ export function translateSoundscapeHints(values: Array<string | null | undefined
   return hits
 }
 
-export function fallbackAmbiencePrompt(hints: string[]): string {
-  const parts = ['ambient background', ...hints, 'continuous room tone', 'no dialogue', 'no music', 'seamless']
+export function fallbackAmbiencePrompt(hints: string[], userHint?: string): string {
+  const parts = ['ambient background', ...hints, userHint?.trim(), 'continuous room tone', 'no dialogue', 'no music', 'seamless']
   return parts.filter(Boolean).join(', ')
 }
 
-export function fallbackSfxPrompt(hints: string[]): string {
-  const parts = ['sound effect', ...hints, 'Foley', 'short', 'dry', 'no dialogue', 'no music']
+export function fallbackSfxPrompt(hints: string[], userHint?: string): string {
+  const parts = ['sound effect', ...hints, userHint?.trim(), 'Foley', 'short', 'dry', 'no dialogue', 'no music']
   return parts.filter(Boolean).join(', ')
 }
 
-export function fallbackCrowdPrompt(): string {
-  return 'crowd walla, indistinct chatter, background crowd, no intelligible words, no music'
+export function fallbackCrowdPrompt(userHint?: string): string {
+  const parts = ['crowd walla, indistinct chatter, background crowd', userHint?.trim(), 'no intelligible words, no music']
+  return parts.filter(Boolean).join(', ')
 }
 
-export function fallbackBgmPrompt(moods: string[]): string {
-  const parts = ['cinematic instrumental score', ...(moods.length ? moods : ['ambient underscore']), 'no vocals', 'subtle', 'loopable']
+export function fallbackBgmPrompt(moods: string[], userHint?: string): string {
+  const parts = ['cinematic instrumental score', ...(moods.length ? moods : ['ambient underscore']), userHint?.trim(), 'no vocals', 'subtle', 'loopable']
   return parts.filter(Boolean).join(', ')
 }
 
@@ -285,6 +289,22 @@ export function parseSoundscapeRequest(body: unknown): SoundscapeRequest {
   if (rawOverrides.length > MAX_ITEMS) throw new SoundscapeError('提示词覆盖项过多')
   const overrides = rawOverrides.map(parseOverride)
 
+  const categoryHints: Partial<Record<SoundscapeCategory, string>> = {}
+  if (raw.categoryHints != null) {
+    if (typeof raw.categoryHints !== 'object' || Array.isArray(raw.categoryHints)) {
+      throw new SoundscapeError('声音描述无效')
+    }
+    for (const [key, value] of Object.entries(raw.categoryHints as Record<string, unknown>)) {
+      if (!SOUNDSCAPE_CATEGORIES.includes(key as SoundscapeCategory)) throw new SoundscapeError('声音类别无效')
+      if (value == null) continue
+      if (typeof value !== 'string') throw new SoundscapeError('声音描述无效')
+      const hint = value.trim()
+      if (!hint) continue
+      if (hint.length > 2000) throw new SoundscapeError('声音描述长度不能超过 2000 字符')
+      categoryHints[key as SoundscapeCategory] = hint
+    }
+  }
+
   let configId: number | undefined
   if (raw.configId != null) {
     configId = Number(raw.configId)
@@ -298,6 +318,7 @@ export function parseSoundscapeRequest(body: unknown): SoundscapeRequest {
     sceneIds,
     overwrite: raw.overwrite === true,
     overrides,
+    categoryHints,
     configId,
   }
 }
@@ -427,7 +448,7 @@ export function buildSoundscapeDraft(input: BuildSoundscapeDraftInput): Soundsca
         startMs: 0,
         endMs: totalDurationMs,
         seconds: DEFAULT_SECONDS.ambience,
-        prompt: llmPrompts.length ? llmPrompts.slice(0, 4).join(', ') : fallbackAmbiencePrompt(hints),
+        prompt: llmPrompts.length ? llmPrompts.slice(0, 4).join(', ') : fallbackAmbiencePrompt(hints, input.categoryHints?.ambience),
         negativePrompt: DEFAULT_NEGATIVE_PROMPTS.ambience,
         loop: false,
         lineIds: [],
@@ -449,7 +470,7 @@ export function buildSoundscapeDraft(input: BuildSoundscapeDraftInput): Soundsca
           startMs: slice.startMs,
           endMs: slice.endMs,
           seconds: DEFAULT_SECONDS.ambience,
-          prompt: llm || fallbackAmbiencePrompt(hints),
+          prompt: llm || fallbackAmbiencePrompt(hints, input.categoryHints?.ambience),
           negativePrompt: DEFAULT_NEGATIVE_PROMPTS.ambience,
           loop: false,
           lineIds: [],
@@ -465,7 +486,7 @@ export function buildSoundscapeDraft(input: BuildSoundscapeDraftInput): Soundsca
       const effects = slice.storyboards
         .map((entry) => entry.storyboard.soundEffect)
         .filter((value): value is string => Boolean(value && value.trim()))
-      if (!llm && effects.length === 0) continue
+      if (!llm && effects.length === 0 && !input.categoryHints?.sfx) continue
       const hints = unique(translateSoundscapeHints(effects))
       pushItem(items, {
         itemId: `sfx:scene:${slice.scene.id}`,
@@ -476,7 +497,7 @@ export function buildSoundscapeDraft(input: BuildSoundscapeDraftInput): Soundsca
         startMs: slice.startMs,
         endMs: slice.endMs,
         seconds: DEFAULT_SECONDS.sfx,
-        prompt: llm || fallbackSfxPrompt(hints),
+        prompt: llm || fallbackSfxPrompt(hints, input.categoryHints?.sfx),
         negativePrompt: DEFAULT_NEGATIVE_PROMPTS.sfx,
         loop: false,
         lineIds: [],
@@ -526,7 +547,7 @@ export function buildSoundscapeDraft(input: BuildSoundscapeDraftInput): Soundsca
           startMs: slice.startMs,
           endMs: slice.endMs,
           seconds: DEFAULT_SECONDS.crowd,
-          prompt: llm || fallbackCrowdPrompt(),
+          prompt: llm || fallbackCrowdPrompt(input.categoryHints?.crowd),
           negativePrompt: DEFAULT_NEGATIVE_PROMPTS.crowd,
           loop: false,
           lineIds: [],
@@ -553,7 +574,7 @@ export function buildSoundscapeDraft(input: BuildSoundscapeDraftInput): Soundsca
       startMs: 0,
       endMs: totalDurationMs,
       seconds: DEFAULT_SECONDS.bgm,
-      prompt: fallbackBgmPrompt(moods.length ? moods : fallbackMoods),
+      prompt: fallbackBgmPrompt(moods.length ? moods : fallbackMoods, input.categoryHints?.bgm),
       negativePrompt: DEFAULT_NEGATIVE_PROMPTS.bgm,
       loop: false,
       lineIds: [],
@@ -621,6 +642,7 @@ export interface ScenePromptScene {
 
 export interface ScenePromptCompileInput {
   scenes: ScenePromptScene[]
+  categoryHints?: Partial<Record<SoundscapeCategory, string>>
 }
 
 export interface ScenePromptCompileResult {
@@ -801,6 +823,20 @@ function formatSceneForPrompt(scene: ScenePromptScene): string {
   ].join('\n')
 }
 
+function formatCategoryHints(hints: Partial<Record<SoundscapeCategory, string>> | undefined): string {
+  if (!hints) return ''
+  const labels: Record<SoundscapeCategory, string> = {
+    ambience: '环境声',
+    sfx: '音效',
+    crowd: '群众声（可包含人数与大致内容）',
+    bgm: '配乐',
+  }
+  const lines = (Object.entries(hints) as Array<[SoundscapeCategory, string]>)
+    .filter(([, text]) => text.trim())
+    .map(([category, text]) => `- ${labels[category]}：${text.trim()}`)
+  return lines.length ? `\n\n用户补充要求（必须融入对应类别的英文提示词，不要照抄中文）：\n${lines.join('\n')}` : ''
+}
+
 export function parseScenePromptResponse(data: unknown): Record<number, ScenePromptSet> {
   const result: Record<number, ScenePromptSet> = {}
   const rawScenes = (data && typeof data === 'object' && Array.isArray((data as any).scenes))
@@ -850,7 +886,7 @@ export async function compileScenePromptsWithText(
           'crowdLineIds：从给定台词中选出群众/人群/路人等非具体角色的台词 id。',
           '输出格式：{"scenes":[{"sceneId":12,"ambiencePrompt":"...","sfxPrompt":"...","crowdPrompt":"...","bgmMood":"...","crowdLineIds":[101]}]}',
         ].join('\n'),
-        prompt: `请为以下场景编译声音提示词：\n\n${batch.map(formatSceneForPrompt).join('\n\n---\n\n')}`,
+        prompt: `请为以下场景编译声音提示词：\n\n${batch.map(formatSceneForPrompt).join('\n\n---\n\n')}${formatCategoryHints(input.categoryHints)}`,
         responseFormat: 'json',
         temperature: 0.4,
         maxTokens: 4000,
@@ -975,6 +1011,7 @@ export async function compileSoundscapePlan(
     clips: timeline.clips,
     cues: timeline.cues,
     lines,
+    categoryHints: options.request.categoryHints,
   }
   const resolved = resolveSceneSlices(draftInput)
   const promptInput: ScenePromptCompileInput = {
@@ -989,6 +1026,7 @@ export async function compileSoundscapePlan(
         kind: cue.kind,
       })),
     })),
+    categoryHints: options.request.categoryHints,
   }
 
   let promptResult: ScenePromptCompileResult = { prompts: {}, degraded: false, warnings: [] }

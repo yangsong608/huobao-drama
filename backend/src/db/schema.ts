@@ -648,6 +648,15 @@ export const mixRevisions = sqliteTable('mix_revisions', {
   sourceFilmId: integer('source_film_id'),
 })
 
+/** 从混音移除的台词：虚拟对白轨不再生成对应片段 */
+export const episodeMixLineExclusions = sqliteTable('episode_mix_line_exclusions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  lineId: integer('line_id').notNull(),
+  reason: text('reason'),
+  createdAt: text('created_at').notNull(),
+})
+
 /** 导出记录 */
 export const episodeExports = sqliteTable('episode_exports', {
   id: integer('id').primaryKey({ autoIncrement: true }),

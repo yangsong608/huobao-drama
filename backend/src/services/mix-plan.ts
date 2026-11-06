@@ -58,7 +58,13 @@ interface VirtualTrackOverride {
   solo?: boolean
   loop?: boolean
 }
-type VirtualOverrideMap = Partial<Record<VirtualRole, VirtualTrackOverride>>
+/** 键为 role 或 `voice:${角色名}`（按角色分轨的对白轨覆盖） */
+type VirtualOverrideMap = Record<string, VirtualTrackOverride>
+
+const VOICE_TRACK_COLORS = [
+  '#f59e0b', '#38bdf8', '#a78bfa', '#f472b6', '#34d399',
+  '#60a5fa', '#fb7185', '#4ade80', '#c084fc', '#fbbf24',
+]
 
 export const MIX_ASSET_ROLES = [
   'video', 'original', 'dialogue', 'crowd', 'ambience', 'sfx', 'bgm', 'voice', 'custom', 'subtitle',
@@ -265,11 +271,83 @@ function soundscapeCrowdLineIds(episodeId: number): Set<number> {
   )
 }
 
-function buildVirtualDialogueTrack(
+/** 用户在混音台显式移除的台词 */
+function mixExcludedLineIds(episodeId: number): Set<number> {
+  const rows = db.select({ lineId: schema.episodeMixLineExclusions.lineId })
+    .from(schema.episodeMixLineExclusions)
+    .where(eq(schema.episodeMixLineExclusions.episodeId, episodeId))
+    .all()
+  return new Set(rows.map((row) => row.lineId))
+}
+
+export interface MixExcludedLine {
+  lineId: number
+  lineNo: number
+  text: string
+  speaker: string
+  lineDeleted: boolean
+}
+
+function requireEpisodeLine(episodeId: number, lineId: number) {
+  const row = db.select().from(schema.storyboardLines)
+    .where(and(eq(schema.storyboardLines.id, lineId), eq(schema.storyboardLines.episodeId, episodeId)))
+    .get()
+  if (!row) throw new MixPlanError('台词不存在或不属于本集', 404)
+  return row
+}
+
+export function excludeMixLine(episodeId: number, lineId: number): MixExcludedLine[] {
+  requireEpisodeLine(episodeId, lineId)
+  const now = new Date().toISOString()
+  db.insert(schema.episodeMixLineExclusions)
+    .values({ episodeId, lineId, reason: 'user', createdAt: now })
+    .onConflictDoNothing()
+    .run()
+  return listMixExcludedLines(episodeId)
+}
+
+export function restoreMixLine(episodeId: number, lineId: number): MixExcludedLine[] {
+  requireEpisodeLine(episodeId, lineId)
+  db.delete(schema.episodeMixLineExclusions)
+    .where(and(
+      eq(schema.episodeMixLineExclusions.episodeId, episodeId),
+      eq(schema.episodeMixLineExclusions.lineId, lineId),
+    ))
+    .run()
+  return listMixExcludedLines(episodeId)
+}
+
+export function listMixExcludedLines(episodeId: number): MixExcludedLine[] {
+  const rows = db.select().from(schema.episodeMixLineExclusions)
+    .where(eq(schema.episodeMixLineExclusions.episodeId, episodeId))
+    .all()
+  const lineById = new Map(
+    db.select().from(schema.storyboardLines)
+      .where(eq(schema.storyboardLines.episodeId, episodeId))
+      .all()
+      .map((row) => [row.id, row]),
+  )
+  return rows
+    .map((row) => {
+      const line = lineById.get(row.lineId)
+      if (!line) return null
+      return {
+        lineId: line.id,
+        lineNo: line.lineNo,
+        text: line.subtitleText || line.text || '',
+        speaker: line.speakerName || '旁白',
+        lineDeleted: Boolean(line.deletedAt),
+      }
+    })
+    .filter((item): item is MixExcludedLine => item !== null)
+    .sort((a, b) => a.lineNo - b.lineNo)
+}
+
+function buildVirtualDialogueTracks(
   episodeId: number,
   timeline: Awaited<ReturnType<typeof previewTimeline>>,
   excludedLineIds: Set<number> = new Set(),
-): MixTrack {
+): MixTrack[] {
   const takes = db.select().from(schema.lineTakes)
     .where(eq(schema.lineTakes.episodeId, episodeId))
     .orderBy(asc(schema.lineTakes.takeNo))
@@ -280,14 +358,15 @@ function buildVirtualDialogueTrack(
     activeByLine.set(take.lineId, take)
   }
 
-  const clips: MixClip[] = []
+  const clipsBySpeaker = new Map<string, MixClip[]>()
   for (const cue of timeline.cues) {
     if (excludedLineIds.has(cue.lineId)) continue
     const take = activeByLine.get(cue.lineId)
     const rawUrl = take?.audioUrl || cue.audioUrl
     const source = clipSource(rawUrl)
     if (!source.url) continue
-    clips.push({
+    const speaker = cue.speaker || '对白'
+    const clip: MixClip = {
       id: null,
       assetId: null,
       takeId: take?.id ?? null,
@@ -307,13 +386,30 @@ function buildVirtualDialogueTrack(
       audioUrl: source.url,
       usable: source.usable,
       reason: source.reason,
-    })
+    }
+    const bucket = clipsBySpeaker.get(speaker)
+    if (bucket) bucket.push(clip)
+    else clipsBySpeaker.set(speaker, [clip])
   }
 
+  const speakerOrder = [...clipsBySpeaker.keys()].sort((a, b) => {
+    const firstA = clipsBySpeaker.get(a)![0].startMs
+    const firstB = clipsBySpeaker.get(b)![0].startMs
+    return firstA - firstB || a.localeCompare(b)
+  })
+  if (speakerOrder.length === 0) {
+    // 全部台词被移除时保留一条空对白轨，作为恢复列表的入口
+    return [voiceTrackShell('对白', 0, [])]
+  }
+  return speakerOrder.map((speaker, index) =>
+    voiceTrackShell(speaker, index, clipsBySpeaker.get(speaker)!))
+}
+
+function voiceTrackShell(name: string, index: number, clips: MixClip[]): MixTrack {
   return {
     id: null,
     role: 'voice',
-    name: '对白',
+    name,
     busId: 'dialogue',
     virtual: true,
     volume: 1,
@@ -325,7 +421,7 @@ function buildVirtualDialogueTrack(
     locked: false,
     hidden: false,
     loop: false,
-    color: '#f59e0b',
+    color: VOICE_TRACK_COLORS[index % VOICE_TRACK_COLORS.length],
     height: 72,
     sortOrder: -1,
     origin: null,
@@ -534,10 +630,11 @@ export async function compileMixPlanDetailed(
     ? null
     : { url: source.url, durationMs: source.durationMs }
   const targetDurationMs = Math.max(0, source.durationMs, timeline.totalDurationMs, dbClipEnd)
-  const excludedCrowdLineIds = soundscapeCrowdLineIds(episodeId)
-  const virtualTracks: MixTrack[] = [
-    buildVirtualDialogueTrack(episodeId, timeline, excludedCrowdLineIds),
-  ]
+  const excludedLineIds = new Set([
+    ...soundscapeCrowdLineIds(episodeId),
+    ...mixExcludedLineIds(episodeId),
+  ])
+  const virtualTracks: MixTrack[] = buildVirtualDialogueTracks(episodeId, timeline, excludedLineIds)
   if (bed) virtualTracks.push(buildVirtualBedTrack(bed))
   if (!hasBgmUserTrack) {
     const bgmTrack = await buildVirtualBgmTrack(episode, drama, targetDurationMs)
@@ -915,7 +1012,7 @@ export interface MixPlanSaveInput {
   buses?: MixPlanInputBus[]
   tracks?: MixPlanInputTrack[]
   clips?: MixPlanInputClip[]
-  /** 虚拟轨覆盖（按 role 匹配 voice/original/bgm） */
+  /** 虚拟轨覆盖（role 匹配 voice/original/bgm；voice 轨带 name 时按 `voice:${name}` 分角色） */
   virtualTracks?: MixPlanInputTrack[]
 }
 
@@ -941,8 +1038,8 @@ function readVirtualOverrides(raw: unknown): VirtualOverrideMap {
   }
   if (!parsed || typeof parsed !== 'object') return {}
   const result: VirtualOverrideMap = {}
-  for (const role of VIRTUAL_ROLES) {
-    const value = (parsed as Record<string, unknown>)[role]
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (key !== 'voice' && !key.startsWith('voice:') && !(VIRTUAL_ROLES as readonly string[]).includes(key)) continue
     if (!value || typeof value !== 'object') continue
     const source = value as Record<string, unknown>
     const override: VirtualTrackOverride = {}
@@ -951,15 +1048,20 @@ function readVirtualOverrides(raw: unknown): VirtualOverrideMap {
     if (source.muted !== undefined) override.muted = Boolean(source.muted)
     if (source.solo !== undefined) override.solo = Boolean(source.solo)
     if (source.loop !== undefined) override.loop = Boolean(source.loop)
-    result[role] = override
+    result[key] = override
   }
   return result
+}
+
+function virtualOverrideKey(role: string, name?: string | null): string {
+  return role === 'voice' && name ? `voice:${name}` : role
 }
 
 function applyVirtualOverrides(tracks: MixTrack[], overrides: VirtualOverrideMap) {
   for (const track of tracks) {
     if (!track.virtual) continue
-    const override = overrides[track.role as VirtualRole]
+    const override = overrides[virtualOverrideKey(track.role, track.name)]
+      ?? overrides[track.role as VirtualRole]
     if (!override) continue
     if (override.volume !== undefined) track.volume = override.volume
     if (override.pan !== undefined) track.pan = override.pan
@@ -981,7 +1083,7 @@ function serializeVirtualOverrides(inputs: MixPlanInputTrack[]): string {
     if (input.muted !== undefined) override.muted = Boolean(input.muted)
     if (input.solo !== undefined) override.solo = Boolean(input.solo)
     if (input.loop !== undefined) override.loop = Boolean(input.loop)
-    overrides[role] = override
+    overrides[virtualOverrideKey(role, input.name)] = override
   }
   return JSON.stringify(overrides)
 }
@@ -992,7 +1094,7 @@ function virtualOverridesFromPlan(plan: MixPlan): VirtualOverrideMap {
     if (!track.virtual) continue
     const role = VIRTUAL_ROLES.find((item) => item === track.role)
     if (!role) continue
-    overrides[role] = {
+    overrides[virtualOverrideKey(role, track.name)] = {
       volume: clampNumber(track.volume, 0, 2, 1),
       pan: clampNumber(track.pan, -1, 1, 0),
       muted: Boolean(track.muted),

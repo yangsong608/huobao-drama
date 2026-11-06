@@ -43,7 +43,9 @@
           <div v-if="clip.lineId" class="mx-actions">
             <button class="mx-btn is-plain" type="button" @click="emit('locate-line', clip.lineId)">{{ t('mix.locateLine') }}</button>
             <button class="mx-btn is-plain" type="button" @click="emit('regenerate-line', clip.lineId)">{{ t('mix.regenerateLine') }}</button>
+            <button class="mx-btn is-danger" type="button" @click="emit('exclude-line', clip.lineId)">{{ t('mix.excludeLine') }}</button>
           </div>
+          <p v-if="clip.lineId" class="mx-hint">{{ t('mix.excludeLineHint') }}</p>
         </template>
 
         <template v-else>
@@ -159,6 +161,14 @@
         </div>
 
         <p v-if="track.virtual" class="mx-hint">{{ t('mix.trackVirtualHint', { n: track.clips.length }) }}</p>
+
+        <div v-if="virtualVoice && excludedLines.length" class="mx-excluded">
+          <span class="mx-field-label">{{ t('mix.excludedLines') }}</span>
+          <div v-for="item in excludedLines" :key="item.lineId" class="mx-excluded-row">
+            <span class="mx-excluded-text">{{ item.speaker }}：{{ item.text || t('mix.excludedLineEmpty') }}</span>
+            <button class="mx-btn is-plain" type="button" @click="emit('restore-line', item.lineId)">{{ t('mix.restoreLine') }}</button>
+          </div>
+        </div>
 
         <label v-if="!track.virtual" class="mx-field">
           <span>{{ t('mix.trackName') }}</span>
@@ -355,6 +365,7 @@ import type {
   EpisodeAudioAsset,
   MixBus,
   MixClip as MixClipType,
+  MixExcludedLine,
   MixRevision,
   SeparationStatus,
 } from '~/composables/useApi'
@@ -369,6 +380,7 @@ const props = defineProps<{
   separation: SeparationStatus | null
   lineText?: string | null
   lineNumber?: number | null
+  excludedLines?: MixExcludedLine[]
   master?: { lufs: number; truePeak: number; limiter: string } | null
   saving?: boolean
   dirty?: boolean
@@ -384,6 +396,8 @@ const emit = defineEmits<{
   'duplicate-clip': [clip: StageClip]
   'locate-line': [lineId: number]
   'regenerate-line': [lineId: number]
+  'exclude-line': [lineId: number]
+  'restore-line': [lineId: number]
   'add-track': [role: string, name?: string]
   'remove-track': [track: StageTrack]
   'insert-asset': [asset: EpisodeAudioAsset]
@@ -460,7 +474,8 @@ const curveOptions = computed(() => [
 ])
 
 const virtual = computed(() => Boolean(props.track?.virtual))
-const virtualDialogue = computed(() => virtual.value && props.track?.role === 'voice' && props.clip?.lineId != null)
+const virtualVoice = computed(() => virtual.value && props.track?.role === 'voice')
+const virtualDialogue = computed(() => virtualVoice.value && props.clip?.lineId != null)
 const trackLocked = computed(() => Boolean(props.track?.locked))
 const clipEditable = computed(() => Boolean(props.clip)
   && !virtual.value
@@ -645,6 +660,9 @@ function setBusNumber(bus: MixBus, key: 'duckRatio' | 'duckAttackMs' | 'duckRele
 .mx-toggle.on { border-color: var(--accent-glow); background: var(--accent-bg); color: var(--accent-text); }
 .mx-toggle:disabled { opacity: .5; cursor: default; }
 .mx-actions { display: flex; flex-wrap: wrap; gap: 5px; padding-top: 2px; }
+.mx-excluded { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
+.mx-excluded-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.mx-excluded-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; color: var(--text-2); }
 .mx-btn { height: 24px; padding: 0 8px; border: 1px solid var(--accent); border-radius: 5px; background: var(--accent); color: var(--action-primary-text); font: inherit; font-size: 10px; font-weight: 600; cursor: pointer; }
 .mx-btn:hover { background: var(--action-primary-hover); }
 .mx-btn.is-plain { border-color: var(--border); background: var(--bg-1); color: var(--text-1); }

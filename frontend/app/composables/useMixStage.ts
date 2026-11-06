@@ -14,6 +14,7 @@ import {
   type MixBus,
   type MixBusKey,
   type MixClip,
+  type MixExcludedLine,
   type MixPlan,
   type MixPlanWithSource,
   type MixPreviewResult,
@@ -125,6 +126,7 @@ export function useMixStage(options: UseMixStageOptions) {
   const plan = ref<StagePlan | null>(null)
   const assets = ref<EpisodeAudioAsset[]>([])
   const revisions = ref<MixRevision[]>([])
+  const excludedLines = ref<MixExcludedLine[]>([])
   const separation = ref<SeparationStatus | null>(null)
   const soundscapeStatus = ref<SoundscapeStatus | null>(null)
   const soundscapePlan = ref<SoundscapePreview | null>(null)
@@ -459,6 +461,7 @@ export function useMixStage(options: UseMixStageOptions) {
         .filter((track) => track.virtual)
         .map((track) => ({
           role: track.role,
+          name: track.name,
           volume: track.volume,
           pan: track.pan,
           muted: track.muted,
@@ -547,6 +550,14 @@ export function useMixStage(options: UseMixStageOptions) {
     }
   }
 
+  async function importAudioAsset(file: File): Promise<EpisodeAudioAsset | null> {
+    const episodeId = options.episodeId()
+    if (!episodeId) return null
+    const result = await mixAPI.importAudioAsset(episodeId, file)
+    assets.value = [...assets.value, result.asset]
+    return result.asset
+  }
+
   async function load(resetHistory = true) {
     const episodeId = options.episodeId()
     if (!episodeId) return
@@ -559,19 +570,21 @@ export function useMixStage(options: UseMixStageOptions) {
     loading.value = true
     error.value = ''
     try {
-      const [next, assetResult, revisionResult, status, soundscape] = await Promise.all([
+      const [next, assetResult, revisionResult, status, soundscape, excluded] = await Promise.all([
         // 初次进入本集时优先使用路由 ?film= 指定的源成片；刷新走已持久化的选择
         mixAPI.plan(episodeId, episodeChanged ? routeFilmId() : undefined),
         mixAPI.assets(episodeId),
         mixAPI.revisions(episodeId),
         mixAPI.separationStatus(episodeId),
         mixAPI.soundscapeStatus(episodeId),
+        mixAPI.excludedLines(episodeId),
       ])
       if (token !== loadToken) return
       applyPlan(next, resetHistory)
       applySourceMeta(next)
       assets.value = assetResult.items
       revisions.value = revisionResult.items
+      excludedLines.value = excluded.items
       separation.value = status
       soundscapeStatus.value = soundscape
       dirty.value = false
@@ -1112,6 +1125,40 @@ export function useMixStage(options: UseMixStageOptions) {
     return result.deleted
   }
 
+  async function excludeVoiceLine(lineId: number) {
+    const episodeId = options.episodeId()
+    if (!episodeId) throw new Error('未选择剧集')
+    error.value = ''
+    try {
+      await flushSave()
+      const result = await mixAPI.excludeLine(episodeId, lineId)
+      excludedLines.value = result.items
+      applyPlan(result.plan, true)
+      dirty.value = false
+      return result.items
+    } catch (err: any) {
+      error.value = err?.message || '移除台词失败'
+      throw err
+    }
+  }
+
+  async function restoreVoiceLine(lineId: number) {
+    const episodeId = options.episodeId()
+    if (!episodeId) throw new Error('未选择剧集')
+    error.value = ''
+    try {
+      await flushSave()
+      const result = await mixAPI.restoreLine(episodeId, lineId)
+      excludedLines.value = result.items
+      applyPlan(result.plan, true)
+      dirty.value = false
+      return result.items
+    } catch (err: any) {
+      error.value = err?.message || '恢复台词失败'
+      throw err
+    }
+  }
+
   function dispose() {
     if (saveTimer) {
       clearTimeout(saveTimer)
@@ -1126,7 +1173,11 @@ export function useMixStage(options: UseMixStageOptions) {
     tracks,
     buses,
     assets,
+    importAudioAsset,
     revisions,
+    excludedLines,
+    excludeVoiceLine,
+    restoreVoiceLine,
     separation,
     separationRunning,
     soundscapeStatus,

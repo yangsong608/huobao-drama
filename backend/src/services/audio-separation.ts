@@ -11,6 +11,9 @@ import path from 'path'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
+import { ffmpeg } from '../utils/ffmpeg.js'
+import { getAbsolutePath } from '../utils/storage.js'
+import { AudioUploadError, saveAudioUpload } from '../utils/audio-upload.js'
 import { isPathInside, projectStorageRelative, projectSubdirPath } from './project-storage.js'
 import { ensureMergedVideo } from './dubbing.js'
 import {
@@ -172,8 +175,51 @@ export function listEpisodeAssets(episodeId: number): AssetRow[] {
     .all()
 }
 
-export function deleteEpisodeAsset(episodeId: number, assetId: number): boolean {
-  requireEpisode(episodeId)
+function probeAudioMeta(file: string): Promise<{ durationMs: number; sampleRate: number; channels: number }> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(file, (err, meta) => {
+      if (err) return reject(new Error('无法读取音频文件，请确认文件完整有效'))
+      const stream = (meta?.streams || []).find((item) => item.codec_type === 'audio')
+      if (!stream) return reject(new Error('文件中没有音频流，请选择音频文件'))
+      const seconds = Number(meta?.format?.duration)
+      resolve({
+        durationMs: Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds * 1000) : 0,
+        sampleRate: Number(stream?.sample_rate) || 48000,
+        channels: Number(stream?.channels) || 2,
+      })
+    })
+  })
+}
+
+/** 混音素材库：导入本地音频文件（kind=import），不影响台词与配音数据 */
+export async function importEpisodeAudioAsset(episodeId: number, file: unknown) {
+  const episode = requireEpisode(episodeId)
+  const saved = await saveAudioUpload(file, { dramaId: episode.dramaId })
+  const absolutePath = getAbsolutePath(saved.path)
+  let meta: { durationMs: number; sampleRate: number; channels: number }
+  try {
+    meta = await probeAudioMeta(absolutePath)
+  } catch (err) {
+    // 探测失败说明文件不是有效音频：删除已落盘的副本，避免留下坏的“ready”素材
+    fs.rm(absolutePath, { force: true }, () => {})
+    throw new AudioUploadError(err instanceof Error ? err.message : '无法读取音频文件')
+  }
+  return db.insert(schema.episodeAudioAssets).values({
+    episodeId,
+    dramaId: episode.dramaId,
+    kind: 'import',
+    url: saved.path,
+    durationMs: meta.durationMs,
+    sampleRate: meta.sampleRate,
+    channels: meta.channels,
+    engine: 'import',
+    status: 'ready',
+    metadataJson: JSON.stringify({ name: saved.name }),
+    createdAt: now(),
+  }).returning().get()
+}
+
+export function deleteEpisodeAsset(episodeId: number, assetId: number): boolean {  requireEpisode(episodeId)
   const asset = db.select().from(schema.episodeAudioAssets)
     .where(eq(schema.episodeAudioAssets.id, assetId)).get()
   if (!asset || asset.episodeId !== episodeId || asset.deletedAt) {

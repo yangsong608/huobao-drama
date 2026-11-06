@@ -73,6 +73,48 @@
             <p class="ss-hint">{{ t(`mix.soundscape.crowdModeHint.${form.crowdMode}`) }}</p>
           </section>
 
+          <section v-if="hintCategories.length" class="ss-section">
+            <span class="ss-label">{{ t('mix.soundscape.hints.label') }}</span>
+            <p class="ss-hint">{{ t('mix.soundscape.hints.hint') }}</p>
+            <div v-for="category in hintCategories" :key="category" class="ss-hint-row">
+              <span class="ss-hint-name">
+                <span class="ss-dot" :style="{ background: CATEGORY_COLORS[category] }" />
+                {{ t(`mix.soundscape.categories.${category}`) }}
+              </span>
+              <textarea
+                v-model="hintDraft[category]"
+                rows="2"
+                spellcheck="false"
+                maxlength="2000"
+                :placeholder="t(`mix.soundscape.hints.placeholder.${category}`)"
+              />
+            </div>
+          </section>
+
+          <section class="ss-section">
+            <span class="ss-label">{{ t('mix.soundscape.secondsLabel') }}</span>
+            <p class="ss-hint">{{ t('mix.soundscape.secondsHint') }}</p>
+            <div class="ss-duration-grid">
+              <label v-for="category in form.categories" :key="category" class="ss-duration">
+                <span class="ss-hint-name">
+                  <span class="ss-dot" :style="{ background: CATEGORY_COLORS[category] }" />
+                  {{ t(`mix.soundscape.categories.${category}`) }}
+                </span>
+                <span class="ss-duration-input">
+                  <input
+                    v-model.number="durationDraft[category]"
+                    type="number"
+                    :min="DURATION_RANGES[category][0]"
+                    :max="DURATION_RANGES[category][1]"
+                    step="1"
+                    :disabled="!preview"
+                  />
+                  <i>s</i>
+                </span>
+              </label>
+            </div>
+          </section>
+
           <section v-if="form.mode === 'scenes'" class="ss-section">
             <div class="ss-row">
               <span class="ss-label">{{ t('mix.soundscape.sceneScope') }}</span>
@@ -209,6 +251,18 @@ const CATEGORY_COLORS: Record<SoundscapeCategory, string> = {
   crowd: '#f59e0b',
   bgm: '#22c55e',
 }
+const DURATION_DEFAULTS: Record<SoundscapeCategory, number> = {
+  ambience: 45,
+  sfx: 5,
+  crowd: 30,
+  bgm: 45,
+}
+const DURATION_RANGES: Record<SoundscapeCategory, readonly [number, number]> = {
+  ambience: [30, 45],
+  sfx: [2, 10],
+  crowd: [20, 45],
+  bgm: [30, 45],
+}
 
 const form = reactive({
   mode: 'scenes' as SoundscapeMode,
@@ -224,12 +278,21 @@ const promptDraft = reactive<Record<string, string>>({})
 // 只有用户改过的提示词才作为覆盖项发送：未编辑的预览草稿必须保持请求不变，
 // 否则预览与启动的缓存键不同，Start 会重新编译全部提示词
 const promptDirty = reactive<Record<string, boolean>>({})
+// 预览前的分类补充描述：直接进入请求，不依赖预览
+const hintDraft = reactive<Record<string, string>>({})
+// 每类声音的生成时长（秒）：与默认一致时不发送覆盖项，避免破坏预览/启动的缓存键
+const durationDraft = reactive<Record<SoundscapeCategory, number>>({ ...DURATION_DEFAULTS })
 const errorRef = ref<HTMLElement | null>(null)
 
 const canSubmit = computed(() => (
   form.categories.length > 0
   && (form.mode !== 'scenes' || allScenes.value || form.sceneIds.length > 0)
 ))
+
+// 群众声台词化模式下由台词编排，无需描述
+const hintCategories = computed(() => form.categories.filter((category) => (
+  category !== 'crowd' || form.crowdMode === 'walla'
+)))
 
 const sceneOrdinal = computed(() => {
   const map = new Map<number, number>()
@@ -273,6 +336,18 @@ function syncDrafts(preview: SoundscapePreview | null) {
   }
 }
 
+function resetDurations() {
+  for (const category of CATEGORIES) durationDraft[category] = DURATION_DEFAULTS[category]
+}
+
+// 输入被清空时 v-model.number 会得到 ''，越界值也不可信：统一归一到合法区间
+function clampDuration(category: SoundscapeCategory): number {
+  const [min, max] = DURATION_RANGES[category]
+  const value = Number(durationDraft[category])
+  if (!Number.isFinite(value) || value <= 0) return DURATION_DEFAULTS[category]
+  return Math.min(max, Math.max(min, Math.round(value)))
+}
+
 function resetForm() {
   form.mode = 'scenes'
   form.categories = ['ambience', 'sfx', 'crowd']
@@ -281,6 +356,8 @@ function resetForm() {
   form.overwrite = false
   allScenes.value = true
   resetDrafts()
+  resetDurations()
+  for (const key of Object.keys(hintDraft)) delete hintDraft[key]
   syncDrafts(props.preview)
   void loadScenes()
 }
@@ -309,6 +386,15 @@ function itemLabel(item: SoundscapePreview['items'][number]): string {
   return t('mix.soundscape.sceneLabel', { n })
 }
 
+function buildHints(): Partial<Record<SoundscapeCategory, string>> {
+  const hints: Partial<Record<SoundscapeCategory, string>> = {}
+  for (const category of hintCategories.value) {
+    const text = (hintDraft[category] ?? '').trim()
+    if (text) hints[category] = text
+  }
+  return hints
+}
+
 function buildRequest(): SoundscapeRequest {
   const overrides: SoundscapeOverride[] = []
   for (const item of props.preview?.items ?? []) {
@@ -323,6 +409,15 @@ function buildRequest(): SoundscapeRequest {
     if (!promptDirty[item.itemId]) continue
     overrides.push({ itemId: item.itemId, prompt })
   }
+  // 与默认一致的时长不发送：保持与提示词覆盖相同的“改了才发”策略
+  for (const item of props.preview?.items ?? []) {
+    if (item.source !== 'generate') continue
+    const seconds = clampDuration(item.category)
+    if (seconds === DURATION_DEFAULTS[item.category]) continue
+    const existing = overrides.find((override) => override.itemId === item.itemId)
+    if (existing) existing.seconds = seconds
+    else overrides.push({ itemId: item.itemId, seconds })
+  }
   return {
     mode: form.mode,
     categories: [...form.categories],
@@ -330,6 +425,7 @@ function buildRequest(): SoundscapeRequest {
     sceneIds: form.mode === 'scenes' && !allScenes.value ? [...form.sceneIds] : [],
     overwrite: form.overwrite,
     overrides,
+    categoryHints: buildHints(),
   }
 }
 
@@ -429,4 +525,23 @@ watch(() => props.error, async (value) => {
   border: 1px solid var(--border); background: var(--bg-1); color: var(--text-1);
   font-size: 10.5px; line-height: 1.5; font-family: inherit;
 }
+.ss-hint-row { display: flex; flex-direction: column; gap: 4px; }
+.ss-hint-name { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); }
+.ss-hint-row textarea {
+  width: 100%; resize: vertical; padding: 6px 8px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg-1); color: var(--text-1);
+  font-size: 10.5px; line-height: 1.5; font-family: inherit;
+}
+.ss-duration-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.ss-duration {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-2);
+}
+.ss-duration-input { display: inline-flex; align-items: center; gap: 4px; }
+.ss-duration-input input {
+  width: 64px; padding: 4px 6px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg-1); color: var(--text-1);
+  font-size: 11px; font-family: inherit;
+}
+.ss-duration-input i { font-style: normal; font-size: 10px; color: var(--text-3); }
 </style>

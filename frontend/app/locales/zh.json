@@ -2661,8 +2661,9 @@
     },
     "stems": {
       "title": "声音素材库（可选）",
-      "intro": "从原声中提取人声、伴奏等声音素材，方便单独调整或替换。提取不会自动改变当前混音；需要使用时，把素材放入时间线。",
-      "extract": "提取声音素材"
+      "intro": "从原声中提取人声、伴奏等声音素材，方便单独调整或替换。提取不会自动改变当前混音；需要使用时，把素材放入时间线。插入声音时，如果没有合适的可用轨道，会自动新建一条轨道。",
+      "extract": "提取声音素材",
+      "importAudio": "导入音频"
     },
     "advanced": {
       "title": "高级"
@@ -2686,17 +2687,29 @@
       "aiBadge": "AI",
       "aiTrack": "AI 生成轨（内容来自场景设定）",
       "modeLabel": "生成范围",
-      "mode": { "scenes": "按场景", "episodeBed": "整集铺底", "assetsOnly": "只生成素材" },
+      "mode": {
+        "scenes": "按场景",
+        "episodeBed": "整集铺底",
+        "assetsOnly": "只生成素材"
+      },
       "modeHint": {
         "scenes": "为每个场景生成独立的环境声、音效与群众声，并按场景时间放置",
         "episodeBed": "生成一条覆盖整集的环境声铺底，适用于氛围统一的剧集",
         "assetsOnly": "只生成音频素材，不自动建轨和放置片段"
       },
       "categoriesLabel": "声音类别",
-      "categories": { "ambience": "环境声", "sfx": "音效", "crowd": "群众声", "bgm": "背景音乐" },
+      "categories": {
+        "ambience": "环境声",
+        "sfx": "音效",
+        "crowd": "群众声",
+        "bgm": "背景音乐"
+      },
       "categoryRequired": "至少选择一类声音",
       "crowdModeLabel": "群众声方式",
-      "crowdMode": { "walla": "人群嘈杂声", "lines": "复用已配音台词" },
+      "crowdMode": {
+        "walla": "人群嘈杂声",
+        "lines": "复用已配音台词"
+      },
       "crowdModeHint": {
         "walla": "生成人群环境嘈杂声，不包含可辨识台词",
         "lines": "把已配音的群众台词放入群众轨，不重复生成"
@@ -2718,7 +2731,19 @@
       "itemDegraded": "该条提示词由规则生成",
       "preview": "预览",
       "start": "开始生成",
-      "wholeEpisode": "整集"
+      "wholeEpisode": "整集",
+      "hints": {
+        "label": "补充描述（可选）",
+        "hint": "用中文描述想要的声音，会融入对应的生成提示词",
+        "placeholder": {
+          "ambience": "例如：海水拍打甲板，海风呼啸",
+          "sfx": "例如：木门吱呀作响，金属碰撞",
+          "crowd": "例如：菜市场早市，十几个人叫卖讨价还价",
+          "bgm": "例如：悲壮的弦乐，逐渐增强"
+        }
+      },
+      "secondsLabel": "生成时长（秒）",
+      "secondsHint": "按声音类别调整每段生成音频的时长，留默认值则不改动；仅对生成的声音生效。调整后需重新预览才会生效。"
     },
     "title": "多轨混音台",
     "monitorKicker": "画面监看",
@@ -2917,7 +2942,16 @@
     "hiddenLane": "已隐藏",
     "unnamedClip": "未命名片段",
     "takeLabel": "配音版本 #{id}",
-    "actionFailed": "操作失败"
+    "actionFailed": "操作失败",
+    "excludeLine": "从混音移除",
+    "excludeLineHint": "仅从混音中移除这句台词，不影响台词准备与配音生成；可在下方列表恢复。",
+    "excludeLineConfirm": "确定把这句台词从混音中移除吗？\n「{text}」\n只影响混音成片，台词准备与配音页不受影响，之后可在此恢复。",
+    "excludedLines": "已从混音移除的台词",
+    "restoreLine": "恢复",
+    "excludedLineEmpty": "（无文本）",
+    "assetKindImport": "导入",
+    "importDone": "已导入音频：{name}",
+    "importFailed": "导入音频失败"
   },
   "export": {
     "noEpisode": "请先选择一集",

@@ -596,6 +596,16 @@ export const sqliteSchemaStatements = [
     UNIQUE (episode_id, revision_no)
   )`,
 
+  // 从混音移除的台词：虚拟对白轨不再生成对应片段（不影响台词准备/生成页）
+  `CREATE TABLE IF NOT EXISTS episode_mix_line_exclusions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    line_id INTEGER NOT NULL,
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (episode_id, line_id)
+  )`,
+
   // 导出记录：混音 / 成片 / 分轨 / 字幕
   `CREATE TABLE IF NOT EXISTS episode_exports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

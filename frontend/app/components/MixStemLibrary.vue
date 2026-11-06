@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { AudioWaveform, Loader2, Play, Trash2, Plus } from 'lucide-vue-next'
+import { AudioWaveform, Loader2, Play, Trash2, Plus, Upload } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   separation: { status?: string; progress?: number; step?: string; error?: string } | null
-  assets: { id: number; kind: string; durationMs?: number; url?: string }[]
+  assets: { id: number; kind: string; durationMs?: number; url?: string; metadataJson?: string | null }[]
   busy?: boolean
 }>()
 const emit = defineEmits<{
@@ -13,8 +13,26 @@ const emit = defineEmits<{
   (e: 'insert-asset', asset: any): void
   (e: 'remove-asset', asset: any): void
   (e: 'preview-asset', asset: any): void
+  (e: 'import-audio', file: File): void
 }>()
 const { t } = useI18n()
+const importInput = ref<HTMLInputElement | null>(null)
+
+function assetLabel(asset: { kind: string; metadataJson?: string | null }): string {
+  if (asset.kind !== 'import') return t(`mix.assetKind${asset.kind}`)
+  try {
+    const name = JSON.parse(asset.metadataJson || '{}')?.name
+    if (typeof name === 'string' && name) return name
+  } catch {}
+  return t('mix.assetKindImport')
+}
+
+function onImportChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) emit('import-audio', file)
+  input.value = ''
+}
 </script>
 
 <template>
@@ -37,9 +55,14 @@ const { t } = useI18n()
       <AudioWaveform :size="12" />
       {{ t('mix.stems.extract') }}
     </button>
+    <button class="mx-btn is-plain" type="button" :disabled="busy" @click="importInput?.click()">
+      <Upload :size="12" />
+      {{ t('mix.stems.importAudio') }}
+    </button>
+    <input ref="importInput" type="file" accept=".mp3,.wav,.m4a,.aac" class="mx-import-input" @change="onImportChange">
     <ul v-if="assets.length" class="mx-stem-list">
       <li v-for="asset in assets" :key="asset.id">
-        <span>{{ t(`mix.assetKind${asset.kind}`) }}</span>
+        <span>{{ assetLabel(asset) }}</span>
         <span class="mx-muted">{{ Math.round((asset.durationMs || 0) / 1000) }}s</span>
         <button class="mx-icon" type="button" @click="emit('preview-asset', asset)"><Play :size="12" /></button>
         <button class="mx-icon" type="button" @click="emit('insert-asset', asset)"><Plus :size="12" /></button>
@@ -72,4 +95,5 @@ const { t } = useI18n()
 .mx-stem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .mx-stem-list li { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-1); font-size: 10px; color: var(--text-1); }
 .mx-stem-list li > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mx-import-input { display: none; }
 </style>

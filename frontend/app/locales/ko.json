@@ -2661,8 +2661,9 @@
     },
     "stems": {
       "title": "소리 소재 라이브러리(선택)",
-      "intro": "원본 소리에서 보컬·반주 등 소리 소재를 추출해 따로 조정하거나 바꿀 수 있습니다. 추출만으로는 현재 믹스가 자동으로 바뀌지 않으며, 필요할 때 소재를 타임라인에 놓으면 됩니다.",
-      "extract": "소리 소재 추출"
+      "intro": "원본 소리에서 보컬·반주 등 소리 소재를 추출해 따로 조정하거나 바꿀 수 있습니다. 추출만으로는 현재 믹스가 자동으로 바뀌지 않으며, 필요할 때 소재를 타임라인에 놓으면 됩니다.사운드를 삽입할 때 적합한 사용 가능한 트랙이 없으면 자동으로 새 트랙을 만듭니다.",
+      "extract": "소리 소재 추출",
+      "importAudio": "오디오 가져오기"
     },
     "advanced": {
       "title": "고급"
@@ -2686,17 +2687,29 @@
       "aiBadge": "AI",
       "aiTrack": "장면 설정에서 생성된 AI 트랙",
       "modeLabel": "생성 범위",
-      "mode": { "scenes": "장면별", "episodeBed": "에피소드 전체", "assetsOnly": "소재만" },
+      "mode": {
+        "scenes": "장면별",
+        "episodeBed": "에피소드 전체",
+        "assetsOnly": "소재만"
+      },
       "modeHint": {
         "scenes": "장면마다 환경음, 효과음, 군중 소리를 생성해 장면 시간에 배치합니다",
         "episodeBed": "에피소드 전체를 덮는 환경음 베드를 하나 생성합니다",
         "assetsOnly": "오디오 소재만 생성하고 트랙 생성이나 클립 배치는 하지 않습니다"
       },
       "categoriesLabel": "사운드 종류",
-      "categories": { "ambience": "환경음", "sfx": "효과음", "crowd": "군중 소리", "bgm": "BGM" },
+      "categories": {
+        "ambience": "환경음",
+        "sfx": "효과음",
+        "crowd": "군중 소리",
+        "bgm": "BGM"
+      },
       "categoryRequired": "사운드 종류를 하나 이상 선택하세요",
       "crowdModeLabel": "군중 소리 방식",
-      "crowdMode": { "walla": "군중 웅성거림", "lines": "더빙된 대사 재사용" },
+      "crowdMode": {
+        "walla": "군중 웅성거림",
+        "lines": "더빙된 대사 재사용"
+      },
       "crowdModeHint": {
         "walla": "식별 가능한 대사가 없는 군중 웅성거림을 생성합니다",
         "lines": "이미 더빙한 군중 대사를 군중 트랙에 배치하고 다시 생성하지 않습니다"
@@ -2718,7 +2731,19 @@
       "itemDegraded": "이 프롬프트는 규칙으로 생성되었습니다",
       "preview": "미리보기",
       "start": "생성 시작",
-      "wholeEpisode": "에피소드 전체"
+      "wholeEpisode": "에피소드 전체",
+      "hints": {
+        "label": "보조 설명(선택)",
+        "hint": "원하는 소리를 자유롭게 적으면 생성 프롬프트에 반영됩니다",
+        "placeholder": {
+          "ambience": "예: 갑판에 부딪히는 파도, 바다 바람",
+          "sfx": "예: 삐걱거리는 나무문, 금속 부딪힘",
+          "crowd": "예: 아침 시장, 십여 명이 흥정하는 소리",
+          "bgm": "예: 비장현 현악, 점점 고조"
+        }
+      },
+      "secondsLabel": "생성 길이(초)",
+      "secondsHint": "사운드 카테고리별로 생성 오디오 길이를 조정합니다. 기본값으로 두면 변경되지 않으며 생성되는 사운드에만 적용됩니다.변경 사항은 미리보기를 다시 실행하면 적용됩니다."
     },
     "title": "멀티트랙 믹서",
     "monitorKicker": "프로그램 모니터",
@@ -2917,7 +2942,16 @@
     "timelineAria": "믹스 타임라인",
     "hiddenLane": "숨김",
     "unnamedClip": "이름 없는 클립",
-    "actionFailed": "작업 실패"
+    "actionFailed": "작업 실패",
+    "excludeLine": "믹스에서 제외",
+    "excludeLineHint": "이 대사를 믹스에서만 제외하며 대사 준비와 더빙에는 영향을 주지 않습니다. 아래 목록에서 복원할 수 있습니다.",
+    "excludeLineConfirm": "이 대사를 믹스에서 제외할까요?\n\"{text}\"\n믹스에만 영향을 주며 나중에 여기서 복원할 수 있습니다.",
+    "excludedLines": "믹스에서 제외된 대사",
+    "restoreLine": "복원",
+    "excludedLineEmpty": "(텍스트 없음)",
+    "assetKindImport": "가져옴",
+    "importDone": "오디오를 가져왔습니다: {name}",
+    "importFailed": "오디오 가져오기 실패"
   },
   "export": {
     "noEpisode": "먼저 에피소드를 선택하세요",

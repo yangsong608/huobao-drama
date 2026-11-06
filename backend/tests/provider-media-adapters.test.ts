@@ -16,6 +16,7 @@ import {
   buildComfyViewUrl,
   extractComfyOutput,
   parseComfyWorkflow,
+  uploadComfyImage,
 } from '../src/services/adapters/comfyui'
 
 const PNG_DATA_URL = `data:image/png;base64,${Buffer.from('fake-png').toString('base64')}`
@@ -208,12 +209,20 @@ test('ComfyUI workflow parsing rejects missing or malformed workflows', () => {
   })
 })
 
-test('ComfyUI placeholders recurse through nodes and leave unknown tokens intact', () => {
+test('ComfyUI reference image download rejects oversized responses', async () => {
+  const config = { provider: 'comfyui', baseUrl, apiKey: '', model: 'sd-xl', settings: {} }
+  await assert.rejects(
+    uploadComfyImage(config as any, `${baseUrl}/huge.png`, 'ref'),
+    /参考图过大/,
+  )
+})
+
+test('ComfyUI placeholders recurse through nodes, keep numbers numeric and leave unknown tokens intact', () => {
   const workflow = {
-    '3': { inputs: { text: '__PROMPT__', seed: '__SEED__', nested: [{ width: '__WIDTH__', unknown: '__KEEP__' }] } },
+    '3': { inputs: { text: '__PROMPT__', seed: '__SEED__', nested: [{ width: '__WIDTH__', unknown: '__KEEP__' }], mixed: '前缀__SEED__后缀' } },
   }
   assert.deepEqual(applyWorkflowPlaceholders(workflow, { PROMPT: '猫', SEED: 7, WIDTH: 512 }), {
-    '3': { inputs: { text: '猫', seed: '7', nested: [{ width: '512', unknown: '__KEEP__' }] } },
+    '3': { inputs: { text: '猫', seed: 7, nested: [{ width: 512, unknown: '__KEEP__' }], mixed: '前缀7后缀' } },
   })
 })
 
@@ -284,6 +293,12 @@ before(async () => {
         res.end(JSON.stringify({ system: { os: 'darwin' } }))
         return
       }
+      if (url === '/huge.png') {
+        res.setHeader('content-type', 'image/png')
+        res.setHeader('content-length', String(65 * 1024 * 1024))
+        res.end(Buffer.alloc(8))
+        return
+      }
       res.statusCode = 404
       res.end('{}')
     })
@@ -330,8 +345,8 @@ test('ComfyUI image adapter uploads references and submits the rendered workflow
   assert.equal(uploadCount - uploadsBefore, 1)
   assert.deepEqual(uploadedNames.slice(-1), [`uploaded-${uploadsBefore + 1}.png`])
   assert.equal(request.body.client_id, 'test-client')
-  assert.deepEqual(request.body.prompt['3'].inputs, { seed: '123', model: 'sd-xl', text: '一只橘猫' })
-  assert.deepEqual(request.body.prompt['6'].inputs, { negative: '低质量', width: '512', height: '768' })
+  assert.deepEqual(request.body.prompt['3'].inputs, { seed: 123, model: 'sd-xl', text: '一只橘猫' })
+  assert.deepEqual(request.body.prompt['6'].inputs, { negative: '低质量', width: 512, height: 768 })
   assert.deepEqual(request.body.prompt['7'].inputs, { image: `huobao/uploaded-${uploadsBefore + 1}.png` })
 
   assert.deepEqual(adapter.parseGenerateResponse({ prompt_id: 'pid-1' }), { isAsync: true, taskId: 'pid-1' })
@@ -388,12 +403,12 @@ test('ComfyUI video adapter maps frames, references and timing placeholders', as
   assert.equal(inputs.first, `huobao/uploaded-${uploadsBefore + 1}.png`)
   assert.equal(inputs.last, `huobao/uploaded-${uploadsBefore + 2}.png`)
   assert.equal(inputs.ref, `huobao/uploaded-${uploadsBefore + 3}.png`)
-  assert.equal(inputs.duration, '4')
-  assert.equal(inputs.fps, '12')
-  assert.equal(inputs.frames, '48')
+  assert.equal(inputs.duration, 4)
+  assert.equal(inputs.fps, 12)
+  assert.equal(inputs.frames, 48)
   assert.equal(inputs.ratio, '16:9')
   assert.equal(inputs.resolution, '720p')
-  assert.equal(inputs.seed, '42')
+  assert.equal(inputs.seed, 42)
 
   assert.deepEqual(adapter.parsePollResponse({
     'pid-2': { outputs: { '9': { videos: [{ filename: 'out.mp4', subfolder: 'videos', type: 'output' }] } } },

@@ -88,6 +88,7 @@
               :empty-text="t('workbench.empty')"
               show-issues
               mode="script"
+              speaker-filter
               :missing-voice-character-ids="missingVoiceCharacterIds"
               :narrator-missing-voice="narratorMissingVoice"
               :voice-groups="voiceProfiles"
@@ -324,6 +325,7 @@
             :saving="saving"
             :empty-text="t('workbench.genEmpty')"
             mode="generate"
+            speaker-filter
             :active-line-id="activeLineId"
             :take-counts="takeCounts"
             :generating-ids="generatingLineIds"

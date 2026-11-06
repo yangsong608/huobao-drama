@@ -738,6 +738,15 @@ export type MixPlanWithSource = MixPlan & {
   source_warnings: MixSourceWarning[]
 }
 
+/** 从混音移除的台词（虚拟对白轨不再生成对应片段） */
+export interface MixExcludedLine {
+  lineId: number
+  lineNo: number
+  text: string
+  speaker: string
+  lineDeleted: boolean
+}
+
 export type SoundscapeCategory = 'ambience' | 'sfx' | 'crowd' | 'bgm'
 export type SoundscapeMode = 'scenes' | 'episode-bed' | 'assets-only'
 export type SoundscapeCrowdMode = 'walla' | 'lines'
@@ -756,6 +765,7 @@ export interface SoundscapeRequest {
   sceneIds?: number[]
   overwrite?: boolean
   overrides?: SoundscapeOverride[]
+  categoryHints?: Partial<Record<SoundscapeCategory, string>>
   configId?: number
 }
 
@@ -911,6 +921,8 @@ export const mixAPI = {
     api.post<{ cancelled: boolean }>(`/episodes/${episodeId}/audio/separate/cancel`),
   assets: (episodeId: number) =>
     api.get<{ items: EpisodeAudioAsset[] }>(`/episodes/${episodeId}/audio/assets`),
+  importAudioAsset: (episodeId: number, file: File) =>
+    uploadForm<{ asset: EpisodeAudioAsset }>(`/episodes/${episodeId}/audio/assets/import`, file),
   removeAsset: (episodeId: number, assetId: number) =>
     api.del<{ deleted: boolean }>(`/episodes/${episodeId}/audio/assets/${assetId}`),
   autoTracks: (episodeId: number, assetId: number) =>
@@ -953,6 +965,12 @@ export const mixAPI = {
     api.post<MixRevision>(`/episodes/${episodeId}/mix/revisions`, { note }),
   restoreRevision: (episodeId: number, revisionId: number) =>
     api.post<{ revision: MixRevision; plan: MixPlan }>(`/episodes/${episodeId}/mix/revisions/${revisionId}/restore`),
+  excludedLines: (episodeId: number) =>
+    api.get<{ items: MixExcludedLine[] }>(`/episodes/${episodeId}/mix/lines/excluded`),
+  excludeLine: (episodeId: number, lineId: number) =>
+    api.del<{ items: MixExcludedLine[]; plan: MixPlan }>(`/episodes/${episodeId}/mix/lines/${lineId}`),
+  restoreLine: (episodeId: number, lineId: number) =>
+    api.post<{ items: MixExcludedLine[]; plan: MixPlan }>(`/episodes/${episodeId}/mix/lines/${lineId}/restore`),
   preview: (episodeId: number, data: { start_ms: number; end_ms: number }) =>
     api.post<MixPreviewResult>(`/episodes/${episodeId}/mix/preview`, data),
   render: (episodeId: number, data: { format?: 'wav' | 'm4a' } = {}) =>

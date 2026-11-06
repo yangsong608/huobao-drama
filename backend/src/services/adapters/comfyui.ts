@@ -81,13 +81,18 @@ export function parseComfyWorkflow(config: AIConfig): Record<string, unknown> {
   return workflow as Record<string, unknown>
 }
 
-/** 递归替换工作流里的 __TOKEN__，未提供的占位符保持原样 */
+/** 递归替换工作流里的 __TOKEN__，未提供的占位符保持原样；整串单 token 且值为数值时保留数值类型 */
 export function applyWorkflowPlaceholders(
   workflow: Record<string, unknown>,
   values: Record<string, string | number>,
 ): Record<string, unknown> {
   const walk = (value: unknown): unknown => {
     if (typeof value === 'string') {
+      const whole = value.match(/^__([A-Z0-9_]+)__$/)
+      if (whole && Object.prototype.hasOwnProperty.call(values, whole[1])) {
+        const raw = values[whole[1]]
+        return typeof raw === 'number' ? raw : String(raw)
+      }
       return value.replace(/__([A-Z0-9_]+)__/g, (token, key: string) =>
         Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : token,
       )
@@ -120,6 +125,8 @@ export function comfyHeaders(config: AIConfig): Record<string, string> {
   return headers
 }
 
+const COMFY_REF_MAX_BYTES = 64 * 1024 * 1024
+
 /** 上传 data URL / HTTP 图片到 ComfyUI input，返回工作流里 LoadImage 可用的文件名 */
 export async function uploadComfyImage(
   config: AIConfig,
@@ -140,7 +147,10 @@ export async function uploadComfyImage(
   } else if (/^https?:\/\//i.test(ref)) {
     const resp = await fetchImpl(ref, { signal: AbortSignal.timeout(60_000) })
     if (!resp.ok) throw new Error(`ComfyUI 参考图下载失败：HTTP ${resp.status}`)
+    const declared = Number(resp.headers.get('content-length') || 0)
+    if (declared > COMFY_REF_MAX_BYTES) throw new Error('ComfyUI 参考图过大（超过 64MB）')
     buffer = Buffer.from(await resp.arrayBuffer())
+    if (buffer.length > COMFY_REF_MAX_BYTES) throw new Error('ComfyUI 参考图过大（超过 64MB）')
     const contentType = (resp.headers.get('content-type') || '').toLowerCase()
     if (contentType.includes('jpeg')) { mimeType = 'image/jpeg'; ext = 'jpg' }
     else if (contentType.includes('webp')) { mimeType = 'image/webp'; ext = 'webp' }

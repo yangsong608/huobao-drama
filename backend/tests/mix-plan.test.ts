@@ -24,8 +24,11 @@ const {
   compileMixPlan,
   createMixRevision,
   ensureDefaultBuses,
+  excludeMixLine,
   hashMixPlan,
+  listMixExcludedLines,
   listMixRevisions,
+  restoreMixLine,
   restoreMixRevision,
   saveMixPlan,
 } = await import('../src/services/mix-plan.ts')
@@ -593,4 +596,82 @@ test('恢复版本时保留生成轨 origin，合片原声床不被误关', asyn
     .where(eq(schema.episodeAudioTracks.id, aiTrack.id)).run()
   db.delete(schema.mixRevisions)
     .where(eq(schema.mixRevisions.id, revision.id)).run()
+})
+
+test('对白台词可从混音移除并恢复', async () => {
+  const before = await compileMixPlan(episode.id, 1)
+  const voice = before.tracks.find((track) => track.virtual && track.role === 'voice')!
+  assert.equal(voice.clips.length, 1)
+  const lineId = voice.clips[0].lineId!
+
+  excludeMixLine(episode.id, lineId)
+  const after = await compileMixPlan(episode.id, 1)
+  assert.equal(
+    after.tracks.find((track) => track.virtual && track.role === 'voice')!.clips.length,
+    0,
+    '移除后台词不得再出现在虚拟对白轨',
+  )
+  assert.deepEqual(
+    listMixExcludedLines(episode.id).map((row) => row.lineId),
+    [lineId],
+  )
+
+  restoreMixLine(episode.id, lineId)
+  const restored = await compileMixPlan(episode.id, 1)
+  assert.equal(
+    restored.tracks.find((track) => track.virtual && track.role === 'voice')!.clips.length,
+    1,
+    '恢复后台词回到虚拟对白轨',
+  )
+  assert.equal(listMixExcludedLines(episode.id).length, 0)
+})
+
+test('移除对白校验台词归属与存在性', () => {
+  assert.throws(() => excludeMixLine(episode.id, 999999), /台词不存在/)
+  assert.throws(() => restoreMixLine(episode.id, 999999), /台词不存在/)
+})
+
+test('虚拟对白轨按角色分轨', async () => {
+  const [spkEpisode] = db.insert(schema.episodes).values({
+    dramaId: 1, episodeNumber: 4, title: '第4集', createdAt: ts, updatedAt: ts,
+  }).returning().all()
+  db.insert(schema.videoMerges).values({
+    episodeId: spkEpisode.id, dramaId: 1, title: `Episode ${spkEpisode.id}`, provider: 'ffmpeg', model: 'test',
+    status: 'completed', kind: 'concat', mergedUrl: shotUrl, duration: 2,
+    createdAt: ts, completedAt: ts,
+  }).run()
+  const [spkStoryboard] = db.insert(schema.storyboards).values({
+    episodeId: spkEpisode.id, storyboardNumber: 1, description: '对峙', videoUrl: shotUrl,
+    createdAt: ts, updatedAt: ts,
+  }).returning().all()
+  const insertLine = (lineNo: number, speaker: string, text: string, plannedStartMs: number) =>
+    db.insert(schema.storyboardLines).values({
+      episodeId: spkEpisode.id, dramaId: 1, storyboardId: spkStoryboard.id,
+      lineNo, sortOrder: lineNo, speakerType: 'dialogue', speakerName: speaker,
+      text, speakText: text, plannedStartMs, audioDurationMs: 1000, audioUrl: toneUrl,
+      status: 'ready', createdAt: ts, updatedAt: ts,
+    }).returning().get()
+  const lineA = insertLine(1, '林小雨', '你骗了我三年。', 200)
+  const lineB = insertLine(2, '顾云舟', '我没有。', 1500)
+  const lineC = insertLine(3, '林小雨', '证据呢？', 2800)
+  for (const l of [lineA, lineB, lineC]) {
+    db.insert(schema.lineTakes).values({
+      lineId: l.id, episodeId: spkEpisode.id, dramaId: 1, takeNo: 1,
+      text: l.text, speakText: l.speakText, audioUrl: toneUrl, durationMs: 1000,
+      status: 'ready', isActive: true, createdAt: ts,
+    }).run()
+  }
+
+  const plan = await compileMixPlan(spkEpisode.id, 1)
+  const voiceTracks = plan.tracks.filter((t) => t.virtual && t.role === 'voice')
+  assert.equal(voiceTracks.length, 2, '每个有对白的角色应各有一条虚拟对白轨')
+  assert.deepEqual(
+    voiceTracks.map((t) => t.name),
+    ['林小雨', '顾云舟'],
+    '对白轨按首次出场顺序以角色命名',
+  )
+  assert.deepEqual(voiceTracks[0].clips.map((c) => c.lineId), [lineA.id, lineC.id])
+  assert.deepEqual(voiceTracks[1].clips.map((c) => c.lineId), [lineB.id])
+  assert.equal(voiceTracks[0].busId, 'dialogue')
+  assert.notEqual(voiceTracks[0].color, voiceTracks[1].color, '不同角色轨道颜色应可区分')
 })

@@ -562,7 +562,7 @@ export async function previewTimeline(episodeId: number, dramaId: number) {
   const rows = db.select().from(schema.storyboardLines)
     .where(eq(schema.storyboardLines.episodeId, episodeId))
     .all()
-    .filter((l) => !l.stale && l.audioDurationMs)
+    .filter((l) => !l.deletedAt && !l.stale && l.audioDurationMs)
   const merged = db.select().from(schema.videoMerges)
     .where(eq(schema.videoMerges.episodeId, episodeId))
     .all()

@@ -243,6 +243,7 @@
         :separation="separation"
         :line-text="inspectorLineText"
         :line-number="inspectorLineNumber"
+        :excluded-lines="inspectorExcludedLines"
         :master="plan?.master ?? null"
         :saving="saving"
         :dirty="dirty"
@@ -255,6 +256,8 @@
         @duplicate-clip="onDuplicateClip"
         @locate-line="emit('locate-line', $event)"
         @regenerate-line="emit('regenerate-line', $event)"
+        @exclude-line="requestExcludeLine"
+        @restore-line="onRestoreLine"
         @add-track="addTrack"
         @remove-track="requestRemoveTrack"
         @insert-asset="insertAsset"
@@ -297,6 +300,7 @@
             @insert-asset="insertAsset"
             @remove-asset="requestRemoveAsset"
             @preview-asset="previewAsset"
+            @import-audio="onImportAudio"
           />
         </template>
       </MixClipInspector>
@@ -520,6 +524,9 @@ const {
   previewing,
   selectedClip,
   selectedTrack,
+  excludedLines,
+  excludeVoiceLine,
+  restoreVoiceLine,
   playheadMs,
   zoom,
   snap,
@@ -559,6 +566,7 @@ const {
   saveRevision,
   restoreRevision,
   removeAsset,
+  importAudioAsset,
   dispose,
 } = stage
 
@@ -647,6 +655,12 @@ const selection = computed(() => {
 })
 const activeTrack = computed(() => tracks.value.find(track => track._uid === activeTrackUid.value) ?? null)
 const inspectorTrack = computed(() => selectedTrack.value ?? activeTrack.value)
+const inspectorExcludedLines = computed(() => {
+  const track = inspectorTrack.value
+  if (!track?.virtual || track.role !== 'voice') return []
+  const firstVoice = tracks.value.find((item) => item.virtual && item.role === 'voice')
+  return track === firstVoice ? excludedLines.value : []
+})
 const inspectorLineText = computed(() => {
   const lineId = selectedClip.value?.lineId
   return lineId ? props.lineTexts?.[lineId] ?? null : null
@@ -1203,6 +1217,15 @@ function previewAsset(asset: EpisodeAudioAsset) {
   const audio = new Audio(url)
   audio.play().catch(() => toast.error(t('mix.previewFailed')))
 }
+
+async function onImportAudio(file: File) {
+  try {
+    const asset = await importAudioAsset(file)
+    if (asset) toast.success(t('mix.importDone', { name: assetLabel(asset) }))
+  } catch (err: any) {
+    toast.error(err?.message || t('mix.importFailed'))
+  }
+}
 function pauseTransport() {
   previewToken += 1
   videoPreview.value?.pause()
@@ -1484,6 +1507,18 @@ function requestRemoveAsset(asset: EpisodeAudioAsset) {
     confirmText: t('mix.assetRemove'),
     action: async () => { await removeAsset(asset.id) },
   })
+}
+function requestExcludeLine(lineId: number) {
+  const text = props.lineTexts?.[lineId] || ''
+  openConfirm({
+    title: t('mix.excludeLine'),
+    message: t('mix.excludeLineConfirm', { text: text || `#${lineId}` }),
+    confirmText: t('mix.excludeLine'),
+    action: async () => { await excludeVoiceLine(lineId) },
+  })
+}
+async function onRestoreLine(lineId: number) {
+  await restoreVoiceLine(lineId)
 }
 function requestRestoreRevision(revision: MixRevision) {
   openConfirm({
