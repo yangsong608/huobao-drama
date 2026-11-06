@@ -39,6 +39,15 @@ import {
   autoCreateStemTracks,
 } from '../services/audio-separation.js'
 import { AudioEngineError, type SeparationEngine } from '../services/audio-engine.js'
+import {
+  cancelSoundscape,
+  getSoundscapeStatus,
+  isSoundscapeRunning,
+  previewSoundscape,
+  startSoundscape,
+  type SoundscapeDeps,
+} from '../services/soundscape.js'
+import { SoundscapeError, parseSoundscapeRequest } from '../services/soundscape-compiler.js'
 
 const app = new Hono()
 
@@ -55,7 +64,7 @@ function findEpisode(episodeId: number) {
   return db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get() ?? null
 }
 
-function statusError(c: Context, status: 400 | 404 | 409, message: string) {
+function statusError(c: Context, status: 400 | 404 | 409 | 503, message: string) {
   if (status === 404) return notFound(c, message)
   return c.json({ code: status, message }, status)
 }
@@ -65,6 +74,9 @@ function handleError(c: Context, error: any, fallback: string) {
     return c.json({ code: 503, message: error.message, error_code: error.code }, 503)
   }
   if (error instanceof MixPlanError || error instanceof SeparationError) {
+    return statusError(c, error.status, error.message)
+  }
+  if (error instanceof SoundscapeError) {
     return statusError(c, error.status, error.message)
   }
   if (error instanceof Error && error.name === 'MixRenderError') {
@@ -138,6 +150,9 @@ app.put('/episodes/:id/mix', async (c) => {
   if (!episodeId) return badRequest(c, '集编号无效')
   const episode = findEpisode(episodeId)
   if (!episode) return notFound(c, '集不存在')
+  if (isSoundscapeRunning(episodeId)) {
+    return statusError(c, 409, '声音生成中，暂不能保存混音')
+  }
   const body = await c.req.json().catch(() => ({}))
   try {
     const plan = await saveMixPlan(episodeId, episode.dramaId, {
@@ -350,5 +365,76 @@ app.post('/episodes/:id/audio/assets/:assetId/tracks', (c) => {
     return handleError(c, error, '自动建轨失败')
   }
 })
+
+export function createSoundscapeRoutes(deps: SoundscapeDeps = {}) {
+  const routes = new Hono()
+
+  routes.post('/episodes/:id/audio/soundscape/preview', async (c) => {
+    const episodeId = parseId(c.req.param('id'))
+    if (!episodeId) return badRequest(c, '集编号无效')
+    const episode = findEpisode(episodeId)
+    if (!episode) return notFound(c, '集不存在')
+    const body = await c.req.json().catch(() => ({}))
+    try {
+      const request = parseSoundscapeRequest(body)
+      const result = await previewSoundscape(episodeId, episode.dramaId, request, deps)
+      return success(c, {
+        mode: result.plan.mode,
+        items: result.plan.items,
+        warnings: result.plan.warnings,
+        counts: result.plan.counts,
+        estimatedSeconds: result.plan.estimatedSeconds,
+        degraded: result.plan.degraded,
+        model: result.model,
+        workflowHash: result.workflowHash,
+        normalizeLoudness: result.normalizeLoudness,
+      })
+    } catch (error: any) {
+      return handleError(c, error, '预览声音生成失败')
+    }
+  })
+
+  routes.post('/episodes/:id/audio/soundscape', async (c) => {
+    const episodeId = parseId(c.req.param('id'))
+    if (!episodeId) return badRequest(c, '集编号无效')
+    const episode = findEpisode(episodeId)
+    if (!episode) return notFound(c, '集不存在')
+    const body = await c.req.json().catch(() => ({}))
+    try {
+      const request = parseSoundscapeRequest(body)
+      const started = await startSoundscape(episodeId, episode.dramaId, request, deps)
+      return success(c, started)
+    } catch (error: any) {
+      return handleError(c, error, '启动声音生成失败')
+    }
+  })
+
+  routes.get('/episodes/:id/audio/soundscape/status', (c) => {
+    const episodeId = parseId(c.req.param('id'))
+    if (!episodeId) return badRequest(c, '集编号无效')
+    try {
+      return success(c, getSoundscapeStatus(episodeId))
+    } catch (error: any) {
+      return handleError(c, error, '读取声音生成状态失败')
+    }
+  })
+
+  routes.post('/episodes/:id/audio/soundscape/cancel', (c) => {
+    const episodeId = parseId(c.req.param('id'))
+    if (!episodeId) return badRequest(c, '集编号无效')
+    try {
+      if (!cancelSoundscape(episodeId)) {
+        return statusError(c, 409, '当前没有运行中的声音生成任务')
+      }
+      return success(c, { status: 'cancelled' })
+    } catch (error: any) {
+      return handleError(c, error, '取消声音生成失败')
+    }
+  })
+
+  return routes
+}
+
+app.route('/', createSoundscapeRoutes())
 
 export default app

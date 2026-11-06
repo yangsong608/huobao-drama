@@ -29,6 +29,8 @@ const {
   restoreMixRevision,
   saveMixPlan,
 } = await import('../src/services/mix-plan.ts')
+const { updateLine } = await import('../src/services/line-workbench.ts')
+const { deleteEpisodeAsset } = await import('../src/services/audio-separation.ts')
 
 const ts = '2026-11-05T00:00:00.000Z'
 db.insert(schema.dramas).values({ title: 'MixPlan 测试', style: '3d', status: 'draft', createdAt: ts, updatedAt: ts }).run()
@@ -83,18 +85,22 @@ const [take] = db.insert(schema.lineTakes).values({
 
 function insertTrack(input: {
   role: string; kind: string; name: string; solo?: boolean; muted?: boolean; busId?: number | null
+  origin?: string | null; episodeId?: number
 }) {
   return db.insert(schema.episodeAudioTracks).values({
-    episodeId: episode.id, dramaId: 1, kind: input.kind, role: input.role, name: input.name,
+    episodeId: input.episodeId ?? episode.id, dramaId: 1, kind: input.kind, role: input.role, name: input.name,
     volume: 1, pan: 0, busId: input.busId ?? null, muted: input.muted ?? false, solo: input.solo ?? false,
     ducking: input.role !== 'voice', loop: false, locked: false, hidden: false,
-    color: '#0ea5e9', height: 72, sortOrder: 10, createdAt: ts, updatedAt: ts,
+    color: '#0ea5e9', height: 72, sortOrder: 10, origin: input.origin ?? null,
+    createdAt: ts, updatedAt: ts,
   }).returning().get()
 }
 
-function insertClip(trackId: number, input: { startMs: number; endMs: number; url: string | null; name?: string }) {
+function insertClip(trackId: number, input: {
+  startMs: number; endMs: number; url: string | null; name?: string; episodeId?: number
+}) {
   return db.insert(schema.episodeAudioClips).values({
-    trackId, episodeId: episode.id, startMs: input.startMs, endMs: input.endMs,
+    trackId, episodeId: input.episodeId ?? episode.id, startMs: input.startMs, endMs: input.endMs,
     sourceStartMs: 0, gainDb: 0, pan: 0, fadeInMs: 0, fadeOutMs: 0, fadeCurve: 'linear',
     sourceUrl: input.url, audioUrl: input.url, status: 'ready', name: input.name || null,
     createdAt: ts, updatedAt: ts,
@@ -147,6 +153,19 @@ test('虚拟对白轨引用激活 Take 与时间轴起点', async () => {
   assert.equal(virtual.clips[0].takeId, take.id)
   assert.equal(virtual.clips[0].startMs, 250)
   assert.equal(virtual.clips[0].usable, true)
+})
+
+test('台词时间写回后虚拟对白片段随之移动', async () => {
+  try {
+    updateLine(line.id, { voiceStartMs: 800 })
+    const plan = await compileMixPlan(episode.id, 1)
+    const virtual = plan.tracks.find((track) => track.virtual)!
+    assert.equal(virtual.clips.length, 1)
+    assert.equal(virtual.clips[0].startMs, 800)
+    assert.equal(virtual.clips[0].endMs, 1800)
+  } finally {
+    updateLine(line.id, { voiceStartMs: null })
+  }
 })
 
 test('缺失素材标 unusable 且不中断编译', async () => {
@@ -358,4 +377,209 @@ test('合片无音频流时不生成原声总床', async () => {
     false,
     '无音轨合片不应成为任何轨道素材',
   )
+})
+
+const [compatEpisode] = db.insert(schema.episodes).values({
+  dramaId: 1, episodeNumber: 6, title: '第6集', bgmUrl: toneUrl, createdAt: ts, updatedAt: ts,
+}).returning().all()
+db.insert(schema.videoMerges).values({
+  episodeId: compatEpisode.id, dramaId: 1, title: '第6集合片', provider: 'ffmpeg', model: 'test',
+  status: 'completed', kind: 'concat', mergedUrl: shotUrl, duration: 2,
+  createdAt: ts, completedAt: ts,
+}).run()
+const [compatStoryboard] = db.insert(schema.storyboards).values({
+  episodeId: compatEpisode.id, storyboardNumber: 1, description: '街头', videoUrl: shotUrl,
+  createdAt: ts, updatedAt: ts,
+}).returning().all()
+const [crowdLine] = db.insert(schema.storyboardLines).values({
+  episodeId: compatEpisode.id, dramaId: 1, storyboardId: compatStoryboard.id,
+  lineNo: 1, sortOrder: 1, speakerType: 'crowd', speakerName: '路人甲',
+  text: '快看那边！', speakText: '快看那边！', plannedStartMs: 0, audioDurationMs: 1000,
+  audioUrl: toneUrl, status: 'ready', createdAt: ts, updatedAt: ts,
+}).returning().all()
+const [crowdTake] = db.insert(schema.lineTakes).values({
+  lineId: crowdLine.id, episodeId: compatEpisode.id, dramaId: 1, takeNo: 1,
+  text: crowdLine.text, speakText: crowdLine.speakText, audioUrl: toneUrl, durationMs: 1000,
+  status: 'ready', isActive: true, createdAt: ts,
+}).returning().all()
+
+test('生成的环境声轨与原声总床共存，origin 随计划返回', async () => {
+  const before = await compileMixPlan(compatEpisode.id, 1)
+  assert.ok(
+    before.tracks.some((track) => track.virtual && track.role === 'original'),
+    '前置条件：合片原声床存在',
+  )
+
+  const generated = insertTrack({
+    role: 'ambience', kind: 'ambience', name: '环境声（AI）', origin: 'soundscape',
+    episodeId: compatEpisode.id,
+  })
+  insertClip(generated.id, { startMs: 0, endMs: 2000, url: toneUrl, episodeId: compatEpisode.id })
+
+  const plan = await compileMixPlan(compatEpisode.id, 1)
+  assert.ok(
+    plan.tracks.some((track) => track.virtual && track.role === 'original'),
+    'AI 环境声不得关闭合片原声床',
+  )
+  assert.equal(plan.tracks.find((track) => track.id === generated.id)!.origin, 'soundscape')
+  assert.equal(
+    plan.tracks.find((track) => track.virtual && track.role === 'voice')!.origin,
+    null,
+    '虚拟轨 origin 必须为 null',
+  )
+})
+
+test('群众声轨引用的台词不再进入虚拟对白轨，删除后自动恢复', async () => {
+  const before = await compileMixPlan(compatEpisode.id, 1)
+  const beforeVoice = before.tracks.find((track) => track.virtual && track.role === 'voice')!
+  assert.equal(beforeVoice.clips.length, 1)
+  assert.equal(beforeVoice.clips[0].lineId, crowdLine.id)
+
+  const crowdTrack = insertTrack({
+    role: 'crowd', kind: 'voice', name: '群众声（AI）', origin: 'soundscape',
+    episodeId: compatEpisode.id,
+  })
+  db.insert(schema.episodeAudioClips).values({
+    trackId: crowdTrack.id, episodeId: compatEpisode.id,
+    assetId: null, takeId: crowdTake.id, lineId: crowdLine.id,
+    startMs: 0, endMs: 1000, sourceStartMs: 0, gainDb: 0, pan: 0,
+    fadeInMs: 300, fadeOutMs: 300, fadeCurve: 'linear',
+    sourceUrl: toneUrl, audioUrl: toneUrl, status: 'ready', name: '群众台词 · 路人甲',
+    createdAt: ts, updatedAt: ts,
+  }).run()
+
+  const after = await compileMixPlan(compatEpisode.id, 1)
+  assert.equal(
+    after.tracks.find((track) => track.virtual && track.role === 'voice')!.clips.length,
+    0,
+    '已被群众轨放置的台词不得在虚拟对白轨重复播放',
+  )
+
+  db.delete(schema.episodeAudioClips)
+    .where(eq(schema.episodeAudioClips.trackId, crowdTrack.id)).run()
+  db.delete(schema.episodeAudioTracks)
+    .where(eq(schema.episodeAudioTracks.id, crowdTrack.id)).run()
+  const restored = await compileMixPlan(compatEpisode.id, 1)
+  assert.equal(
+    restored.tracks.find((track) => track.virtual && track.role === 'voice')!.clips.length,
+    1,
+    '删除群众轨后台词回到虚拟对白轨',
+  )
+})
+
+test('生成 BGM 轨关闭虚拟 BGM，删除生成素材后虚拟 BGM 恢复', async () => {
+  const before = await compileMixPlan(compatEpisode.id, 1)
+  assert.ok(before.tracks.some((track) => track.virtual && track.role === 'bgm'))
+
+  const bgmTrack = insertTrack({
+    role: 'bgm', kind: 'bgm', name: '配乐（AI）', origin: 'soundscape', episodeId: compatEpisode.id,
+  })
+  const bgmAsset = db.insert(schema.episodeAudioAssets).values({
+    episodeId: compatEpisode.id, dramaId: 1, kind: 'soundscape', status: 'ready',
+    sourceHash: 'c'.repeat(64), url: toneUrl, durationMs: 2000,
+    engine: 'comfyui', model: 'stable-audio-open', createdAt: ts,
+  }).returning().get()
+  db.insert(schema.episodeAudioClips).values({
+    trackId: bgmTrack.id, episodeId: compatEpisode.id, assetId: bgmAsset.id,
+    startMs: 0, endMs: 2000, sourceStartMs: 0, gainDb: 0, pan: 0,
+    fadeInMs: 0, fadeOutMs: 0, fadeCurve: 'linear',
+    sourceUrl: toneUrl, audioUrl: toneUrl, status: 'ready', name: '本集配乐（AI）',
+    createdAt: ts, updatedAt: ts,
+  }).run()
+  const after = await compileMixPlan(compatEpisode.id, 1)
+  assert.equal(after.tracks.some((track) => track.virtual && track.role === 'bgm'), false)
+
+  assert.equal(deleteEpisodeAsset(compatEpisode.id, bgmAsset.id), true)
+  const tracks = db.select().from(schema.episodeAudioTracks)
+    .where(eq(schema.episodeAudioTracks.episodeId, compatEpisode.id)).all()
+  assert.ok(tracks.some((track) => track.id === bgmTrack.id), '生成轨保留为空轨')
+  const restored = await compileMixPlan(compatEpisode.id, 1)
+  assert.ok(
+    restored.tracks.some((track) => track.virtual && track.role === 'bgm'),
+    '删除生成素材后虚拟 BGM 必须恢复',
+  )
+})
+
+test('保存混音计划保留生成轨 origin 与片段引用，新轨无法伪造 origin', async () => {
+  const [saveEpisode] = db.insert(schema.episodes).values({
+    dramaId: 1, episodeNumber: 7, title: '第7集', createdAt: ts, updatedAt: ts,
+  }).returning().all()
+  const asset = db.insert(schema.episodeAudioAssets).values({
+    episodeId: saveEpisode.id, dramaId: 1, kind: 'soundscape', status: 'ready',
+    sourceHash: 'a'.repeat(64), url: toneUrl, durationMs: 1000,
+    engine: 'comfyui', model: 'stable-audio-open', createdAt: ts,
+  }).returning().get()
+  const track = db.insert(schema.episodeAudioTracks).values({
+    episodeId: saveEpisode.id, dramaId: 1, kind: 'ambience', role: 'ambience', name: '环境声（AI）',
+    origin: 'soundscape', volume: 0.7, pan: 0, muted: false, solo: false, ducking: true,
+    loop: false, locked: false, hidden: false, sortOrder: 0, createdAt: ts, updatedAt: ts,
+  }).returning().get()
+  const clip = db.insert(schema.episodeAudioClips).values({
+    trackId: track.id, episodeId: saveEpisode.id, assetId: asset.id,
+    startMs: 0, endMs: 1000, sourceStartMs: 0, gainDb: 0, pan: 0,
+    fadeInMs: 0, fadeOutMs: 0, fadeCurve: 'linear',
+    sourceUrl: toneUrl, audioUrl: toneUrl, status: 'ready', name: '场景 1 · 环境声',
+    createdAt: ts, updatedAt: ts,
+  }).returning().get()
+
+  const saved = await saveMixPlan(saveEpisode.id, 1, {
+    tracks: [
+      { id: track.id, role: 'ambience', name: '改名后的环境声', busId: 'original', origin: 'sfx' } as any,
+      { role: 'sfx', name: '用户音效', origin: 'soundscape' } as any,
+    ],
+    clips: [
+      { id: clip.id, trackId: track.id, assetId: asset.id, startMs: 0, endMs: 1000, audioUrl: toneUrl },
+    ],
+  })
+
+  const stored = db.select().from(schema.episodeAudioTracks)
+    .where(eq(schema.episodeAudioTracks.id, track.id)).get()!
+  assert.equal(stored.origin, 'soundscape', '更新轨道不得覆盖 origin')
+  assert.equal(stored.name, '改名后的环境声')
+
+  const storedClip = db.select().from(schema.episodeAudioClips)
+    .where(eq(schema.episodeAudioClips.id, clip.id)).get()!
+  assert.equal(storedClip.assetId, asset.id)
+  assert.equal(storedClip.audioUrl, toneUrl)
+
+  assert.equal(saved.tracks.find((item) => item.id === track.id)!.origin, 'soundscape')
+  const userTrack = db.select().from(schema.episodeAudioTracks)
+    .where(eq(schema.episodeAudioTracks.episodeId, saveEpisode.id)).all()
+    .find((item) => item.role === 'sfx')!
+  assert.equal(userTrack.origin, null, '新建轨不能由客户端伪造 origin')
+})
+
+test('恢复版本时保留生成轨 origin，合片原声床不被误关', async () => {
+  const aiTrack = insertTrack({
+    role: 'ambience', kind: 'ambience', name: 'AI 环境声', origin: 'soundscape',
+    episodeId: bedEpisode.id,
+  })
+  const revision = await createMixRevision(bedEpisode.id, 'AI 轨快照')
+  const before = await compileMixPlan(bedEpisode.id, 1)
+  assert.ok(
+    before.tracks.some((track) => track.virtual && track.role === 'original'),
+    '前置条件：带 AI 环境声时原声总床仍存在',
+  )
+
+  db.delete(schema.episodeAudioTracks)
+    .where(eq(schema.episodeAudioTracks.id, aiTrack.id)).run()
+  restoreMixRevision(bedEpisode.id, revision.id)
+
+  const stored = db.select().from(schema.episodeAudioTracks)
+    .where(eq(schema.episodeAudioTracks.id, aiTrack.id)).get()
+  assert.ok(stored, '版本恢复应重建 AI 轨道')
+  assert.equal(stored.origin, 'soundscape', '恢复的生成轨必须保留 origin')
+
+  const restored = await compileMixPlan(bedEpisode.id, 1)
+  assert.ok(
+    restored.tracks.some((track) => track.virtual && track.role === 'original'),
+    '恢复的 AI 环境声不得关闭合片原声床',
+  )
+
+  db.delete(schema.episodeAudioClips)
+    .where(eq(schema.episodeAudioClips.trackId, aiTrack.id)).run()
+  db.delete(schema.episodeAudioTracks)
+    .where(eq(schema.episodeAudioTracks.id, aiTrack.id)).run()
+  db.delete(schema.mixRevisions)
+    .where(eq(schema.mixRevisions.id, revision.id)).run()
 })

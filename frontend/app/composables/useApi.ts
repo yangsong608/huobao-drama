@@ -15,8 +15,13 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
 
     if (!resp.ok || (json.code && json.code >= 400)) {
       console.log(`%c[API] %c${method} ${path} %c${resp.status} %c${ms}ms`, 'color:#888', 'color:#ef5350', 'color:#ef5350;font-weight:bold', 'color:#888', json.message || '')
-      const error = new Error(json.message || `${resp.status}`) as Error & { status?: number; data?: any }
+      const error = new Error(json.message || `${resp.status}`) as Error & {
+        status?: number
+        code?: string
+        data?: any
+      }
       error.status = resp.status || json.code
+      error.code = json.code
       error.data = json.data
       throw error
     }
@@ -66,7 +71,40 @@ export const episodeAPI = {
   generateVideoPrompts: (id: number, model?: string, configId?: number, storyboardIds?: number[]) => api.post(`/episodes/${id}/generate-video-prompts`, { model: model || undefined, config_id: configId || undefined, storyboard_ids: storyboardIds?.length ? storyboardIds : undefined }),
   videoPromptsStatus: (id: number) => api.get(`/episodes/${id}/video-prompts-status`),
   comfyWorkflow: (id: number, configId?: number) => api.get(`/episodes/${id}/comfyui/workflow${configId ? `?config_id=${configId}` : ''}`),
+  comfyUiSession: (id: number, configId?: number) => api.get(`/episodes/${id}/comfyui/ui-session${configId ? `?config_id=${configId}` : ''}`),
   comfyRun: (id: number, opts?: { configId?: number; forceNew?: boolean }) => api.post(`/episodes/${id}/comfyui/run`, { config_id: opts?.configId, force_new: opts?.forceNew === true }),
+}
+
+export const editAPI = {
+  get: (episodeId: number) => api.get(`/episodes/${episodeId}/edit`),
+  media: (episodeId: number) => api.get(`/episodes/${episodeId}/edit/media`),
+  saveDraft: (episodeId: number, body: {
+    base_version: number
+    plan: unknown
+    force?: boolean
+  }) => api.put(`/episodes/${episodeId}/edit/draft`, body),
+  discardDraft: (episodeId: number) => api.del(`/episodes/${episodeId}/edit/draft`),
+  revisions: (episodeId: number) => api.get(`/episodes/${episodeId}/edit/revisions`),
+  revision: (episodeId: number, revisionId: number) =>
+    api.get(`/episodes/${episodeId}/edit/revisions/${revisionId}`),
+  createRevision: (episodeId: number, body: {
+    base_version: number
+    note?: string
+    plan?: unknown
+    update_draft?: boolean
+  }) => api.post(`/episodes/${episodeId}/edit/revisions`, body),
+  restoreRevision: (episodeId: number, revisionId: number, body: { base_version: number }) =>
+    api.post(`/episodes/${episodeId}/edit/revisions/${revisionId}/restore`, body),
+  roughCut: (episodeId: number, body: {
+    mode: 'replace' | 'append'
+    plan: unknown
+    create_revision?: boolean
+    base_version?: number
+  }) => api.post(`/episodes/${episodeId}/edit/rough-cut`, body),
+  suggestSubtitles: (episodeId: number, body: {
+    mode: 'fill' | 'replace'
+    plan: unknown
+  }) => api.post(`/episodes/${episodeId}/edit/subtitles/suggest`, body),
 }
 
 // 全自动流水线：改写 → 提取 → 资产生图 → 分镜 → 视频提示词 → 视频
@@ -629,6 +667,7 @@ export interface MixTrack {
   color: string | null
   height: number
   sortOrder: number
+  origin: string | null
   stemAssetId: number | null
   clips: MixClip[]
 }
@@ -641,6 +680,72 @@ export interface MixPlan {
   buses: MixBus[]
   tracks: MixTrack[]
   master: { lufs: number; truePeak: number; limiter: string }
+}
+
+export type SoundscapeCategory = 'ambience' | 'sfx' | 'crowd' | 'bgm'
+export type SoundscapeMode = 'scenes' | 'episode-bed' | 'assets-only'
+export type SoundscapeCrowdMode = 'walla' | 'lines'
+
+export interface SoundscapeOverride {
+  itemId: string
+  prompt?: string
+  negativePrompt?: string
+  seconds?: number
+}
+
+export interface SoundscapeRequest {
+  mode: SoundscapeMode
+  categories: SoundscapeCategory[]
+  crowdMode: SoundscapeCrowdMode
+  sceneIds?: number[]
+  overwrite?: boolean
+  overrides?: SoundscapeOverride[]
+  configId?: number
+}
+
+export interface SoundscapeItem {
+  itemId: string
+  category: SoundscapeCategory
+  source: 'generate' | 'lines'
+  sceneId: number | null
+  storyboardId: number | null
+  startMs: number
+  endMs: number
+  seconds: number
+  loop: boolean
+  prompt: string
+  negativePrompt: string | null
+  degraded: boolean
+  cached: boolean
+}
+
+export interface SoundscapePreview {
+  mode: SoundscapeMode
+  items: SoundscapeItem[]
+  warnings: string[]
+  counts: { total: number; generate: number; lines: number; cached: number }
+  estimatedSeconds: number
+  degraded: boolean
+  model: string
+  workflowHash: string
+  normalizeLoudness: boolean
+}
+
+export interface SoundscapeStatus {
+  jobId: number | null
+  status: 'idle' | 'running' | 'completed' | 'failed' | 'cancelled'
+  progress: number
+  step: string | null
+  error: string | null
+  counts: { total: number; done: number; failed: number; reused: number; clips: number }
+  warnings: string[]
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export interface SoundscapeStart {
+  jobId: number
+  status: 'running'
 }
 
 export interface EpisodeAudioAsset {
@@ -785,6 +890,14 @@ export const mixAPI = {
     api.post<MixPreviewResult>(`/episodes/${episodeId}/mix/preview`, data),
   render: (episodeId: number, data: { format?: 'wav' | 'm4a' } = {}) =>
     api.post<MixRenderResult>(`/episodes/${episodeId}/mix/render`, data),
+  previewSoundscape: (episodeId: number, data: SoundscapeRequest) =>
+    api.post<SoundscapePreview>(`/episodes/${episodeId}/audio/soundscape/preview`, data),
+  startSoundscape: (episodeId: number, data: SoundscapeRequest) =>
+    api.post<SoundscapeStart>(`/episodes/${episodeId}/audio/soundscape`, data),
+  soundscapeStatus: (episodeId: number) =>
+    api.get<SoundscapeStatus>(`/episodes/${episodeId}/audio/soundscape/status`),
+  cancelSoundscape: (episodeId: number) =>
+    api.post<{ status: 'cancelled' }>(`/episodes/${episodeId}/audio/soundscape/cancel`),
   peaks: (episodeId: number, source: { assetId?: number; takeId?: number; sampleId?: number }) => {
     const query = source.assetId ? `asset_id=${source.assetId}`
       : source.takeId ? `take_id=${source.takeId}`

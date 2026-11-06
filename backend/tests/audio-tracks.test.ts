@@ -199,3 +199,31 @@ test('音轨不属于该集时返回 404', async () => {
   assert.equal(response.status, 404)
   await app.request(`/episodes/${episode.id}/audio/tracks/${track.id}`, { method: 'DELETE' })
 })
+
+test('origin 只能由内部创建写入，更新接口忽略 origin', async () => {
+  const { createAudioTrack, updateAudioTrack } = await import('../src/services/audio-tracks.ts')
+  const created = createAudioTrack(episode.id, {
+    kind: 'ambience',
+    role: 'ambience',
+    name: '环境声（AI）',
+    origin: 'soundscape',
+  })
+  assert.equal(created.origin, 'soundscape')
+
+  const updated = updateAudioTrack(episode.id, created.id, {
+    name: '改名后仍是生成轨',
+    origin: null,
+  } as any)
+  assert.equal(updated.origin, 'soundscape')
+  assert.equal(updated.name, '改名后仍是生成轨')
+
+  const userTrack = createAudioTrack(episode.id, { kind: 'sfx', name: '用户音效' })
+  assert.equal(userTrack.origin, null)
+
+  const response = await app.request(`/episodes/${episode.id}/audio/tracks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: 'ambience', name: '伪造轨', origin: 'soundscape' }),
+  })
+  assert.equal((await body(response)).data.origin, null)
+})

@@ -80,7 +80,7 @@ test('inspector shows the real dirty state, not a stale saved label', () => {
   assert.match(inspector, /props\.dirty \? t\('mix\.unsaved'\)/)
   assert.match(inspector, /'is-dirty': dirty && !saving/)
   assert.match(mixStage, /:dirty="dirty"/)
-  assert.match(mixStage, /:can-edit="Boolean\(episodeId\)"/)
+  assert.match(mixStage, /:can-edit="Boolean\(episodeId\)/)
 })
 
 test('virtual dialogue clips get a compact read-only inspector', () => {

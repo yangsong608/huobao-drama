@@ -2,14 +2,14 @@ import { Hono } from 'hono'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { success, notFound, badRequest, now } from '../utils/response.js'
-import { toSnakeCaseArray, toSnakeCase } from '../utils/transform.js'
+import { toSnakeCaseArray, toSnakeCase, slimTaskParams } from '../utils/transform.js'
 import { getActiveConfigId } from '../services/ai.js'
 import { EXTRACT_TARGETS, getExtractionStatus, startExtraction, type ExtractTarget } from '../services/extraction.js'
 import { getVideoPromptBatchStatus, startVideoPromptBatch } from '../services/video-prompts.js'
 import { getAutomationState, isAutomationRunning, startAutomation, stopAutomation } from '../services/automation.js'
 import { ReworkError, reworkEpisode } from '../services/rework.js'
 import { getDubbingDefaults, VIDEO_AUDIO_MODES } from '../services/app-settings.js'
-import { previewEpisodeComfyRun, runEpisodeComfy } from '../services/comfyui-episode.js'
+import { createComfyUiSession, previewEpisodeComfyRun, runEpisodeComfy } from '../services/comfyui-episode.js'
 
 const app = new Hono()
 
@@ -410,6 +410,21 @@ app.get('/:id/comfyui/workflow', async (c) => {
   }
 })
 
+// GET /episodes/:id/comfyui/ui-session — 用配置 Token 换取网关只读页面地址（票据在路径中）
+app.get('/:id/comfyui/ui-session', async (c) => {
+  const id = Number(c.req.param('id'))
+  const rawConfigId = c.req.query('config_id')
+  const configId = rawConfigId ? Number(rawConfigId) : undefined
+  if (configId !== undefined && (!Number.isInteger(configId) || configId <= 0)) {
+    return badRequest(c, 'config_id 无效')
+  }
+  try {
+    return success(c, await createComfyUiSession(id, { configId }))
+  } catch (error: any) {
+    return badRequest(c, error?.message || 'ComfyUI 监控页面会话创建失败')
+  }
+})
+
 // POST /episodes/:id/comfyui/run — 提交整集工作流（一次 sys_task，产物登记到拼接导出）
 app.post('/:id/comfyui/run', async (c) => {
   const id = Number(c.req.param('id'))
@@ -491,7 +506,7 @@ app.get('/:id/generation-tasks', async (c) => {
     .slice(0, 20)
 
   return success(c, {
-    tasks: toSnakeCaseArray(scope.tasks),
+    tasks: toSnakeCaseArray(scope.tasks.map(slimTaskParams)),
     merges: toSnakeCaseArray(merges),
   })
 })

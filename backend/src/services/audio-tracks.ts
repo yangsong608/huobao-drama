@@ -66,6 +66,7 @@ export interface AudioTrackInput {
   duckAttackMs?: number
   duckReleaseMs?: number
   sortOrder?: number
+  origin?: string | null
 }
 
 export interface AudioClipInput {
@@ -231,6 +232,7 @@ export function createAudioTrack(episodeId: number, input: AudioTrackInput): Aud
     duckAttackMs: Math.round(clampNumber(input.duckAttackMs, 0, 2000, 20)),
     duckReleaseMs: Math.round(clampNumber(input.duckReleaseMs, 0, 5000, 250)),
     sortOrder: Number.isFinite(Number(input.sortOrder)) ? Math.round(Number(input.sortOrder)) : maxOrder + 1,
+    origin: input.origin === 'soundscape' ? 'soundscape' : null,
     createdAt: now(),
     updatedAt: now(),
   }).returning().get()

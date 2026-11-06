@@ -143,6 +143,65 @@ export async function resolveEpisodeComfyConfig(
   return fallback
 }
 
+export interface EpisodeComfyUiSession {
+  url: string
+  expiresAt: number | null
+  gateway: boolean
+}
+
+/**
+ * 监控页面会话：网关配置（base_url 以 /comfyui 结尾）用配置 Token 换取
+ * 带票据的只读页面地址；票据放在路径中，静态资源、API 与 WebSocket 自动携带。
+ */
+export async function createComfyUiSession(
+  episodeId: number,
+  options: { configId?: number } = {},
+): Promise<EpisodeComfyUiSession> {
+  const [episode] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
+  if (!episode || episode.deletedAt) throw new Error('剧集不存在')
+  const config = await resolveEpisodeComfyConfig(episode, options.configId)
+  const rawBase = String(config.baseUrl || '').trim().replace(/\/+$/, '')
+  if (!rawBase) throw new Error('ComfyUI 配置缺少 base_url')
+
+  let parsed: URL
+  try {
+    parsed = new URL(rawBase)
+  } catch {
+    throw new Error('ComfyUI 配置的 base_url 无效')
+  }
+  const pathname = parsed.pathname.replace(/\/+$/, '')
+  if (!pathname.toLowerCase().endsWith('/comfyui')) {
+    return { url: rawBase, expiresAt: null, gateway: false }
+  }
+  if (!config.apiKey) {
+    throw new Error('网关 ComfyUI 配置缺少 API Key（网关 Token），无法创建监控页面会话')
+  }
+
+  let response: Response
+  try {
+    response = await fetch(`${rawBase}/ui-session`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+      signal: AbortSignal.timeout(15_000),
+    })
+  } catch (error: any) {
+    throw new Error(`连接 H3 网关失败：${error?.message || '网络错误'}`)
+  }
+  const payload: any = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `H3 网关拒绝创建监控会话（HTTP ${response.status}）`)
+  }
+  const sessionPath = typeof payload?.path === 'string' ? payload.path : ''
+  if (!sessionPath.startsWith('/')) throw new Error('H3 网关未返回有效的监控会话路径')
+
+  const prefix = pathname.slice(0, -'/comfyui'.length)
+  return {
+    url: `${parsed.origin}${prefix}${sessionPath}`,
+    expiresAt: Number(payload?.expires_at) || null,
+    gateway: true,
+  }
+}
+
 /** 工作流优先用本集快照，未保存时跟随配置；快照在保存时已做节点对象校验 */
 export function resolveEpisodeWorkflow(episode: EpisodeRow, config: AIConfig): Record<string, unknown> {
   const snapshot = String(episode.comfyuiWorkflowJson || '').trim()

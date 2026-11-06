@@ -1,7 +1,7 @@
 <template>
   <section
     ref="rootRef"
-    class="mx-stage"
+    :class="['mx-stage', { 'is-generating': soundscapeRunning }]"
     tabindex="0"
     @keydown="onKeydown"
     @pointerdown.capture="focusStage"
@@ -13,20 +13,33 @@
         <span :class="['mx-status', { 'is-dirty': dirty, 'is-saving': saving }]">{{ saveState }}</span>
         <span v-if="separationRunning" class="mx-chip is-accent">{{ t('mix.separating') }}</span>
         <span v-else-if="separation?.engine === 'basic'" class="mx-chip is-warning">{{ t('mix.engineBasic') }}</span>
+        <span v-if="soundscapeRunning" class="mx-chip is-accent">{{ t('mix.soundscape.running') }}</span>
       </div>
       <div class="mx-top-actions">
         <template v-if="$slots.actions">
           <slot name="actions" />
           <span class="mx-divider" />
         </template>
-        <button class="mx-btn" :class="{ 'is-primary': !hasAssets }" type="button" :disabled="!episodeId || separationRunning || loading" @click="requestSeparate(false)">
+        <button class="mx-btn" :class="{ 'is-primary': !hasAssets }" type="button" :disabled="!episodeId || separationRunning || soundscapeRunning || loading" @click="requestSeparate(false)">
           <AudioWaveform :size="12" />
           {{ hasAssets ? t('mix.reseparate') : t('mix.separate') }}
         </button>
         <button v-if="separationRunning" class="mx-btn is-plain" type="button" @click="onCancelSeparation">{{ t('mix.separationCancel') }}</button>
+        <button
+          class="mx-btn"
+          :class="{ 'is-primary': hasAssets && !soundscapeRunning }"
+          type="button"
+          :disabled="!canGenerateSound || separationRunning || soundscapeRunning || loading"
+          :title="canGenerateSound ? t('mix.soundscape.entryHint') : t('mix.soundscape.needMerge')"
+          @click="openSoundscape"
+        >
+          <Sparkles :size="12" />
+          {{ t('mix.soundscape.entry') }}
+        </button>
+        <button v-if="soundscapeRunning" class="mx-btn is-plain" type="button" @click="onCancelSoundscape">{{ t('mix.soundscape.cancel') }}</button>
         <span class="mx-divider" />
-        <button class="mx-icon" type="button" :title="t('mix.undo')" :disabled="!canUndo" @click="undo"><Undo2 :size="13" /></button>
-        <button class="mx-icon" type="button" :title="t('mix.redo')" :disabled="!canRedo" @click="redo"><Redo2 :size="13" /></button>
+        <button class="mx-icon" type="button" :title="t('mix.undo')" :disabled="!canUndo || soundscapeRunning" @click="undo"><Undo2 :size="13" /></button>
+        <button class="mx-icon" type="button" :title="t('mix.redo')" :disabled="!canRedo || soundscapeRunning" @click="redo"><Redo2 :size="13" /></button>
         <button :class="['mx-icon', { on: snap }]" type="button" :title="t('mix.snap')" @click="toggleSnap"><Magnet :size="13" /></button>
         <span class="mx-divider" />
         <button class="mx-icon" type="button" :title="t('mix.fit')" @click="fitTimeline"><Maximize2 :size="12" /></button>
@@ -46,7 +59,7 @@
         <span class="mx-divider" />
         <AppMenu v-if="episodeId" v-model:open="addMenuOpen" :min-width="248">
           <template #trigger>
-            <button class="mx-btn" type="button" :title="t('mix.addTrack')" :disabled="loading">
+            <button class="mx-btn" type="button" :title="t('mix.addTrack')" :disabled="loading || soundscapeRunning">
               <Plus :size="12" />
               {{ t('mix.addTrack') }}
             </button>
@@ -67,11 +80,11 @@
           <Plus :size="12" />
           {{ t('mix.addTrack') }}
         </button>
-        <button class="mx-btn is-plain" type="button" :disabled="!episodeId || saving" @click="onSaveRevision">
+        <button class="mx-btn is-plain" type="button" :disabled="!episodeId || saving || soundscapeRunning" @click="onSaveRevision">
           <Save :size="12" />
           {{ t('mix.saveRevision') }}
         </button>
-        <button class="mx-icon" type="button" :title="t('mix.refresh')" :disabled="loading" @click="requestReload">
+        <button class="mx-icon" type="button" :title="t('mix.refresh')" :disabled="loading || soundscapeRunning" @click="requestReload">
           <RefreshCw :size="13" :class="{ 'animate-spin': loading }" />
         </button>
         <button
@@ -89,6 +102,10 @@
     <div v-if="separationRunning" class="mx-progress">
       <div class="mx-progress-bar"><span :style="{ width: `${separation?.progress || 0}%` }" /></div>
       <span class="mx-progress-text">{{ separation?.step || t('mix.separationPreparing') }} · {{ separation?.progress || 0 }}%</span>
+    </div>
+    <div v-if="soundscapeRunning" class="mx-progress">
+      <div class="mx-progress-bar"><span :style="{ width: `${soundscapeStatus?.progress || 0}%` }" /></div>
+      <span class="mx-progress-text">{{ soundscapeStatus?.step || t('mix.soundscape.preparing') }} · {{ soundscapeStatus?.progress || 0 }}%</span>
     </div>
 
     <p v-if="error" class="mx-error">{{ error }}</p>
@@ -189,9 +206,19 @@
           <b>{{ t('mix.emptyTitle') }}</b>
           <p>{{ t('mix.emptyHint') }}</p>
           <div class="mx-empty-actions">
-            <button class="mx-btn is-primary" type="button" :disabled="separationRunning" @click="requestSeparate(false)">
+            <button class="mx-btn is-primary" type="button" :disabled="separationRunning || soundscapeRunning" @click="requestSeparate(false)">
               <AudioWaveform :size="12" />
               {{ t('mix.separate') }}
+            </button>
+            <button
+              class="mx-btn is-plain"
+              type="button"
+              :disabled="!canGenerateSound || separationRunning || soundscapeRunning || loading"
+              :title="canGenerateSound ? t('mix.soundscape.entryHint') : t('mix.soundscape.needMerge')"
+              @click="openSoundscape"
+            >
+              <Sparkles :size="12" />
+              {{ t('mix.soundscape.entry') }}
             </button>
             <AppMenu v-model:open="emptyMenuOpen" :min-width="248">
               <template #trigger>
@@ -226,7 +253,7 @@
         :master="plan?.master ?? null"
         :saving="saving"
         :dirty="dirty"
-        :can-edit="Boolean(episodeId)"
+        :can-edit="Boolean(episodeId) && !soundscapeRunning"
         @update-clip="onUpdateClip"
         @update-track="onTrackUpdate"
         @update-bus="onBusUpdate"
@@ -257,7 +284,7 @@
         <input class="mx-time-input" type="number" min="0" step="0.1" :value="toSec(rangeStartMs)" :aria-label="t('mix.rangeStart')" @change="setRangeStart" />
         <span class="mx-muted">–</span>
         <input class="mx-time-input" type="number" min="0" step="0.1" :value="toSec(rangeEndMs)" :aria-label="t('mix.rangeEnd')" @change="setRangeEnd" />
-        <button class="mx-btn" type="button" :disabled="previewing || !episodeId || !hasAnyAudio" @click="generatePreview()">
+        <button class="mx-btn" type="button" :disabled="previewing || !episodeId || !hasAnyAudio || soundscapeRunning" @click="generatePreview()">
           <Loader2 v-if="previewing" :size="12" class="animate-spin" />
           <AudioLines v-else :size="12" />
           {{ previewing ? t('mix.previewing') : t('mix.preview') }}
@@ -276,7 +303,7 @@
       </div>
 
       <div class="mx-transport-group is-master">
-        <button class="mx-icon" type="button" :title="t('mix.masterMute')" @click="toggleMasterMute">
+        <button class="mx-icon" type="button" :title="t('mix.masterMute')" :disabled="soundscapeRunning" @click="toggleMasterMute">
           <VolumeX v-if="masterMuted" :size="13" />
           <Volume2 v-else :size="13" />
         </button>
@@ -288,6 +315,7 @@
           step="1"
           :value="masterVolumePct"
           :aria-label="t('mix.masterVolume')"
+          :disabled="soundscapeRunning"
           @pointerdown="beginChange"
           @pointerup="endChange"
           @input="setMasterVolume"
@@ -334,6 +362,18 @@
       @cancel="closeConfirm"
       @confirm="runConfirm"
     />
+
+    <MixSoundscapeDialog
+      :open="soundscapeOpen"
+      :episode-id="episodeId"
+      :preview="soundscapePlan"
+      :previewing="soundscapePreviewing"
+      :starting="soundscapeStarting"
+      :error="soundscapeError"
+      @close="soundscapeOpen = false"
+      @preview="onSoundscapePreview"
+      @start="onSoundscapeStart"
+    />
   </section>
 </template>
 
@@ -358,6 +398,7 @@ import {
   RefreshCw,
   Save,
   SlidersHorizontal,
+  Sparkles,
   Undo2,
   Volume2,
   VolumeX,
@@ -369,6 +410,7 @@ import type {
   MixClip,
   MixRevision,
   MixTrack,
+  SoundscapeRequest,
   TimelineCue,
 } from '~/composables/useApi'
 import { useMixPlayback } from '~/composables/useMixPlayback'
@@ -377,6 +419,7 @@ import ConfirmDialog from '~/components/ConfirmDialog.vue'
 import AppMenu from '~/components/AppMenu.vue'
 import AppMenuItem from '~/components/AppMenuItem.vue'
 import MixClipInspector from '~/components/MixClipInspector.vue'
+import MixSoundscapeDialog from '~/components/MixSoundscapeDialog.vue'
 import MixTimeline from '~/components/MixTimeline.vue'
 import MixTrackHead from '~/components/MixTrackHead.vue'
 import SubtitlePreview from '~/components/SubtitlePreview.vue'
@@ -394,6 +437,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   'locate-line': [lineId: number]
   'regenerate-line': [lineId: number]
+  'timeline-retimed': [lineId: number]
+  'soundscape-busy': [busy: boolean]
 }>()
 
 const { t } = useI18n()
@@ -411,6 +456,10 @@ const {
   revisions,
   separation,
   separationRunning,
+  soundscapeStatus,
+  soundscapeRunning,
+  soundscapePlan,
+  soundscapeStarting,
   loading,
   saving,
   dirty,
@@ -426,6 +475,8 @@ const {
   canRedo,
   durationMs: planDuration,
   load,
+  refreshPlan,
+  retimeLine,
   addTrack: addStageTrack,
   updateTrack,
   updateBus,
@@ -436,6 +487,7 @@ const {
   splitClip,
   duplicateClip,
   moveClip,
+  moveVirtualClip,
   trimClip,
   selectClip,
   clearSelection,
@@ -445,6 +497,9 @@ const {
   redo,
   runSeparation,
   cancelSeparation,
+  previewSoundscape,
+  startSoundscape,
+  cancelSoundscape,
   previewRange,
   saveRevision,
   restoreRevision,
@@ -476,9 +531,13 @@ const loopPreview = ref(false)
 const playing = ref(false)
 const renderedMode = ref(false)
 let previewToken = 0
+let pendingRetime: { lineId: number; startMs: number } | null = null
 const addMenuOpen = ref(false)
 const emptyMenuOpen = ref(false)
 const inspectorOpen = ref(readInspectorPreference())
+const soundscapeOpen = ref(false)
+const soundscapePreviewing = ref(false)
+const soundscapeError = ref('')
 
 const playback = useMixPlayback({
   tracks: () => tracks.value,
@@ -514,6 +573,7 @@ const currentCueText = computed(() => {
   return cue?.text || ''
 })
 const hasAssets = computed(() => assets.value.length > 0)
+const canGenerateSound = computed(() => Boolean(props.episodeId && props.durationMs > 0))
 const hasAnyAudio = computed(() => tracks.value.some(track => track.clips.length > 0))
 const showEmpty = computed(() => !hasAnyAudio.value && !tracks.value.some(track => !track.virtual))
 const selection = computed(() => {
@@ -681,6 +741,13 @@ watch(playbackMissing, (list) => {
   toast.error(t('mix.realtimeMissing', { n: list.length }))
 })
 
+watch(soundscapeRunning, (busy) => emit('soundscape-busy', busy), { immediate: true })
+watch(() => soundscapeStatus.value?.status, (status, previous) => {
+  if (previous !== 'running') return
+  if (status === 'completed') toast.success(t('mix.soundscape.done'))
+  if (status === 'failed') toast.error(soundscapeStatus.value?.error || t('mix.soundscape.failed'))
+})
+
 onBeforeUnmount(() => {
   if (rescheduleTimer) {
     clearTimeout(rescheduleTimer)
@@ -690,6 +757,7 @@ onBeforeUnmount(() => {
   playback.dispose()
   dispose()
 })
+onBeforeUnmount(() => emit('soundscape-busy', false))
 
 function onSelectClip(track: StageTrack, clip: StageClip) {
   activeTrackUid.value = track._uid
@@ -715,10 +783,33 @@ function beginChange() {
   stage.beginChange()
 }
 function endChange() {
+  if (pendingRetime) {
+    const pending = pendingRetime
+    pendingRetime = null
+    void commitRetime(pending.lineId, pending.startMs)
+    return
+  }
   stage.endChange()
 }
 function onMoveClip(clip: StageClip, startMs: number) {
+  const track = tracks.value.find(item => item.clips.some(entry => entry._uid === clip._uid))
+  if (track?.virtual && track.role === 'voice' && clip.lineId != null) {
+    const duration = clip.endMs - clip.startMs
+    const maxStart = Math.max(0, totalDuration.value - duration)
+    const next = Math.min(Math.max(0, Math.round(startMs)), maxStart)
+    if (moveVirtualClip(clip, next)) pendingRetime = { lineId: clip.lineId, startMs: clip.startMs }
+    return
+  }
   moveClip(clip, startMs)
+}
+async function commitRetime(lineId: number, startMs: number) {
+  try {
+    await retimeLine(lineId, startMs)
+    emit('timeline-retimed', lineId)
+  } catch (err: any) {
+    toast.error(err?.message || t('mix.retimeFailed'))
+    await refreshPlan().catch(() => {})
+  }
 }
 function onTrimStart(clip: StageClip, ms: number) {
   trimClip(clip, 'start', ms)
@@ -1163,6 +1254,50 @@ async function onCancelSeparation() {
     toast.error(err?.message || t('mix.separationCancelFailed'))
   }
 }
+function openSoundscape() {
+  if (!canGenerateSound.value) {
+    toast.error(t('mix.soundscape.needMerge'))
+    return
+  }
+  soundscapeError.value = ''
+  soundscapePlan.value = null
+  soundscapeOpen.value = true
+}
+
+async function onSoundscapePreview(request: SoundscapeRequest) {
+  soundscapePreviewing.value = true
+  soundscapeError.value = ''
+  try {
+    await previewSoundscape(request)
+  } catch (err: any) {
+    soundscapeError.value = err?.message || t('mix.soundscape.previewFailed')
+  } finally {
+    soundscapePreviewing.value = false
+  }
+}
+
+async function onSoundscapeStart(request: SoundscapeRequest) {
+  soundscapeError.value = ''
+  try {
+    await startSoundscape(request)
+    soundscapeOpen.value = false
+    toast.success(t('mix.soundscape.started'))
+  } catch (err: any) {
+    soundscapeError.value = err?.message || t('mix.soundscape.startFailed')
+  }
+}
+
+async function onCancelSoundscape() {
+  try {
+    const cancelled = await cancelSoundscape()
+    // 任务恰好完成时服务端返回 409、并未取消：交给状态 watcher 提示完成/失败
+    if (cancelled) {
+      toast.success(t('mix.soundscape.cancelDone'))
+    }
+  } catch (err: any) {
+    toast.error(err?.message || t('mix.soundscape.cancelFailed'))
+  }
+}
 async function onSaveRevision() {
   try {
     const revision = await saveRevision()
@@ -1254,6 +1389,7 @@ function focusStage(event: PointerEvent) {
 }
 function onKeydown(event: KeyboardEvent) {
   if (isFormTarget(event.target)) return
+  if (soundscapeRunning.value && event.code !== 'Space') return
   const meta = event.metaKey || event.ctrlKey
   const key = event.key.toLowerCase()
   if (meta && key === 'z') {
@@ -1363,6 +1499,7 @@ defineExpose({ seekTo, pause, play: togglePlay })
 .mx-monitor-hint { margin: 0; font-size: 9.5px; color: var(--text-3); }
 .mx-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 288px minmax(0, 1fr) 316px; }
 .mx-body.is-inspector-closed { grid-template-columns: 288px minmax(0, 1fr); }
+.mx-stage.is-generating .mx-body { pointer-events: none; opacity: .72; }
 .mx-heads { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-1); overflow: hidden; }
 .mx-heads-label { flex: none; height: 30px; display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid var(--border); font-size: 9px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); }
 .mx-heads-clip { flex: 1; min-height: 0; overflow: hidden; }

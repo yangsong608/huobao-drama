@@ -17,6 +17,7 @@
         @change="rename"
       />
       <span v-else class="mx-th-name is-readonly" :title="track.name">{{ track.name }}</span>
+      <span v-if="track.origin === 'soundscape'" class="mx-th-auto is-ai" :title="t('mix.soundscape.aiTrack')">{{ t('mix.soundscape.aiBadge') }}</span>
       <span v-if="track.virtual" class="mx-th-auto">{{ t('mix.trackVirtual') }}</span>
       <button
         v-if="!track.virtual"
@@ -54,7 +55,7 @@
       <button :class="['mx-th-toggle', { on: track.solo }]" type="button" :title="t('mix.trackSolo')" @click.stop="toggle('solo')">{{ t('mix.trackSoloShort') }}</button>
       <button v-if="!track.virtual" :class="['mx-th-toggle', { on: track.ducking }]" type="button" :title="t('mix.trackDuck')" @click.stop="toggle('ducking')">{{ t('mix.trackDuckShort') }}</button>
       <button :class="['mx-th-toggle', { on: track.loop }]" type="button" :title="t('mix.trackLoop')" @click.stop="toggle('loop')">{{ t('mix.trackLoopShort') }}</button>
-      <span v-if="track.virtual" class="mx-th-note">{{ t('mix.trackVirtualHint', { n: track.clips.length }) }}</span>
+      <span v-if="track.virtual" class="mx-th-note">{{ t(track.role === 'voice' ? 'mix.trackVirtualVoiceHint' : 'mix.trackVirtualHint', { n: track.clips.length }) }}</span>
       <span v-else class="mx-th-clips">{{ t('mix.clipCount', { n: track.clips.length }) }}</span>
     </div>
 
@@ -235,6 +236,7 @@ function onResizeUp(event: PointerEvent) {
 .mx-th-name:hover, .mx-th-name:focus { border-color: var(--border); background: var(--bg-0); outline: none; }
 .mx-th-name.is-readonly { font-weight: 500; color: var(--text-2); white-space: nowrap; overflow: hidden; }
 .mx-th-auto { flex: none; font-size: 9px; color: var(--accent-text); }
+.mx-th-auto.is-ai { padding: 0 4px; border-radius: 999px; background: var(--accent-bg); color: var(--accent-text); font-weight: 600; }
 .mx-th-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--text-3); cursor: pointer; }
 .mx-th-icon:hover { color: var(--text-0); background: var(--bg-hover); }
 .mx-th-icon.on { color: var(--accent-text); }

@@ -66,6 +66,10 @@ backend/workspace/*
 # Config
 configs/config.yaml
 
+# Local audio engine sidecar (Python env and model cache)
+tools/audio-engine/.venv/
+tools/audio-engine/models/
+
 # Local tooling / agent state
 vibe_images/
 .superpowers/

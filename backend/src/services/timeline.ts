@@ -62,8 +62,16 @@ export interface TimelineCue {
   audioUrl: string | null
 }
 
+export interface TimelineClipPosition {
+  storyboardId: number
+  startMs: number
+  endMs: number
+  durationMs: number
+}
+
 export interface TimelineResult {
   cues: TimelineCue[]
+  clips: TimelineClipPosition[]
   totalDurationMs: number
   maxOverflowMs: number
   overlapCount: number
@@ -95,6 +103,16 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
     cursorMs += duration
   }
   const totalDurationMs = Math.max(0, Math.round(input.totalDurationMs ?? cursorMs))
+
+  const clipPositions: TimelineClipPosition[] = clips.map((clip) => {
+    const span = clipStart.get(clip.storyboardId)!
+    return {
+      storyboardId: clip.storyboardId,
+      startMs: span.startMs,
+      endMs: span.endMs,
+      durationMs: span.endMs - span.startMs,
+    }
+  })
 
   const order = new Map<number, number>()
   clips.forEach((c, i) => order.set(c.storyboardId, i))
@@ -217,7 +235,16 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
     cue.subtitleEndMs = Math.round(Math.min(subtitleEnd, cue.endMs))
   }
 
-  return { cues, totalDurationMs, maxOverflowMs, overlapCount, atempoCount, trimmedCount, skippedLineIds }
+  return {
+    cues,
+    clips: clipPositions,
+    totalDurationMs,
+    maxOverflowMs,
+    overlapCount,
+    atempoCount,
+    trimmedCount,
+    skippedLineIds,
+  }
 }
 
 /** 字幕结束时间兜底：极端情况下（下一句紧贴）保证不出现负时长 */

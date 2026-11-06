@@ -7,6 +7,7 @@
  * - 任何编辑 300ms 防抖保存；范围试听与版本先落库，保证与服务端渲染一致。
  */
 import {
+  dubbingAPI,
   mixAPI,
   type EpisodeAudioAsset,
   type MixBus,
@@ -18,6 +19,9 @@ import {
   type MixRevision,
   type MixTrack,
   type SeparationStatus,
+  type SoundscapePreview,
+  type SoundscapeRequest,
+  type SoundscapeStatus,
 } from '~/composables/useApi'
 import { applySoloMuteState } from '~/utils/mix-solo'
 
@@ -118,6 +122,10 @@ export function useMixStage(options: UseMixStageOptions) {
   const assets = ref<EpisodeAudioAsset[]>([])
   const revisions = ref<MixRevision[]>([])
   const separation = ref<SeparationStatus | null>(null)
+  const soundscapeStatus = ref<SoundscapeStatus | null>(null)
+  const soundscapePlan = ref<SoundscapePreview | null>(null)
+  const soundscapeStarting = ref(false)
+  const soundscapeRefreshing = ref(false)
   const loading = ref(false)
   const saving = ref(false)
   const dirty = ref(false)
@@ -138,9 +146,12 @@ export function useMixStage(options: UseMixStageOptions) {
   let saveTimer: ReturnType<typeof setTimeout> | null = null
   let pollTimer: ReturnType<typeof setTimeout> | null = null
   let pollToken = 0
+  let soundscapeTimer: ReturnType<typeof setTimeout> | null = null
+  let soundscapePollToken = 0
   let loadToken = 0
   let loadedEpisode: number | null = null
   let inFlight: Promise<StagePlan> | null = null
+  let retimeChain: Promise<void> = Promise.resolve()
   let serverTrackIds = new Set<number>()
   let serverClipIds = new Set<number>()
 
@@ -150,6 +161,9 @@ export function useMixStage(options: UseMixStageOptions) {
   const canUndo = computed(() => history.value.length > 0)
   const canRedo = computed(() => future.value.length > 0)
   const separationRunning = computed(() => separation.value?.status === 'running')
+  const soundscapeRunning = computed(() =>
+    soundscapeStatus.value?.status === 'running' || soundscapeRefreshing.value
+  )
 
   const selectedTrack = computed<StageTrack | null>(() => {
     const key = selected.value
@@ -246,6 +260,19 @@ export function useMixStage(options: UseMixStageOptions) {
       pendingSnapshot = null
     }
     if (selected.value && (!selectedTrack.value || !selectedClip.value)) selected.value = null
+  }
+
+  /** 只重取计划，保留播放头、选中与撤销栈（台词重排后同步虚拟轨） */
+  async function refreshPlan() {
+    const episodeId = options.episodeId()
+    if (!episodeId) return
+    const next = await mixAPI.getPlan(episodeId)
+    const selectedBefore = selected.value ? { ...selected.value } : null
+    applyPlan(next)
+    if (selectedBefore) {
+      selected.value = selectedBefore
+      if (!selectedTrack.value || !selectedClip.value) selected.value = null
+    }
   }
 
   function snapshot(): MixSnapshot {
@@ -447,6 +474,23 @@ export function useMixStage(options: UseMixStageOptions) {
     return plan.value
   }
 
+  /**
+   * 对白片段的时间来自台词 voice_start_ms，不属于混音计划；
+   * 串行提交避免连续拖拽时旧响应覆盖新时间。
+   */
+  async function retimeLine(lineId: number, startMs: number) {
+    const episodeId = options.episodeId()
+    if (!episodeId) throw new Error('未选择剧集')
+    const target = Math.max(0, Math.round(startMs))
+    const run = retimeChain.then(async () => {
+      await flushSave()
+      await dubbingAPI.updateLine(lineId, { voice_start_ms: target })
+      await refreshPlan()
+    })
+    retimeChain = run.catch(() => {})
+    return run
+  }
+
   async function loadAssets() {
     const episodeId = options.episodeId()
     if (!episodeId) return []
@@ -463,24 +507,32 @@ export function useMixStage(options: UseMixStageOptions) {
   async function load(resetHistory = true) {
     const episodeId = options.episodeId()
     if (!episodeId) return
+    const episodeChanged = loadedEpisode !== episodeId
+    if (episodeChanged) {
+      stopSoundscapePolling()
+      soundscapePlan.value = null
+    }
     const token = ++loadToken
     loading.value = true
     error.value = ''
     try {
-      const [next, assetResult, revisionResult, status] = await Promise.all([
+      const [next, assetResult, revisionResult, status, soundscape] = await Promise.all([
         mixAPI.getPlan(episodeId),
         mixAPI.assets(episodeId),
         mixAPI.revisions(episodeId),
         mixAPI.separationStatus(episodeId),
+        mixAPI.soundscapeStatus(episodeId),
       ])
       if (token !== loadToken) return
       applyPlan(next, resetHistory)
       assets.value = assetResult.items
       revisions.value = revisionResult.items
       separation.value = status
+      soundscapeStatus.value = soundscape
       dirty.value = false
       playheadMs.value = 0
       if (status.status === 'running') startPolling()
+      if (soundscape.status === 'running') pollSoundscape()
     } catch (err: any) {
       if (token !== loadToken) return
       error.value = err?.message || '读取混音计划失败'
@@ -568,6 +620,128 @@ export function useMixStage(options: UseMixStageOptions) {
     return result.cancelled
   }
 
+  function stopSoundscapePolling() {
+    soundscapePollToken += 1
+    if (soundscapeTimer) {
+      clearTimeout(soundscapeTimer)
+      soundscapeTimer = null
+    }
+  }
+
+  function pollSoundscape() {
+    stopSoundscapePolling()
+    const token = soundscapePollToken
+    const tick = async () => {
+      const episodeId = options.episodeId()
+      if (!episodeId || token !== soundscapePollToken) return
+      try {
+        const status = await mixAPI.soundscapeStatus(episodeId)
+        if (token !== soundscapePollToken) return
+        soundscapeStatus.value = status
+        if (status.status === 'running') {
+          soundscapeTimer = setTimeout(tick, POLL_INTERVAL_MS)
+          return
+        }
+        soundscapeTimer = null
+        if (status.status === 'completed') {
+          // 刷新完成前保持 running，避免用户在旧计划上保存
+          soundscapeRefreshing.value = true
+          try {
+            await Promise.all([loadAssets(), refreshPlan()])
+          } finally {
+            if (token === soundscapePollToken) soundscapeRefreshing.value = false
+          }
+        }
+      } catch (err: any) {
+        if (token !== soundscapePollToken) return
+        error.value = err?.message || '读取声音生成状态失败'
+        // 瞬时失败（服务重启/休眠唤醒/代理抖动）不能永久锁死 running，继续重试
+        soundscapeTimer = setTimeout(tick, POLL_INTERVAL_MS)
+      }
+    }
+    void tick()
+  }
+
+  async function previewSoundscape(request: SoundscapeRequest): Promise<SoundscapePreview> {
+    const episodeId = options.episodeId()
+    if (!episodeId) throw new Error('未选择剧集')
+    error.value = ''
+    try {
+      const result = await mixAPI.previewSoundscape(episodeId, request)
+      soundscapePlan.value = result
+      return result
+    } catch (err: any) {
+      error.value = err?.message || '预览声音生成失败'
+      throw err
+    }
+  }
+
+  async function startSoundscape(request: SoundscapeRequest) {
+    const episodeId = options.episodeId()
+    if (!episodeId) throw new Error('未选择剧集')
+    soundscapeStarting.value = true
+    error.value = ''
+    try {
+      const started = await mixAPI.startSoundscape(episodeId, request)
+      soundscapeStatus.value = {
+        jobId: started.jobId,
+        status: 'running',
+        progress: 0,
+        step: '准备生成',
+        error: null,
+        counts: { total: 0, done: 0, failed: 0, reused: 0, clips: 0 },
+        warnings: [],
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+      }
+      pollSoundscape()
+      return started
+    } catch (err: any) {
+      error.value = err?.message || '启动声音生成失败'
+      throw err
+    } finally {
+      soundscapeStarting.value = false
+    }
+  }
+
+  async function cancelSoundscape() {
+    const episodeId = options.episodeId()
+    if (!episodeId) return false
+    let cancelled = false
+    try {
+      const result = await mixAPI.cancelSoundscape(episodeId)
+      cancelled = result.status === 'cancelled'
+    } catch (err: any) {
+      // 409：任务在取消前已完成，交给 finally 刷新状态并由状态提示统一收口
+      if (err?.status !== 409) throw err
+    } finally {
+      // 任务恰好完成时取消路由返回 409：清理与状态刷新仍必须执行，
+      // 否则 running 状态会被永久锁死
+      stopSoundscapePolling()
+      soundscapeRefreshing.value = false
+      const wasRunning = soundscapeStatus.value?.status === 'running'
+      try {
+        const status = await mixAPI.soundscapeStatus(episodeId)
+        soundscapeStatus.value = status
+        // 服务端未接受取消（仍在运行）时恢复轮询，等待其自然结束
+        if (status.status === 'running') pollSoundscape()
+        // 任务恰好完成时取消路由返回 409：必须刷新素材与计划，界面才能看到生成结果
+        if (status.status === 'completed') {
+          soundscapeRefreshing.value = true
+          try {
+            await Promise.all([loadAssets(), refreshPlan()])
+          } finally {
+            soundscapeRefreshing.value = false
+          }
+        }
+      } catch (err: any) {
+        error.value = err?.message || '读取声音生成状态失败'
+        if (wasRunning) pollSoundscape()
+      }
+    }
+    return cancelled
+  }
+
   function clearSelection() {
     selected.value = null
   }
@@ -606,6 +780,7 @@ export function useMixStage(options: UseMixStageOptions) {
       color: input.color ?? '#38bdf8',
       height: input.height ?? 72,
       sortOrder: input.sortOrder ?? maxOrder + 1,
+      origin: null,
       stemAssetId: input.stemAssetId ?? null,
       clips: [],
       _uid: newUid('t'),
@@ -666,7 +841,7 @@ export function useMixStage(options: UseMixStageOptions) {
 
   function updateClip(clip: StageClip, patch: Partial<MixClip>) {
     const track = trackOfClip(clip)
-    if (track?.locked) return
+    if (!track || track.virtual || track.locked) return
     if (clip.locked && patch.locked !== false) return
     mutate(() => {
       if (patch.startMs !== undefined || patch.endMs !== undefined) {
@@ -696,7 +871,7 @@ export function useMixStage(options: UseMixStageOptions) {
 
   function removeClip(clip: StageClip) {
     const track = trackOfClip(clip)
-    if (!track || track.locked || clip.locked) return
+    if (!track || track.virtual || track.locked || clip.locked) return
     if (selected.value?.clipUid === clip._uid) selected.value = null
     mutate(() => {
       track.clips = track.clips.filter((item) => item._uid !== clip._uid)
@@ -705,7 +880,7 @@ export function useMixStage(options: UseMixStageOptions) {
 
   function splitClip(clip: StageClip, atMs: number): StageClip | null {
     const track = trackOfClip(clip)
-    if (!track || track.locked || clip.locked) return null
+    if (!track || track.virtual || track.locked || clip.locked) return null
     const at = Math.round(atMs)
     if (at <= clip.startMs + MIN_CLIP_MS || at >= clip.endMs - MIN_CLIP_MS) return null
     const second: StageClip = {
@@ -726,7 +901,7 @@ export function useMixStage(options: UseMixStageOptions) {
 
   function duplicateClip(clip: StageClip): StageClip | null {
     const track = trackOfClip(clip)
-    if (!track) return null
+    if (!track || track.virtual) return null
     const duration = clip.endMs - clip.startMs
     const copy: StageClip = {
       ...clone(clip),
@@ -742,9 +917,22 @@ export function useMixStage(options: UseMixStageOptions) {
     return copy
   }
 
+  /** 虚拟对白只移动起止时间，不进撤销栈也不触发混音保存 */
+  function moveVirtualClip(clip: StageClip, startMs: number): boolean {
+    const track = trackOfClip(clip)
+    if (!track || !track.virtual || track.role !== 'voice' || clip.lineId == null) return false
+    const duration = clip.endMs - clip.startMs
+    const start = Math.max(0, Math.round(startMs))
+    if (start === clip.startMs) return false
+    clip.startMs = start
+    clip.endMs = start + duration
+    sortClips(track)
+    return true
+  }
+
   function moveClip(clip: StageClip, startMs: number) {
     const track = trackOfClip(clip)
-    if (!track || track.locked || clip.locked) return
+    if (!track || track.virtual || track.locked || clip.locked) return
     const duration = clip.endMs - clip.startMs
     const start = Math.max(0, Math.round(startMs))
     mutate(() => {
@@ -756,7 +944,7 @@ export function useMixStage(options: UseMixStageOptions) {
 
   function trimClip(clip: StageClip, edge: 'start' | 'end', timeMs: number) {
     const track = trackOfClip(clip)
-    if (!track || track.locked || clip.locked) return
+    if (!track || track.virtual || track.locked || clip.locked) return
     mutate(() => {
       if (edge === 'start') {
         const next = clamp(Math.round(timeMs), 0, clip.endMs - MIN_CLIP_MS)
@@ -885,6 +1073,7 @@ export function useMixStage(options: UseMixStageOptions) {
       saveTimer = null
     }
     stopPolling()
+    stopSoundscapePolling()
   }
 
   return {
@@ -895,6 +1084,14 @@ export function useMixStage(options: UseMixStageOptions) {
     revisions,
     separation,
     separationRunning,
+    soundscapeStatus,
+    soundscapeRunning,
+    soundscapePlan,
+    soundscapeStarting,
+    previewSoundscape,
+    startSoundscape,
+    cancelSoundscape,
+    pollSoundscape,
     loading,
     saving,
     dirty,
@@ -915,6 +1112,8 @@ export function useMixStage(options: UseMixStageOptions) {
     loadAssets,
     save,
     flushSave,
+    refreshPlan,
+    retimeLine,
     beginChange,
     endChange,
     addTrack,
@@ -927,6 +1126,7 @@ export function useMixStage(options: UseMixStageOptions) {
     splitClip,
     duplicateClip,
     moveClip,
+    moveVirtualClip,
     trimClip,
     snapTime,
     selectClip,

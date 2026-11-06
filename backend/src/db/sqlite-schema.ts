@@ -453,6 +453,7 @@ export const sqliteSchemaStatements = [
     ducking INTEGER DEFAULT 1,
     loop INTEGER DEFAULT 0,
     sort_order INTEGER DEFAULT 0,
+    origin TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
@@ -619,6 +620,89 @@ export const sqliteSchemaStatements = [
     created_at TEXT NOT NULL,
     finished_at TEXT,
     deleted_at TEXT
+  )`,
+
+  // 每集一份可变剪辑草稿
+  `CREATE TABLE IF NOT EXISTS episode_edit_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER,
+    plan_json TEXT NOT NULL,
+    plan_hash TEXT,
+    edit_sync_hash TEXT,
+    version INTEGER NOT NULL DEFAULT 0,
+    base_revision_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+
+  // 不可变剪辑版本快照
+  `CREATE TABLE IF NOT EXISTS edit_revisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    revision_no INTEGER NOT NULL,
+    plan_json TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    edit_sync_hash TEXT NOT NULL,
+    render_hash TEXT,
+    duration_ms INTEGER,
+    clip_count INTEGER,
+    note TEXT,
+    is_current INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  )`,
+
+  // 剪辑轨 / 原声参考 / 精确预览 / 缩略图缓存
+  `CREATE TABLE IF NOT EXISTS edit_renders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    edit_revision_id INTEGER,
+    render_hash TEXT,
+    edit_sync_hash TEXT,
+    dialogue_sync_hash TEXT,
+    subtitle_hash TEXT,
+    mix_revision_id INTEGER,
+    audio_version INTEGER,
+    cache_key TEXT,
+    range_start_ms INTEGER,
+    range_end_ms INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending',
+    progress INTEGER NOT NULL DEFAULT 0,
+    output_url TEXT,
+    output_path TEXT,
+    duration_ms INTEGER,
+    size_bytes INTEGER,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    finished_at TEXT,
+    deleted_at TEXT
+  )`,
+
+  // 预览代理：低码率/低分辨率源，按源指纹失效
+  `CREATE TABLE IF NOT EXISTS episode_media_proxies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER,
+    source_url TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    progress INTEGER NOT NULL DEFAULT 0,
+    output_url TEXT,
+    width INTEGER,
+    height INTEGER,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    finished_at TEXT
+  )`,
+
+  // 编辑 / 导出互斥锁
+  `CREATE TABLE IF NOT EXISTS episode_locks (
+    episode_id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    acquired_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
   )`,
 
   // 配音持久化任务（试听不落库；批量生成/分离/导出走这里）
@@ -843,6 +927,14 @@ export const sqliteSchemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_audio_assets_episode ON episode_audio_assets (episode_id, kind, source_hash)`,
   `CREATE INDEX IF NOT EXISTS idx_mix_revisions_episode ON mix_revisions (episode_id, revision_no)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_mix_revisions_current ON mix_revisions (episode_id) WHERE is_current = 1`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_drafts_episode ON episode_edit_drafts (episode_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_revisions_no ON edit_revisions (episode_id, revision_no)`,
+  `CREATE INDEX IF NOT EXISTS idx_edit_revisions_current ON edit_revisions (episode_id, is_current)`,
+  `CREATE INDEX IF NOT EXISTS idx_edit_renders_cache ON edit_renders (episode_id, kind, status, render_hash)`,
+  `CREATE INDEX IF NOT EXISTS idx_edit_renders_sync ON edit_renders (episode_id, kind, status, edit_sync_hash)`,
+  `CREATE INDEX IF NOT EXISTS idx_edit_renders_revision ON edit_renders (edit_revision_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_renders_cache_key ON edit_renders (episode_id, kind, cache_key)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_media_proxies_source ON episode_media_proxies (episode_id, source_url, source_fingerprint)`,
   `CREATE INDEX IF NOT EXISTS idx_episode_exports_episode ON episode_exports (episode_id, created_at)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_episode_exports_current ON episode_exports (episode_id, kind) WHERE is_current = 1`,
   `CREATE INDEX IF NOT EXISTS idx_dubbing_jobs_episode ON dubbing_jobs (episode_id, kind, status)`,
@@ -1076,6 +1168,7 @@ export function initSqliteSchema(sqlite: Database.Database) {
     stem_asset_id: 'INTEGER',
     duck_attack_ms: 'INTEGER DEFAULT 20',
     duck_release_ms: 'INTEGER DEFAULT 250',
+    origin: 'TEXT',
   }
   for (const [name, type] of Object.entries(trackWorkbenchColumns)) {
     if (!trackColumns.has(name)) sqlite.exec(`ALTER TABLE episode_audio_tracks ADD COLUMN ${name} ${type}`)
@@ -1125,6 +1218,62 @@ export function initSqliteSchema(sqlite: Database.Database) {
   for (const [name, type] of Object.entries(videoModeColumns)) {
     if (!episodeColumns.has(name)) sqlite.exec(`ALTER TABLE episodes ADD COLUMN ${name} ${type}`)
   }
+
+  // ===== V3 剪辑工作台：旧库幂等补列，默认只读且不影响既有数据 =====
+  const editEpisodeColumns: Record<string, string> = {
+    edit_revision_id: 'INTEGER',
+    edit_plan_hash: 'TEXT',
+    edit_sync_hash: 'TEXT',
+    edit_enabled: 'INTEGER DEFAULT 0',
+  }
+  for (const [name, type] of Object.entries(editEpisodeColumns)) {
+    if (!episodeColumns.has(name)) sqlite.exec(`ALTER TABLE episodes ADD COLUMN ${name} ${type}`)
+  }
+
+  const mixRevisionColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(mix_revisions)').all() as { name: string }[]).map((row) => row.name),
+  )
+  const mixEditColumns: Record<string, string> = {
+    edit_revision_id: 'INTEGER',
+    edit_sync_hash: 'TEXT',
+    dialogue_sync_hash: 'TEXT',
+    source_kind: "TEXT DEFAULT 'legacy'",
+  }
+  for (const [name, type] of Object.entries(mixEditColumns)) {
+    if (!mixRevisionColumns.has(name)) sqlite.exec(`ALTER TABLE mix_revisions ADD COLUMN ${name} ${type}`)
+  }
+
+  const exportColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(episode_exports)').all() as { name: string }[]).map((row) => row.name),
+  )
+  const exportEditColumns: Record<string, string> = {
+    edit_revision_id: 'INTEGER',
+    mix_revision_id: 'INTEGER',
+    edit_plan_hash: 'TEXT',
+    edit_sync_hash: 'TEXT',
+    dialogue_sync_hash: 'TEXT',
+    render_mode: 'TEXT',
+    subtitle_mode: 'TEXT',
+    file_name: 'TEXT',
+  }
+  for (const [name, type] of Object.entries(exportEditColumns)) {
+    if (!exportColumns.has(name)) sqlite.exec(`ALTER TABLE episode_exports ADD COLUMN ${name} ${type}`)
+  }
+
+  // 旧库回填：已有剪辑版本的分集标记为启用，并指向当前版本；无版本保持默认 0。
+  sqlite.exec(`
+    UPDATE episodes
+    SET edit_enabled = 1,
+        edit_revision_id = COALESCE(edit_revision_id, (
+          SELECT id FROM edit_revisions
+          WHERE edit_revisions.episode_id = episodes.id AND is_current = 1
+          LIMIT 1
+        ))
+    WHERE EXISTS (
+      SELECT 1 FROM edit_revisions WHERE edit_revisions.episode_id = episodes.id
+    )
+  `)
+
   // 小说故事坐标：旧库先加列再回填，避免被新库默认值 first 覆盖历史作品。
   const novelColumns = new Set((sqlite.prepare('PRAGMA table_info(novels)').all() as { name: string }[]).map((c) => c.name))
   if (!novelColumns.has('narrative_person')) {

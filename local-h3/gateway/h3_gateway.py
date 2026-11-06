@@ -18,8 +18,10 @@ import json
 import os
 import queue
 import re
+import select
 import shutil
 import socket
+import ssl
 import threading
 import time
 import urllib.error
@@ -114,6 +116,7 @@ class Settings:
         self.queue_limit = 32
         self.max_body_bytes = 64 * 1024 * 1024
         self.sign_ttl = 3600
+        self.ui_session_ttl = 43200
         self.retention_days = 7
         self.upstream_timeout = 1800
         self.upload_timeout = 600
@@ -158,6 +161,7 @@ class Settings:
             queue_limit=number("H3_QUEUE_LIMIT", 32, 0),
             max_body_bytes=number("H3_MAX_BODY_BYTES", 64 * 1024 * 1024, 1024),
             sign_ttl=number("H3_SIGN_TTL", 3600, 1),
+            ui_session_ttl=number("H3_UI_SESSION_TTL", 43200, 60),
             retention_days=number("H3_RETENTION_DAYS", 7, 0),
             upstream_timeout=number("H3_UPSTREAM_TIMEOUT", 1800, 1),
             upload_timeout=number("H3_UPLOAD_TIMEOUT", 600, 1),
@@ -192,6 +196,29 @@ def token_ok(expected, provided):
 def media_signature(sign_key, name, expires):
     message = f"{name}:{int(expires)}".encode()
     return hmac.new(sign_key, message, hashlib.sha256).hexdigest()
+
+
+def ui_session_ticket(sign_key, expires):
+    """ComfyUI 页面会话票据：放在 URL 路径里，静态资源/API/WS 自动携带。"""
+    message = f"comfyui-ui:{int(expires)}".encode()
+    digest = hmac.new(sign_key, message, hashlib.sha256).hexdigest()
+    return f"{int(expires)}.{digest}"
+
+
+def ui_session_valid(sign_key, ticket, now=None):
+    try:
+        expires_raw, signature = str(ticket).split(".", 1)
+        expires = int(expires_raw)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if expires <= (time.time() if now is None else now):
+        return False
+    try:
+        provided = signature.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    expected = hmac.new(sign_key, f"comfyui-ui:{expires}".encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(provided, expected.encode())
 
 
 def describe_http_error(err):
@@ -1220,6 +1247,8 @@ def make_handler(gateway):
         protocol_version = "HTTP/1.1"
         server_version = f"HuobaoH3Gateway/{VERSION}"
         sys_version = ""
+        # 浏览器会为排队中的 chunk 预开大量 socket；空闲连接必须回收，否则线程数暴涨
+        timeout = 30
 
         def log_message(self, fmt, *args):
             return None
@@ -1344,6 +1373,10 @@ def make_handler(gateway):
                     return self._video_poll() if self.command == "GET" else self._not_found()
                 if path.startswith("/files/"):
                     return self._serve_file() if self.command in ("GET", "HEAD") else self._not_found()
+                if path == "/comfyui/ui-session":
+                    return self._ui_session() if self.command == "POST" else self._not_found()
+                if path.startswith("/comfyui/ui/"):
+                    return self._comfy_ui_proxy()
                 if path == "/comfyui" or path.startswith("/comfyui/"):
                     return self._comfy_proxy()
                 if path == "/v1/models":
@@ -1603,26 +1636,85 @@ def make_handler(gateway):
 
         # -- ComfyUI 代理 -------------------------------------------------
 
+        def _ui_session(self):
+            if not self._require_token():
+                return
+            ttl = gateway.settings.ui_session_ttl
+            expires = int(time.time()) + ttl
+            ticket = ui_session_ticket(gateway.settings.sign_key, expires)
+            self._json(200, {
+                "path": f"/comfyui/ui/{ticket}/",
+                "expires_at": expires,
+                "ttl": ttl,
+            })
+
         def _comfy_proxy(self):
             if not self._require_token(allow_query=True):
                 return
-            method = self.command
-            path = urllib.parse.urlsplit(self.path).path
-            target = path[len("/comfyui"):] or "/"
+            parsed = urllib.parse.urlsplit(self.path)
+            target = parsed.path[len("/comfyui"):] or "/"
             if not target.startswith("/"):
                 target = "/" + target
-            if not self._proxy_allowed(method, target):
+            if not self._proxy_allowed(self.command, target):
                 return self._error(404, "not_found", "代理路径不在允许列表")
+            self._forward_comfy(self.command, target, parsed.query, strip_token=True)
 
-            query = urllib.parse.parse_qsl(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
-            query = urllib.parse.urlencode([(k, v) for k, v in query if k != "token"])
-            body = None
-            if method == "POST":
-                body = self._read_body()
+        def _comfy_ui_proxy(self):
+            parsed = urllib.parse.urlsplit(self.path)
+            prefix = "/comfyui/ui/"
+            rest = parsed.path[len(prefix):]
+            ticket, separator, target = rest.partition("/")
+            if not ui_session_valid(gateway.settings.sign_key, ticket):
+                return self._error(403, "forbidden", "ComfyUI 页面会话无效或已过期，请刷新监控页面")
+            if not separator:
+                # 尾斜杠决定前端 api_base/静态资源解析，缺省时重定向补齐
+                query = ("?" + parsed.query) if parsed.query else ""
+                self.send_response(301)
+                self.send_header("Location", f"{prefix}{ticket}/{query}")
+                self.send_header("Content-Length", "0")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.close_connection = True
+                return
+            target = "/" + target
+            target = self._safe_ui_target(target)
+            if target is None:
+                return self._error(403, "forbidden", "监控页面路径不合法")
+            upgrade = (self.headers.get("Upgrade") or "").lower()
+            if target == "/ws" and upgrade == "websocket":
+                return self._comfy_ws(parsed.query, int(ticket.split(".", 1)[0]))
+            if not self._ui_proxy_allowed(self.command, target):
+                return self._error(404, "not_found", "监控页面仅开放只读操作")
+            self._forward_comfy(self.command, target, parsed.query, ui=True)
+
+        @staticmethod
+        def _safe_ui_target(target):
+            """只读白名单与实际转发必须看同一条规范路径，拒绝点段和编码分隔符。"""
+            if not target.startswith("/") or "\\" in target or "\x00" in target:
+                return None
+            lowered = target.lower()
+            if any(token in lowered for token in ("%2e", "%2f", "%5c", "%00")):
+                return None
+            if "//" in target or ";" in target:
+                return None
+            decoded = urllib.parse.unquote(target)
+            if "\\" in decoded or "\x00" in decoded:
+                return None
+            if any(segment in (".", "..") for segment in decoded.split("/")):
+                return None
+            return target
+
+        def _forward_comfy(self, method, target, raw_query="", strip_token=False, ui=False):
+            query_pairs = urllib.parse.parse_qsl(raw_query, keep_blank_values=True)
+            if strip_token:
+                query_pairs = [(k, v) for k, v in query_pairs if k != "token"]
+            query = urllib.parse.urlencode(query_pairs)
+            body = self._read_body() if method == "POST" else None
             headers = {}
-            content_type = self.headers.get("Content-Type")
-            if content_type:
-                headers["Content-Type"] = content_type
+            for name in ("Content-Type", "Accept", "Accept-Encoding", "Range", "If-None-Match", "If-Modified-Since"):
+                value = self.headers.get(name)
+                if value:
+                    headers[name] = value
             url = gateway.settings.comfy_url.rstrip("/") + target
             if query:
                 url += "?" + query
@@ -1630,23 +1722,57 @@ def make_handler(gateway):
             timeout = 600 if target == "/view" or target.startswith("/history/") else 120
             try:
                 with gateway._comfy_opener.open(request, timeout=timeout) as response:
-                    length = response.headers.get("Content-Length")
                     self.send_response(response.status)
-                    for header in ("Content-Type", "Content-Length", "Last-Modified", "ETag"):
+                    for header in (
+                        "Content-Type", "Content-Length", "Last-Modified", "ETag",
+                        "Content-Encoding", "Accept-Ranges",
+                        "Content-Range", "Content-Disposition",
+                    ):
                         value = response.headers.get(header)
                         if value:
                             self.send_header(header, value)
+                    if ui and target.startswith("/assets/"):
+                        # 带 hash 的前端 chunk 可长期缓存；上游的 no-store 会让首屏每次重下 100+ 文件
+                        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+                    else:
+                        value = response.headers.get("Cache-Control")
+                        if value:
+                            self.send_header("Cache-Control", value)
+                    if ui:
+                        self.send_header("Referrer-Policy", "no-referrer")
                     self.send_header("Access-Control-Allow-Origin", "*")
-                    self.send_header("Connection", "close")
+                    # 有 Content-Length 的只读响应允许复用连接；首屏 100+ chunk 不再每次重新握手
+                    keep_alive = (
+                        method in ("GET", "HEAD")
+                        and bool(response.headers.get("Content-Length"))
+                        and self.request_version != "HTTP/1.0"
+                        and not self.close_connection
+                    )
+                    if keep_alive:
+                        self.send_header("Connection", "keep-alive")
+                    else:
+                        self.send_header("Connection", "close")
+                        self.close_connection = True
                     self.end_headers()
-                    self.close_connection = True
-                    if method != "HEAD":
+                    if method != "HEAD" and response.status not in (204, 304):
                         while True:
                             chunk = response.read(256 * 1024)
                             if not chunk:
                                 break
                             self.wfile.write(chunk)
             except urllib.error.HTTPError as exc:
+                if exc.code in (204, 304):
+                    self.send_response(exc.code)
+                    for header in ("ETag", "Last-Modified", "Cache-Control"):
+                        value = exc.headers.get(header)
+                        if value:
+                            self.send_header(header, value)
+                    if ui:
+                        self.send_header("Referrer-Policy", "no-referrer")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.close_connection = True
+                    return
                 payload = exc.read()
                 content_type = exc.headers.get("Content-Type") or "application/json"
                 self._start(exc.code, content_type, len(payload))
@@ -1654,6 +1780,116 @@ def make_handler(gateway):
                     self.wfile.write(payload)
             except (urllib.error.URLError, OSError):
                 self._error(502, "comfy_error", "ComfyUI 不可达")
+
+        def _comfy_ws(self, raw_query, expires=0):
+            key = (self.headers.get("Sec-WebSocket-Key") or "").strip()
+            if not key:
+                return self._error(400, "bad_request", "缺少 WebSocket 握手")
+            upstream = urllib.parse.urlsplit(gateway.settings.comfy_url)
+            host = upstream.hostname or "127.0.0.1"
+            port = upstream.port or (443 if upstream.scheme == "https" else 80)
+            query = urllib.parse.urlencode(urllib.parse.parse_qsl(raw_query, keep_blank_values=True))
+            target = (upstream.path.rstrip("/") or "") + "/ws" + (("?" + query) if query else "")
+            expected_accept = base64.b64encode(hashlib.sha1(
+                (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()
+            ).digest()).decode()
+            sock = None
+            try:
+                sock = socket.create_connection((host, port), timeout=15)
+                if upstream.scheme == "https":
+                    sock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
+                sock.settimeout(None)
+                handshake = (
+                    f"GET {target} HTTP/1.1\r\n"
+                    f"Host: {host}:{port}\r\n"
+                    "Upgrade: websocket\r\n"
+                    "Connection: Upgrade\r\n"
+                    f"Sec-WebSocket-Key: {key}\r\n"
+                    "Sec-WebSocket-Version: 13\r\n"
+                    "\r\n"
+                ).encode()
+                sock.sendall(handshake)
+                response = b""
+                while b"\r\n\r\n" not in response:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    response += chunk
+                    if len(response) > 65536:
+                        break
+            except OSError:
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+                return self._error(502, "comfy_error", "ComfyUI WebSocket 不可达")
+
+            head, _, tail = response.partition(b"\r\n\r\n")
+            status_line = head.split(b"\r\n", 1)[0]
+            upstream_accept = ""
+            for line in head.split(b"\r\n")[1:]:
+                name, _, value = line.partition(b":")
+                if name.strip().lower() == b"sec-websocket-accept":
+                    upstream_accept = value.strip().decode("latin-1")
+                    break
+            if b" 101 " not in status_line or upstream_accept != expected_accept:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+                return self._error(502, "comfy_error", "ComfyUI WebSocket 握手失败")
+
+            self.send_response_only(101)
+            self.send_header("Upgrade", "websocket")
+            self.send_header("Connection", "Upgrade")
+            self.send_header("Sec-WebSocket-Accept", expected_accept)
+            self.end_headers()
+            self.wfile.flush()
+            self.close_connection = True
+            if tail:
+                try:
+                    self.connection.sendall(tail)
+                except OSError:
+                    pass
+            self._relay_ws(sock, expires)
+
+        def _relay_ws(self, upstream, expires=0):
+            client = self.connection
+            try:
+                client.setblocking(False)
+                upstream.setblocking(False)
+                while True:
+                    if expires and time.time() >= expires:
+                        return
+                    readable, _, _ = select.select([client, upstream], [], [], 30)
+                    for source in readable:
+                        try:
+                            data = source.recv(65536)
+                        except (BlockingIOError, InterruptedError):
+                            continue
+                        if not data:
+                            return
+                        target = upstream if source is client else client
+                        view = memoryview(data)
+                        while view:
+                            try:
+                                sent = target.send(view)
+                            except (BlockingIOError, InterruptedError):
+                                select.select([], [target], [], 5)
+                                continue
+                            view = view[sent:]
+            except OSError:
+                pass
+            finally:
+                try:
+                    client.setblocking(True)
+                except OSError:
+                    pass
+                try:
+                    upstream.close()
+                except OSError:
+                    pass
 
         @staticmethod
         def _proxy_allowed(method, path):
@@ -1666,7 +1902,25 @@ def make_handler(gateway):
                 return path in ("/prompt", "/upload/image")
             return False
 
+        @staticmethod
+        def _ui_proxy_allowed(method, path):
+            if method in ("GET", "HEAD"):
+                return True
+            if method == "POST":
+                # 只放行前端自身的设置/用户数据读写，生成类变更一律拒绝
+                return (
+                    path == "/api/settings" or path.startswith("/api/settings/")
+                    or path == "/api/userdata" or path.startswith("/api/userdata/")
+                )
+            return False
+
     return Handler
+
+
+class GatewayServer(ThreadingHTTPServer):
+    # 默认 backlog=5，ComfyUI 首屏 100+ 并发 chunk 会丢 SYN；内核 somaxconn 为 4096
+    request_queue_size = 256
+    daemon_threads = True
 
 
 def main():
@@ -1674,7 +1928,7 @@ def main():
     if not settings.token:
         raise SystemExit("H3_GATEWAY_TOKEN 未设置，拒绝启动")
     gateway = Gateway(settings)
-    server = ThreadingHTTPServer((settings.host, settings.port), make_handler(gateway))
+    server = GatewayServer((settings.host, settings.port), make_handler(gateway))
     log(
         f"{SERVICE} {VERSION} listening on {settings.host}:{settings.port} "
         f"comfy={settings.comfy_url} workers={settings.workers}"

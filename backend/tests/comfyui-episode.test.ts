@@ -5,6 +5,7 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
+import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { eq } from 'drizzle-orm'
@@ -18,6 +19,7 @@ process.env.MYSQL_AUTO_IMPORT = 'false'
 
 const { db, schema } = await import('../src/db/index.ts')
 const {
+  createComfyUiSession,
   previewEpisodeComfyRun,
   resolveEpisodeComfyConfig,
   resolveEpisodeTimelineMapping,
@@ -25,9 +27,11 @@ const {
   runEpisodeComfy,
 } = await import('../src/services/comfyui-episode.ts')
 const { default: episodeRoute } = await import('../src/routes/episodes.ts')
+const { default: taskRoute } = await import('../src/routes/tasks.ts')
 
 const app = new Hono()
 app.route('/api/v1/episodes', episodeRoute)
+app.route('/api/v1/tasks', taskRoute)
 
 const ts = '2026-11-04T00:00:00.000Z'
 let seq = 0
@@ -313,16 +317,25 @@ test('预览：输出节点缺失时在提交前报错', async () => {
 
 test('路由：工作流预览可用，整集任务出现在集任务抽屉', async () => {
   const { episodeId, dramaId } = buildEpisodeFixture()
-  db.insert(schema.sysTask).values({
+  const inserted = db.insert(schema.sysTask).values({
     type: 'video',
     dramaId,
     provider: 'comfyui',
     stage: 'polling',
     status: 'processing',
-    params: JSON.stringify({ episodeId, comfyTimeline: { node: '6' } }),
+    params: JSON.stringify({
+      episodeId,
+      comfyTimeline: {
+        node: '6',
+        fps: 24,
+        workflow: { '6': { class_type: 'MiniMaxH3Director', inputs: { timeline_data: '{}' } } },
+        timelineData: { version: 4, segments: [{ prompt: 'heavy payload' }] },
+      },
+    }),
     createdAt: ts,
     updatedAt: ts,
   }).run()
+  const taskId = Number(inserted.lastInsertRowid)
 
   const previewResp = await app.request(`/api/v1/episodes/${episodeId}/comfyui/workflow`)
   assert.equal(previewResp.status, 200)
@@ -333,9 +346,70 @@ test('路由：工作流预览可用，整集任务出现在集任务抽屉', as
   const tasksResp = await app.request(`/api/v1/episodes/${episodeId}/generation-tasks`)
   assert.equal(tasksResp.status, 200)
   const tasksBody = await tasksResp.json() as any
-  assert.ok(tasksBody.data.tasks.some((task: any) => task.provider === 'comfyui' && task.status === 'processing'))
+  const task = tasksBody.data.tasks.find((row: any) => row.provider === 'comfyui' && row.status === 'processing')
+  assert.ok(task)
+  // 列表/轮询不返回内嵌工作流与时间线，但保留 comfyTimeline 标记
+  const listParams = JSON.parse(task.params)
+  assert.equal(listParams.comfyTimeline.node, '6')
+  assert.equal(listParams.comfyTimeline.fps, 24)
+  assert.equal(listParams.comfyTimeline.workflow, undefined)
+  assert.equal(listParams.comfyTimeline.timelineData, undefined)
+
+  const detailResp = await app.request(`/api/v1/tasks/${taskId}`)
+  assert.equal(detailResp.status, 200)
+  const detailBody = await detailResp.json() as any
+  assert.equal(detailBody.data.params.includes('"workflow"'), false)
+  assert.equal(JSON.parse(detailBody.data.params).comfyTimeline.node, '6')
 
   const missingResp = await app.request('/api/v1/episodes/99999/comfyui/workflow')
   assert.equal(missingResp.status, 400)
+})
+
+test('监控会话：网关配置用 Token 换取带票据地址', async () => {
+  const { episodeId, configId } = buildEpisodeFixture()
+  const seen: { url?: string; method?: string; auth?: string }[] = []
+  const server = createServer((req, res) => {
+    seen.push({ url: req.url, method: req.method, auth: req.headers.authorization })
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ path: '/comfyui/ui/ticket123/', expires_at: 123456 }))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as any).port
+  try {
+    db.update(schema.aiServiceConfigs).set({
+      baseUrl: `http://127.0.0.1:${port}/comfyui`,
+      apiKey: 'gw-token',
+    }).where(eq(schema.aiServiceConfigs.id, configId)).run()
+
+    const session = await createComfyUiSession(episodeId)
+    assert.equal(session.gateway, true)
+    assert.equal(session.url, `http://127.0.0.1:${port}/comfyui/ui/ticket123/`)
+    assert.equal(session.expiresAt, 123456)
+    assert.deepEqual(seen[0], {
+      url: '/comfyui/ui-session',
+      method: 'POST',
+      auth: 'Bearer gw-token',
+    })
+
+    const routeResp = await app.request(`/api/v1/episodes/${episodeId}/comfyui/ui-session`)
+    assert.equal(routeResp.status, 200)
+    const routeBody = await routeResp.json() as any
+    assert.equal(routeBody.data.url, `http://127.0.0.1:${port}/comfyui/ui/ticket123/`)
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  }
+})
+
+test('监控会话：直连 ComfyUI 返回原始地址，网关缺少 Token 时报错', async () => {
+  const { episodeId, configId } = buildEpisodeFixture()
+  const direct = await createComfyUiSession(episodeId)
+  assert.equal(direct.gateway, false)
+  assert.equal(direct.url, 'http://127.0.0.1:8190')
+
+  db.update(schema.aiServiceConfigs).set({
+    baseUrl: 'http://127.0.0.1:8190/comfyui',
+    apiKey: '',
+  }).where(eq(schema.aiServiceConfigs.id, configId)).run()
+  await assert.rejects(() => createComfyUiSession(episodeId), /缺少 API Key/)
 })
 

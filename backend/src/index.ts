@@ -35,6 +35,7 @@ import audioTracks from './routes/audio-tracks.js'
 import audioPeaks from './routes/audio-peaks.js'
 import mix from './routes/mix.js'
 import exportsRoute from './routes/exports.js'
+import edit from './routes/edit.js'
 import grid from './routes/grid.js'
 import scriptImport from './routes/scriptImport.js'
 import jobs from './routes/jobs.js'
@@ -112,6 +113,8 @@ api.route('/', audioPeaks)
 api.route('/', mix)
 // 导出：/episodes/:id/export-checks、/episodes/:id/exports、/exports/:id
 api.route('/', exportsRoute)
+// 剪辑工作台聚合状态：GET /episodes/:id/edit（M1 只读）
+api.route('/', edit)
 // 兼容 M0 的 /dubbing 前缀
 api.route('/dubbing', dubbing)
 api.route('/grid', grid)

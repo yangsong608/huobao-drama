@@ -46,22 +46,30 @@ function normalizeProviderSettings(value: any): Record<string, any> {
 
 /** 各 provider 的最低配置要求（在保存时拦截，避免生成时才报错） */
 function validateProviderSettings(serviceType: string, provider: string, settings: Record<string, any>) {
-  if (provider === 'comfyui' && (serviceType === 'image' || serviceType === 'video')) {
-    const workflow = settings.workflow
-    if (!workflow) throw new Error('ComfyUI 需要 workflow（API 格式工作流 JSON）')
-    if (typeof workflow === 'string') {
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(workflow)
-      } catch {
-        throw new Error('ComfyUI workflow 不是合法 JSON')
-      }
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('ComfyUI workflow 必须是节点对象')
-      }
-    } else if (typeof workflow !== 'object' || Array.isArray(workflow)) {
+  if (provider !== 'comfyui') return
+  if (serviceType !== 'image' && serviceType !== 'video' && serviceType !== 'audio-gen') return
+  const workflow = settings.workflow
+  if (!workflow) throw new Error('ComfyUI 需要 workflow（API 格式工作流 JSON）')
+  let serialized = ''
+  if (typeof workflow === 'string') {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(workflow)
+    } catch {
+      throw new Error('ComfyUI workflow 不是合法 JSON')
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error('ComfyUI workflow 必须是节点对象')
     }
+    serialized = workflow
+  } else {
+    if (typeof workflow !== 'object' || Array.isArray(workflow)) {
+      throw new Error('ComfyUI workflow 必须是节点对象')
+    }
+    serialized = JSON.stringify(workflow)
+  }
+  if (serviceType === 'audio-gen' && !serialized.includes('__PROMPT__')) {
+    throw new Error('音频工作流必须包含 __PROMPT__ 占位符')
   }
 }
 

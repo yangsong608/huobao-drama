@@ -180,6 +180,12 @@ export function deleteEpisodeAsset(episodeId: number, assetId: number): boolean 
     throw new SeparationError('音频素材不存在', 404)
   }
   db.transaction((tx) => {
+    tx.delete(schema.episodeAudioClips)
+      .where(and(
+        eq(schema.episodeAudioClips.episodeId, episodeId),
+        eq(schema.episodeAudioClips.assetId, assetId),
+      ))
+      .run()
     const tracks = tx.select().from(schema.episodeAudioTracks)
       .where(eq(schema.episodeAudioTracks.episodeId, episodeId)).all()
       .filter((track) => track.stemAssetId === assetId)
@@ -435,7 +441,7 @@ export function autoCreateStemTracks(episodeId: number, assetIds: number[]): { t
   const assets = db.select().from(schema.episodeAudioAssets)
     .where(and(eq(schema.episodeAudioAssets.episodeId, episodeId), isNull(schema.episodeAudioAssets.deletedAt)))
     .all()
-    .filter((asset) => assetIds.includes(asset.id))
+    .filter((asset) => assetIds.includes(asset.id) && asset.kind !== 'soundscape')
   if (!assets.length) return { tracks: [], clips: [] }
 
   const createdTracks: TrackRow[] = []

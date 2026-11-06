@@ -12,7 +12,9 @@ test('episode video mode tabs switch between native and ComfyUI', () => {
   assert.match(page, /<div class="video-mode-tabs" role="tablist"/)
   assert.match(page, /@click="changeEpisodeVideoMode\('native'\)"/)
   assert.match(page, /@click="changeEpisodeVideoMode\('comfyui'\)"/)
-  assert.match(page, /const episodeVideoMode = computed<'native' \| 'comfyui'>/)
+  // 该文件是 <script setup>（无 lang="ts"），计算属性不能带 TS 泛型
+  assert.match(page, /const episodeVideoMode = computed\(\(\) =>/)
+  assert.doesNotMatch(page, /computed<'native'/)
   assert.match(page, /await episodeAPI\.update\(epId\.value, \{ video_mode: mode \}\)/)
 })
 
@@ -23,27 +25,40 @@ test('video configs follow the active mode and write the matching episode field'
   assert.match(page, /comfyTarget \? \{ comfyui_config_id: configId \} : \{ video_config_id: configId \}/)
 })
 
-test('ComfyUI mode hides per-shot controls and mounts the workflow panel', () => {
-  // 逐镜播放器、历史、批量与重试仅在原生模式出现
+test('ComfyUI mode keeps the task list, footer actions and mounts the token-gated monitor', () => {
+  // 逐镜播放器、历史、批量与重试仅在原生模式出现；左侧任务列表保留
   assert.match(page, /<aside v-if="!isComfyVideoMode" class="video-task-player">/)
   assert.match(page, /v-if="!isComfyVideoMode && sbVideoHistory\.length"/)
   assert.match(page, /v-if="recoverableVideoCount && !isComfyVideoMode"/)
   assert.match(page, /v-if="!isComfyVideoMode" class="btn btn-sm" :class="\{ 'is-on': videoSelectMode \}"/)
-  // 右侧改为工作流面板：映射信息、分镜段落与运行入口
-  assert.match(page, /<div v-else class="comfy-workflow-panel">/)
-  assert.match(page, /comfyPreview\.mapping\.node\s*\}\}\.\{\{\s*comfyPreview\.mapping\.input/)
-  assert.match(page, /v-for="segment in comfyPreview\.timeline\.segments"/)
-  assert.match(page, /@click="runComfyEpisode"/)
+  // 左下角两个按钮：修改回到原生逐镜，提交直接运行整集工作流
+  assert.match(page, /<div v-if="isComfyVideoMode" class="video-task-footer">/)
+  assert.match(page, /class="video-task-footer-actions"[\s\S]*?@click="changeEpisodeVideoMode\('native'\)"/)
+  assert.match(page, /class="video-task-footer-actions"[\s\S]*?@click="runComfyEpisode"/)
+  // 右侧只挂载带令牌的工作流监控页，不再渲染旧预览面板
+  assert.match(page, /<section v-if="isComfyVideoMode" class="comfy-embed-stage">/)
+  assert.match(page, /<iframe[\s\S]*?:src="comfyUiUrl"[\s\S]*?referrerpolicy="no-referrer"/)
+  assert.doesNotMatch(page, /comfy-workflow-panel/)
 })
 
-test('ComfyUI panel previews and submits the whole episode', () => {
+test('ComfyUI panel previews, submits the whole episode and loads the monitor session', () => {
   assert.match(useApi, /comfyWorkflow: \(id: number, configId\?: number\) => api\.get/)
+  assert.match(useApi, /comfyUiSession: \(id: number, configId\?: number\) => api\.get/)
   assert.match(useApi, /comfyRun: \(id: number, opts\?: \{ configId\?: number; forceNew\?: boolean \}\) => api\.post/)
   assert.match(page, /comfyPreview\.value = await episodeAPI\.comfyWorkflow\(epId\.value, configId \|\| comfyPreviewConfigId\.value\)/)
+  assert.match(page, /const res = await episodeAPI\.comfyUiSession\(epId\.value, configId \|\| comfyPreviewConfigId\.value\)/)
+  assert.match(page, /comfyUiGateway\.value = res\?\.gateway === true/)
   assert.match(page, /const res = await episodeAPI\.comfyRun\(epId\.value, \{ configId: comfyPreviewConfigId\.value \}\)/)
   assert.match(page, /void pollComfyEpisode\(res\?\.taskId\)/)
   // 整集任务在任务列表标记为「整集生成」
   assert.match(page, /if \(task\.type === 'video' && isEpisodeComfyTask\(task\)\) return t\('episode\.tasks\.wholeEpisode'\)/)
+})
+
+test('ComfyUI polling stops when the episode changes or the page unmounts', () => {
+  assert.match(page, /let comfyPollSeq = 0/)
+  assert.match(page, /const seq = \+\+comfyPollSeq/)
+  assert.match(page, /seq !== comfyPollSeq \|\| episodeId !== epId\.value/)
+  assert.match(page, /onBeforeUnmount\(\(\) => \{[\s\S]*?comfyPollSeq\+\+/)
 })
 
 test('per-shot generation is blocked in ComfyUI mode', () => {
@@ -53,15 +68,19 @@ test('per-shot generation is blocked in ComfyUI mode', () => {
 test('ComfyUI copy exists in all four locales', () => {
   const keys = [
     'modelLabel', 'modeLabel', 'modeNative', 'modeComfy', 'modeSwitchedNative', 'modeSwitchedComfy',
-    'nodeCount', 'loading', 'previewFailed', 'noPreview', 'openSettings', 'timelineNode', 'outputNode',
-    'autoOutput', 'fps', 'mappingSource', 'mappingConfig', 'mappingDefault', 'segments', 'frames',
-    'duration', 'resolution', 'segmentsTitle', 'refs', 'open', 'run', 'running', 'runConfirm',
-    'runStarted', 'runDone', 'runFailed', 'runningTask', 'exportHint', 'noBaseUrl', 'invalidBaseUrl', 'nativeOnly',
+    'previewFailed', 'noPreview', 'openSettings', 'segments', 'frames', 'open', 'running',
+    'runConfirm', 'runStarted', 'runDone', 'runFailed', 'nativeOnly', 'editNative', 'submit',
+    'monitorTitle', 'viaGateway', 'liveRunning', 'liveIdle', 'monitorLoading', 'monitorFailed',
+    'monitorReadonly', 'retry',
   ]
+  const stale = ['nodeCount', 'loading', 'timelineNode', 'outputNode', 'autoOutput', 'fps', 'mappingSource', 'mappingConfig', 'mappingDefault', 'duration', 'resolution', 'segmentsTitle', 'refs', 'run', 'runningTask', 'exportHint', 'noBaseUrl', 'invalidBaseUrl']
   for (const locale of ['zh', 'en', 'ja', 'ko']) {
     const dict = JSON.parse(read(`app/locales/${locale}.json`))
     for (const key of keys) {
       assert.equal(typeof dict.episode.comfy?.[key], 'string', `${locale} missing episode.comfy.${key}`)
+    }
+    for (const key of stale) {
+      assert.equal(dict.episode.comfy?.[key], undefined, `${locale} still has obsolete episode.comfy.${key}`)
     }
     assert.equal(typeof dict.episode.tasks.wholeEpisode, 'string', `${locale} missing episode.tasks.wholeEpisode`)
   }

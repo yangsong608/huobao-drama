@@ -89,6 +89,14 @@ export const episodes = sqliteTable('episodes', {
   mixVirtualTracks: text('mix_virtual_tracks'),
   /** 最近一次台词抽取时间 */
   lastExtractAt: text('last_extract_at'),
+  /** 当前剪辑版本（edit_revisions.id）；null 表示尚未建立剪辑版本 */
+  editRevisionId: integer('edit_revision_id'),
+  /** 当前剪辑计划哈希，用于混音桥快速比较 */
+  editPlanHash: text('edit_plan_hash'),
+  /** 时间/源素材同步哈希 */
+  editSyncHash: text('edit_sync_hash'),
+  /** 是否已纳入剪辑工作台（V3）；M1 只读不写 */
+  editEnabled: integer('edit_enabled', { mode: 'boolean' }).default(false),
   /** 来源小说章节（V3） */
   sourceChapterNo: integer('source_chapter_no'),
   sourcePartNo: integer('source_part_no'),
@@ -612,6 +620,10 @@ export const mixRevisions = sqliteTable('mix_revisions', {
   note: text('note'),
   isCurrent: integer('is_current', { mode: 'boolean' }).default(false),
   createdAt: text('created_at').notNull(),
+  editRevisionId: integer('edit_revision_id'),
+  editSyncHash: text('edit_sync_hash'),
+  dialogueSyncHash: text('dialogue_sync_hash'),
+  sourceKind: text('source_kind').default('legacy'),
 })
 
 /** 导出记录 */
@@ -638,6 +650,97 @@ export const episodeExports = sqliteTable('episode_exports', {
   createdAt: text('created_at').notNull(),
   finishedAt: text('finished_at'),
   deletedAt: text('deleted_at'),
+  editRevisionId: integer('edit_revision_id'),
+  mixRevisionId: integer('mix_revision_id'),
+  editPlanHash: text('edit_plan_hash'),
+  editSyncHash: text('edit_sync_hash'),
+  dialogueSyncHash: text('dialogue_sync_hash'),
+  renderMode: text('render_mode'),
+  subtitleMode: text('subtitle_mode'),
+  fileName: text('file_name'),
+})
+
+/** 剪辑草稿：每集最多一份，可变 */
+export const episodeEditDrafts = sqliteTable('episode_edit_drafts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id'),
+  planJson: text('plan_json').notNull(),
+  planHash: text('plan_hash'),
+  editSyncHash: text('edit_sync_hash'),
+  version: integer('version').notNull().default(0),
+  baseRevisionId: integer('base_revision_id'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** 不可变剪辑版本 */
+export const editRevisions = sqliteTable('edit_revisions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  revisionNo: integer('revision_no').notNull(),
+  planJson: text('plan_json').notNull(),
+  planHash: text('plan_hash').notNull(),
+  editSyncHash: text('edit_sync_hash').notNull(),
+  renderHash: text('render_hash'),
+  durationMs: integer('duration_ms'),
+  clipCount: integer('clip_count'),
+  note: text('note'),
+  isCurrent: integer('is_current', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull(),
+})
+
+/** 剪辑渲染缓存 */
+export const editRenders = sqliteTable('edit_renders', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  kind: text('kind').notNull(),
+  editRevisionId: integer('edit_revision_id'),
+  renderHash: text('render_hash'),
+  editSyncHash: text('edit_sync_hash'),
+  dialogueSyncHash: text('dialogue_sync_hash'),
+  subtitleHash: text('subtitle_hash'),
+  mixRevisionId: integer('mix_revision_id'),
+  audioVersion: integer('audio_version'),
+  cacheKey: text('cache_key'),
+  rangeStartMs: integer('range_start_ms'),
+  rangeEndMs: integer('range_end_ms'),
+  status: text('status').notNull().default('pending'),
+  progress: integer('progress').notNull().default(0),
+  outputUrl: text('output_url'),
+  outputPath: text('output_path'),
+  durationMs: integer('duration_ms'),
+  sizeBytes: integer('size_bytes'),
+  error: text('error'),
+  createdAt: text('created_at').notNull(),
+  finishedAt: text('finished_at'),
+  deletedAt: text('deleted_at'),
+})
+
+/** 预览代理 */
+export const episodeMediaProxies = sqliteTable('episode_media_proxies', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id'),
+  sourceUrl: text('source_url').notNull(),
+  sourceFingerprint: text('source_fingerprint').notNull(),
+  status: text('status').notNull().default('pending'),
+  progress: integer('progress').notNull().default(0),
+  outputUrl: text('output_url'),
+  width: integer('width'),
+  height: integer('height'),
+  error: text('error'),
+  createdAt: text('created_at').notNull(),
+  finishedAt: text('finished_at'),
+})
+
+/** 编辑 / 导出互斥锁 */
+export const episodeLocks = sqliteTable('episode_locks', {
+  episodeId: integer('episode_id').primaryKey(),
+  kind: text('kind').notNull(),
+  owner: text('owner').notNull(),
+  acquiredAt: text('acquired_at').notNull(),
+  expiresAt: text('expires_at').notNull(),
 })
 
 /** 配音持久化任务 */
@@ -682,6 +785,8 @@ export const episodeAudioTracks = sqliteTable('episode_audio_tracks', {
   duckAttackMs: integer('duck_attack_ms').default(20),
   duckReleaseMs: integer('duck_release_ms').default(250),
   sortOrder: integer('sort_order').default(0),
+  /** 服务端来源：soundscape=AI 生成轨；用户轨为空 */
+  origin: text('origin'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })

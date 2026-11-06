@@ -83,15 +83,28 @@ test('范围模式按起止裁剪并保留片头静音', () => {
   assert.match(graph, /adelay=1000\|1000/)
 })
 
-test('原声与 BGM 总线接受对白侧链', () => {
+test('原声与 BGM 总线各有独立对白侧链', () => {
   const plan = planWith([clip()]) as any
   plan.tracks.push(
     { ...plan.tracks[0], id: 7, virtual: false, role: 'ambience', name: '原声背景', busId: 'original', loop: false, clips: [clip()] },
     { ...plan.tracks[0], id: 8, virtual: false, role: 'bgm', name: '配乐', busId: 'bgm', loop: false, clips: [clip()] },
   )
   const { graph } = buildMixFilterGraph(plan)
-  assert.match(graph, /asplit=2\[bus_dialogue\]\[sidechain_dialogue\]/)
+  assert.match(graph, /asplit=3\[bus_dialogue\]\[sidechain_dialogue_original\]\[sidechain_dialogue_bgm\]/)
+  assert.match(graph, /\[raw_original\]\[sidechain_dialogue_original\]sidechaincompress=/)
+  assert.match(graph, /\[raw_bgm\]\[sidechain_dialogue_bgm\]sidechaincompress=/)
   assert.equal((graph.match(/sidechaincompress=/g) || []).length, 2)
+})
+
+test('原声与 BGM 同时存在时可实际渲染', async () => {
+  const plan = planWith([clip()]) as any
+  plan.tracks.push(
+    { ...plan.tracks[0], id: 7, virtual: false, role: 'ambience', name: '原声背景', busId: 'original', loop: false, clips: [clip()] },
+    { ...plan.tracks[0], id: 8, virtual: false, role: 'bgm', name: '配乐', busId: 'bgm', loop: false, clips: [clip()] },
+  )
+  const outputPath = path.join(root, 'ducked.m4a')
+  const result = await renderMixAudio(plan, { outputPath, format: 'm4a' })
+  assert.ok(Math.abs(result.durationMs - 3000) <= 100, `duration=${result.durationMs}`)
 })
 
 test('无可用片段时拒绝渲染', async () => {

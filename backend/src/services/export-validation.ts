@@ -9,7 +9,7 @@ import type { ExportKind } from './export-presets.js'
 export interface MediaProbe {
   durationMs: number
   sizeBytes: number
-  video: { codec: string; width: number; height: number } | null
+  video: { codec: string; width: number; height: number; fps: number | null } | null
   audio: { codec: string; sampleRate: number; channels: number } | null
   subtitleStreams: number
 }
@@ -50,6 +50,18 @@ export function probeMedia(file: string): Promise<MediaProbe> {
       const audio = streams.find((stream) => stream.codec_type === 'audio')
       const duration = Number(metadata?.format?.duration)
       const size = Number(metadata?.format?.size)
+      const parseFps = (raw: unknown): number | null => {
+        const text = String(raw ?? '').trim()
+        if (!text) return null
+        const [numerator, denominator] = text.split('/').map(Number)
+        if (Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0) {
+          const fraction = numerator / denominator
+          return Number.isFinite(fraction) && fraction > 0 ? fraction : null
+        }
+        const value = Number(text)
+        return Number.isFinite(value) && value > 0 ? value : null
+      }
+      const fps = video ? parseFps(video.avg_frame_rate) ?? parseFps(video.r_frame_rate) : null
       resolve({
         durationMs: Number.isFinite(duration) && duration > 0 ? Math.round(duration * 1000) : 0,
         sizeBytes: Number.isFinite(size) && size > 0 ? size : 0,
@@ -58,6 +70,7 @@ export function probeMedia(file: string): Promise<MediaProbe> {
               codec: String(video.codec_name || ''),
               width: Number(video.width) || 0,
               height: Number(video.height) || 0,
+              fps,
             }
           : null,
         audio: audio

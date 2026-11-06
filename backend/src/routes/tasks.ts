@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { and, desc, eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { success, created, badRequest } from '../utils/response.js'
+import { slimTaskParams } from '../utils/transform.js'
 import { generateImage, generateVideo, recoverVideoTask } from '../services/generation.js'
 import { safeTaskError } from '../services/video-download.js'
 import { getActiveConfig, getConfigById } from '../services/ai.js'
@@ -343,7 +344,7 @@ app.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const [row] = await db.select().from(schema.sysTask)
     .where(eq(schema.sysTask.id, id))
-  return success(c, row || null)
+  return success(c, row ? slimTaskParams(row) : null)
 })
 
 // GET /tasks — 按 type / storyboard_id / drama_id 过滤
@@ -358,7 +359,7 @@ app.get('/', async (c) => {
   if (storyboardId) rows = rows.filter(r => r.storyboardId === Number(storyboardId))
   if (dramaId) rows = rows.filter(r => r.dramaId === Number(dramaId))
 
-  return success(c, rows)
+  return success(c, rows.map(slimTaskParams))
 })
 
 // DELETE /tasks/:id

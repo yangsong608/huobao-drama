@@ -8,7 +8,7 @@
  */
 import crypto from 'crypto'
 import fs from 'fs'
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { getAbsolutePath } from '../utils/storage.js'
@@ -122,6 +122,7 @@ export interface MixTrack {
   color: string | null
   height: number
   sortOrder: number
+  origin: string | null
   stemAssetId: number | null
   clips: MixClip[]
 }
@@ -233,7 +234,35 @@ function toClip(row: ClipRow): MixClip {
   }
 }
 
-function buildVirtualDialogueTrack(episodeId: number, timeline: Awaited<ReturnType<typeof previewTimeline>>): MixTrack {
+/** 已放入群众声生成轨的台词，避免虚拟对白轨重复播放 */
+function soundscapeCrowdLineIds(episodeId: number): Set<number> {
+  const trackIds = new Set(
+    db.select({ id: schema.episodeAudioTracks.id })
+      .from(schema.episodeAudioTracks)
+      .where(and(
+        eq(schema.episodeAudioTracks.episodeId, episodeId),
+        eq(schema.episodeAudioTracks.origin, 'soundscape'),
+        eq(schema.episodeAudioTracks.role, 'crowd'),
+      ))
+      .all()
+      .map((row) => row.id),
+  )
+  if (!trackIds.size) return new Set()
+  const clips = db.select().from(schema.episodeAudioClips)
+    .where(eq(schema.episodeAudioClips.episodeId, episodeId))
+    .all()
+  return new Set(
+    clips
+      .filter((clip) => trackIds.has(clip.trackId) && clip.lineId != null)
+      .map((clip) => clip.lineId!),
+  )
+}
+
+function buildVirtualDialogueTrack(
+  episodeId: number,
+  timeline: Awaited<ReturnType<typeof previewTimeline>>,
+  excludedLineIds: Set<number> = new Set(),
+): MixTrack {
   const takes = db.select().from(schema.lineTakes)
     .where(eq(schema.lineTakes.episodeId, episodeId))
     .orderBy(asc(schema.lineTakes.takeNo))
@@ -246,6 +275,7 @@ function buildVirtualDialogueTrack(episodeId: number, timeline: Awaited<ReturnTy
 
   const clips: MixClip[] = []
   for (const cue of timeline.cues) {
+    if (excludedLineIds.has(cue.lineId)) continue
     const take = activeByLine.get(cue.lineId)
     const rawUrl = take?.audioUrl || cue.audioUrl
     const source = clipSource(rawUrl)
@@ -291,6 +321,7 @@ function buildVirtualDialogueTrack(episodeId: number, timeline: Awaited<ReturnTy
     color: '#f59e0b',
     height: 72,
     sortOrder: -1,
+    origin: null,
     stemAssetId: null,
     clips,
   }
@@ -350,6 +381,7 @@ function buildVirtualBedTrack(bed: { url: string; durationMs: number }): MixTrac
     color: '#38bdf8',
     height: 72,
     sortOrder: -2,
+    origin: null,
     stemAssetId: null,
     clips: [{
       id: null,
@@ -404,6 +436,7 @@ async function buildVirtualBgmTrack(
     color: '#8b5cf6',
     height: 72,
     sortOrder: -3,
+    origin: null,
     stemAssetId: null,
     clips: [{
       id: null,
@@ -487,6 +520,7 @@ export async function compileMixPlan(episodeId: number, dramaId: number): Promis
       color: row.color ?? null,
       height: row.height ?? 72,
       sortOrder: row.sortOrder ?? 0,
+      origin: row.origin ?? null,
       stemAssetId: row.stemAssetId ?? null,
       clips: clipRows.filter((clip) => clip.trackId === row.id).map(toClip),
     }
@@ -497,14 +531,21 @@ export async function compileMixPlan(episodeId: number, dramaId: number): Promis
     0,
   )
   const hasOriginalUserTrack = tracks.some((track) => (
-    track.role === 'original' || track.role === 'ambience' || track.busId === 'original'
+    track.origin !== 'soundscape'
+    && (track.role === 'original' || track.role === 'ambience' || track.busId === 'original')
   ))
-  const hasBgmUserTrack = tracks.some((track) => track.role === 'bgm' || track.busId === 'bgm')
+  const hasBgmUserTrack = tracks.some((track) => (
+    (track.role === 'bgm' || track.busId === 'bgm')
+    && (track.origin !== 'soundscape' || track.clips.length > 0)
+  ))
   // 无声集必须在混音层再次静音原声，避免旧合片把原声带回成片
   const silentEpisode = normalizeVideoAudioMode(episode.videoAudioMode) === 'silent'
   const bed = hasOriginalUserTrack || silentEpisode ? null : await latestMergeBed(episodeId)
   const targetDurationMs = Math.max(0, timeline.totalDurationMs, dbClipEnd, bed?.durationMs || 0)
-  const virtualTracks: MixTrack[] = [buildVirtualDialogueTrack(episodeId, timeline)]
+  const excludedCrowdLineIds = soundscapeCrowdLineIds(episodeId)
+  const virtualTracks: MixTrack[] = [
+    buildVirtualDialogueTrack(episodeId, timeline, excludedCrowdLineIds),
+  ]
   if (bed) virtualTracks.push(buildVirtualBedTrack(bed))
   if (!hasBgmUserTrack) {
     const bgmTrack = await buildVirtualBgmTrack(episode, drama, targetDurationMs)
@@ -1042,6 +1083,7 @@ export function restoreMixRevision(episodeId: number, revisionId: number): { rev
         height: track.height,
         stemAssetId: track.stemAssetId,
         sortOrder: track.sortOrder,
+        origin: track.origin === 'soundscape' ? 'soundscape' : null,
         updatedAt: now(),
       }
       if (track.id != null && existingIds.has(track.id)) {

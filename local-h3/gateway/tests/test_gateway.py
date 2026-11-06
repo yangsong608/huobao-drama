@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 """H3 网关单元/集成测试：标准库 unittest + 本地假 ComfyUI，不依赖 GPU。"""
 import base64
+import hashlib
 import json
 import os
 import re
 import shutil
+import socket
 import sys
 import tempfile
 import threading
@@ -92,6 +94,11 @@ class FakeComfy:
                     with fake.lock:
                         fake.uploads.append({"name": name, "body": raw})
                     return self._send(200, json.dumps({"name": name}).encode())
+                if path == "/api/settings":
+                    fake.last_proxy_body = raw
+                    return self._send(200, b'{"ok":true}')
+                if path == "/api/prompt":
+                    return self._send(404, b"{}")
                 if path == "/prompt":
                     body = json.loads(raw or b"{}")
                     graph = body.get("prompt") or {}
@@ -110,6 +117,27 @@ class FakeComfy:
             def do_GET(self):
                 parsed = urllib.parse.urlsplit(self.path)
                 path = parsed.path
+                if path == "/ws" and (self.headers.get("Upgrade") or "").lower() == "websocket":
+                    key = (self.headers.get("Sec-WebSocket-Key") or "").strip()
+                    accept = base64.b64encode(hashlib.sha1(
+                        (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()
+                    ).digest()).decode()
+                    self.send_response_only(101)
+                    self.send_header("Upgrade", "websocket")
+                    self.send_header("Connection", "Upgrade")
+                    self.send_header("Sec-WebSocket-Accept", accept)
+                    self.end_headers()
+                    self.wfile.flush()
+                    self.close_connection = True
+                    self.connection.sendall(b"\x81\x05hello")
+                    self.connection.recv(1024)
+                    return None
+                if path == "/":
+                    return self._send(200, b"<html><script src=\"./assets/app.js\"></script></html>", "text/html")
+                if path == "/assets/app.js":
+                    return self._send(200, b"console.log('comfy')", "application/javascript")
+                if path == "/api/system_stats":
+                    return self._send(200, b'{"system":{"os":"fake-api"}}')
                 if path == "/system_stats":
                     return self._send(200, b'{"system":{"os":"fake"}}')
                 if path.startswith("/history/"):
@@ -630,6 +658,95 @@ class TestComfyProxy(BaseCase):
     def test_non_comfy_path_not_proxied(self):
         status, _, _ = self.h.json("GET", "/system_stats", headers=self.h.auth)
         self.assertEqual(status, 404)
+
+    def _ui_path(self):
+        status, _, payload = self.h.json("POST", "/comfyui/ui-session", headers=self.h.auth)
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["path"].startswith("/comfyui/ui/"))
+        self.assertTrue(payload["path"].endswith("/"))
+        return payload["path"]
+
+    def test_ui_session_requires_token(self):
+        status, _, _ = self.h.json("POST", "/comfyui/ui-session")
+        self.assertEqual(status, 401)
+        status, _, _ = self.h.json("GET", "/comfyui/ui-session", headers=self.h.auth)
+        self.assertEqual(status, 404)
+
+    def test_ui_page_assets_and_api(self):
+        path = self._ui_path()
+        status, headers, body = self.h.request("GET", path)
+        self.assertEqual(status, 200)
+        self.assertIn(b"./assets/app.js", body)
+        self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
+        status, _, body = self.h.request("GET", path + "assets/app.js")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"console.log('comfy')")
+        status, _, payload = self.h.json("GET", path + "api/system_stats")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["system"]["os"], "fake-api")
+
+    def test_ui_missing_trailing_slash_redirects(self):
+        path = self._ui_path()
+        status, _, body = self.h.request("GET", path.rstrip("/"))
+        self.assertEqual(status, 200)
+        self.assertIn(b"./assets/app.js", body)
+
+    def test_ui_readonly_policy(self):
+        path = self._ui_path()
+        status, _, _ = self.h.json("POST", path + "api/prompt", {"prompt": {}})
+        self.assertEqual(status, 404)
+        status, _, _ = self.h.json("POST", path + "prompt", {"prompt": {}})
+        self.assertEqual(status, 404)
+        status, _, payload = self.h.json("POST", path + "api/settings", {"theme": "dark"})
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        # 白名单必须按归一化路径判断，点段/编码分隔符不得穿透到 /api/prompt
+        for suffix in (
+            "api/settings/../prompt",
+            "api/settings/%2e%2e/prompt",
+            "api/userdata/../prompt",
+            "api/settings//../prompt",
+            "api/settings;x/../prompt",
+        ):
+            status, _, _ = self.h.json("POST", path + suffix, {"prompt": {}})
+            self.assertEqual(status, 403, suffix)
+
+    def test_ui_ticket_expiry(self):
+        expired = gw.ui_session_ticket(SIGN_KEY, int(time.time()) - 1)
+        self.assertFalse(gw.ui_session_valid(SIGN_KEY, expired))
+        valid = gw.ui_session_ticket(SIGN_KEY, int(time.time()) + 60)
+        self.assertTrue(gw.ui_session_valid(SIGN_KEY, valid))
+        self.assertFalse(gw.ui_session_valid(SIGN_KEY, "bad"))
+        expires = int(time.time()) + 60
+        ticket = gw.ui_session_ticket(SIGN_KEY, expires)
+        self.assertTrue(gw.ui_session_valid(SIGN_KEY, ticket, now=expires - 1))
+        self.assertFalse(gw.ui_session_valid(SIGN_KEY, ticket, now=expires))
+        self.assertFalse(gw.ui_session_valid(SIGN_KEY, f"{expires}.éé"))
+
+    def test_ui_websocket_relay(self):
+        path = self._ui_path()
+        url = urllib.parse.urlsplit(self.h.base)
+        sock = socket.create_connection((url.hostname, url.port), timeout=5)
+        key = base64.b64encode(os.urandom(16)).decode()
+        request = (
+            f"GET {path}ws HTTP/1.1\r\n"
+            f"Host: {url.netloc}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n"
+        )
+        sock.sendall(request.encode())
+        response = b""
+        while b"\r\n\r\n" not in response:
+            response += sock.recv(4096)
+        head, _, tail = response.partition(b"\r\n\r\n")
+        self.assertIn(b" 101 ", head.split(b"\r\n", 1)[0])
+        while len(tail) < 7:
+            tail += sock.recv(7 - len(tail))
+        self.assertEqual(tail[:7], b"\x81\x05hello")
+        sock.close()
 
 
 class TestUnits(unittest.TestCase):

@@ -1258,7 +1258,58 @@
             </div>
             <span class="field-hint">{{ t('settings.cfg.modelsHint') }}</span>
           </div>
-          <template v-if="cfgForm.provider === 'comfyui' && (cfgForm.service_type === 'image' || cfgForm.service_type === 'video')">
+          <template v-if="cfgForm.service_type === 'audio-gen' && cfgForm.provider === 'comfyui'">
+            <section class="cfg-settings">
+              <div class="cfg-settings-head">{{ t('settings.cfg.providerSettings') }}</div>
+              <label class="field">
+                <span class="field-label">{{ t('settings.cfg.comfyWorkflow') }} <span class="required">*</span></span>
+                <textarea
+                  v-model="cfgForm.provider_settings.workflow"
+                  class="textarea mono cfg-workflow"
+                  rows="8"
+                  :placeholder="t('settings.cfg.comfyWorkflowPlaceholder')"
+                ></textarea>
+                <span class="field-hint">{{ t('settings.cfg.audioWorkflowHint') }}</span>
+              </label>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.outputNode') }}</span>
+                  <input v-model="cfgForm.provider_settings.output_node" class="input mono" placeholder="9" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.outputKey') }}</span>
+                  <input v-model="cfgForm.provider_settings.output_key" class="input mono" placeholder="audio" />
+                </label>
+              </div>
+              <span class="field-hint">{{ t('settings.cfg.audioOutputNodeHint') }}</span>
+              <label class="field">
+                <span class="field-label">{{ t('settings.cfg.negativePrompt') }}</span>
+                <input v-model="cfgForm.provider_settings.negative_prompt" class="input" :placeholder="t('settings.cfg.negativePromptPlaceholder')" />
+              </label>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.seed') }}</span>
+                  <input v-model="cfgForm.provider_settings.seed" class="input" type="number" step="1" :placeholder="t('settings.cfg.seedPlaceholder')" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.audioTimeout') }}</span>
+                  <input v-model="cfgForm.provider_settings.timeout_ms" class="input" type="number" min="1000" step="1000" placeholder="600000" />
+                </label>
+              </div>
+              <label class="field cfg-check">
+                <input v-model="cfgForm.provider_settings.normalize_loudness" type="checkbox" />
+                <span>{{ t('settings.cfg.audioNormalize') }}</span>
+              </label>
+              <span class="field-hint">{{ t('settings.cfg.audioNormalizeHint') }}</span>
+              <label class="field">
+                <span class="field-label">{{ t('settings.cfg.modelLicense') }}</span>
+                <input v-model="cfgForm.provider_settings.model_license" class="input mono" placeholder="stability-ai-community" />
+                <span class="field-hint">{{ t('settings.cfg.modelLicenseHint') }}</span>
+              </label>
+              <span class="field-hint">{{ t('settings.cfg.audioTimeoutHint') }}</span>
+            </section>
+          </template>
+          <template v-else-if="cfgForm.provider === 'comfyui' && (cfgForm.service_type === 'image' || cfgForm.service_type === 'video')">
             <section class="cfg-settings">
               <div class="cfg-settings-head">{{ t('settings.cfg.providerSettings') }}</div>
               <label class="field">
@@ -1789,6 +1840,9 @@ const CFG_SETTING_KEYS = computed(() => {
     if (provider === 'volcengine') return ['defaultVoiceId', 'resourceId', 'uid', 'appId', 'accessKey', 'format', 'sampleRate', 'emotion']
     return ['defaultVoiceId', 'format', 'sampleRate', 'emotion']
   }
+  if (type === 'audio-gen') {
+    return ['workflow', 'output_node', 'output_key', 'negative_prompt', 'seed', 'timeout_ms', 'normalize_loudness', 'model_license']
+  }
   if (provider === 'comfyui') {
     return type === 'video'
       ? ['workflow', 'output_node', 'output_key', 'negative_prompt', 'seed', 'fps', 'client_id']
@@ -1826,6 +1880,7 @@ const serviceTypes = computed(() => [
   { type: 'image', label: t('common.serviceType.image') },
   { type: 'video', label: t('common.serviceType.video') },
   { type: 'audio', label: t('common.serviceType.audio') },
+  { type: 'audio-gen', label: t('common.serviceType.audioGen') },
 ])
 const providers = ['gemini', 'openai', 'volcengine', 'minimax', 'aliyun', 'qwen3-tts', 'openai-compatible', 'comfyui']
 const providerSelectOptions = computed(() => providers.map(p => ({ label: p, value: p })))
@@ -1850,6 +1905,7 @@ const serviceMeta = computed(() => ({
   image: { label: t('common.serviceType.image'), desc: t('settings.ai.meta.image') },
   video: { label: t('common.serviceType.video'), desc: t('settings.ai.meta.video') },
   audio: { label: t('common.serviceType.audio'), desc: t('settings.ai.meta.audio') },
+  'audio-gen': { label: t('common.serviceType.audioGen'), desc: t('settings.ai.meta.audioGen') },
 }))
 function emptyProviderSettings() {
   return {
@@ -1875,6 +1931,10 @@ function emptyProviderSettings() {
     seed: '',
     fps: '',
     client_id: 'huobao-drama',
+    // ComfyUI 音频生成
+    timeout_ms: '',
+    normalize_loudness: true,
+    model_license: '',
     // 图片厂商参数
     prompt_extend: true,
     watermark: false,
@@ -1897,7 +1957,7 @@ function collectProviderSettings() {
       outgoing[key] = value
       continue
     }
-    if (['seed', 'fps', 'sampleRate', 'timeoutMs', 'concurrency', 'maxInputChars', 'maxNewTokens'].includes(key)) {
+    if (['seed', 'fps', 'sampleRate', 'timeoutMs', 'concurrency', 'maxInputChars', 'maxNewTokens', 'timeout_ms'].includes(key)) {
       if (value === '' || value === null || value === undefined) continue
       const n = Number(value)
       if (!Number.isFinite(n)) throw new Error(t('settings.cfg.numberInvalid'))
@@ -1908,6 +1968,7 @@ function collectProviderSettings() {
       if (key === 'concurrency' && (!Number.isInteger(n) || n < 1 || n > 8)) throw new Error(t('settings.cfg.numberInvalid'))
       if (key === 'maxInputChars' && (!Number.isInteger(n) || n <= 0)) throw new Error(t('settings.cfg.numberInvalid'))
       if (key === 'maxNewTokens' && (!Number.isInteger(n) || n < 64 || n > 2048)) throw new Error(t('settings.cfg.numberInvalid'))
+      if (key === 'timeout_ms' && (!Number.isInteger(n) || n <= 0)) throw new Error(t('settings.cfg.numberInvalid'))
       outgoing[key] = n
       continue
     }
@@ -1955,6 +2016,9 @@ const providerPresets = {
     aliyun: { label: '阿里云百炼语音', baseUrl: 'https://dashscope.aliyuncs.com', models: ['cosyvoice-v2', 'qwen-tts'] },
     volcengine: { label: '豆包语音合成 v3', baseUrl: 'https://openspeech.bytedance.com', models: ['seed-tts-2.0'] },
     'openai-compatible': { label: '本地 OpenAI 兼容语音', baseUrl: 'http://127.0.0.1:8000', models: ['tts-1'] },
+  },
+  'audio-gen': {
+    comfyui: { label: 'ComfyUI 本地音频工作流', baseUrl: 'http://127.0.0.1:8188', models: ['stable-audio-open-1.0'] },
   },
 }
 const huobaoQuickConfigs = computed(() => {

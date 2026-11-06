@@ -470,7 +470,10 @@ type SysTaskRecord = typeof schema.sysTask.$inferSelect
 async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string) {
   const type = record.type as TaskType
   const label = taskLabel(type)
-  const profile = POLL_PROFILES[type]
+  // 整集 ComfyUI 时间线单次可跑 40 分钟以上，按视频档位放宽到约 100 分钟
+  const profile = parseTaskParams(record.params)?.comfyTimeline
+    ? { attempts: 600, intervalMs: 10_000, maxDurationMs: null }
+    : POLL_PROFILES[type]
   const adapter = type === 'image' ? getImageAdapter(config.provider) : getVideoAdapter(config.provider)
   const startedAt = Date.now()
 

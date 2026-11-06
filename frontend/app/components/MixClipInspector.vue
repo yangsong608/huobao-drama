@@ -45,7 +45,18 @@
         </p>
 
         <template v-if="virtual">
-          <p class="mx-hint">{{ t('mix.clipVirtualHint') }}</p>
+          <p v-if="virtualDialogue" class="mx-hint">{{ t('mix.clipVirtualHint') }}</p>
+          <p v-else class="mx-hint">{{ t('mix.clipVirtualReadonly') }}</p>
+          <div class="mx-grid2">
+            <label class="mx-field">
+              <span>{{ t('mix.start') }}</span>
+              <input :value="toSec(clip.startMs)" disabled />
+            </label>
+            <label class="mx-field">
+              <span>{{ t('mix.end') }}</span>
+              <input :value="toSec(clip.endMs)" disabled />
+            </label>
+          </div>
           <div v-if="clip.lineId" class="mx-actions">
             <button class="mx-btn is-plain" type="button" @click="emit('locate-line', clip.lineId)">{{ t('mix.locateLine') }}</button>
             <button class="mx-btn is-plain" type="button" @click="emit('regenerate-line', clip.lineId)">{{ t('mix.regenerateLine') }}</button>
@@ -461,6 +472,7 @@ const curveOptions = computed(() => [
 ])
 
 const virtual = computed(() => Boolean(props.track?.virtual))
+const virtualDialogue = computed(() => virtual.value && props.track?.role === 'voice' && props.clip?.lineId != null)
 const trackLocked = computed(() => Boolean(props.track?.locked))
 const clipEditable = computed(() => Boolean(props.clip)
   && !virtual.value

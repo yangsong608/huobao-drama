@@ -342,7 +342,7 @@ function resolveStemPath(outputDir: string, candidate: unknown): string | null {
   return resolved
 }
 
-function probeAudioMeta(file: string): Promise<{ durationMs: number; sampleRate: number; channels: number }> {
+export function probeAudioMeta(file: string): Promise<{ durationMs: number; sampleRate: number; channels: number }> {
   return new Promise((resolve) => {
     ffmpeg.ffprobe(file, (err, meta) => {
       if (err) return resolve({ durationMs: 0, sampleRate: 0, channels: 0 })

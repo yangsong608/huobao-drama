@@ -103,6 +103,40 @@ export function setDubbingEnabled(enabled: boolean): boolean {
   return enabled
 }
 
+export const EDIT_WORKSPACE_MODES = ['off', 'readonly', 'on'] as const
+export type EditWorkspaceMode = typeof EDIT_WORKSPACE_MODES[number]
+
+const EDIT_WORKSPACE_KEY = 'edit_workspace'
+
+function isEditWorkspaceMode(value: unknown): value is EditWorkspaceMode {
+  return typeof value === 'string' && (EDIT_WORKSPACE_MODES as readonly string[]).includes(value)
+}
+
+/**
+ * 剪辑工作台开关：环境变量 EDIT_WORKSPACE 优先（仅调试/紧急回滚），
+ * 其次 app_settings，未设置时默认 readonly，保证 M1 不会写入任何计划。
+ */
+export function getEditWorkspaceMode(): EditWorkspaceMode {
+  const fromEnv = String(process.env.EDIT_WORKSPACE || '').trim().toLowerCase()
+  if (isEditWorkspaceMode(fromEnv)) return fromEnv
+  const row = db.select().from(schema.appSettings)
+    .where(eq(schema.appSettings.key, EDIT_WORKSPACE_KEY))
+    .get()
+  return isEditWorkspaceMode(row?.value) ? row.value : 'readonly'
+}
+
+export function setEditWorkspaceMode(mode: EditWorkspaceMode): EditWorkspaceMode {
+  if (!isEditWorkspaceMode(mode)) throw new Error(`Invalid edit workspace mode: ${mode}`)
+  db.insert(schema.appSettings)
+    .values({ key: EDIT_WORKSPACE_KEY, value: mode, updatedAt: now() })
+    .onConflictDoUpdate({
+      target: schema.appSettings.key,
+      set: { value: mode, updatedAt: now() },
+    })
+    .run()
+  return mode
+}
+
 // ---------------------------------------------------------------------------
 // 队列开关（V2 · M5）
 // ---------------------------------------------------------------------------

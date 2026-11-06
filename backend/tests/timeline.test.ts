@@ -145,3 +145,27 @@ test('无台词时时间轴仍返回视频总时长', () => {
   assert.equal(r.cues.length, 0)
   assert.equal(r.totalDurationMs, 4000)
 })
+
+test('clips 返回每个分镜的绝对位置，累加与总时长一致', () => {
+  const result = buildTimeline({
+    clips: [clip(1, 2000), clip(2, 3000)],
+    lines: [],
+  })
+  assert.deepEqual(result.clips, [
+    { storyboardId: 1, startMs: 0, endMs: 2000, durationMs: 2000 },
+    { storyboardId: 2, startMs: 2000, endMs: 5000, durationMs: 3000 },
+  ])
+  assert.equal(result.clips.reduce((sum, item) => sum + item.durationMs, 0), result.totalDurationMs)
+})
+
+test('clips 在传入更长的总时长时保持真实分镜位置', () => {
+  const result = buildTimeline({
+    clips: [clip(1, 2000), clip(2, 3000)],
+    lines: [],
+    totalDurationMs: 8000,
+  })
+  assert.equal(result.clips[0].startMs, 0)
+  assert.equal(result.clips[1].startMs, 2000)
+  assert.equal(result.clips[1].endMs, 5000)
+  assert.equal(result.totalDurationMs, 8000)
+})

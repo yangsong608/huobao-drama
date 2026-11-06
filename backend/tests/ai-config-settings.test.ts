@@ -428,3 +428,53 @@ test('audio probes exercise the real synthesis contract and reject bad credentia
   assert.match(expired401.message, /API Key/)
   assert.match(expired401.message, /App ID/)
 })
+
+test('audio-gen 只接受 ComfyUI，且工作流必须含 __PROMPT__', async () => {
+  const base = {
+    service_type: 'audio-gen',
+    provider: 'comfyui',
+    name: '本地音频生成',
+    base_url: 'http://127.0.0.1:8188',
+    api_key: '',
+    model: ['stable-audio-open-1.0'],
+    priority: 10,
+    provider_settings: {
+      workflow: { '3': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: '__MODEL__' } } },
+      output_node: '9',
+      output_key: 'audio',
+      timeout_ms: 600000,
+      normalize_loudness: true,
+      model_license: 'stability-ai-community',
+    },
+  }
+
+  const missingPrompt = await app.request('/api/v1/ai-configs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(base),
+  })
+  assert.equal(missingPrompt.status, 400)
+
+  const withPrompt = await app.request('/api/v1/ai-configs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...base,
+      provider_settings: {
+        ...base.provider_settings,
+        workflow: {
+          '3': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: '__MODEL__' } },
+          '6': { class_type: 'CLIPTextEncode', inputs: { text: '__PROMPT__' } },
+        },
+      },
+    }),
+  })
+  assert.equal(withPrompt.status, 201, await withPrompt.clone().text())
+
+  const badProvider = await app.request('/api/v1/ai-configs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...base, provider: 'openai' }),
+  })
+  assert.equal(badProvider.status, 400)
+})

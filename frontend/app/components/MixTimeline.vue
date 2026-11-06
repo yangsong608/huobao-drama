@@ -719,6 +719,11 @@ function snapMove(start: number, duration: number, exclude: StageClip): number {
   return Math.max(0, Math.round(best))
 }
 
+/** 只有虚拟对白轨的片段能改时间；原声床/BGM 等虚拟素材仍只读 */
+function isVirtualDialogue(track: StageTrack, clip: StageClip): boolean {
+  return Boolean(track.virtual && track.role === 'voice' && clip.lineId != null)
+}
+
 function onPointerDown(event: PointerEvent) {
   if (event.button !== 0) return
   const canvas = canvasRef.value
@@ -743,8 +748,9 @@ function onPointerDown(event: PointerEvent) {
   const hit = clipAt(x, y)
   if (hit) {
     emit('select', hit.track, hit.clip)
-    const editable = !hit.track.virtual && !hit.track.locked && !hit.clip.locked
-    if (editable && hit.edge) {
+    const virtualMove = isVirtualDialogue(hit.track, hit.clip)
+    const editable = !hit.track.locked && !hit.clip.locked && (!hit.track.virtual || virtualMove)
+    if (editable && !hit.track.virtual && hit.edge) {
       interaction = {
         kind: hit.edge === 'start' ? 'trim-start' : 'trim-end',
         clip: hit.clip,
@@ -773,7 +779,7 @@ function onPointerDown(event: PointerEvent) {
         originalSource: hit.clip.sourceStartMs,
         moved: false,
       }
-      emit('begin-change')
+      if (!virtualMove) emit('begin-change')
       canvas.setPointerCapture(event.pointerId)
       cursor.value = 'grabbing'
       return
@@ -876,8 +882,9 @@ function updateHover(x: number, y: number) {
   }
   const hit = clipAt(x, y)
   if (hit) {
-    const editable = !hit.track.virtual && !hit.track.locked && !hit.clip.locked
-    cursor.value = !editable ? 'pointer' : hit.edge ? 'ew-resize' : 'grab'
+    const virtualMove = isVirtualDialogue(hit.track, hit.clip)
+    const editable = !hit.track.locked && !hit.clip.locked && (!hit.track.virtual || virtualMove)
+    cursor.value = !editable ? 'pointer' : (!hit.track.virtual && hit.edge) ? 'ew-resize' : 'grab'
     const title = lineLabel(hit.clip)
     const time = `${formatTimePrecise(hit.clip.startMs)} – ${formatTimePrecise(hit.clip.endMs)}`
     const host = hostRef.value

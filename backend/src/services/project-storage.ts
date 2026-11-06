@@ -17,8 +17,11 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { DATA_ROOT } from '../utils/paths.js'
 
-export const PROJECT_SUBDIRS = ['images', 'videos', 'uploads', 'merged', 'temp', 'audio', 'transitions'] as const
+export const PROJECT_SUBDIRS = ['images', 'videos', 'uploads', 'merged', 'temp', 'audio', 'transitions', 'edit'] as const
 export type ProjectSubdir = typeof PROJECT_SUBDIRS[number]
+
+/** 剪辑工作台的嵌套目录：cut/audio-ref/preview/proxy/tmp */
+export const EDIT_SUBDIRS = ['cut', 'audio-ref', 'preview', 'proxy', 'tmp'] as const
 
 const PROJECT_PATH_RE = /^static\/projects\/(\d+)\/(.+)$/
 const storageDirCache = new Map<number, string | null>()
@@ -121,7 +124,10 @@ export async function ensureProjectStorageLayout(dramaId: number): Promise<strin
 /** 在指定物理根下创建标准子目录 */
 export async function ensureStorageLayoutAt(root: string): Promise<string> {
   await fsp.mkdir(root, { recursive: true })
-  await Promise.all(PROJECT_SUBDIRS.map(sub => fsp.mkdir(path.join(root, sub), { recursive: true })))
+  await Promise.all([
+    ...PROJECT_SUBDIRS.map(sub => fsp.mkdir(path.join(root, sub), { recursive: true })),
+    ...EDIT_SUBDIRS.map(sub => fsp.mkdir(path.join(root, 'edit', sub), { recursive: true })),
+  ])
   return root
 }
 
@@ -158,7 +164,10 @@ export async function moveProjectStorageContents(fromRoot: string, toRoot: strin
     for (const entry of await fsp.readdir(sourceDir, { withFileTypes: true })) {
       const from = path.join(sourceDir, entry.name)
       const to = path.join(targetDir, entry.name)
-      if (fs.existsSync(to)) {
+      // 切换存储目录前 ensureStorageLayoutAt(newRoot) 会预建 edit/<sub> 等空目录，
+      // 这类「两边都是目录且目标为空」的占位目录必须允许合并，否则切换必失败；
+      // 文件、非空目录、类型不一致仍然视为冲突。
+      if (fs.existsSync(to) && !(entry.isDirectory() && await isEmptyDirectory(to))) {
         throw new Error(`目标目录已存在同名文件（${path.join(sub, entry.name)}），请换一个空目录`)
       }
       moves.push({ from, to })
@@ -194,6 +203,8 @@ export async function moveProjectStorageContents(fromRoot: string, toRoot: strin
 
 async function moveEntry(from: string, to: string): Promise<void> {
   await fsp.mkdir(path.dirname(to), { recursive: true })
+  // 目标位置可能是 ensureStorageLayoutAt 预建的空目录占位，先移除才能落盘
+  await removeEmptyDirTarget(from, to)
   try {
     await fsp.rename(from, to)
   } catch (error: any) {
@@ -201,6 +212,38 @@ async function moveEntry(from: string, to: string): Promise<void> {
     // 跨磁盘（外置硬盘）无法 rename：复制后删除源
     await fsp.cp(from, to, { recursive: true, force: false, errorOnExist: true })
     await fsp.rm(from, { recursive: true, force: true })
+  }
+}
+
+/** 目标是否为已存在且为空的目录；不存在（ENOENT）按 false 处理 */
+async function isEmptyDirectory(target: string): Promise<boolean> {
+  try {
+    const stat = await fsp.lstat(target)
+    if (!stat.isDirectory()) return false
+    return (await fsp.readdir(target)).length === 0
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') return false
+    throw error
+  }
+}
+
+/**
+ * 移除目标位置的空目录占位（仅当源也是目录时）。
+ * 只移除空目录；目标不存在或为文件、非空目录时保持原样，交给 rename/cp 报错。
+ */
+async function removeEmptyDirTarget(from: string, to: string): Promise<void> {
+  try {
+    const sourceStat = await fsp.lstat(from)
+    if (!sourceStat.isDirectory()) return
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') return
+    throw error
+  }
+  try {
+    if (!(await isEmptyDirectory(to))) return
+    await fsp.rmdir(to)
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT') throw error
   }
 }
 

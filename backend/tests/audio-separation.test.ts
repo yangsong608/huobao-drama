@@ -175,3 +175,40 @@ test('autoCreateStemTracks 幂等，重复调用不复制轨道', () => {
     .where(eq(schema.episodeAudioTracks.episodeId, episode.id)).all()
   assert.equal(tracksAfter.length, tracksBefore.length)
 })
+
+test('自动建轨跳过 soundscape 素材，删除素材清理引用片段但保留空轨', () => {
+  const [soundEpisode] = db.insert(schema.episodes).values({
+    dramaId: 1, episodeNumber: 9, title: '第9集', createdAt: ts, updatedAt: ts,
+  }).returning().all()
+  const asset = db.insert(schema.episodeAudioAssets).values({
+    episodeId: soundEpisode.id, dramaId: 1, kind: 'soundscape', status: 'ready',
+    sourceHash: 'b'.repeat(64), url: 'static/projects/1/audio/soundscape/bed.wav',
+    durationMs: 4000, engine: 'comfyui', model: 'stable-audio-open',
+    createdAt: ts,
+  }).returning().get()
+
+  const created = autoCreateStemTracks(soundEpisode.id, [asset.id])
+  assert.deepEqual(created.tracks, [], 'soundscape 素材不得自动建 A4 自定义轨')
+
+  const track = db.insert(schema.episodeAudioTracks).values({
+    episodeId: soundEpisode.id, dramaId: 1, kind: 'ambience', role: 'ambience',
+    name: '环境声（AI）', origin: 'soundscape', volume: 1, pan: 0,
+    muted: false, solo: false, ducking: true, loop: false, locked: false, hidden: false,
+    sortOrder: 10, createdAt: ts, updatedAt: ts,
+  }).returning().get()
+  db.insert(schema.episodeAudioClips).values({
+    trackId: track.id, episodeId: soundEpisode.id, assetId: asset.id,
+    startMs: 0, endMs: 4000, sourceStartMs: 0, gainDb: 0, pan: 0,
+    fadeInMs: 0, fadeOutMs: 0, fadeCurve: 'linear',
+    sourceUrl: asset.url, audioUrl: asset.url, status: 'ready', name: '场景 1 · 环境声',
+    createdAt: ts, updatedAt: ts,
+  }).run()
+
+  assert.equal(deleteEpisodeAsset(soundEpisode.id, asset.id), true)
+  const clips = db.select().from(schema.episodeAudioClips)
+    .where(eq(schema.episodeAudioClips.episodeId, soundEpisode.id)).all()
+  assert.equal(clips.length, 0, '引用素材的片段必须删除')
+  const tracks = db.select().from(schema.episodeAudioTracks)
+    .where(eq(schema.episodeAudioTracks.episodeId, soundEpisode.id)).all()
+  assert.deepEqual(tracks.map((row) => row.id), [track.id], '生成轨保留为空轨，方便重新生成')
+})

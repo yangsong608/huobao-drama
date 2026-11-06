@@ -353,8 +353,10 @@
               :line-numbers="mixLineNumbers"
               :video-url="videoUrl"
               :cues="timelineCues"
+              @soundscape-busy="mixSoundscapeBusy = $event"
               @locate-line="locateMixLine"
               @regenerate-line="regenerateMixLine"
+              @timeline-retimed="loadTimeline"
             >
               <template #actions>
                 <button class="btn btn-sm" type="button" :disabled="loading" @click="loadTimeline">
@@ -403,8 +405,8 @@
               </template>
             </MixStage>
             <div class="dub-next-bar">
-              <span class="dub-next-copy">{{ t('workbench.previewDoneHint') }}</span>
-              <button class="btn btn-sm is-primary" type="button" @click="nextStep">
+              <span class="dub-next-copy">{{ mixSoundscapeBusy ? t('workbench.soundscapeBusy') : t('workbench.previewDoneHint') }}</span>
+              <button class="btn btn-sm is-primary" type="button" :disabled="mixSoundscapeBusy" @click="nextStep">
                 {{ t('workbench.nextStep', { step: stepDefs[4].label }) }}
                 <ArrowRight :size="11" />
               </button>
@@ -682,6 +684,12 @@ function goStep(index: number | string) {
     index = mapped
   }
   if (index < 0 || index >= stepDefs.value.length) return
+  if (mixSoundscapeBusy.value) {
+    if (index !== currentStep.value) {
+      toast.error(t('workbench.soundscapeBusy'))
+      return
+    }
+  }
   emit('update:step', index)
   if (index === 3) void loadTimeline()
 }
@@ -894,6 +902,7 @@ async function retryFailed() {
 
 const player = ref<HTMLAudioElement | null>(null)
 const mixStageRef = ref<{ seekTo: (ms: number) => void } | null>(null)
+const mixSoundscapeBusy = ref(false)
 const selectedLine = ref<StoryboardLine | null>(null)
 
 function mediaUrl(url: string) {

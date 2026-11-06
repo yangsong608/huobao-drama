@@ -24,6 +24,9 @@ export interface ComfyUiSettings {
   seed?: number
   fps?: number
   clientId?: string
+  timeoutMs?: number
+  normalizeLoudness?: boolean
+  modelLicense?: string
 }
 
 interface ComfyUploadResult {
@@ -43,6 +46,15 @@ export function readComfySettings(config: AIConfig): ComfyUiSettings {
     seed: typeof settings.seed === 'number' && Number.isInteger(settings.seed) ? settings.seed : undefined,
     fps: typeof settings.fps === 'number' && settings.fps > 0 ? settings.fps : undefined,
     clientId: typeof settings.client_id === 'string' ? settings.client_id : undefined,
+    timeoutMs: typeof settings.timeout_ms === 'number' && settings.timeout_ms > 0
+      ? Math.round(settings.timeout_ms)
+      : undefined,
+    normalizeLoudness: typeof settings.normalize_loudness === 'boolean'
+      ? settings.normalize_loudness
+      : undefined,
+    modelLicense: typeof settings.model_license === 'string' && settings.model_license.trim()
+      ? settings.model_license.trim()
+      : undefined,
   }
 }
 

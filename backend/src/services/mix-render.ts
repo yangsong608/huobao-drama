@@ -208,25 +208,31 @@ export function buildMixFilterGraph(
     ? (onlyBus !== 'dialogue' && busByKey.get(onlyBus)?.ducking && dialogueRaw ? [onlyBus] : [])
     : [...busOutputs.keys()]
       .filter((key) => key !== 'dialogue' && busByKey.get(key)?.ducking)
-  let sidechainKey: string | null = null
+  const sidechainByTarget = new Map<string, string>()
   if (dialogueRaw && duckingTargets.length) {
     if (onlyBus) {
       // 单总线导出不需要保留对白输出，直接把它当侧链键，避免产生悬空标签
-      sidechainKey = dialogueRaw
+      sidechainByTarget.set(onlyBus, dialogueRaw)
     } else {
-      parts.push(`[${dialogueRaw}]asplit=2[bus_dialogue][sidechain_dialogue]`)
+      // 滤镜标签只能被消费一次，每个侧链压缩器都需要独立的 asplit 分支
+      const labels = duckingTargets.map((key) => `sidechain_dialogue_${key}`)
+      parts.push(
+        `[${dialogueRaw}]asplit=${duckingTargets.length + 1}[bus_dialogue]`
+        + labels.map((label) => `[${label}]`).join(''),
+      )
       busOutputs.set('dialogue', 'bus_dialogue')
-      sidechainKey = 'sidechain_dialogue'
+      duckingTargets.forEach((key, index) => sidechainByTarget.set(key, labels[index]))
     }
   }
 
   for (const key of duckingTargets) {
-    if (!sidechainKey) continue
+    const sidechain = sidechainByTarget.get(key)
+    if (!sidechain) continue
     const raw = busOutputs.get(key)!
     const bus = busByKey.get(key)!
     const label = `bus_${key}`
     parts.push(
-      `[${raw}][${sidechainKey}]sidechaincompress=`
+      `[${raw}][${sidechain}]sidechaincompress=`
       + `threshold=0.03:ratio=${linear(bus.duckRatio)}:attack=${Math.round(bus.duckAttackMs)}:`
       + `release=${Math.round(bus.duckReleaseMs)}[${label}]`,
     )

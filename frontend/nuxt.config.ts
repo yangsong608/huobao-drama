@@ -29,6 +29,11 @@ export default defineNuxtConfig({
           file: fileURLToPath(new URL('./app/views/drama/episode.vue', import.meta.url)),
         },
         {
+          name: 'drama-episode-edit',
+          path: '/drama/:id/episode/:episodeNumber/edit',
+          file: fileURLToPath(new URL('./app/views/drama/edit.vue', import.meta.url)),
+        },
+        {
           name: 'novel-detail',
           path: '/novels/:id',
           file: fileURLToPath(new URL('./app/views/novel/detail.vue', import.meta.url)),
