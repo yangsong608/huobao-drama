@@ -14,10 +14,13 @@
  */
 import type { AIConfig } from './types'
 import { joinProviderUrl } from './url'
+import { readGatewaySlug } from './comfyui-gateway'
 import { parseDataUrl } from '../../utils/storage.js'
 
 export interface ComfyUiSettings {
   workflow?: unknown
+  /** 网关模式：已保存工作流名称；存在时不再使用 workflow JSON */
+  workflowSlug?: string
   outputNode?: string
   outputKey?: string
   negativePrompt?: string
@@ -40,6 +43,7 @@ export function readComfySettings(config: AIConfig): ComfyUiSettings {
   const outputKey = typeof settings.output_key === 'string' ? settings.output_key.trim() : ''
   return {
     workflow: settings.workflow,
+    workflowSlug: readGatewaySlug(config) ?? undefined,
     outputNode: outputNode || undefined,
     outputKey: outputKey || undefined,
     negativePrompt: typeof settings.negative_prompt === 'string' ? settings.negative_prompt : undefined,
@@ -121,6 +125,7 @@ export async function uploadComfyImage(
   config: AIConfig,
   ref: string,
   filename: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<ComfyUploadResult> {
   let buffer: Buffer
   let mimeType = 'image/png'
@@ -133,7 +138,7 @@ export async function uploadComfyImage(
     mimeType = parsed.mimeType
     ext = mimeType === 'image/jpeg' ? 'jpg' : mimeType === 'image/webp' ? 'webp' : 'png'
   } else if (/^https?:\/\//i.test(ref)) {
-    const resp = await fetch(ref, { signal: AbortSignal.timeout(60_000) })
+    const resp = await fetchImpl(ref, { signal: AbortSignal.timeout(60_000) })
     if (!resp.ok) throw new Error(`ComfyUI 参考图下载失败：HTTP ${resp.status}`)
     buffer = Buffer.from(await resp.arrayBuffer())
     const contentType = (resp.headers.get('content-type') || '').toLowerCase()
@@ -143,18 +148,25 @@ export async function uploadComfyImage(
     throw new Error('ComfyUI 参考图仅支持 data URL 或 HTTP(S) 地址')
   }
 
+  const gateway = readGatewaySlug(config)
   const form = new FormData()
   form.append('image', new Blob([new Uint8Array(buffer)], { type: mimeType }), `${filename}.${ext}`)
-  form.append('type', 'input')
-  form.append('overwrite', 'true')
+  if (!gateway) {
+    form.append('type', 'input')
+    form.append('overwrite', 'true')
+  }
 
-  const resp = await fetch(joinProviderUrl(config.baseUrl, '', '/upload/image'), {
+  const endpoint = gateway ? '/v1/uploads' : '/upload/image'
+  const resp = await fetchImpl(joinProviderUrl(config.baseUrl, '', endpoint), {
     method: 'POST',
     headers: comfyHeaders(config),
     body: form,
     signal: AbortSignal.timeout(60_000),
   })
-  if (!resp.ok) throw new Error(`ComfyUI 上传参考图失败：HTTP ${resp.status} ${await resp.text()}`)
+  if (!resp.ok) {
+    const label = gateway ? 'H3 网关上传参考图失败' : 'ComfyUI 上传参考图失败'
+    throw new Error(`${label}：HTTP ${resp.status} ${await resp.text()}`)
+  }
   const result = await resp.json() as any
   if (!result?.name) throw new Error('ComfyUI 上传参考图响应缺少 name')
   const name = result.subfolder ? `${result.subfolder}/${result.name}` : result.name

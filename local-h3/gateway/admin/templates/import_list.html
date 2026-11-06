@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}从 ComfyUI 导入{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>从 ComfyUI 导入</h1>
+    <p class="muted">读取 ComfyUI 中已保存（Save）的工作流，自动转换为 API 格式并推断参数。</p>
+  </div>
+  <a class="btn" href="/workflows">返回列表</a>
+</div>
+
+{% if error %}
+<section class="card">
+  <div class="flash error">{{ error }}</div>
+  <p class="hint">请确认「设置」中的 ComfyUI 地址正确，且工作流已保存到 ComfyUI 的 workflows 目录。</p>
+  <a class="btn" href="/settings">去设置</a>
+</section>
+{% elif files %}
+<section class="card">
+  <div class="card-head">
+    <h2>已保存工作流</h2>
+    <span class="muted small">{{ comfy_url }}</span>
+  </div>
+  <table class="table">
+    <thead><tr><th>文件</th><th>路径</th><th class="right">操作</th></tr></thead>
+    <tbody>
+      {% for item in files %}
+      <tr>
+        <td><strong>{{ item.name }}</strong></td>
+        <td class="mono muted">{{ item.path }}</td>
+        <td class="right"><a class="btn tiny primary" href="/workflows/import/preview?path={{ item.path|urlencode }}">预览导入</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}
+<section class="card">
+  <p class="empty">ComfyUI 的 workflows 目录中没有找到 .json 工作流。</p>
+  <p class="hint">先在 ComfyUI 中保存工作流（菜单 Save），刷新本页即可看到。</p>
+</section>
+{% endif %}
+{% endblock %}

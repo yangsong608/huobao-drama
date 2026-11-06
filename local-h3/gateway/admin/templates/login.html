@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}登录{% endblock %}
+{% block content %}
+<section class="login-shell">
+  <div class="login-card">
+    <div class="login-brand"><span class="brand-mark">火</span></div>
+    <h1>H3 网关管理台</h1>
+    <p class="muted">管理工作流、API Key 与 ComfyUI 连接</p>
+    {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+    <form method="post" action="/login" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label>用户名
+        <input type="text" name="username" value="{{ username or '' }}" autocomplete="username" autofocus required>
+      </label>
+      <label>密码
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button class="btn primary block" type="submit">登录</button>
+    </form>
+    <p class="hint">首次使用请在服务器执行 <code>python -m admin.cli create-admin</code></p>
+  </div>
+</section>
+{% endblock %}

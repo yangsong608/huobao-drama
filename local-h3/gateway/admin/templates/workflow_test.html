@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}测试 {{ workflow.slug }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>测试工作流</h1>
+    <p class="muted"><span class="mono">{{ workflow.slug }}</span> · {{ workflow.name }} · {{ kind_labels.get(workflow.kind, workflow.kind) }}</p>
+  </div>
+  <a class="btn" href="/workflows">返回列表</a>
+</div>
+
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+{% if result %}<div class="flash ok">{{ result }}</div>{% endif %}
+
+<div class="grid-2">
+  <section class="card">
+    <h2>参数</h2>
+    <form method="post" action="/workflows/{{ workflow.slug }}/test" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>输入 JSON
+        <textarea name="inputs" rows="12" spellcheck="false">{{ inputs|raw_json }}</textarea>
+      </label>
+      <label class="check"><input type="checkbox" name="run"> 同时提交到 ComfyUI 执行</label>
+      <div class="row">
+        <button class="btn primary" type="submit">校验依赖</button>
+        <span class="hint">不勾选只检查节点与必填输入；勾选会真实排队执行一次。</span>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>映射</h2>
+    <dl class="kv">
+      <dt>输出节点</dt><dd class="mono">{{ workflow.output_node or '-' }}</dd>
+      <dt>输出键</dt><dd class="mono">{{ workflow.output_key or '-' }}</dd>
+      <dt>输出后缀</dt><dd class="mono">{{ workflow.output_exts|join(', ') or '-' }}</dd>
+      <dt>来源</dt><dd>{{ 'ComfyUI 导入' if workflow.source == 'comfyui' else ('内置' if workflow.source == 'seed' else '手动') }}</dd>
+    </dl>
+    <table class="table compact">
+      <thead><tr><th>参数</th><th>类型</th><th>必填</th><th>目标</th></tr></thead>
+      <tbody>
+        {% for name, spec in workflow.input_map.items() %}
+        <tr>
+          <td class="mono">{{ name }}</td>
+          <td>{{ spec.type or 'text' }}</td>
+          <td>{{ '否' if spec.optional else '是' }}</td>
+          <td class="mono small">
+            {% if spec.targets %}
+              {% for target in spec.targets %}{{ target.node }}.{{ target.input }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+            {% else %}
+              {{ spec.node }}.{{ spec.input }}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endblock %}

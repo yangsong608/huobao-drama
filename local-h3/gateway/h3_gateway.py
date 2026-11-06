@@ -32,6 +32,8 @@ from email import policy as email_policy
 from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from admin.db import GatewayStore, hash_api_key, public_workflow
+
 VERSION = "1.0.0"
 SERVICE = "huobao-h3-gateway"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -62,12 +64,18 @@ MEDIA_TYPES = {
     ".webp": "image/webp",
 }
 
-TERMINAL_STATES = ("succeeded", "failed")
+TERMINAL_STATES = ("succeeded", "failed", "cancelled")
 PERSIST_FIELDS = (
     "id", "kind", "mode", "state", "created_at", "updated_at", "pid", "file",
     "duration", "error", "warning", "response_format", "frames", "width",
-    "height", "quality",
+    "height", "quality", "workflow", "workflow_kind", "output_node",
+    "output_key", "output_exts",
 )
+DEFAULT_WORKFLOW_EXTS = {
+    "video": [".mp4", ".webm"],
+    "image": [".png", ".jpg", ".jpeg", ".webp"],
+    "audio": [".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"],
+}
 
 
 def log(message):
@@ -98,6 +106,10 @@ class ComfyError(Exception):
     pass
 
 
+class Cancelled(Exception):
+    pass
+
+
 # ---------------------------------------------------------------------------
 # 配置
 # ---------------------------------------------------------------------------
@@ -111,6 +123,7 @@ class Settings:
         self.comfy_url = "http://127.0.0.1:8188"
         self.workflow_dir = os.path.join(SCRIPT_DIR, "workflows")
         self.data_dir = os.path.join(SCRIPT_DIR, "data")
+        self.db_path = os.path.join(self.data_dir, "gateway.db")
         self.public_base_url = ""
         self.workers = 1
         self.queue_limit = 32
@@ -147,6 +160,7 @@ class Settings:
         sign_key = sign_raw.encode() if sign_raw else hashlib.sha256(
             f"h3-gateway:{token}".encode()
         ).digest()
+        data_dir = text("H3_DATA_DIR", os.path.join(SCRIPT_DIR, "data"))
 
         return cls(
             host=text("H3_GATEWAY_HOST", "0.0.0.0"),
@@ -155,7 +169,8 @@ class Settings:
             sign_key=sign_key,
             comfy_url=text("H3_COMFY_URL", "http://127.0.0.1:8188").rstrip("/"),
             workflow_dir=text("H3_WORKFLOW_DIR", os.path.join(SCRIPT_DIR, "workflows")),
-            data_dir=text("H3_DATA_DIR", os.path.join(SCRIPT_DIR, "data")),
+            data_dir=data_dir,
+            db_path=text("H3_DB_PATH", os.path.join(data_dir, "gateway.db")),
             public_base_url=text("H3_PUBLIC_BASE_URL").rstrip("/"),
             workers=number("H3_WORKERS", 1, 0),
             queue_limit=number("H3_QUEUE_LIMIT", 32, 0),
@@ -649,6 +664,104 @@ def parse_video_content(content):
 
 
 # ---------------------------------------------------------------------------
+# 命名工作流：输入校验与节点注入
+# ---------------------------------------------------------------------------
+
+def input_targets(spec):
+    targets = spec.get("targets") if isinstance(spec, dict) else None
+    if isinstance(targets, list):
+        return [item for item in targets if isinstance(item, dict)]
+    return [{"node": (spec or {}).get("node"), "input": (spec or {}).get("input")}]
+
+
+def coerce_input_value(kind, value):
+    if kind == "text":
+        return str(value)
+    if kind == "json":
+        if not isinstance(value, (dict, list)):
+            raise ValueError("必须是 JSON 对象或数组")
+        return json.dumps(value, ensure_ascii=False)
+    if kind == "integer":
+        if isinstance(value, bool):
+            raise ValueError("必须是整数")
+        number = float(value)
+        if not number.is_integer():
+            raise ValueError("必须是整数")
+        return int(number)
+    if kind == "number":
+        if isinstance(value, bool):
+            raise ValueError("必须是数字")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, str) and re.fullmatch(r"-?\d+", value.strip()):
+            return int(value.strip())
+        return float(value)
+    if kind == "boolean":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str) and value.strip().lower() in ("true", "false", "1", "0"):
+            return value.strip().lower() in ("true", "1")
+        raise ValueError("必须是布尔值")
+    return str(value)
+
+
+def validate_job_inputs(row, inputs):
+    mapping = row.get("input_map") or {}
+    for name, spec in mapping.items():
+        if not isinstance(spec, dict):
+            continue
+        required = not bool(spec.get("optional"))
+        value = inputs.get(name)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            if required:
+                raise BadRequest(f"缺少输入: {name}")
+            continue
+        kind = str(spec.get("type") or "text")
+        if kind == "image":
+            if not isinstance(value, str):
+                raise BadRequest(f"输入 {name} 必须是图片 data URL 或 http(s) 地址")
+            continue
+        try:
+            coerce_input_value(kind, value)
+        except (TypeError, ValueError) as exc:
+            raise BadRequest(f"输入 {name} {exc}") from exc
+
+
+def build_job_graph(row, inputs, upload_image):
+    try:
+        graph = json.loads(json.dumps(row.get("workflow") or {}, ensure_ascii=False))
+    except (TypeError, ValueError) as exc:
+        raise ComfyError("工作流 JSON 已损坏，请在管理端重新保存") from exc
+    mapping = row.get("input_map") or {}
+    for name, spec in mapping.items():
+        if not isinstance(spec, dict):
+            continue
+        value = inputs.get(name)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            if spec.get("optional"):
+                continue
+            raise BadRequest(f"缺少输入: {name}")
+        kind = str(spec.get("type") or "text")
+        if kind == "image":
+            value = upload_image(value)
+        else:
+            try:
+                value = coerce_input_value(kind, value)
+            except (TypeError, ValueError) as exc:
+                raise BadRequest(f"输入 {name} {exc}") from exc
+        for target in input_targets(spec):
+            node = graph.get(str(target.get("node") or ""))
+            if not isinstance(node, dict) or not isinstance(node.get("inputs"), dict):
+                raise ComfyError(f"输入映射 {name} 指向的节点 {target.get('node')} 不存在")
+            node["inputs"][target.get("input")] = value
+    return graph
+
+
+# ---------------------------------------------------------------------------
 # 网关
 # ---------------------------------------------------------------------------
 
@@ -656,6 +769,9 @@ class Gateway:
     def __init__(self, settings):
         self.settings = settings
         self.registry = WorkflowRegistry(settings.workflow_dir)
+        self.store = GatewayStore(settings.db_path)
+        self._cancelled = set()
+        self._cancel_lock = threading.Lock()
         self.files_dir = os.path.join(settings.data_dir, "files")
         self.tasks_path = os.path.join(settings.data_dir, "tasks.json")
         os.makedirs(self.files_dir, exist_ok=True)
@@ -687,6 +803,18 @@ class Gateway:
         self._cleanup_thread.start()
 
     # -- 任务存储 ---------------------------------------------------------
+
+    def auth_ok(self, provided):
+        """环境变量 Token 或管理端签发的 API Key 均可访问业务接口。"""
+        if not provided:
+            return False
+        if token_ok(self.settings.token, provided):
+            return True
+        digest = hash_api_key(provided)
+        if digest in self.store.api_key_hashes():
+            self.store.touch_api_key(digest)
+            return True
+        return False
 
     def _persist_locked(self):
         records = [
@@ -767,6 +895,9 @@ class Gateway:
             "warning": meta.get("warning"), "response_format": meta.get("response_format", "url"),
             "frames": meta.get("frames"), "width": meta.get("width"),
             "height": meta.get("height"), "quality": meta.get("quality"),
+            "workflow": meta.get("workflow"), "workflow_kind": meta.get("workflow_kind"),
+            "output_node": meta.get("output_node"), "output_key": meta.get("output_key"),
+            "output_exts": meta.get("output_exts"),
         }
         with self._lock:
             if self._queue.qsize() >= self.settings.queue_limit:
@@ -793,10 +924,14 @@ class Gateway:
                     continue
                 self._update(task_id, state="processing")
                 try:
-                    if task["kind"] == "video":
+                    if task["kind"] == "workflow":
+                        self._run_workflow(task_id, payload)
+                    elif task["kind"] == "video":
                         self._run_video(task_id, payload)
                     else:
                         self._run_image(task_id, payload)
+                except Cancelled:
+                    self._update(task_id, state="cancelled", error="已取消")
                 except Exception as exc:  # noqa: BLE001 - 任务失败必须落状态
                     self._fail(task_id, exc)
             finally:
@@ -815,7 +950,8 @@ class Gateway:
     # -- ComfyUI ---------------------------------------------------------
 
     def _comfy_url(self, path):
-        return self.settings.comfy_url.rstrip("/") + path
+        base = self.store.get_setting("comfy_url") or self.settings.comfy_url
+        return base.rstrip("/") + path
 
     def _comfy_json(self, path, payload=None, timeout=120):
         data = json.dumps(payload).encode() if payload is not None else None
@@ -909,9 +1045,11 @@ class Gateway:
             raise ValueError("参考图片过大")
         return data, content_type
 
-    def _wait_history(self, prompt_id):
+    def _wait_history(self, prompt_id, should_stop=None):
         deadline = time.time() + self.settings.upstream_timeout
         while time.time() < deadline:
+            if should_stop and should_stop():
+                raise Cancelled()
             history = self._comfy_json(f"/history/{prompt_id}", timeout=30)
             if prompt_id in history:
                 return history[prompt_id]
@@ -919,15 +1057,18 @@ class Gateway:
         raise TimeoutError("ComfyUI 执行超时")
 
     @staticmethod
-    def _find_output(entry, extensions):
+    def _find_output(entry, extensions, node=None, key=None):
         outputs = (entry or {}).get("outputs") or {}
-        for node_output in outputs.values():
+        node_ids = [str(node)] if node else list(outputs.keys())
+        keys = [key] if key else ["images", "videos", "gifs", "audio", "audios"]
+        for node_id in node_ids:
+            node_output = outputs.get(node_id)
             if not isinstance(node_output, dict):
                 continue
-            for key in ("images", "videos", "gifs"):
-                for item in node_output.get(key) or []:
+            for output_key in keys:
+                for item in node_output.get(output_key) or []:
                     filename = str((item or {}).get("filename") or "")
-                    if filename.lower().endswith(extensions):
+                    if filename.lower().endswith(tuple(extensions)):
                         return item
         return None
 
@@ -1105,6 +1246,108 @@ class Gateway:
         self._download_output(item, filename)
         self._update(task_id, state="succeeded", file=filename, error=None)
 
+    # -- 命名工作流任务 ---------------------------------------------------
+
+    def _is_cancelled(self, task_id):
+        with self._cancel_lock:
+            return task_id in self._cancelled
+
+    def _delete_prompt(self, prompt_id):
+        try:
+            self._comfy_json("/queue", {"delete": [prompt_id]}, timeout=10)
+        except Exception:  # noqa: BLE001 - 取消是尽力而为
+            pass
+
+    def cancel_job(self, task_id):
+        task = self.get_task(task_id)
+        if not task or task.get("kind") != "workflow":
+            return None
+        if task.get("state") in TERMINAL_STATES:
+            return task
+        with self._cancel_lock:
+            self._cancelled.add(task_id)
+        if task.get("state") == "queued":
+            self._update(task_id, state="cancelled", error="已取消")
+        else:
+            prompt_id = task.get("pid")
+            if prompt_id:
+                self._delete_prompt(prompt_id)
+        return self.get_task(task_id)
+
+    def list_jobs(self, limit=20):
+        with self._lock:
+            items = [dict(task) for task in self.tasks.values() if task.get("kind") == "workflow"]
+        items.sort(key=lambda task: task.get("created_at") or 0, reverse=True)
+        return items[:max(1, min(int(limit), 100))]
+
+    def job_payload(self, task, base_url):
+        state = task.get("state")
+        return {
+            "job_id": task.get("id"),
+            "id": task.get("id"),
+            "workflow": task.get("workflow"),
+            "kind": task.get("workflow_kind"),
+            "status": state,
+            "state": state,
+            "created_at": task.get("created_at"),
+            "updated_at": task.get("updated_at"),
+            "file": task.get("file"),
+            "file_url": self.signed_file_url(base_url, task) if state == "succeeded" else None,
+            "duration": round(float(task["duration"]), 3) if task.get("duration") else None,
+            "error": task.get("error"),
+            "warning": task.get("warning"),
+        }
+
+    def _run_workflow(self, task_id, payload):
+        started = time.time()
+        row = payload.get("workflow") or {}
+        inputs = payload.get("inputs") or {}
+        if self._is_cancelled(task_id):
+            raise Cancelled()
+        graph = build_job_graph(row, inputs, self._upload_source)
+        result = self._comfy_json("/prompt", {"prompt": graph})
+        prompt_id = result.get("prompt_id") if isinstance(result, dict) else None
+        if not prompt_id:
+            raise ComfyError("ComfyUI 未返回 prompt_id")
+        self._update(task_id, pid=prompt_id)
+        log(f"job {task_id[:8]} submitted workflow={row.get('slug')} kind={row.get('kind')}")
+        entry = self._wait_history(
+            prompt_id, should_stop=lambda: self._is_cancelled(task_id),
+        )
+        if self._is_cancelled(task_id):
+            self._delete_prompt(prompt_id)
+            raise Cancelled()
+        self._finish_workflow(task_id, entry)
+        log(f"job {task_id[:8]} done in {time.time() - started:.1f}s")
+
+    def _finish_workflow(self, task_id, entry):
+        error = history_error(entry)
+        if error:
+            self._update(task_id, state="failed", error=error)
+            return
+        task = self.get_task(task_id) or {}
+        kind = task.get("workflow_kind") or "video"
+        exts = tuple(
+            "." + str(ext).lower().lstrip(".")
+            for ext in (task.get("output_exts") or [])
+            if str(ext).strip()
+        ) or tuple(DEFAULT_WORKFLOW_EXTS.get(kind, (".mp4",)))
+        item = self._find_output(
+            entry, exts, task.get("output_node") or None, task.get("output_key") or None,
+        )
+        if not item:
+            nodes = ", ".join((entry.get("outputs") or {}).keys()) or "none"
+            self._update(
+                task_id, state="failed",
+                error=f"ComfyUI 输出中没有匹配的 {kind} 产物（节点: {nodes}，后缀: {'/'.join(exts)}）",
+            )
+            return
+        suffix = os.path.splitext(str(item.get("filename") or ""))[1].lower()
+        ext = suffix if suffix in exts else exts[0]
+        filename = f"{task_id}{ext}"
+        self._download_output(item, filename)
+        self._update(task_id, state="succeeded", file=filename, error=None)
+
     # -- 恢复与清理 -------------------------------------------------------
 
     def _resume(self, task_id):
@@ -1116,6 +1359,8 @@ class Gateway:
             entry = self._wait_history(prompt_id)
             if task.get("kind") == "video":
                 self._finish_video(task_id, entry)
+            elif task.get("kind") == "workflow":
+                self._finish_workflow(task_id, entry)
             else:
                 self._finish_image(task_id, entry)
             log(f"task {task_id[:8]} resumed")
@@ -1343,7 +1588,7 @@ def make_handler(gateway):
             elif allow_query:
                 query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                 provided = (query.get("token") or [""])[0]
-            return token_ok(gateway.settings.token, provided)
+            return gateway.auth_ok(provided)
 
         def _require_token(self, allow_query=False):
             if self._token_ok(allow_query):
@@ -1387,6 +1632,21 @@ def make_handler(gateway):
                     return self._image_edits() if self.command == "POST" else self._not_found()
                 if path.startswith("/v1/images/task/"):
                     return self._image_poll() if self.command == "GET" else self._not_found()
+                if path == "/v1/workflows":
+                    return self._workflow_list() if self.command == "GET" else self._not_found()
+                if path.startswith("/v1/workflows/"):
+                    return self._workflow_detail() if self.command == "GET" else self._not_found()
+                if path == "/v1/jobs":
+                    if self.command == "POST":
+                        return self._job_submit()
+                    return self._job_list() if self.command == "GET" else self._not_found()
+                if path.startswith("/v1/jobs/"):
+                    rest = path[len("/v1/jobs/"):]
+                    if rest.endswith("/cancel"):
+                        return self._job_cancel() if self.command == "POST" else self._not_found()
+                    return self._job_poll() if self.command == "GET" else self._not_found()
+                if path == "/v1/uploads":
+                    return self._upload() if self.command == "POST" else self._not_found()
                 return self._not_found()
             except BadRequest as exc:
                 return self._error(400, "bad_request", str(exc))
@@ -1593,6 +1853,121 @@ def make_handler(gateway):
                     "status": "failed", "error": {"message": "unknown task"},
                 })
             self._json(200, gateway.image_payload(task, self._public_base()))
+
+        # -- 命名工作流 ---------------------------------------------------
+
+        def _workflow_list(self):
+            if not self._require_token():
+                return
+            items = [
+                public_workflow(row)
+                for row in gateway.store.list_workflows(active_only=True)
+            ]
+            self._json(200, {"object": "list", "data": items})
+
+        def _workflow_detail(self):
+            if not self._require_token():
+                return
+            path = urllib.parse.urlsplit(self.path).path
+            slug = urllib.parse.unquote(path[len("/v1/workflows/"):]).strip("/")
+            row = gateway.store.get_workflow(slug) if slug else None
+            if not row:
+                raise NotFound("工作流不存在或已停用")
+            self._json(200, {"object": "workflow", "data": public_workflow(row)})
+
+        def _job_submit(self):
+            if not self._require_token():
+                return
+            body = self._json_body()
+            slug = str(body.get("workflow") or "").strip()
+            if not slug:
+                raise BadRequest("workflow required")
+            row = gateway.store.get_workflow(slug)
+            if not row:
+                raise NotFound("工作流不存在或已停用")
+            inputs = body.get("inputs")
+            if inputs is None:
+                inputs = {}
+            if not isinstance(inputs, dict):
+                raise BadRequest("inputs 必须是对象")
+            validate_job_inputs(row, inputs)
+            duration = None
+            if row.get("kind") == "audio" and isinstance(inputs.get("seconds"), (int, float)):
+                duration = float(inputs["seconds"])
+            elif isinstance(inputs.get("frames"), (int, float)) and isinstance(inputs.get("fps"), (int, float)):
+                if inputs["fps"]:
+                    duration = float(inputs["frames"]) / float(inputs["fps"])
+            task_id = gateway.enqueue(
+                "workflow", row.get("kind") or "video",
+                {"workflow": row, "inputs": inputs},
+                workflow=row.get("slug"),
+                workflow_kind=row.get("kind"),
+                output_node=row.get("output_node"),
+                output_key=row.get("output_key"),
+                output_exts=row.get("output_exts"),
+                duration=duration,
+                response_format=str(body.get("response_format") or "url"),
+            )
+            log(f"job {task_id[:8]} queued workflow={slug} kind={row.get('kind')}")
+            self._json(200, {
+                "job_id": task_id,
+                "id": task_id,
+                "status": "queued",
+                "workflow": slug,
+            })
+
+        def _job_poll(self):
+            if not self._require_token():
+                return
+            path = urllib.parse.urlsplit(self.path).path
+            job_id = urllib.parse.unquote(path[len("/v1/jobs/"):]).strip("/")
+            if not TASK_ID_RE.fullmatch(job_id or ""):
+                raise NotFound("任务不存在")
+            task = gateway.get_task(job_id)
+            if not task or task.get("kind") != "workflow":
+                raise NotFound("任务不存在")
+            self._json(200, gateway.job_payload(task, self._public_base()))
+
+        def _job_list(self):
+            if not self._require_token():
+                return
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            try:
+                limit = int((query.get("limit") or ["20"])[0])
+            except ValueError:
+                limit = 20
+            data = [
+                gateway.job_payload(task, self._public_base())
+                for task in gateway.list_jobs(limit)
+            ]
+            self._json(200, {"object": "list", "data": data})
+
+        def _job_cancel(self):
+            if not self._require_token():
+                return
+            path = urllib.parse.urlsplit(self.path).path
+            rest = urllib.parse.unquote(path[len("/v1/jobs/"):]).strip("/")
+            job_id = rest[: -len("/cancel")].strip("/") if rest.endswith("/cancel") else ""
+            if not TASK_ID_RE.fullmatch(job_id or ""):
+                raise NotFound("任务不存在")
+            task = gateway.cancel_job(job_id)
+            if not task:
+                raise NotFound("任务不存在")
+            self._json(200, gateway.job_payload(task, self._public_base()))
+
+        def _upload(self):
+            if not self._require_token():
+                return
+            raw = self._read_body()
+            _, files = parse_multipart(raw, self.headers.get("Content-Type") or "")
+            image = next((item for item in files if item.get("field") in ("image", "file")), None)
+            if not image:
+                raise BadRequest("image required")
+            data = image.get("data") or b""
+            if not is_image_bytes(data):
+                raise BadRequest("上传内容不是有效图片")
+            name = gateway._upload_bytes(data, image.get("content_type") or "image/png")
+            self._json(200, {"name": name, "subfolder": ""})
 
         # -- 文件 ---------------------------------------------------------
 

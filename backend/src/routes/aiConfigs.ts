@@ -44,10 +44,27 @@ function normalizeProviderSettings(value: any): Record<string, any> {
   return obj as Record<string, any>
 }
 
+const WORKFLOW_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/
+
+function readWorkflowSlugSetting(settings: Record<string, any>): string | null {
+  const raw = settings.workflow_slug
+  if (typeof raw !== 'string') return null
+  return raw.trim() || null
+}
+
 /** 各 provider 的最低配置要求（在保存时拦截，避免生成时才报错） */
 function validateProviderSettings(serviceType: string, provider: string, settings: Record<string, any>) {
   if (provider !== 'comfyui') return
   if (serviceType !== 'image' && serviceType !== 'video' && serviceType !== 'audio-gen') return
+  // 网关模式：工作流保存在网关管理端，这里只登记名称
+  if (settings.workflow_slug !== undefined && settings.workflow_slug !== null && settings.workflow_slug !== '') {
+    const slug = readWorkflowSlugSetting(settings)
+    if (!slug || !WORKFLOW_SLUG_PATTERN.test(slug)) {
+      throw new Error('workflow_slug 格式无效：只能包含小写字母、数字、连字符与下划线，且以字母或数字开头')
+    }
+    settings.workflow_slug = slug
+    return
+  }
   const workflow = settings.workflow
   if (!workflow) throw new Error('ComfyUI 需要 workflow（API 格式工作流 JSON）')
   let serialized = ''
@@ -254,6 +271,15 @@ function buildProbe(
   }
 
   if (p === 'comfyui') {
+    // 网关模式：/v1/workflows 同时验证地址、Token 与工作流注册表
+    if (readWorkflowSlugSetting(settings)) {
+      return {
+        method: 'GET',
+        url: joinProviderUrl(baseUrl, '', '/v1/workflows'),
+        headers: bearerHeaders(apiKey),
+        body: undefined,
+      }
+    }
     // ComfyUI 本地服务：system_stats 无副作用，可验证地址与鉴权
     return {
       method: 'GET',
@@ -511,6 +537,49 @@ app.post('/test', async (c) => {
       message: error.message || '请求失败',
       response_preview: '',
     })
+  }
+})
+
+// POST /ai-configs/comfyui/workflows —— 设置页按网关地址拉取可选工作流
+app.post('/comfyui/workflows', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const baseUrl = String(body.base_url || '').trim()
+  if (!baseUrl) return badRequest(c, '需要 base_url')
+  const kind = String(body.kind || '').trim().toLowerCase()
+  const apiKey = typeof body.api_key === 'string' ? body.api_key : undefined
+  const url = joinProviderUrl(baseUrl, '', '/v1/workflows')
+
+  logTaskProgress('AIConfig', 'workflow-list-start', { url: redactUrl(url), kind })
+  try {
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: bearerHeaders(apiKey),
+      signal: AbortSignal.timeout(15_000),
+    })
+    const text = await resp.text()
+    let payload: any = null
+    try {
+      payload = text ? JSON.parse(text) : null
+    } catch {
+      payload = null
+    }
+    if (!resp.ok) {
+      const detail = payload?.error?.message
+        || (typeof payload?.error === 'string' ? payload.error : '')
+        || payload?.message
+        || `HTTP ${resp.status}`
+      logTaskError('AIConfig', 'workflow-list-failed', { url: redactUrl(url), status: resp.status })
+      return c.json({ code: 502, message: `H3 网关拒绝访问工作流列表：${detail}` }, 502)
+    }
+    const items = Array.isArray(payload?.data) ? payload.data : []
+    const workflows = kind
+      ? items.filter((item: any) => String(item?.kind || '').toLowerCase() === kind)
+      : items
+    logTaskSuccess('AIConfig', 'workflow-list-done', { url: redactUrl(url), count: workflows.length })
+    return success(c, { workflows })
+  } catch (error: any) {
+    logTaskError('AIConfig', 'workflow-list-error', { url: redactUrl(url), error: error.message })
+    return c.json({ code: 502, message: `连接 H3 网关失败：${error?.message || '网络错误'}` }, 502)
   }
 })
 

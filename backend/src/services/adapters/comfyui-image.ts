@@ -12,6 +12,7 @@ import type {
   ImagePollResponse,
 } from './types'
 import { joinProviderUrl } from './url'
+import { isComfyGatewayConfig, mapGatewayJob, readGatewaySlug } from './comfyui-gateway'
 import {
   applyWorkflowPlaceholders,
   buildComfyViewUrl,
@@ -40,11 +41,39 @@ export class ComfyUIImageAdapter implements ImageProviderAdapter {
   supportsReferenceImages = true
 
   async buildGenerateRequest(config: AIConfig, record: ImageGenerationRecord): Promise<ProviderRequest> {
-    const workflow = parseComfyWorkflow(config)
     const settings = readComfySettings(config)
     const { width, height } = parseSize(record.size)
     const refImages = parseUrlArray(record.referenceImages)
 
+    if (isComfyGatewayConfig(config)) {
+      const slug = readGatewaySlug(config)
+      if (!slug) throw new Error('ComfyUI 网关配置缺少 workflow_slug')
+      const inputs: Record<string, unknown> = {
+        prompt: record.prompt || '',
+        width,
+        height,
+        seed: comfySeed(settings),
+      }
+      if (settings.negativePrompt) inputs.negative_prompt = settings.negativePrompt
+      const model = record.model || config.model
+      if (model) inputs.model = model
+      for (let i = 0; i < refImages.length; i++) {
+        const uploaded = await uploadComfyImage(config, refImages[i], `huobao-image-${record.id}-${i + 1}`)
+        inputs[`image_${i + 1}`] = uploaded.name
+        if (i === 0) {
+          inputs.image = uploaded.name
+          inputs.first_frame = uploaded.name
+        }
+      }
+      return {
+        url: joinProviderUrl(config.baseUrl, '', '/v1/jobs'),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...comfyHeaders(config) },
+        body: { workflow: slug, inputs },
+      }
+    }
+
+    const workflow = parseComfyWorkflow(config)
     const values: Record<string, string | number> = {
       PROMPT: record.prompt || '',
       NEGATIVE_PROMPT: settings.negativePrompt || '',
@@ -81,11 +110,20 @@ export class ComfyUIImageAdapter implements ImageProviderAdapter {
     if (result?.node_errors && Object.keys(result.node_errors).length) {
       throw new Error(`ComfyUI 工作流节点校验失败：${this.errorText(result.node_errors)}`)
     }
-    if (!result?.prompt_id) throw new Error('ComfyUI 响应缺少 prompt_id')
-    return { isAsync: true, taskId: String(result.prompt_id) }
+    const taskId = result?.job_id || result?.id || result?.prompt_id
+    if (!taskId) throw new Error('ComfyUI 响应缺少任务 ID（prompt_id/job_id）')
+    return { isAsync: true, taskId: String(taskId) }
   }
 
   buildPollRequest(config: AIConfig, taskId: string): ProviderRequest {
+    if (isComfyGatewayConfig(config)) {
+      return {
+        url: joinProviderUrl(config.baseUrl, '', `/v1/jobs/${encodeURIComponent(taskId)}`),
+        method: 'GET',
+        headers: comfyHeaders(config),
+        body: undefined,
+      }
+    }
     return {
       url: joinProviderUrl(config.baseUrl, '', `/history/${encodeURIComponent(taskId)}`),
       method: 'GET',
@@ -95,6 +133,12 @@ export class ComfyUIImageAdapter implements ImageProviderAdapter {
   }
 
   parsePollResponse(result: any, config?: AIConfig): ImagePollResponse {
+    if (config && isComfyGatewayConfig(config)) {
+      const mapped = mapGatewayJob(result)
+      if (mapped.status === 'failed') return { status: 'failed', error: mapped.error }
+      if (mapped.status === 'completed') return { status: 'completed', imageUrl: mapped.fileUrl }
+      return { status: 'processing' }
+    }
     const entry = unwrapComfyHistory(result)
     const settings = config ? readComfySettings(config) : { outputKey: 'images' }
     const output = extractComfyOutput(entry, settings.outputNode, settings.outputKey || 'images')

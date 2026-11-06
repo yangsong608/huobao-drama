@@ -1261,27 +1261,51 @@
           <template v-if="cfgForm.service_type === 'audio-gen' && cfgForm.provider === 'comfyui'">
             <section class="cfg-settings">
               <div class="cfg-settings-head">{{ t('settings.cfg.providerSettings') }}</div>
-              <label class="field">
-                <span class="field-label">{{ t('settings.cfg.comfyWorkflow') }} <span class="required">*</span></span>
-                <textarea
-                  v-model="cfgForm.provider_settings.workflow"
-                  class="textarea mono cfg-workflow"
-                  rows="8"
-                  :placeholder="t('settings.cfg.comfyWorkflowPlaceholder')"
-                ></textarea>
-                <span class="field-hint">{{ t('settings.cfg.audioWorkflowHint') }}</span>
-              </label>
-              <div class="cfg-setting-grid">
-                <label class="field">
-                  <span class="field-label">{{ t('settings.cfg.outputNode') }}</span>
-                  <input v-model="cfgForm.provider_settings.output_node" class="input mono" placeholder="9" />
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('settings.cfg.outputKey') }}</span>
-                  <input v-model="cfgForm.provider_settings.output_key" class="input mono" placeholder="audio" />
-                </label>
+              <div class="field">
+                <span class="field-label">{{ t('settings.cfg.comfyMode') }}</span>
+                <div class="comfy-mode-switch">
+                  <button type="button" :class="['comfy-mode-pill', { 'is-active': cfgComfyMode === 'gateway' }]" @click="cfgComfyMode = 'gateway'">{{ t('settings.cfg.comfyModeGateway') }}</button>
+                  <button type="button" :class="['comfy-mode-pill', { 'is-active': cfgComfyMode === 'direct' }]" @click="cfgComfyMode = 'direct'">{{ t('settings.cfg.comfyModeDirect') }}</button>
+                </div>
+                <span class="field-hint">{{ t('settings.cfg.comfyModeHint') }}</span>
               </div>
-              <span class="field-hint">{{ t('settings.cfg.audioOutputNodeHint') }}</span>
+              <template v-if="cfgComfyMode === 'gateway'">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.gatewayWorkflow') }} <span class="required">*</span></span>
+                  <div class="gateway-workflow-row">
+                    <BaseSelect v-model="cfgForm.provider_settings.workflow_slug" :options="gatewayWorkflowOptions" :placeholder="t('settings.cfg.gatewayWorkflowPlaceholder')" searchable />
+                    <button type="button" class="btn btn-sm" :disabled="gwLoading" @click="loadGatewayWorkflows">
+                      <Loader2 v-if="gwLoading" :size="12" class="animate-spin" />
+                      {{ t('settings.cfg.gatewayLoadWorkflows') }}
+                    </button>
+                  </div>
+                  <span v-if="gwError" class="field-hint gw-error">{{ gwError }}</span>
+                  <span class="field-hint">{{ t('settings.cfg.gatewayWorkflowHint') }}</span>
+                </label>
+              </template>
+              <template v-else>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.comfyWorkflow') }} <span class="required">*</span></span>
+                  <textarea
+                    v-model="cfgForm.provider_settings.workflow"
+                    class="textarea mono cfg-workflow"
+                    rows="8"
+                    :placeholder="t('settings.cfg.comfyWorkflowPlaceholder')"
+                  ></textarea>
+                  <span class="field-hint">{{ t('settings.cfg.audioWorkflowHint') }}</span>
+                </label>
+                <div class="cfg-setting-grid">
+                  <label class="field">
+                    <span class="field-label">{{ t('settings.cfg.outputNode') }}</span>
+                    <input v-model="cfgForm.provider_settings.output_node" class="input mono" placeholder="9" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">{{ t('settings.cfg.outputKey') }}</span>
+                    <input v-model="cfgForm.provider_settings.output_key" class="input mono" placeholder="audio" />
+                  </label>
+                </div>
+                <span class="field-hint">{{ t('settings.cfg.audioOutputNodeHint') }}</span>
+              </template>
               <label class="field">
                 <span class="field-label">{{ t('settings.cfg.negativePrompt') }}</span>
                 <input v-model="cfgForm.provider_settings.negative_prompt" class="input" :placeholder="t('settings.cfg.negativePromptPlaceholder')" />
@@ -1312,27 +1336,51 @@
           <template v-else-if="cfgForm.provider === 'comfyui' && (cfgForm.service_type === 'image' || cfgForm.service_type === 'video')">
             <section class="cfg-settings">
               <div class="cfg-settings-head">{{ t('settings.cfg.providerSettings') }}</div>
-              <label class="field">
-                <span class="field-label">{{ t('settings.cfg.comfyWorkflow') }} <span class="required">*</span></span>
-                <textarea
-                  v-model="cfgForm.provider_settings.workflow"
-                  class="textarea mono cfg-workflow"
-                  rows="8"
-                  :placeholder="t('settings.cfg.comfyWorkflowPlaceholder')"
-                ></textarea>
-                <span class="field-hint">{{ t('settings.cfg.comfyWorkflowHint') }}</span>
-              </label>
-              <div class="cfg-setting-grid">
-                <label class="field">
-                  <span class="field-label">{{ t('settings.cfg.outputNode') }}</span>
-                  <input v-model="cfgForm.provider_settings.output_node" class="input mono" placeholder="9" />
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('settings.cfg.outputKey') }}</span>
-                  <input v-model="cfgForm.provider_settings.output_key" class="input mono" placeholder="images" />
-                </label>
+              <div class="field">
+                <span class="field-label">{{ t('settings.cfg.comfyMode') }}</span>
+                <div class="comfy-mode-switch">
+                  <button type="button" :class="['comfy-mode-pill', { 'is-active': cfgComfyMode === 'gateway' }]" @click="cfgComfyMode = 'gateway'">{{ t('settings.cfg.comfyModeGateway') }}</button>
+                  <button type="button" :class="['comfy-mode-pill', { 'is-active': cfgComfyMode === 'direct' }]" @click="cfgComfyMode = 'direct'">{{ t('settings.cfg.comfyModeDirect') }}</button>
+                </div>
+                <span class="field-hint">{{ t('settings.cfg.comfyModeHint') }}</span>
               </div>
-              <span class="field-hint">{{ t('settings.cfg.outputNodeHint') }}</span>
+              <template v-if="cfgComfyMode === 'gateway'">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.gatewayWorkflow') }} <span class="required">*</span></span>
+                  <div class="gateway-workflow-row">
+                    <BaseSelect v-model="cfgForm.provider_settings.workflow_slug" :options="gatewayWorkflowOptions" :placeholder="t('settings.cfg.gatewayWorkflowPlaceholder')" searchable />
+                    <button type="button" class="btn btn-sm" :disabled="gwLoading" @click="loadGatewayWorkflows">
+                      <Loader2 v-if="gwLoading" :size="12" class="animate-spin" />
+                      {{ t('settings.cfg.gatewayLoadWorkflows') }}
+                    </button>
+                  </div>
+                  <span v-if="gwError" class="field-hint gw-error">{{ gwError }}</span>
+                  <span class="field-hint">{{ t('settings.cfg.gatewayWorkflowHint') }}</span>
+                </label>
+              </template>
+              <template v-else>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.comfyWorkflow') }} <span class="required">*</span></span>
+                  <textarea
+                    v-model="cfgForm.provider_settings.workflow"
+                    class="textarea mono cfg-workflow"
+                    rows="8"
+                    :placeholder="t('settings.cfg.comfyWorkflowPlaceholder')"
+                  ></textarea>
+                  <span class="field-hint">{{ t('settings.cfg.comfyWorkflowHint') }}</span>
+                </label>
+                <div class="cfg-setting-grid">
+                  <label class="field">
+                    <span class="field-label">{{ t('settings.cfg.outputNode') }}</span>
+                    <input v-model="cfgForm.provider_settings.output_node" class="input mono" placeholder="9" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">{{ t('settings.cfg.outputKey') }}</span>
+                    <input v-model="cfgForm.provider_settings.output_key" class="input mono" placeholder="images" />
+                  </label>
+                </div>
+                <span class="field-hint">{{ t('settings.cfg.outputNodeHint') }}</span>
+              </template>
               <label class="field">
                 <span class="field-label">{{ t('settings.cfg.negativePrompt') }}</span>
                 <input v-model="cfgForm.provider_settings.negative_prompt" class="input" :placeholder="t('settings.cfg.negativePromptPlaceholder')" />
@@ -1831,6 +1879,43 @@ const cfgForm = reactive({
   provider_settings: emptyProviderSettings(),
 })
 const cfgOriginalSettings = ref({})
+// ComfyUI 连接方式：网关（推荐，工作流保存在网关管理端）或直连（旧版工作流 JSON）
+const cfgComfyMode = ref('gateway')
+const gwWorkflows = ref([])
+const gwLoading = ref(false)
+const gwError = ref('')
+const gatewayWorkflowOptions = computed(() => gwWorkflows.value.map(item => ({
+  label: item.name ? `${item.name} · ${item.slug}` : item.slug,
+  value: item.slug,
+})))
+async function loadGatewayWorkflows(options = {}) {
+  const baseUrl = String(cfgForm.base_url || '').trim()
+  if (!baseUrl) {
+    if (!options?.quiet) toast.warning(t('settings.cfg.gatewayUrlRequired'))
+    return
+  }
+  gwLoading.value = true
+  gwError.value = ''
+  try {
+    const kind = cfgForm.service_type === 'audio-gen' ? 'audio' : cfgForm.service_type
+    const result = await aiConfigAPI.comfyWorkflows({ base_url: baseUrl, api_key: cfgForm.api_key, kind })
+    const workflows = Array.isArray(result) ? result : (Array.isArray(result?.workflows) ? result.workflows : [])
+    gwWorkflows.value = workflows
+    if (!gwWorkflows.value.length) {
+      gwError.value = t('settings.cfg.gatewayWorkflowsEmpty')
+      return
+    }
+    const current = cfgForm.provider_settings.workflow_slug
+    if (!current || !gwWorkflows.value.some(item => item.slug === current)) {
+      cfgForm.provider_settings.workflow_slug = gwWorkflows.value[0].slug
+    }
+  } catch (error) {
+    gwError.value = error?.message || t('settings.cfg.gatewayWorkflowsFailed')
+    if (!options?.quiet) toastError(error)
+  } finally {
+    gwLoading.value = false
+  }
+}
 /** 表单可编辑的 provider 专属字段；保存时只覆盖这些键，保留后端写入的其它字段 */
 const CFG_SETTING_KEYS = computed(() => {
   const type = cfgForm.service_type
@@ -1841,9 +1926,17 @@ const CFG_SETTING_KEYS = computed(() => {
     return ['defaultVoiceId', 'format', 'sampleRate', 'emotion']
   }
   if (type === 'audio-gen') {
+    if (provider === 'comfyui' && cfgComfyMode.value === 'gateway') {
+      return ['workflow_slug', 'negative_prompt', 'seed', 'timeout_ms', 'normalize_loudness', 'model_license']
+    }
     return ['workflow', 'output_node', 'output_key', 'negative_prompt', 'seed', 'timeout_ms', 'normalize_loudness', 'model_license']
   }
   if (provider === 'comfyui') {
+    if (cfgComfyMode.value === 'gateway') {
+      return type === 'video'
+        ? ['workflow_slug', 'negative_prompt', 'seed', 'fps', 'client_id']
+        : ['workflow_slug', 'negative_prompt', 'seed']
+    }
     return type === 'video'
       ? ['workflow', 'output_node', 'output_key', 'negative_prompt', 'seed', 'fps', 'client_id']
       : ['workflow', 'output_node', 'output_key', 'negative_prompt', 'seed']
@@ -1925,6 +2018,7 @@ function emptyProviderSettings() {
     maxNewTokens: '',
     // ComfyUI 本地工作流
     workflow: '',
+    workflow_slug: '',
     output_node: '',
     output_key: '',
     negative_prompt: '',
@@ -1951,6 +2045,16 @@ function collectProviderSettings() {
   const outgoing = { ...cfgOriginalSettings.value }
   const form = cfgForm.provider_settings || {}
   for (const key of CFG_SETTING_KEYS.value) delete outgoing[key]
+  // 切换连接方式时清掉另一模式的遗留键，避免网关配置残留旧 JSON / 直连配置残留 slug
+  if (cfgForm.provider === 'comfyui' && ['image', 'video', 'audio-gen'].includes(cfgForm.service_type)) {
+    const staleKeys = cfgComfyMode.value === 'gateway'
+      ? ['workflow', 'output_node', 'output_key']
+      : ['workflow_slug']
+    for (const key of staleKeys) delete outgoing[key]
+    if (cfgComfyMode.value === 'gateway' && !String(form.workflow_slug || '').trim()) {
+      throw new Error(t('settings.cfg.gatewayWorkflowRequired'))
+    }
+  }
   for (const key of CFG_SETTING_KEYS.value) {
     const value = form[key]
     if (typeof value === 'boolean') {
@@ -2049,6 +2153,11 @@ function applyProviderPreset(type, provider) {
   cfgForm.base_url = preset.baseUrl
   cfgForm.models = [...preset.models]
   if (providerChanged) cfgForm.provider_settings = emptyProviderSettings()
+  if (provider === 'comfyui') {
+    cfgComfyMode.value = 'gateway'
+    gwWorkflows.value = []
+    gwError.value = ''
+  }
   // 配置名持久化进 DB：用 provider 英文 + 服务类型英文标识拼，不随界面语言漂移
   cfgForm.name = `${preset.label}-${type}`
 }
@@ -2113,6 +2222,9 @@ function startAddCfg(t) {
   cfgEditId.value = null
   cfgTestResult.value = null
   cfgOriginalSettings.value = {}
+  cfgComfyMode.value = 'gateway'
+  gwWorkflows.value = []
+  gwError.value = ''
   Object.assign(cfgForm, {
     name: '', provider: '', api_key: '', base_url: '', models: [], service_type: t, priority: 0, temperature: '',
     provider_settings: emptyProviderSettings(),
@@ -2126,6 +2238,9 @@ function startEditCfg(c) {
   cfgTestResult.value = null
   const raw = c.provider_settings && typeof c.provider_settings === 'object' ? c.provider_settings : {}
   cfgOriginalSettings.value = { ...raw }
+  cfgComfyMode.value = raw.workflow_slug ? 'gateway' : 'direct'
+  gwWorkflows.value = []
+  gwError.value = ''
   const merged = { ...emptyProviderSettings(), ...raw }
   if (merged.workflow && typeof merged.workflow === 'object') {
     merged.workflow = JSON.stringify(merged.workflow, null, 2)
@@ -2142,6 +2257,10 @@ function startEditCfg(c) {
     provider_settings: merged,
   })
   cfgDialog.value = true
+  // 编辑网关配置时自动拉取工作流名称，避免用户不知道可选项
+  if (c.provider === 'comfyui' && cfgComfyMode.value === 'gateway' && cfgForm.base_url) {
+    void loadGatewayWorkflows({ quiet: true })
+  }
 }
 async function testCfgPayload(payload) {
   cfgTesting.value = true
@@ -3510,6 +3629,24 @@ onBeforeUnmount(stopUsagePoll)
   background: var(--bg-0);
 }
 .cfg-settings-head { font-size: 12px; font-weight: 600; color: var(--text-1); }
+.comfy-mode-switch { display: inline-flex; gap: 4px; padding: 3px; border-radius: var(--radius-pill); background: var(--bg-1); width: fit-content; }
+.comfy-mode-pill {
+  min-height: var(--button-height-sm);
+  padding: 0 14px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.16s var(--ease-out);
+}
+.comfy-mode-pill:hover { color: var(--text-0); }
+.comfy-mode-pill.is-active { background: var(--accent); color: #fff; }
+.gateway-workflow-row { display: flex; gap: 8px; align-items: center; }
+.gateway-workflow-row > :first-child { flex: 1; min-width: 0; }
+.gw-error { color: var(--error); }
 .cfg-setting-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .cfg-workflow { min-height: 160px; resize: vertical; font-size: 11px; line-height: 1.5; }
 .cfg-check { flex-direction: row; align-items: center; gap: 8px; font-size: 12px; color: var(--text-1); }

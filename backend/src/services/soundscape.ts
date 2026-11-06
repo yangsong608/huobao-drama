@@ -20,6 +20,7 @@ import {
   parseComfyWorkflow,
   readComfySettings,
 } from './adapters/comfyui.js'
+import { readGatewaySlug } from './adapters/comfyui-gateway.js'
 import {
   assertAudioWorkflowPrompt,
   cancelComfyPrompt,
@@ -262,10 +263,17 @@ async function resolveSetup(configId: number | undefined, deps: SoundscapeDeps):
   if ((config.provider || '').toLowerCase() !== 'comfyui') {
     throw new SoundscapeError('音频生成目前只支持 ComfyUI 服务', 400)
   }
-  let workflow: Record<string, unknown>
+  const gatewaySlug = readGatewaySlug(config)
+  let workflowHash: string
   try {
-    workflow = parseComfyWorkflow(config)
-    assertAudioWorkflowPrompt(workflow)
+    if (gatewaySlug) {
+      // 网关模式：工作流 JSON 只在服务端保存，客户端用 slug 区分缓存
+      workflowHash = `gateway:${gatewaySlug}`
+    } else {
+      const workflow = parseComfyWorkflow(config)
+      assertAudioWorkflowPrompt(workflow)
+      workflowHash = hashSoundscapeWorkflow(workflow)
+    }
   } catch (error) {
     throw new SoundscapeError((error as Error).message, 400)
   }
@@ -273,7 +281,7 @@ async function resolveSetup(configId: number | undefined, deps: SoundscapeDeps):
   return {
     config,
     model: config.model,
-    workflowHash: hashSoundscapeWorkflow(workflow),
+    workflowHash,
     normalizeLoudness: settings.normalizeLoudness ?? true,
     fixedSeed: settings.seed ?? null,
     timeoutMs: settings.timeoutMs ?? 600000,

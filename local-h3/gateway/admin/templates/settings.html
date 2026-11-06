@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}设置{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>ComfyUI 设置</h1>
+    <p class="muted">网关与管理台读取同一个数据库，保存后自动生效。</p>
+  </div>
+</div>
+
+<section class="card narrow">
+  <h2>连接地址</h2>
+  <form method="post" action="/settings" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>ComfyUI 地址
+      <input type="url" name="comfy_url" value="{{ comfy_url }}" placeholder="http://127.0.0.1:8188">
+    </label>
+    <p class="hint">留空则沿用网关环境变量 <code>H3_COMFY_URL</code>{% if env_comfy_url %}（当前：{{ env_comfy_url }}）{% endif %}。</p>
+    <div class="row">
+      <button class="btn primary" type="submit">保存</button>
+    </div>
+  </form>
+
+  <hr>
+
+  <h2>连通性测试</h2>
+  <form method="post" action="/settings/test" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="url" name="comfy_url" value="{{ comfy_url }}" placeholder="http://127.0.0.1:8188">
+    <button class="btn" type="submit">测试连接</button>
+  </form>
+  <p class="hint">测试会请求 <code>/object_info</code>，返回节点数量即表示可用。</p>
+</section>
+
+<section class="card narrow">
+  <h2>运行环境</h2>
+  <dl class="kv">
+    <dt>数据库</dt><dd class="mono">{{ db_path }}</dd>
+    <dt>网关 API</dt><dd class="mono">/v1/workflows · /v1/jobs · /v1/uploads</dd>
+    <dt>网关进程</dt><dd>与 web 服务分离，读取 <code>comfy_url</code> 最多延迟 5 秒</dd>
+  </dl>
+  <p class="hint">修改地址不会影响其他 ComfyUI 工作流；网关只在执行命名工作流时使用该地址。</p>
+</section>
+{% endblock %}

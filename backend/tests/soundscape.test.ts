@@ -626,3 +626,32 @@ test('预览与启动参数一致时复用编译结果', async () => {
   await waitStatus(episode.id, 'completed')
   assert.equal(compiles, 1)
 })
+
+test('网关音频配置无需本地工作流，slug 参与缓存哈希', async () => {
+  const { episode, drama } = newEpisode('网关音频')
+  const config: AIConfig = {
+    id: 901,
+    serviceType: 'audio-gen',
+    provider: 'comfyui',
+    baseUrl: 'http://127.0.0.1:8192',
+    apiKey: 'gw-token',
+    model: 'stable-audio-open-1.0',
+    settings: {
+      workflow_slug: 'stable-audio',
+      normalize_loudness: false,
+      seed: 7,
+    },
+  }
+  let compiled: { workflowHash: string } | null = null
+  const preview = await previewSoundscape(episode.id, drama.id, makeRequest(), {
+    resolveConfig: async () => config,
+    compilePlan: async (options) => {
+      compiled = options
+      return makePlan([makeItem({ itemId: 'ambience:scene:10' })])
+    },
+  })
+  assert.equal(preview.workflowHash, 'gateway:stable-audio')
+  assert.equal(compiled?.workflowHash, 'gateway:stable-audio')
+  assert.equal(preview.model, 'stable-audio-open-1.0')
+  assert.equal(preview.normalizeLoudness, false)
+})

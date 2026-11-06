@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑工作流' if mode == 'edit' else '新增工作流' }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ '编辑工作流' if mode == 'edit' else '新增工作流' }}</h1>
+    <p class="muted">工作流必须是 ComfyUI「导出（API）」得到的节点对象；界面格式请走导入。</p>
+  </div>
+  <a class="btn" href="/workflows">返回列表</a>
+</div>
+
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+<form method="post" action="{{ '/workflows/' ~ values.slug ~ '/edit' if mode == 'edit' else '/workflows/new' }}" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="source" value="{{ values.source }}">
+  <input type="hidden" name="source_file" value="{{ values.source_file }}">
+
+  <section class="card">
+    <h2>基本信息</h2>
+    <div class="form-grid">
+      <label>标识 slug
+        <input type="text" name="slug" value="{{ values.slug }}" placeholder="stable-audio-ambient" {% if mode == 'edit' %}readonly{% endif %} required>
+        <span class="hint">小写字母、数字、下划线、短横线；客户端按它选择工作流。</span>
+      </label>
+      <label>显示名称
+        <input type="text" name="name" value="{{ values.name }}" placeholder="环境声生成" required>
+      </label>
+      <label>类型
+        <select name="kind">
+          {% for key, label in kind_labels.items() %}
+          <option value="{{ key }}" {{ 'selected' if values.kind == key }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>排序说明 / 描述
+        <input type="text" name="description" value="{{ values.description }}" placeholder="用于在客户端说明该工作流">
+      </label>
+    </div>
+    <label class="check"><input type="checkbox" name="is_active" {{ 'checked' if values.is_active }}> 启用（客户端可见）</label>
+  </section>
+
+  <section class="card">
+    <h2>输出与参数映射</h2>
+    <div class="form-grid">
+      <label>输出节点
+        <input type="text" name="output_node" value="{{ values.output_node }}" placeholder="8">
+      </label>
+      <label>输出键
+        <input type="text" name="output_key" value="{{ values.output_key }}" placeholder="audio / images">
+      </label>
+      <label>输出后缀
+        <input type="text" name="output_exts" value="{{ values.output_exts }}" placeholder="wav,mp3">
+      </label>
+    </div>
+    <label>输入映射 JSON
+      <textarea rows="8" spellcheck="false" name="input_map">{{ values.input_map|raw_json }}</textarea>
+      <span class="hint">格式：<code>{"prompt": {"node": "2", "input": "text", "type": "text"}}</code>；一对多可写 <code>targets</code>。</span>
+    </label>
+    <label>示例输入 JSON
+      <textarea rows="5" spellcheck="false" name="example_json">{{ values.example_json|raw_json }}</textarea>
+    </label>
+  </section>
+
+  <section class="card">
+    <h2>工作流 JSON（API 格式）</h2>
+    <label>
+      <textarea rows="18" spellcheck="false" name="workflow_json">{{ values.workflow_json|raw_json }}</textarea>
+    </label>
+  </section>
+
+  <div class="row sticky-actions">
+    <button class="btn primary" type="submit">保存工作流</button>
+    <a class="btn" href="/workflows">取消</a>
+  </div>
+</form>
+{% endblock %}

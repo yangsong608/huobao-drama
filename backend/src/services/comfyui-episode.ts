@@ -11,6 +11,7 @@ import { eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { getConfigById } from './ai.js'
 import { applyComfyTimelineWorkflow, parseComfyWorkflow, readComfySettings, uploadComfyImage } from './adapters/comfyui.js'
+import { fetchGatewayWorkflow, readGatewaySlug, type GatewayRequestOptions } from './adapters/comfyui-gateway.js'
 import type { AIConfig } from './adapters/types'
 import {
   DEFAULT_COMFY_TIMELINE,
@@ -40,11 +41,16 @@ export interface EpisodeComfyContext {
   audioMode: VideoAudioMode
   mapping: ComfyTimelineMapping
   mappingSource: 'config' | 'default'
+  /** 网关模式为空对象；直连模式为注入 timeline_data 后的工作流快照 */
   workflow: Record<string, unknown>
+  /** 网关已保存工作流名称；直连模式为 null */
+  workflowSlug: string | null
   storyboards: ComfyTimelineStoryboardInput[]
   storyboardRows: StoryboardRow[]
   warnings: string[]
 }
+
+export interface EpisodeComfyLoadOptions extends GatewayRequestOptions {}
 
 export interface EpisodeComfyRefPreview {
   index: number
@@ -170,16 +176,20 @@ export async function createComfyUiSession(
     throw new Error('ComfyUI 配置的 base_url 无效')
   }
   const pathname = parsed.pathname.replace(/\/+$/, '')
-  if (!pathname.toLowerCase().endsWith('/comfyui')) {
+  const gatewayMode = !!readGatewaySlug(config)
+  if (!gatewayMode && !pathname.toLowerCase().endsWith('/comfyui')) {
     return { url: rawBase, expiresAt: null, gateway: false }
   }
   if (!config.apiKey) {
     throw new Error('网关 ComfyUI 配置缺少 API Key（网关 Token），无法创建监控页面会话')
   }
 
+  const sessionBase = gatewayMode && !pathname.toLowerCase().endsWith('/comfyui')
+    ? `${rawBase}/comfyui`
+    : rawBase
   let response: Response
   try {
-    response = await fetch(`${rawBase}/ui-session`, {
+    response = await fetch(`${sessionBase}/ui-session`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${config.apiKey}` },
       signal: AbortSignal.timeout(15_000),
@@ -194,7 +204,9 @@ export async function createComfyUiSession(
   const sessionPath = typeof payload?.path === 'string' ? payload.path : ''
   if (!sessionPath.startsWith('/')) throw new Error('H3 网关未返回有效的监控会话路径')
 
-  const prefix = pathname.slice(0, -'/comfyui'.length)
+  const prefix = gatewayMode && !pathname.toLowerCase().endsWith('/comfyui')
+    ? pathname
+    : pathname.slice(0, -'/comfyui'.length)
   return {
     url: `${parsed.origin}${prefix}${sessionPath}`,
     expiresAt: Number(payload?.expires_at) || null,
@@ -228,12 +240,20 @@ function findTimelineNode(workflow: Record<string, unknown>): Record<string, unk
 /** 配置显式声明 timeline_mapping 时以配置为准；否则工作流自带 E12 时间线节点可用默认映射 */
 export function resolveEpisodeTimelineMapping(
   config: AIConfig,
-  workflow: Record<string, unknown>,
+  workflow: Record<string, unknown> | null,
 ): { mapping: ComfyTimelineMapping; source: 'config' | 'default' } | null {
   const configured = readComfyTimelineMapping(config)
   if (configured) return { mapping: configured, source: 'config' }
-  if (findTimelineNode(workflow)) {
+  if (workflow && findTimelineNode(workflow)) {
     // 默认映射仍尊重配置里的输出节点/键，避免整集产物落到错误的 Save 节点
+    const settings = readComfySettings(config)
+    return {
+      mapping: { ...DEFAULT_COMFY_TIMELINE, outputNode: settings.outputNode, outputKey: settings.outputKey },
+      source: 'default',
+    }
+  }
+  // 网关模式不暴露工作流节点；timeline_data 输入已由工作流详情校验
+  if (readGatewaySlug(config)) {
     const settings = readComfySettings(config)
     return {
       mapping: { ...DEFAULT_COMFY_TIMELINE, outputNode: settings.outputNode, outputKey: settings.outputKey },
@@ -257,14 +277,34 @@ function groupIds<T extends { storyboardId: number }>(links: T[], pick: (link: T
 export async function loadEpisodeComfyContext(
   episodeId: number,
   explicitConfigId?: number,
+  options: EpisodeComfyLoadOptions = {},
 ): Promise<EpisodeComfyContext> {
   const [episode] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
   if (!episode || episode.deletedAt) throw new Error('剧集不存在')
   const config = await resolveEpisodeComfyConfig(episode, explicitConfigId)
   if (!config.id) throw new Error('ComfyUI 配置缺少 id，请检查服务配置')
   const configId = config.id
-  const workflow = resolveEpisodeWorkflow(episode, config)
-  const timelineMapping = resolveEpisodeTimelineMapping(config, workflow)
+  const workflowSlug = readGatewaySlug(config)
+  let workflow: Record<string, unknown>
+  if (workflowSlug) {
+    let gatewayWorkflow
+    try {
+      gatewayWorkflow = await fetchGatewayWorkflow(config, workflowSlug, options)
+    } catch (error: any) {
+      throw new Error(`读取 H3 网关工作流失败：${error?.message || '网络错误'}`)
+    }
+    if (gatewayWorkflow.kind && gatewayWorkflow.kind.toLowerCase() !== 'video') {
+      throw new Error(`所选网关工作流类型是 ${gatewayWorkflow.kind}，整集视频需要 video 工作流`)
+    }
+    if (!gatewayWorkflow.inputs?.timeline_data) {
+      throw new Error('所选网关工作流不是整集时间线工作流：缺少 timeline_data 输入，请在管理端确认输入映射')
+    }
+    // 网关模式不传输工作流 JSON：timeline_data 由网关按 mapping 注入
+    workflow = {}
+  } else {
+    workflow = resolveEpisodeWorkflow(episode, config)
+  }
+  const timelineMapping = resolveEpisodeTimelineMapping(config, workflowSlug ? null : workflow)
   if (!timelineMapping) {
     throw new Error('当前 ComfyUI 配置未启用整集时间线：请在配置的 settings.timeline_mapping 设置 mode=timeline，或使用包含 timeline_data 节点的 E12 工作流')
   }
@@ -302,7 +342,7 @@ export async function loadEpisodeComfyContext(
   const propIdsByStoryboard = groupIds(await db.select().from(schema.storyboardProps), link => link.propId)
 
   const warnings: string[] = []
-  if (timelineMapping.source === 'default') {
+  if (timelineMapping.source === 'default' && !workflowSlug) {
     warnings.push('配置未声明 timeline_mapping，已按 E12 默认映射运行')
   }
   if (normalizeVideoAudioMode(episode.videoAudioMode) === 'silent') {
@@ -350,6 +390,7 @@ export async function loadEpisodeComfyContext(
     mapping: timelineMapping.mapping,
     mappingSource: timelineMapping.source,
     workflow,
+    workflowSlug,
     storyboards,
     storyboardRows,
     warnings,
@@ -381,13 +422,15 @@ export async function previewEpisodeComfyRun(
     maxRefs: MAX_SEGMENT_REFS,
     compilePrompt: text => compileH3Prompt(text, ctx.audioMode),
   })
-  // 提前校验节点结构，缺节点/缺 inputs 在预览阶段就给出可读错误
-  applyComfyTimelineWorkflow(ctx.workflow, {
-    timelineData: { preview: true },
-    node: ctx.mapping.node,
-    input: ctx.mapping.input,
-    outputNode: ctx.mapping.outputNode,
-  })
+  // 提前校验节点结构，缺节点/缺 inputs 在预览阶段就给出可读错误；网关模式由服务端校验
+  if (!ctx.workflowSlug) {
+    applyComfyTimelineWorkflow(ctx.workflow, {
+      timelineData: { preview: true },
+      node: ctx.mapping.node,
+      input: ctx.mapping.input,
+      outputNode: ctx.mapping.outputNode,
+    })
+  }
   return {
     episode: {
       id: ctx.episode.id,
@@ -487,12 +530,14 @@ export async function runEpisodeComfy(
   }
 
   const timelineData = materializeComfyTimelineData(plan, uploadedNames)
-  applyComfyTimelineWorkflow(ctx.workflow, {
-    timelineData,
-    node: ctx.mapping.node,
-    input: ctx.mapping.input,
-    outputNode: ctx.mapping.outputNode,
-  })
+  if (!ctx.workflowSlug) {
+    applyComfyTimelineWorkflow(ctx.workflow, {
+      timelineData,
+      node: ctx.mapping.node,
+      input: ctx.mapping.input,
+      outputNode: ctx.mapping.outputNode,
+    })
+  }
 
   const durationSec = Math.round((plan.totalFrames / plan.fps) * 100) / 100
   logTaskStart('ComfyEpisode', 'run', {
@@ -517,7 +562,8 @@ export async function runEpisodeComfy(
       timelineData,
       node: ctx.mapping.node,
       input: ctx.mapping.input,
-      workflow: ctx.workflow,
+      workflow: ctx.workflowSlug ? undefined : ctx.workflow,
+      workflowSlug: ctx.workflowSlug,
       outputNode: ctx.mapping.outputNode,
       outputKey: ctx.mapping.outputKey,
       syncInputs: {

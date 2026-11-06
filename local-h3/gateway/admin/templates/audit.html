@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}审计日志{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>审计日志</h1>
+    <p class="muted">登录、设置、工作流与 Key 的变更记录，最多显示最近 300 条。</p>
+  </div>
+</div>
+
+<section class="card">
+  {% if logs %}
+  <table class="table">
+    <thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>详情</th></tr></thead>
+    <tbody>
+      {% for item in logs %}
+      <tr>
+        <td class="muted small nowrap">{{ item.created_at|dt }}</td>
+        <td>{{ item.actor }}</td>
+        <td class="mono">{{ item.action }}</td>
+        <td class="mono small">{{ item.target or '-' }}</td>
+        <td class="muted small">{{ item.detail or '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">暂无审计记录。</p>
+  {% endif %}
+</section>
+{% endblock %}

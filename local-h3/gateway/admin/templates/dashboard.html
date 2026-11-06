@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}概览{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>概览</h1>
+    <p class="muted">客户端只按名称选择工作流；网关负责执行、排队与回传媒体。</p>
+  </div>
+  <a class="btn primary" href="/workflows/new">新增工作流</a>
+</div>
+
+<section class="stats">
+  <article class="stat">
+    <span class="stat-label">启用工作流</span>
+    <strong>{{ active_count }}<small> / {{ workflows|length }}</small></strong>
+    <a href="/workflows">管理工作流 →</a>
+  </article>
+  <article class="stat">
+    <span class="stat-label">可用 API Key</span>
+    <strong>{{ key_count }}</strong>
+    <a href="/keys">管理密钥 →</a>
+  </article>
+  <article class="stat">
+    <span class="stat-label">ComfyUI 地址</span>
+    <strong class="small">{{ comfy_url or (env_comfy_url or '未配置') }}</strong>
+    <a href="/settings">连接设置 →</a>
+  </article>
+  <article class="stat">
+    <span class="stat-label">管理员</span>
+    <strong>{{ users|length }}</strong>
+    <span class="muted small">当前登录：{{ user }}</span>
+  </article>
+</section>
+
+<div class="grid-2">
+  <section class="card">
+    <div class="card-head">
+      <h2>工作流</h2>
+      <a class="muted" href="/workflows">全部</a>
+    </div>
+    {% if workflows %}
+    <table class="table compact">
+      <thead><tr><th>名称</th><th>类型</th><th>状态</th><th>更新</th></tr></thead>
+      <tbody>
+        {% for row in workflows[:6] %}
+        <tr>
+          <td><a href="/workflows/{{ row.slug }}/edit">{{ row.name }}</a><div class="mono muted">{{ row.slug }}</div></td>
+          <td>{{ kind_labels.get(row.kind, row.kind) }}</td>
+          <td>{% if row.is_active %}<span class="pill ok">启用</span>{% else %}<span class="pill off">停用</span>{% endif %}</td>
+          <td class="muted">{{ row.updated_at|dt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">还没有工作流。可以从 ComfyUI 已保存的流程导入，或手动粘贴 API 格式 JSON。</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>最近操作</h2><a class="muted" href="/audit">审计日志</a></div>
+    {% if audit %}
+    <ul class="timeline">
+      {% for item in audit %}
+      <li>
+        <span class="mono">{{ item.action }}</span>
+        <span>{{ item.target }}</span>
+        <time>{{ item.created_at|dt }}</time>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">暂无操作记录。</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card hint-card">
+  <h2>客户端如何接入</h2>
+  <ol class="steps">
+    <li>在「设置」填写 ComfyUI 地址并点「测试连接」。</li>
+    <li>从 ComfyUI 的已保存工作流导入，或手动新增 API 格式工作流，确认参数映射与输出节点。</li>
+    <li>在「API Key」创建密钥，交给客户端填写网关地址与密钥。</li>
+    <li>客户端只需选择工作流名称，不再粘贴工作流 JSON。</li>
+  </ol>
+</section>
+{% endblock %}

@@ -1,0 +1,213 @@
+{
+  "version": 1,
+  "workflows": [
+    {
+      "slug": "e12-timeline",
+      "name": "H3 整集时间线（E12）",
+      "kind": "video",
+      "description": "MiniMax H3 Director 整集时间线工作流。客户端按分镜生成 timeline_data，上传参考图后提交；产物为带音轨的整集视频。",
+      "file": "e12-timeline.json",
+      "input_map": {
+        "timeline_data": {
+          "node": "6",
+          "input": "timeline_data",
+          "type": "json"
+        },
+        "total_frames": {
+          "node": "6",
+          "input": "total_frames",
+          "type": "integer"
+        },
+        "width": {
+          "node": "6",
+          "input": "width",
+          "type": "integer"
+        },
+        "height": {
+          "node": "6",
+          "input": "height",
+          "type": "integer"
+        },
+        "frame_rate": {
+          "node": "6",
+          "input": "frame_rate",
+          "type": "number"
+        },
+        "steps": {
+          "node": "6",
+          "input": "steps",
+          "type": "integer",
+          "optional": true
+        },
+        "seed": {
+          "node": "6",
+          "input": "seed",
+          "type": "integer",
+          "optional": true
+        },
+        "global_prompt": {
+          "node": "6",
+          "input": "global_prompt",
+          "type": "text",
+          "optional": true
+        },
+        "task_type": {
+          "node": "6",
+          "input": "task_type",
+          "type": "text",
+          "optional": true
+        }
+      },
+      "output_node": "8",
+      "output_key": "",
+      "output_exts": [
+        "mp4",
+        "webm",
+        "gif"
+      ],
+      "example": {
+        "timeline_data": {
+          "version": 4,
+          "editMode": "segment",
+          "timelineMode": "r2v",
+          "totalFrames": 121,
+          "frameRate": 24.0,
+          "width": 1024,
+          "height": 576,
+          "refMaxSize": 1024,
+          "output": {
+            "mode": "fixed",
+            "longEdge": 1024,
+            "width": 1024,
+            "height": 576,
+            "maxExportFrames": 0,
+            "exportMode": "all",
+            "continuityEnabled": false,
+            "continuityOverlapFrames": 9
+          },
+          "videoClips": [],
+          "video": {
+            "fileName": "",
+            "videoFile": "",
+            "subfolder": "",
+            "type": "input",
+            "frames": [],
+            "frameMap": []
+          },
+          "global": {
+            "taskType": "r2v — 参考主体生视频(Reference to Video)",
+            "prompt": "Natural synchronized sound, no text.",
+            "refs": [],
+            "referenceVideo": {},
+            "continuousReference": false,
+            "genImage": {
+              "imageFile": ""
+            }
+          },
+          "shots": [],
+          "keyframes": [],
+          "segments": [
+            {
+              "id": "s1",
+              "start": 0,
+              "length": 121,
+              "frameCount": 121,
+              "durationSec": 5.04,
+              "prompt": "A calm cinematic establishing shot, soft natural light, gentle camera push-in.",
+              "negativePrompt": "bad video, distorted face, extra fingers, deformed hands, subtitles, captions, on-screen text, chinese characters, watermark, logo",
+              "continuityFromPrev": false,
+              "loras": [],
+              "isStartFrame": false,
+              "isEndFrame": false,
+              "genImage": {
+                "imageFile": null,
+                "width": 0,
+                "height": 0
+              },
+              "endImage": null,
+              "taskType": "",
+              "refs": []
+            }
+          ],
+          "gen": {
+            "defaultFrameCount": 121
+          },
+          "runSelectEnabled": false,
+          "runSelection": []
+        },
+        "total_frames": 121,
+        "width": 1024,
+        "height": 576,
+        "frame_rate": 24.0,
+        "seed": 20275001
+      }
+    },
+    {
+      "slug": "stable-audio",
+      "name": "Stable Audio Open 声音生成",
+      "kind": "audio",
+      "description": "Stable Audio Open 文生音频工作流：按提示词生成环境声、音效、群众声或 BGM，输出 FLAC 音频。",
+      "file": "stable-audio.json",
+      "input_map": {
+        "prompt": {
+          "node": "2",
+          "input": "text",
+          "type": "text"
+        },
+        "negative_prompt": {
+          "node": "3",
+          "input": "text",
+          "type": "text",
+          "optional": true
+        },
+        "seconds": {
+          "targets": [
+            {
+              "node": "4",
+              "input": "seconds_total"
+            },
+            {
+              "node": "5",
+              "input": "seconds"
+            }
+          ],
+          "type": "number"
+        },
+        "seed": {
+          "node": "6",
+          "input": "seed",
+          "type": "integer",
+          "optional": true
+        },
+        "steps": {
+          "node": "6",
+          "input": "steps",
+          "type": "integer",
+          "optional": true
+        },
+        "cfg": {
+          "node": "6",
+          "input": "cfg",
+          "type": "number",
+          "optional": true
+        }
+      },
+      "output_node": "8",
+      "output_key": "audio",
+      "output_exts": [
+        "wav",
+        "mp3",
+        "flac",
+        "ogg",
+        "m4a",
+        "aac"
+      ],
+      "example": {
+        "prompt": "rain on a tin roof, distant thunder, no music",
+        "negative_prompt": "music, speech, vocals",
+        "seconds": 10,
+        "seed": 42
+      }
+    }
+  ]
+}

@@ -137,6 +137,8 @@ export interface ComfyTimelineTask {
   input: string
   /** 提交时工作流快照；缺省使用配置内工作流 */
   workflow?: Record<string, unknown> | null
+  /** 网关模式已保存的工作流名称；设置后忽略 workflow 快照 */
+  workflowSlug?: string | null
   outputNode?: string
   outputKey?: string
   /** 写入时间线节点输入框的图参数（节点不存在该输入时跳过） */

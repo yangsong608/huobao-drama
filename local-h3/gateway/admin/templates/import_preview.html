@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}导入预览{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>导入预览</h1>
+    <p class="muted">来源：<span class="mono">{{ path }}</span>{% if node_count %} · {{ node_count }} 个节点{% endif %}</p>
+  </div>
+  <a class="btn" href="/workflows/import">重新选择</a>
+</div>
+
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+<form method="post" action="/workflows/import" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="path" value="{{ path }}">
+  <input type="hidden" name="source" value="comfyui">
+  <input type="hidden" name="source_file" value="{{ path }}">
+
+  <section class="card">
+    <h2>保存为</h2>
+    <div class="form-grid">
+      <label>标识 slug
+        <input type="text" name="slug" value="{{ values.slug }}" required>
+      </label>
+      <label>显示名称
+        <input type="text" name="name" value="{{ values.name }}" required>
+      </label>
+      <label>类型
+        <select name="kind">
+          {% for key, label in kind_labels.items() %}
+          <option value="{{ key }}" {{ 'selected' if values.kind == key }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>描述
+        <input type="text" name="description" value="{{ values.description }}" placeholder="例如：生成环境声 / 群众声">
+      </label>
+    </div>
+    <label class="check"><input type="checkbox" name="is_active" {{ 'checked' if values.is_active }}> 立即启用</label>
+  </section>
+
+  <section class="card">
+    <h2>输出与参数</h2>
+    <div class="form-grid">
+      <label>输出节点
+        <input type="text" name="output_node" value="{{ values.output_node }}">
+      </label>
+      <label>输出键
+        <input type="text" name="output_key" value="{{ values.output_key }}">
+      </label>
+      <label>输出后缀
+        <input type="text" name="output_exts" value="{{ values.output_exts }}">
+      </label>
+    </div>
+    <label>输入映射 JSON
+      <textarea rows="10" spellcheck="false" name="input_map">{{ values.input_map|raw_json }}</textarea>
+    </label>
+    <label>示例输入 JSON
+      <textarea rows="5" spellcheck="false" name="example_json">{{ values.example_json|raw_json }}</textarea>
+    </label>
+  </section>
+
+  <details class="card">
+    <summary>查看转换后的 API 工作流</summary>
+    <label>
+      <textarea rows="18" spellcheck="false" name="workflow_json">{{ values.workflow_json|raw_json }}</textarea>
+    </label>
+  </details>
+
+  <div class="row sticky-actions">
+    <button class="btn primary" type="submit">导入并保存</button>
+    <a class="btn" href="/workflows/import">取消</a>
+  </div>
+</form>
+{% endblock %}

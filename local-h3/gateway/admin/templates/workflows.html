@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}工作流{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>工作流</h1>
+    <p class="muted">工作流存放在管理端数据库；客户端只拿到名称、参数与输出说明。</p>
+  </div>
+  <div class="row">
+    <a class="btn" href="/workflows/import">从 ComfyUI 导入</a>
+    <a class="btn primary" href="/workflows/new">手动新增</a>
+  </div>
+</div>
+
+{% if workflows %}
+<section class="card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>名称</th><th>类型</th><th>来源</th><th>参数</th><th>状态</th><th>更新</th><th class="right">操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in workflows %}
+      <tr>
+        <td>
+          <a href="/workflows/{{ row.slug }}/edit"><strong>{{ row.name }}</strong></a>
+          <div class="mono muted">{{ row.slug }}</div>
+          {% if row.description %}<div class="small muted">{{ row.description }}</div>{% endif %}
+        </td>
+        <td><span class="pill kind-{{ row.kind }}">{{ kind_labels.get(row.kind, row.kind) }}</span></td>
+        <td class="muted small">{{ 'ComfyUI 导入' if row.source == 'comfyui' else ('内置' if row.source == 'seed' else '手动') }}{% if row.source_file %}<div class="mono">{{ row.source_file }}</div>{% endif %}</td>
+        <td class="muted small">{{ row.input_map|length }} 项<div class="mono">{{ row.output_node or '-' }} / {{ row.output_key or '-' }}</div></td>
+        <td>{% if row.is_active %}<span class="pill ok">启用</span>{% else %}<span class="pill off">停用</span>{% endif %}</td>
+        <td class="muted small">{{ row.updated_at|dt }}</td>
+        <td class="right nowrap">
+          <a class="btn tiny" href="/workflows/{{ row.slug }}/test">测试</a>
+          <a class="btn tiny" href="/workflows/{{ row.slug }}/edit">编辑</a>
+          <form method="post" action="/workflows/{{ row.slug }}/toggle" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="btn tiny" type="submit">{{ '停用' if row.is_active else '启用' }}</button>
+          </form>
+          <form method="post" action="/workflows/{{ row.slug }}/delete" class="inline" onsubmit="return confirm('确认删除工作流 {{ row.slug }}？该操作不可恢复。')">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="btn tiny danger" type="submit">删除</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}
+<section class="card">
+  <p class="empty">还没有工作流。</p>
+  <div class="row center">
+    <a class="btn primary" href="/workflows/import">从 ComfyUI 已保存工作流导入</a>
+    <a class="btn" href="/workflows/new">手动新增</a>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

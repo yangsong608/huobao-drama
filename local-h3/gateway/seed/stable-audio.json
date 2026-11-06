@@ -1,0 +1,108 @@
+{
+ "1": {
+  "class_type": "CheckpointLoaderSimple",
+  "inputs": {
+   "ckpt_name": "stable-audio-open-1.0.safetensors"
+  }
+ },
+ "9": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "t5-base.safetensors",
+   "type": "stable_audio",
+   "device": "default"
+  }
+ },
+ "2": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": "ambient soundscape, cinematic, natural",
+   "clip": [
+    "9",
+    0
+   ]
+  }
+ },
+ "3": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": "music, speech, vocals, distortion, noise",
+   "clip": [
+    "9",
+    0
+   ]
+  }
+ },
+ "4": {
+  "class_type": "ConditioningStableAudio",
+  "inputs": {
+   "positive": [
+    "2",
+    0
+   ],
+   "negative": [
+    "3",
+    0
+   ],
+   "seconds_start": 0.0,
+   "seconds_total": 30.0
+  }
+ },
+ "5": {
+  "class_type": "EmptyLatentAudio",
+  "inputs": {
+   "seconds": 30.0,
+   "batch_size": 1
+  }
+ },
+ "6": {
+  "class_type": "KSampler",
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "seed": 42,
+   "steps": 100,
+   "cfg": 6.0,
+   "sampler_name": "euler",
+   "scheduler": "simple",
+   "positive": [
+    "4",
+    0
+   ],
+   "negative": [
+    "4",
+    1
+   ],
+   "latent_image": [
+    "5",
+    0
+   ],
+   "denoise": 1.0
+  }
+ },
+ "7": {
+  "class_type": "VAEDecodeAudio",
+  "inputs": {
+   "samples": [
+    "6",
+    0
+   ],
+   "vae": [
+    "1",
+    2
+   ]
+  }
+ },
+ "8": {
+  "class_type": "SaveAudio",
+  "inputs": {
+   "audio": [
+    "7",
+    0
+   ],
+   "filename_prefix": "audio/hb_soundscape"
+  }
+ }
+}

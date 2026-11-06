@@ -413,3 +413,108 @@ test('监控会话：直连 ComfyUI 返回原始地址，网关缺少 Token 时�
   await assert.rejects(() => createComfyUiSession(episodeId), /缺少 API Key/)
 })
 
+
+test('预览：网关模式按 slug 拉取工作流并校验 timeline_data 输入', async () => {
+  const { episodeId, configId } = buildEpisodeFixture()
+  const seen: string[] = []
+  const server = createServer((req, res) => {
+    seen.push(req.url || '')
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      object: 'workflow',
+      data: {
+        slug: 'e12-timeline',
+        name: 'H3 整集时间线（E12）',
+        kind: 'video',
+        inputs: {
+          timeline_data: { type: 'json', required: true },
+          total_frames: { type: 'integer', required: true },
+        },
+        output: { node: '8', key: '', exts: ['mp4'] },
+      },
+    }))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as any).port
+  try {
+    db.update(schema.aiServiceConfigs).set({
+      baseUrl: `http://127.0.0.1:${port}`,
+      apiKey: 'gw-token',
+      settings: JSON.stringify({ workflow_slug: 'e12-timeline' }),
+    }).where(eq(schema.aiServiceConfigs.id, configId)).run()
+
+    const preview = await previewEpisodeComfyRun(episodeId)
+    assert.equal(preview.config.id, configId)
+    assert.equal(preview.mapping.node, '6')
+    assert.equal(preview.mapping.source, 'default')
+    assert.deepEqual(preview.workflow, {})
+    assert.equal(preview.timeline.segments.length, 2)
+    assert.equal(preview.timeline.segments[0].refs.length, 4)
+    assert.equal(preview.warnings.some(warning => warning.includes('timeline_mapping')), false)
+    assert.ok(seen.includes('/v1/workflows/e12-timeline'))
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  }
+})
+
+test('预览：网关工作流缺少 timeline_data 时给出可读错误', async () => {
+  const { episodeId, configId } = buildEpisodeFixture()
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      object: 'workflow',
+      data: {
+        slug: 'single-video',
+        name: '单段视频',
+        kind: 'video',
+        inputs: { prompt: { type: 'text', required: true } },
+      },
+    }))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as any).port
+  try {
+    db.update(schema.aiServiceConfigs).set({
+      baseUrl: `http://127.0.0.1:${port}`,
+      apiKey: 'gw-token',
+      settings: JSON.stringify({ workflow_slug: 'single-video' }),
+    }).where(eq(schema.aiServiceConfigs.id, configId)).run()
+
+    await assert.rejects(
+      () => previewEpisodeComfyRun(episodeId),
+      /timeline_data/,
+    )
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  }
+})
+
+test('监控会话：网关根地址（workflow_slug）请求 /comfyui/ui-session', async () => {
+  const { episodeId, configId } = buildEpisodeFixture()
+  const seen: { url?: string; method?: string; auth?: string }[] = []
+  const server = createServer((req, res) => {
+    seen.push({ url: req.url, method: req.method, auth: req.headers.authorization })
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ path: '/comfyui/ui/root-ticket/', expires_at: 999 }))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as any).port
+  try {
+    db.update(schema.aiServiceConfigs).set({
+      baseUrl: `http://127.0.0.1:${port}`,
+      apiKey: 'gw-token',
+      settings: JSON.stringify({ workflow_slug: 'e12-timeline' }),
+    }).where(eq(schema.aiServiceConfigs.id, configId)).run()
+
+    const session = await createComfyUiSession(episodeId)
+    assert.equal(session.gateway, true)
+    assert.equal(session.url, `http://127.0.0.1:${port}/comfyui/ui/root-ticket/`)
+    assert.deepEqual(seen[0], {
+      url: '/comfyui/ui-session',
+      method: 'POST',
+      auth: 'Bearer gw-token',
+    })
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  }
+})

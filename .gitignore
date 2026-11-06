@@ -70,6 +70,13 @@ configs/config.yaml
 tools/audio-engine/.venv/
 tools/audio-engine/models/
 
+# H3 gateway admin service virtualenv
+local-h3/gateway/.venv/
+local-h3/gateway/.venv-admin/
+local-h3/gateway/data/
+local-h3/gateway/admin.secret
+local-h3/gateway/admin/__pycache__/
+
 # Local tooling / agent state
 vibe_images/
 .superpowers/
@@ -92,3 +99,6 @@ Thumbs.db
 # Local-only agent instructions
 /CLAUDE.md
 /AGENTS.md
+
+# External reference repositories (cloned for read-only analysis; not tracked)
+reference/

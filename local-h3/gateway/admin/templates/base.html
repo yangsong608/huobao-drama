@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}管理台{% endblock %} · 火宝 H3 网关</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+{% if user %}
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-mark">火</span> H3 网关 <em>管理台</em></a>
+  <nav>
+    <a href="/" class="{{ 'on' if active == 'dashboard' }}">概览</a>
+    <a href="/workflows" class="{{ 'on' if active == 'workflows' }}">工作流</a>
+    <a href="/keys" class="{{ 'on' if active == 'keys' }}">API Key</a>
+    <a href="/settings" class="{{ 'on' if active == 'settings' }}">设置</a>
+    <a href="/audit" class="{{ 'on' if active == 'audit' }}">审计</a>
+  </nav>
+  <div class="who">
+    <span>{{ user }}</span>
+    <form method="post" action="/logout">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="link" type="submit">退出</button>
+    </form>
+  </div>
+</header>
+{% endif %}
+<main class="{{ 'guest' if not user }}">
+  {% if flash %}
+  <div class="flash {{ flash.level }}">{{ flash.message }}</div>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

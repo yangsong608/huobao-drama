@@ -7,6 +7,14 @@
 import type { AIConfig } from './types'
 import { joinProviderUrl } from './url'
 import {
+  cancelGatewayJob,
+  fetchGatewayJob,
+  isComfyGatewayConfig,
+  mapGatewayJob,
+  readGatewaySlug,
+  submitGatewayJob,
+} from './comfyui-gateway'
+import {
   buildComfyViewUrl,
   comfyHeaders,
   parseComfyWorkflow,
@@ -214,10 +222,57 @@ async function downloadAudio(
   }
 }
 
+function gatewayAudioInputs(
+  input: AudioGenerateInput,
+  settings: ReturnType<typeof readComfySettings>,
+): Record<string, unknown> {
+  const inputs: Record<string, unknown> = {
+    prompt: input.prompt,
+    seconds: input.seconds,
+    seed: input.seed,
+  }
+  const negative = input.negativePrompt ?? settings.negativePrompt
+  if (negative) inputs.negative_prompt = negative
+  return inputs
+}
+
+async function downloadGatewayAudio(
+  config: AIConfig,
+  fileUrl: string,
+  fetchImpl: typeof fetch,
+  signal?: AbortSignal,
+): Promise<{ buffer: Buffer; extension: string; filename: string }> {
+  const response = await fetchImpl(fileUrl, { headers: comfyHeaders(config), signal })
+  if (!response.ok) throw new ComfyAudioError(`H3 网关音频下载失败：HTTP ${response.status}`)
+  let filename = 'audio'
+  try {
+    filename = decodeURIComponent(new URL(fileUrl).pathname.split('/').pop() || 'audio')
+  } catch {
+    // 签名地址结构异常时保留默认文件名，扩展名回退到响应类型
+  }
+  const match = filename.match(AUDIO_EXT_RE)
+  const contentType = (response.headers.get('content-type') || '').toLowerCase()
+  const fromType = contentType.includes('wav')
+    ? 'wav'
+    : contentType.includes('mpeg') || contentType.includes('mp3')
+      ? 'mp3'
+      : contentType.includes('flac')
+        ? 'flac'
+        : ''
+  return {
+    buffer: Buffer.from(await response.arrayBuffer()),
+    extension: (match?.[1] || fromType || 'wav').toLowerCase(),
+    filename,
+  }
+}
+
 export async function runComfyAudio(input: AudioGenerateInput): Promise<AudioGenerateResult> {
   const settings = readComfySettings(input.config)
-  const workflow = parseComfyWorkflow(input.config)
-  assertAudioWorkflowPrompt(workflow)
+  const gateway = isComfyGatewayConfig(input.config)
+  const slug = gateway ? readGatewaySlug(input.config) : null
+  if (gateway && !slug) throw new ComfyAudioError('H3 网关配置缺少 workflow_slug')
+  const workflow: Record<string, unknown> = gateway ? {} : parseComfyWorkflow(input.config)
+  if (!gateway) assertAudioWorkflowPrompt(workflow)
   const fetchImpl = input.fetchImpl ?? fetch
   const controller = new AbortController()
   const timeoutMs = input.timeoutMs ?? settings.timeoutMs ?? 600_000
@@ -231,32 +286,52 @@ export async function runComfyAudio(input: AudioGenerateInput): Promise<AudioGen
   try {
     // 已取消的信号不要再把工作流提交进队列，否则取消后仍会占用 GPU
     if (signal.aborted) throw abortError()
-    const injected = applyAudioWorkflowPlaceholders(workflow, {
-      PROMPT: input.prompt,
-      NEGATIVE_PROMPT: input.negativePrompt || settings.negativePrompt || '',
-      AUDIO_SECONDS: input.seconds,
-      SEED: input.seed,
-      MODEL: input.model,
-    })
-    const promptId = await submitPrompt(input.config, injected, fetchImpl, signal)
+    let promptId: string
+    if (gateway) {
+      promptId = await submitGatewayJob(
+        input.config,
+        slug!,
+        gatewayAudioInputs(input, settings),
+        { fetchImpl, signal },
+      )
+    } else {
+      const injected = applyAudioWorkflowPlaceholders(workflow, {
+        PROMPT: input.prompt,
+        NEGATIVE_PROMPT: input.negativePrompt || settings.negativePrompt || '',
+        AUDIO_SECONDS: input.seconds,
+        SEED: input.seed,
+        MODEL: input.model,
+      })
+      promptId = await submitPrompt(input.config, injected, fetchImpl, signal)
+    }
     submittedId = promptId
     input.onPromptId?.(promptId)
 
     const pollIntervalMs = input.pollIntervalMs ?? 1500
     for (;;) {
       if (signal.aborted) throw abortError()
-      const response = await fetchImpl(joinProviderUrl(input.config.baseUrl, '', `/history/${encodeURIComponent(promptId)}`), {
-        headers: comfyHeaders(input.config),
-        signal,
-      })
-      if (!response.ok) throw new ComfyAudioError(`ComfyUI 查询失败：HTTP ${response.status}`)
-      const history = unwrapComfyHistory(await response.json())
-      const found = extractComfyAudioOutput(history, settings.outputNode, settings.outputKey)
-      if (found.item) {
-        const downloaded = await downloadAudio(input.config, found.item, fetchImpl, signal)
-        return { ...downloaded, promptId }
+      if (gateway) {
+        const payload = await fetchGatewayJob(input.config, promptId, { fetchImpl, signal })
+        const mapped = mapGatewayJob(payload)
+        if (mapped.status === 'completed') {
+          const downloaded = await downloadGatewayAudio(input.config, mapped.fileUrl!, fetchImpl, signal)
+          return { ...downloaded, promptId }
+        }
+        if (mapped.status === 'failed') throw new ComfyAudioError(mapped.error || 'H3 网关任务失败')
+      } else {
+        const response = await fetchImpl(joinProviderUrl(input.config.baseUrl, '', `/history/${encodeURIComponent(promptId)}`), {
+          headers: comfyHeaders(input.config),
+          signal,
+        })
+        if (!response.ok) throw new ComfyAudioError(`ComfyUI 查询失败：HTTP ${response.status}`)
+        const history = unwrapComfyHistory(await response.json())
+        const found = extractComfyAudioOutput(history, settings.outputNode, settings.outputKey)
+        if (found.item) {
+          const downloaded = await downloadAudio(input.config, found.item, fetchImpl, signal)
+          return { ...downloaded, promptId }
+        }
+        if (found.error) throw new ComfyAudioError(found.error)
       }
-      if (found.error) throw new ComfyAudioError(found.error)
       await delay(pollIntervalMs, signal)
     }
   } catch (error: any) {
@@ -279,6 +354,14 @@ export async function cancelComfyPrompt(
   promptId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
+  if (isComfyGatewayConfig(config)) {
+    try {
+      await cancelGatewayJob(config, promptId, { fetchImpl, timeoutMs: 3000 })
+    } catch {
+      // best effort：网关任务可能已完成
+    }
+    return
+  }
   try {
     await fetchImpl(joinProviderUrl(config.baseUrl, '', '/queue'), {
       method: 'POST',

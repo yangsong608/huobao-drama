@@ -28,6 +28,7 @@ import h3_gateway as gw  # noqa: E402
 TOKEN = "test-token-123"
 SIGN_KEY = b"test-sign-key"
 PAYLOAD_MP4 = b"FAKE-MP4-" + b"x" * 4096
+PAYLOAD_WAV = b"FAKE-WAV-" + b"x" * 4096
 PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jX1cAAAAASUVORK5CYII="
 )
@@ -105,10 +106,15 @@ class FakeComfy:
                     with fake.lock:
                         fake.counter += 1
                         pid = f"pid{fake.counter}"
-                        kind = "video" if any(
-                            isinstance(v, dict) and v.get("class_type") == "SaveVideo"
-                            for v in graph.values()
-                        ) else "image"
+                        kind = "image"
+                        for node in graph.values():
+                            if not isinstance(node, dict):
+                                continue
+                            if node.get("class_type") == "SaveVideo":
+                                kind = "video"
+                                break
+                            if node.get("class_type") == "SaveAudio":
+                                kind = "audio"
                         fake.graphs.append(graph)
                         fake.outputs[pid] = kind
                     return self._send(200, json.dumps({"prompt_id": pid}).encode())
@@ -149,23 +155,25 @@ class FakeComfy:
                     if fake.error_entry is not None:
                         entry = fake.error_entry
                     else:
-                        ext = ".mp4" if kind == "video" else ".png"
-                        entry = {
-                            "status": {"status_str": "success", "messages": []},
-                            "outputs": {
-                                "8": {"images": [{"filename": f"{pid}{ext}", "subfolder": "", "type": "output"}]},
-                            },
-                        }
-                        if kind == "video":
-                            entry["outputs"]["8"]["images"][0]["filename"] = f"{pid}.mp4"
+                        entry = {"status": {"status_str": "success", "messages": []}, "outputs": {}}
+                        if kind == "audio":
+                            entry["outputs"]["8"] = {
+                                "audio": [{"filename": f"{pid}.wav", "subfolder": "", "type": "output"}],
+                            }
                         else:
-                            entry["outputs"]["11"] = entry["outputs"].pop("8")
+                            ext = ".mp4" if kind == "video" else ".png"
+                            node = "8" if kind == "video" else "11"
+                            entry["outputs"][node] = {
+                                "images": [{"filename": f"{pid}{ext}", "subfolder": "", "type": "output"}],
+                            }
                     return self._send(200, json.dumps({pid: entry}).encode())
                 if path == "/view":
                     q = urllib.parse.parse_qs(parsed.query)
                     filename = (q.get("filename") or [""])[0]
                     if filename.endswith(".mp4"):
                         return self._send(200, PAYLOAD_MP4, "video/mp4")
+                    if filename.endswith(".wav"):
+                        return self._send(200, PAYLOAD_WAV, "audio/wav")
                     return self._send(200, PNG_1X1, "image/png")
                 return self._send(404, b"{}")
 

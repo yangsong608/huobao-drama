@@ -119,6 +119,17 @@ before(async () => {
         res.end(AUDIO_WAV)
         return
       }
+      if (req.url === '/v1/workflows') {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({
+          object: 'list',
+          data: [
+            { slug: 'e12-timeline', name: 'H3 整集时间线（E12）', kind: 'video', inputs: { timeline_data: { type: 'json', required: true } } },
+            { slug: 'stable-audio', name: 'Stable Audio Open 声音生成', kind: 'audio', inputs: { prompt: { type: 'text', required: true } } },
+          ],
+        }))
+        return
+      }
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({ ok: true }))
     })
@@ -477,4 +488,90 @@ test('audio-gen 只接受 ComfyUI，且工作流必须含 __PROMPT__', async () 
     body: JSON.stringify({ ...base, provider: 'openai' }),
   })
   assert.equal(badProvider.status, 400)
+})
+
+test('ComfyUI 网关配置用 workflow_slug 代替工作流 JSON', async () => {
+  const valid = await createConfig({
+    service_type: 'video',
+    provider: 'comfyui',
+    base_url: baseUrl,
+    api_key: 'gw-key',
+    provider_settings: { workflow_slug: 'e12-timeline', output_node: 'ignored' },
+  })
+  assert.equal(valid.status, 201, await valid.clone().text())
+  const created = (await json(valid)).data
+  assert.equal(created.provider_settings.workflow_slug, 'e12-timeline')
+
+  const audio = await createConfig({
+    service_type: 'audio-gen',
+    provider: 'comfyui',
+    base_url: baseUrl,
+    api_key: 'gw-key',
+    provider_settings: { workflow_slug: 'stable-audio' },
+  })
+  assert.equal(audio.status, 201, await audio.clone().text())
+
+  const invalid = await createConfig({
+    service_type: 'image',
+    provider: 'comfyui',
+    base_url: baseUrl,
+    provider_settings: { workflow_slug: 'Bad Slug!' },
+  })
+  assert.equal(invalid.status, 400)
+  assert.match((await json(invalid)).message, /workflow_slug/)
+
+  const uppercase = await createConfig({
+    service_type: 'video',
+    provider: 'comfyui',
+    base_url: baseUrl,
+    provider_settings: { workflow_slug: 'E12-Timeline' },
+  })
+  assert.equal(uppercase.status, 400)
+  assert.match((await json(uppercase)).message, /workflow_slug/)
+
+  lastProbe = null
+  const probe = (await json(await app.request('/api/v1/ai-configs/test', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      service_type: 'video',
+      provider: 'comfyui',
+      base_url: baseUrl,
+      api_key: 'gw-key',
+      provider_settings: { workflow_slug: 'e12-timeline' },
+    }),
+  }))).data
+  assert.equal(probe.ok, true)
+  assert.equal(probe.url, `${baseUrl}/v1/workflows`)
+  assert.equal(lastProbe?.url, '/v1/workflows')
+  assert.equal(lastProbe?.headers.authorization, 'Bearer gw-key')
+})
+
+test('工作流列表代理按类型返回网关工作流', async () => {
+  lastProbe = null
+  const response = await app.request('/api/v1/ai-configs/comfyui/workflows', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ base_url: baseUrl, api_key: 'gw-key', kind: 'audio' }),
+  })
+  assert.equal(response.status, 200, await response.clone().text())
+  const body = await json(response)
+  assert.deepEqual(body.data.workflows.map((item: any) => item.slug), ['stable-audio'])
+  assert.equal(lastProbe?.url, '/v1/workflows')
+  assert.equal(lastProbe?.headers.authorization, 'Bearer gw-key')
+
+  const missing = await app.request('/api/v1/ai-configs/comfyui/workflows', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ api_key: 'gw-key' }),
+  })
+  assert.equal(missing.status, 400)
+
+  const rejected = await app.request('/api/v1/ai-configs/comfyui/workflows', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ base_url: baseUrl, api_key: 'bad-key' }),
+  })
+  assert.equal(rejected.status, 502)
+  assert.match((await json(rejected)).message, /unauthorized|鉴权|网关/)
 })
