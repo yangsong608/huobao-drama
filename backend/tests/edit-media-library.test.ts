@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import { eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 
 const require = createRequire(import.meta.url)
@@ -19,6 +20,8 @@ delete process.env.EDIT_WORKSPACE
 
 const { db, schema } = await import('../src/db/index.ts')
 const { setEditWorkspaceMode } = await import('../src/services/app-settings.ts')
+const { assembleStoryboardClips, persistInitialProjectPlan } = await import('../src/services/edit-bootstrap.ts')
+const { createEmptyEditPlan, projectSettingsForAspect } = await import('../src/services/edit-plan.ts')
 const app = new Hono()
 app.route('/', (await import('../src/routes/edit.ts')).default)
 
@@ -63,6 +66,28 @@ const takeOne = db.insert(schema.lineTakes).values({
   text: '第一句', audioUrl: 'static/audio/take1.mp3', durationMs: 1200,
   hash: 'take-hash-1', status: 'ready', isActive: true, createdAt: ts,
 }).returning().get()
+
+// 工程化：为该集建旧版工程（source_merge_id 为空）并落分镜初始版本 + 草稿，
+// 等价于旧 bootstrap 行为（版本 v1 + 草稿 v1，含 1 个分镜片段）。
+setEditWorkspaceMode('on')
+const legacyProject = db.insert(schema.editProjects).values({
+  episodeId: episode.id, dramaId: drama.id, sourceMergeId: null,
+  title: '旧版工程', status: 'active', createdAt: ts, updatedAt: ts,
+}).returning().get()
+db.update(schema.episodes).set({ editProjectId: legacyProject.id })
+  .where(eq(schema.episodes.id, episode.id)).run()
+const assembly = await assembleStoryboardClips(episode.id, projectSettingsForAspect('9:16'))
+persistInitialProjectPlan({
+  episodeId: episode.id,
+  dramaId: drama.id,
+  projectId: legacyProject.id,
+  plan: {
+    ...createEmptyEditPlan(episode.id, projectSettingsForAspect('9:16')),
+    clips: assembly.clips,
+    transitions: assembly.transitions,
+  },
+  mode: 'on',
+})
 
 after(() => {
   fs.rmSync(root, { recursive: true, force: true })

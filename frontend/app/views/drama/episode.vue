@@ -1009,6 +1009,8 @@
           :episode-id="episode?.id || null"
           :drama-id="dramaId"
           :step="dubStep"
+          :episode-number="episode?.episode_number || episodeNumber"
+          :drama-aspect="dramaAspectRatio"
           @update:step="dubStep = $event"
           @open-preview="dubOpen = true"
           @open-settings="goDubbingSettings"
@@ -1088,6 +1090,24 @@
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                       {{ t('common.download') }}
                     </a>
+                    <button
+                      v-if="m.status === 'completed' && m.merged_url"
+                      class="btn btn-sm"
+                      :title="t('films.setCurrent')"
+                      @click.stop="setFilmCurrent(m.id)"
+                    >{{ t('films.setCurrent') }}</button>
+                    <button
+                      v-if="m.status === 'completed' && m.merged_url"
+                      class="btn btn-sm"
+                      :title="t('films.openMix')"
+                      @click.stop="openFilmInMix(m.id)"
+                    >{{ t('films.openMix') }}</button>
+                    <button
+                      v-if="m.status === 'completed' && m.merged_url"
+                      class="btn btn-sm"
+                      :title="t('films.openEdit')"
+                      @click.stop="openFilmInEdit(m.id)"
+                    >{{ t('films.openEdit') }}</button>
                     <button
                       class="btn btn-sm btn-ghost merge-card-del"
                       :title="t('episode.export.delete')"
@@ -2070,7 +2090,7 @@ import {
   Users, FileText, FolderKanban, Clapperboard, Download, Loader2,
   Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors,
 } from 'lucide-vue-next'
-import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI } from '~/composables/useApi'
+import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
 import { useAgent } from '~/composables/useAgent'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
@@ -2086,6 +2106,7 @@ definePageMeta({ layout: 'studio' })
 const { t } = useI18n()
 
 const route = useRoute()
+const router = useRouter()
 const dramaId = Number(route.params.id)
 const episodeNumber = Number(route.params.episodeNumber)
 const dubOpen = ref(false)
@@ -2170,6 +2191,38 @@ async function loadExportMerges() {
   try { exportMerges.value = await mergeAPI.list(epId.value) || [] } catch { /* 静默 */ }
 }
 
+// ===== 成片中心动作（Phase B）：设当前 / 混音 / 剪辑 =====
+async function setFilmCurrent(filmId) {
+  try {
+    await filmAPI.setCurrent(epId.value, filmId)
+    await loadExportMerges()
+    toast.success(t('films.setCurrentDone'))
+  } catch (e) {
+    toastError(e, { fallback: 'films.setCurrentFailed' })
+  }
+}
+
+async function openFilmInMix(filmId) {
+  try {
+    await filmAPI.setCurrent(epId.value, filmId)
+  } catch { /* 已是当前或网络异常时仍允许进入混音 */ }
+  router.push({ path: route.path, query: { ...route.query, panel: 'dubbing', step: '3', film: String(filmId) } })
+}
+
+async function openFilmInEdit(filmId) {
+  router.push(`/drama/${dramaId}/episode/${episode.value?.episode_number ?? episodeNumber}/edit?film=${filmId}`)
+}
+
+// 拼接页跳转通过 query 指向配音阶段第 4 步（预览与混音）；film 参数由混音侧后续任务消费
+function applyRoutePanelQuery() {
+  const q = route.query
+  if (q.panel === 'dubbing') {
+    panel.value = 'dubbing'
+    const step = Number(q.step)
+    if (Number.isInteger(step) && step >= 0 && step < DUB_STEP_KEYS.length) dubStep.value = step
+  }
+}
+
 const scriptStep = ref(storedPanel ? (storedPanel.scriptStep === 0 ? 0 : 1) : 0)
 // 旧版本地存储的 'storyboard' 子步骤已并入 'videos'（视频制作）
 const storedProdTab = storedPanel?.prodTab === 'storyboard' ? 'videos' : storedPanel?.prodTab
@@ -2183,6 +2236,7 @@ const dubStep = ref(legacyVoicePanel ? 1 : (Number.isInteger(storedDubStep) && s
 const dubSummary = ref(null)
 function onDubSummary(payload) { dubSummary.value = payload }
 function openDubbingStage() { panel.value = 'dubbing' }
+applyRoutePanelQuery()
 const hasEditEntry = computed(() => Boolean(episode.value?.video_url || episode.value?.videoUrl))
 
 function openEditWorkspace() {

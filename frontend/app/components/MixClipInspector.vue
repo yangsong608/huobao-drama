@@ -7,28 +7,11 @@
     </header>
 
     <div class="mx-ins-scroll">
-      <section v-if="separation?.status === 'running'" class="mx-card is-sep">
-        <div class="mx-card-head">
-          <span class="mx-chip is-accent">{{ t('mix.separationRunning') }}</span>
-          <span class="mx-muted">{{ separation.progress }}%</span>
-        </div>
-        <div class="mx-mini-bar"><span :style="{ width: `${separation.progress || 0}%` }" /></div>
-        <p class="mx-hint">{{ separation.step || t('mix.separationPreparing') }}</p>
-        <button class="mx-btn is-plain" type="button" @click="emit('cancel-separation')">{{ t('mix.separationCancel') }}</button>
-      </section>
-
-      <section v-else-if="separation?.status === 'failed'" class="mx-card is-danger">
-        <div class="mx-card-head">
-          <span class="mx-chip is-danger">{{ t('mix.separationFailed') }}</span>
-        </div>
-        <p class="mx-hint">{{ separation.error || t('mix.separationFailedHint') }}</p>
-        <button class="mx-btn" type="button" @click="emit('separate', true)">{{ t('mix.separationRetry') }}</button>
-      </section>
-
-      <p v-if="basicEngine" class="mx-note is-warning">{{ t('mix.engineBasicHint') }}</p>
+      <!-- 这一集怎么听（由宿主通过 MixStage 注入，检查器外不再重复渲染） -->
+      <slot name="episode-settings" />
 
       <!-- 片段 -->
-      <section v-if="clip" class="mx-card">
+      <section v-if="clip" class="mx-card clip-section">
         <div class="mx-card-head">
           <span class="mx-chip" :style="{ borderColor: track?.color || undefined, color: track?.color || undefined }">{{ t('mix.clipSection') }}</span>
           <span v-if="clip.takeId" class="mx-chip is-accent">{{ t('mix.followTake', { id: clip.takeId }) }}</span>
@@ -240,62 +223,41 @@
         <p class="mx-hint">{{ t('mix.noSelection') }}</p>
       </section>
 
-      <section class="mx-card">
-        <div class="mx-card-head">
-          <span class="mx-chip">{{ t('mix.newTrack') }}</span>
-        </div>
-        <p class="mx-hint">{{ t('mix.newTrackHint') }}</p>
-        <label class="mx-field">
-          <span>{{ t('mix.newTrackName') }}</span>
-          <input
-            v-model="newTrackName"
-            :placeholder="t('mix.newTrackNamePlaceholder')"
-            :disabled="!canEdit"
-            @keydown.enter.prevent="submitNewTrack"
-          />
-        </label>
-        <label class="mx-field">
-          <span>{{ t('mix.trackRole') }}</span>
-          <BaseSelect v-model="newRole" :options="roleOptions" :searchable="false" :disabled="!canEdit" />
-        </label>
-        <p class="mx-hint">{{ roleHint(newRole) }}</p>
-        <p class="mx-hint">{{ t('mix.newTrackBusHint', { bus: busName(ROLE_BUS[newRole] || 'sfx') }) }}</p>
-        <p v-if="!canEdit" class="mx-hint is-warning">{{ t('mix.newTrackDisabledHint') }}</p>
-        <button class="mx-btn" type="button" :disabled="!canEdit" @click="submitNewTrack">{{ t('mix.addTrack') }}</button>
-      </section>
+      <!-- 声音素材库（折叠，由宿主注入 MixStemLibrary） -->
+      <details class="mx-card mx-details stem-library" :open="false">
+        <summary>{{ t('mix.stems.title') }}</summary>
+        <p v-if="separation?.engine" class="mx-hint">{{ engineLabel(separation.engine) }}</p>
+        <slot name="stem-library" />
+        <!-- 宿主未注入素材库时的兜底：保留原有素材列表与操作 -->
+        <section v-if="!$slots['stem-library']" class="mx-card">
+          <div class="mx-card-head">
+            <span class="mx-chip">{{ t('mix.assets') }}</span>
+            <span class="mx-muted">{{ assets.length }}</span>
+          </div>
+          <p class="mx-hint">{{ t('mix.assetSourceHint') }}</p>
+          <p v-if="!assets.length" class="mx-hint">{{ t('mix.assetEmpty') }}</p>
+          <ul v-else class="mx-assets">
+            <li v-for="asset in assets" :key="asset.id" class="mx-asset">
+              <div class="mx-asset-main">
+                <span class="mx-asset-kind">{{ kindLabel(asset.kind) }}</span>
+                <span class="mx-asset-name" :title="assetName(asset)">{{ assetName(asset) }}</span>
+                <span class="mx-asset-meta">
+                  {{ engineLabel(asset.engine) }}
+                  <template v-if="asset.durationMs"> · {{ formatMs(asset.durationMs) }}</template>
+                </span>
+              </div>
+              <div class="mx-asset-actions">
+                <button class="mx-btn is-plain" type="button" :disabled="!asset.url" @click="emit('insert-asset', asset)">{{ t('mix.assetInsert') }}</button>
+                <button class="mx-btn is-danger" type="button" @click="emit('remove-asset', asset)">{{ t('mix.assetRemove') }}</button>
+              </div>
+            </li>
+          </ul>
+        </section>
+      </details>
 
-      <!-- 集级设置（由宿主注入：字幕模式、原声、BGM 等） -->
-      <slot name="settings" />
-
-      <!-- 素材库 -->
-      <section class="mx-card">
-        <div class="mx-card-head">
-          <span class="mx-chip">{{ t('mix.assets') }}</span>
-          <span class="mx-muted">{{ assets.length }}</span>
-        </div>
-        <p class="mx-hint">{{ t('mix.assetSourceHint') }}</p>
-        <p v-if="!assets.length" class="mx-hint">{{ t('mix.assetEmpty') }}</p>
-        <ul v-else class="mx-assets">
-          <li v-for="asset in assets" :key="asset.id" class="mx-asset">
-            <div class="mx-asset-main">
-              <span class="mx-asset-kind">{{ kindLabel(asset.kind) }}</span>
-              <span class="mx-asset-name" :title="assetName(asset)">{{ assetName(asset) }}</span>
-              <span class="mx-asset-meta">
-                {{ engineLabel(asset.engine) }}
-                <template v-if="asset.durationMs"> · {{ formatMs(asset.durationMs) }}</template>
-              </span>
-            </div>
-            <div class="mx-asset-actions">
-              <button class="mx-btn is-plain" type="button" :disabled="!asset.url" @click="emit('insert-asset', asset)">{{ t('mix.assetInsert') }}</button>
-              <button class="mx-btn is-danger" type="button" @click="emit('remove-asset', asset)">{{ t('mix.assetRemove') }}</button>
-            </div>
-          </li>
-        </ul>
-      </section>
-
-      <!-- 总线 -->
-      <details class="mx-card mx-details">
-        <summary>{{ t('mix.busSection') }}</summary>
+      <!-- 高级（折叠：总线、响度、历史版本与集级设置） -->
+      <details class="mx-card mx-details advanced-section" :open="false">
+        <summary>{{ t('mix.advanced.title') }}</summary>
         <p class="mx-hint">{{ t('mix.busHint') }}</p>
         <div v-for="bus in buses.filter(item => item.key !== 'master')" :key="bus.key" class="mx-bus">
           <div class="mx-bus-head">
@@ -338,21 +300,47 @@
           <span>{{ t('mix.truePeakTarget') }} <b>{{ master?.truePeak ?? '—' }} dBTP</b></span>
           <span class="mx-muted">{{ t('mix.targetHint') }}</span>
         </div>
+
+        <!-- 版本 -->
+        <details v-if="revisions.length" class="mx-card mx-details">
+          <summary>{{ t('mix.revisionSection') }}</summary>
+          <ul class="mx-revisions">
+            <li v-for="revision in revisions" :key="revision.id" class="mx-revision">
+              <div class="mx-revision-main">
+                <span>#{{ revision.revisionNo }}</span>
+                <span class="mx-muted">{{ formatDate(revision.createdAt) }}</span>
+                <span v-if="revision.isCurrent" class="mx-chip is-accent">{{ t('mix.revisionCurrent') }}</span>
+              </div>
+              <button class="mx-btn is-plain" type="button" :disabled="revision.isCurrent" @click="emit('restore-revision', revision)">{{ t('mix.revisionRestore') }}</button>
+            </li>
+          </ul>
+        </details>
+
+        <!-- 集级设置（由宿主注入：字幕模式、原声、BGM 等） -->
+        <slot name="settings" />
       </details>
 
-      <!-- 版本 -->
-      <details v-if="revisions.length" class="mx-card mx-details">
-        <summary>{{ t('mix.revisionSection') }}</summary>
-        <ul class="mx-revisions">
-          <li v-for="revision in revisions" :key="revision.id" class="mx-revision">
-            <div class="mx-revision-main">
-              <span>#{{ revision.revisionNo }}</span>
-              <span class="mx-muted">{{ formatDate(revision.createdAt) }}</span>
-              <span v-if="revision.isCurrent" class="mx-chip is-accent">{{ t('mix.revisionCurrent') }}</span>
-            </div>
-            <button class="mx-btn is-plain" type="button" :disabled="revision.isCurrent" @click="emit('restore-revision', revision)">{{ t('mix.revisionRestore') }}</button>
-          </li>
-        </ul>
+      <!-- 添加轨道（折叠） -->
+      <details class="mx-card mx-details add-track-section" :open="false">
+        <summary>{{ t('mix.addTrack') }}</summary>
+        <p class="mx-hint">{{ t('mix.newTrackHint') }}</p>
+        <label class="mx-field">
+          <span>{{ t('mix.newTrackName') }}</span>
+          <input
+            v-model="newTrackName"
+            :placeholder="t('mix.newTrackNamePlaceholder')"
+            :disabled="!canEdit"
+            @keydown.enter.prevent="submitNewTrack"
+          />
+        </label>
+        <label class="mx-field">
+          <span>{{ t('mix.trackRole') }}</span>
+          <BaseSelect v-model="newRole" :options="roleOptions" :searchable="false" :disabled="!canEdit" />
+        </label>
+        <p class="mx-hint">{{ roleHint(newRole) }}</p>
+        <p class="mx-hint">{{ t('mix.newTrackBusHint', { bus: busName(ROLE_BUS[newRole] || 'sfx') }) }}</p>
+        <p v-if="!canEdit" class="mx-hint is-warning">{{ t('mix.newTrackDisabledHint') }}</p>
+        <button class="mx-btn" type="button" :disabled="!canEdit" @click="submitNewTrack">{{ t('mix.addTrack') }}</button>
       </details>
     </div>
   </div>
@@ -478,8 +466,6 @@ const clipEditable = computed(() => Boolean(props.clip)
   && !virtual.value
   && !trackLocked.value
   && !props.clip?.locked)
-const basicEngine = computed(() => props.separation?.engine === 'basic'
-  || props.assets.some(asset => asset.engine === 'basic'))
 const panLabel = computed(() => panText(Number(props.clip?.pan) || 0))
 const trackPanLabel = computed(() => panText(Number(props.track?.pan) || 0))
 
@@ -495,15 +481,15 @@ function roleHint(role: string): string {
 function busName(key: string): string {
   return BUS_KEYS[key] ? t(BUS_KEYS[key]) : key
 }
-function kindLabel(kind: string): string {
-  return ASSET_KEYS[kind] ? t(ASSET_KEYS[kind]) : (kind || t('mix.assetKindOther'))
-}
 function engineLabel(engine: string | null): string {
   if (!engine) return t('mix.engineUnknown')
   if (engine === 'basic') return t('mix.engineBasic')
   if (engine === 'uvr') return t('mix.engineUvr')
   if (engine === 'demucs') return t('mix.engineDemucs')
   return engine
+}
+function kindLabel(kind: string): string {
+  return ASSET_KEYS[kind] ? t(ASSET_KEYS[kind]) : (kind || t('mix.assetKindOther'))
 }
 function assetName(asset: EpisodeAudioAsset): string {
   const raw = String(asset.url || '').split('/').pop() || ''

@@ -142,7 +142,13 @@ export function useExportSession(options: UseExportSessionOptions) {
     pollTimer = setTimeout(tick, POLL_INTERVAL_MS)
   }
 
-  async function start(kind: ExportKind) {
+  async function start(kind: ExportKind, overrides: {
+    preset?: string
+    subtitleMode?: ExportSubtitleMode
+    sourceFilmId?: number | null
+    title?: string | null
+    setCurrent?: boolean
+  } = {}) {
     const episodeId = options.episodeId()
     if (!episodeId || disposed || starting.value) return null
     starting.value = true
@@ -151,7 +157,15 @@ export function useExportSession(options: UseExportSessionOptions) {
     try {
       const result = await exportAPI.start(episodeId, {
         kind,
-        ...(kind === 'video' ? { preset: preset.value, subtitle_mode: subtitleMode.value } : {}),
+        ...(kind === 'video'
+          ? {
+              preset: overrides.preset || preset.value,
+              subtitle_mode: overrides.subtitleMode || subtitleMode.value,
+              ...(overrides.sourceFilmId ? { source_film_id: overrides.sourceFilmId } : {}),
+              ...(overrides.title ? { title: overrides.title } : {}),
+              ...(overrides.setCurrent ? { set_current: true } : {}),
+            }
+          : {}),
       })
       if (disposed) return result.record
       lastReused.value = Boolean(result.reused)

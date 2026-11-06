@@ -1,11 +1,9 @@
-import { and, asc, desc, eq, isNull, max } from 'drizzle-orm'
+import { and, asc, eq, isNull, max } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import type { EditWorkspaceMode } from './app-settings.js'
 import { editSourceFromUrl } from './edit-media.js'
 import {
   computeLayout,
-  createEmptyEditPlan,
-  createSingleClipPlan,
   editSyncHashOf,
   minimumClipMs,
   planHashOf,
@@ -133,9 +131,17 @@ export interface PersistBootstrapResult {
   created: boolean
 }
 
-export function persistInitialEditPlan(input: {
+/**
+ * 工程维度初始计划落库（设计 §6.1、§6.11）：
+ * - 版本与草稿都按 project_id 组织（idx_edit_revisions_project_no / idx_edit_drafts_project）；
+ * - episodes 指针仅在 episodes.edit_project_id 指向本工程时同步，
+ *   避免并发打开其他工程时把指针改错；
+ * - mode !== 'on'（readonly）绝不写库，只回传计划本身。
+ */
+export function persistInitialProjectPlan(input: {
   episodeId: number
   dramaId: number
+  projectId: number
   plan: EditPlanV1
   mode: EditWorkspaceMode
 }): PersistBootstrapResult {
@@ -145,14 +151,14 @@ export function persistInitialEditPlan(input: {
   return db.transaction((tx) => {
     const existing = tx.select().from(schema.editRevisions)
       .where(and(
-        eq(schema.editRevisions.episodeId, input.episodeId),
+        eq(schema.editRevisions.projectId, input.projectId),
         eq(schema.editRevisions.isCurrent, true),
       ))
       .get()
     const existingPlan = parsePlanJson(existing?.planJson)
     if (existing && existingPlan) {
       const draft = tx.select().from(schema.episodeEditDrafts)
-        .where(eq(schema.episodeEditDrafts.episodeId, input.episodeId))
+        .where(eq(schema.episodeEditDrafts.projectId, input.projectId))
         .get()
       return {
         revisionId: existing.id,
@@ -169,19 +175,20 @@ export function persistInitialEditPlan(input: {
     const syncHash = editSyncHashOf(input.plan)
     const maxRow = tx.select({ value: max(schema.editRevisions.revisionNo) })
       .from(schema.editRevisions)
-      .where(eq(schema.editRevisions.episodeId, input.episodeId))
+      .where(eq(schema.editRevisions.projectId, input.projectId))
       .get()
     const revisionNo = Number(maxRow?.value ?? 0) + 1
 
     tx.update(schema.editRevisions)
       .set({ isCurrent: false })
       .where(and(
-        eq(schema.editRevisions.episodeId, input.episodeId),
+        eq(schema.editRevisions.projectId, input.projectId),
         eq(schema.editRevisions.isCurrent, true),
       ))
       .run()
     const revision = tx.insert(schema.editRevisions).values({
       episodeId: input.episodeId,
+      projectId: input.projectId,
       revisionNo,
       planJson,
       planHash,
@@ -194,15 +201,16 @@ export function persistInitialEditPlan(input: {
       createdAt: ts,
     }).returning().get()
 
-    // episode_edit_drafts 在 episode_id 上有唯一索引。读路径只有在没有可解析的
-    // 草稿计划时才会走到 bootstrap，因此这里残留的行要么是无法解析的损坏草稿，
-    // 要么是孤立的草稿；在同一事务内先替换再写入，避免唯一约束让 GET 永久 500。
+    // episode_edit_drafts 按 project_id 唯一（idx_edit_drafts_project）。读路径只有在
+    // 没有可解析的草稿计划时才会走到 bootstrap，因此这里残留的行要么是无法解析的
+    // 损坏草稿，要么是孤立的草稿；在同一事务内先替换再写入，避免唯一约束让 GET 永久 500。
     tx.delete(schema.episodeEditDrafts)
-      .where(eq(schema.episodeEditDrafts.episodeId, input.episodeId))
+      .where(eq(schema.episodeEditDrafts.projectId, input.projectId))
       .run()
     tx.insert(schema.episodeEditDrafts).values({
       episodeId: input.episodeId,
       dramaId: input.dramaId,
+      projectId: input.projectId,
       planJson,
       planHash,
       editSyncHash: syncHash,
@@ -217,7 +225,10 @@ export function persistInitialEditPlan(input: {
       editSyncHash: syncHash,
       editEnabled: true,
       updatedAt: ts,
-    }).where(eq(schema.episodes.id, input.episodeId)).run()
+    }).where(and(
+      eq(schema.episodes.id, input.episodeId),
+      eq(schema.episodes.editProjectId, input.projectId),
+    )).run()
 
     return {
       revisionId: revision.id,
@@ -228,108 +239,3 @@ export function persistInitialEditPlan(input: {
   }, { behavior: 'immediate' })
 }
 
-export interface BootstrapInput {
-  episodeId: number
-  dramaId: number
-  project: EditProjectSettings
-  mode: EditWorkspaceMode
-  episodeVideoUrl: string | null
-  warnings: EditIssue[]
-}
-
-export interface BootstrapResult {
-  plan: EditPlanV1
-  source: 'storyboard' | 'merge' | 'episode-video' | 'empty'
-  initializedRevisionId: number | null
-  draftVersion: number | null
-}
-
-export async function bootstrapEditPlan(input: BootstrapInput): Promise<BootstrapResult> {
-  if (input.mode === 'on') {
-    const assembly = await assembleStoryboardClips(input.episodeId, input.project)
-    input.warnings.push(...assembly.warnings)
-    if (assembly.clips.length > 0) {
-      const plan: EditPlanV1 = {
-        ...createEmptyEditPlan(input.episodeId, input.project),
-        clips: assembly.clips,
-        transitions: assembly.transitions,
-      }
-      const persisted = persistInitialEditPlan({
-        episodeId: input.episodeId,
-        dramaId: input.dramaId,
-        plan,
-        mode: input.mode,
-      })
-      return {
-        plan: persisted.plan,
-        source: 'storyboard',
-        // 并发首读时 persistInitialEditPlan 可能复用已落库的版本（created = false）。
-        // 只要分镜 bootstrap 落到了某个版本，就必须回传该 id，让读路径重新加载草稿/版本。
-        initializedRevisionId: persisted.revisionId,
-        draftVersion: persisted.draftVersion,
-      }
-    }
-
-    const merge = db.select().from(schema.videoMerges)
-      .where(and(
-        eq(schema.videoMerges.episodeId, input.episodeId),
-        eq(schema.videoMerges.status, 'completed'),
-        isNull(schema.videoMerges.deletedAt),
-      ))
-      .orderBy(desc(schema.videoMerges.createdAt), desc(schema.videoMerges.id))
-      .get()
-    if (merge?.mergedUrl) {
-      try {
-        const source = await editSourceFromUrl({
-          kind: 'merge',
-          id: merge.id,
-          url: merge.mergedUrl,
-          label: '既有合片',
-        })
-        return {
-          plan: createSingleClipPlan(input.episodeId, source, input.project),
-          source: 'merge',
-          initializedRevisionId: null,
-          draftVersion: null,
-        }
-      } catch (error) {
-        input.warnings.push({
-          severity: 'warning',
-          code: 'MERGE_MEDIA_MISSING',
-          path: 'video_merges.merged_url',
-          message: error instanceof Error ? error.message : '合片不可读',
-        })
-      }
-    }
-  }
-
-  if (input.episodeVideoUrl) {
-    try {
-      const source = await editSourceFromUrl({
-        kind: 'episode-video',
-        id: input.episodeId,
-        url: input.episodeVideoUrl,
-      })
-      return {
-        plan: createSingleClipPlan(input.episodeId, source, input.project),
-        source: 'episode-video',
-        initializedRevisionId: null,
-        draftVersion: null,
-      }
-    } catch (error) {
-      input.warnings.push({
-        severity: 'warning',
-        code: 'MEDIA_MISSING',
-        path: 'episode.video_url',
-        message: error instanceof Error ? error.message : '当前成片不可读',
-      })
-    }
-  }
-
-  return {
-    plan: createEmptyEditPlan(input.episodeId, input.project),
-    source: 'empty',
-    initializedRevisionId: null,
-    draftVersion: null,
-  }
-}

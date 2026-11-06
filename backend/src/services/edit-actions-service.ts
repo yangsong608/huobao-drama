@@ -17,25 +17,30 @@ import { planEnvelope, parsePlanJson } from './edit-response.js'
 import { createEditRevision } from './edit-revision-service.js'
 import { buildTimelineForPlan } from './edit-timeline-data.js'
 import { dialogPlacementsOf, suggestSubtitles } from './edit-timeline.js'
+import type { EditProjectRow } from './edit-project-service.js'
 
-function actionContext(episodeId: number) {
-  const episode = getWritableEpisode(episodeId)
+/**
+ * 动作上下文（工程作用域）：基础计划按 project_id 读取草稿 → 当前版本；
+ * 归一化 fallback 仍取剧集画幅（工程 settings 由旧版工程沿用剧集设置）。
+ */
+function actionContext(episodeId: number, project: EditProjectRow) {
+  getWritableEpisode(episodeId)
   const drama = db.select().from(schema.dramas)
-    .where(eq(schema.dramas.id, episode.dramaId))
+    .where(eq(schema.dramas.id, project.dramaId))
     .get()
-  const project = projectSettingsForAspect(aspectOf(drama?.aspectRatio), 30)
+  const fallback = projectSettingsForAspect(aspectOf(drama?.aspectRatio), 30)
   const draft = db.select().from(schema.episodeEditDrafts)
-    .where(eq(schema.episodeEditDrafts.episodeId, episodeId))
+    .where(eq(schema.episodeEditDrafts.projectId, project.id))
     .get()
   const revision = db.select().from(schema.editRevisions)
     .where(and(
-      eq(schema.editRevisions.episodeId, episodeId),
+      eq(schema.editRevisions.projectId, project.id),
       eq(schema.editRevisions.isCurrent, true),
     ))
     .orderBy(desc(schema.editRevisions.createdAt), desc(schema.editRevisions.id))
     .get()
   const stored = parsePlanJson(draft?.planJson) ?? parsePlanJson(revision?.planJson)
-  return { project, stored }
+  return { project: fallback, stored }
 }
 
 function normalizeInput(
@@ -61,9 +66,10 @@ function transitionBetween(fromClipId: string, toClipId: string) {
 
 export async function roughCutEditPlan(
   episodeId: number,
+  project: EditProjectRow,
   input: Record<string, unknown>,
 ) {
-  const context = actionContext(episodeId)
+  const context = actionContext(episodeId, project)
   const base = normalizeInput(input.plan ?? context.stored, episodeId, context.project)
   const mode = input.mode === 'append' ? 'append' : 'replace'
   const transition = input.transition === 'dissolve' ? 'dissolve' : 'cut'
@@ -130,7 +136,7 @@ export async function roughCutEditPlan(
   if (input.create_revision === true) {
     // 快照只建版本、不写草稿：本动作响应不返回 draft_version，若快照抬高草稿版本，
     // 前端随后的自动保存（始终带 base_version）会立刻 409。
-    const snapshot = createEditRevision(episodeId, {
+    const snapshot = createEditRevision(project, {
       base_version: input.base_version,
       note: '初剪前快照',
       plan: base.plan,
@@ -152,9 +158,10 @@ export async function roughCutEditPlan(
 
 export function suggestEditSubtitles(
   episodeId: number,
+  project: EditProjectRow,
   input: Record<string, unknown>,
 ) {
-  const context = actionContext(episodeId)
+  const context = actionContext(episodeId, project)
   const base = normalizeInput(input.plan ?? context.stored, episodeId, context.project)
   const mode = input.mode === 'replace' ? 'replace' : 'fill'
   const timeline = buildTimelineForPlan(episodeId, base.plan)

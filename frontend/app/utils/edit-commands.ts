@@ -9,9 +9,12 @@ import type {
   EditClipSource,
   EditIssue,
   EditPlanV1,
+  EditProjectSettings,
+  EditSubtitleAppearance,
   EditSubtitleCue,
   EditTransition,
 } from './edit-plan'
+import { subtitleAppearanceForPreset } from './edit-plan.ts'
 import { computeLocalLayout, localClipContentDurationMs } from './edit-layout.ts'
 import {
   migrateCueAnchorsForSplit,
@@ -52,6 +55,28 @@ function clamp(value: number, min: number, max: number): number {
 
 function minimumSourceMs(plan: EditPlanV1): number {
   return Math.ceil((3 * 1000) / Math.max(1, Number(plan.project.fps) || 30))
+}
+
+/** 一帧的毫秒数（与 edit-frame-commands 的 frameMsOf 同口径；避免循环引用在此重复实现） */
+function frameMsOf(plan: EditPlanV1): number {
+  const rounded = Math.max(1, Math.round(Number(plan.project.fps) || 30))
+  return Math.round((1000 / rounded) * 1000) / 1000
+}
+
+/**
+ * 片段最短时长（时间线毫秒）：图片片段允许 1 帧（规范 §6.3），其余保持 3 帧下限。
+ */
+function minimumClipMs(plan: EditPlanV1, clip: Pick<EditClip, 'kind'>): number {
+  if (clip.kind === 'image') return Math.max(1, Math.floor(frameMsOf(plan)))
+  return minimumSourceMs(plan)
+}
+
+/** 片段最短源区间（源毫秒），speed 换算后按图片/视频区分下限 */
+function minSourceRangeFor(plan: EditPlanV1, clip: Pick<EditClip, 'kind'>, speed: number): number {
+  if (clip.kind === 'image') {
+    return Math.max(1, Math.round(frameMsOf(plan) * Math.max(0.25, Number(speed) || 1)))
+  }
+  return minSourceRange(plan, speed)
 }
 
 function minSourceRange(plan: EditPlanV1, speed: number): number {
@@ -173,7 +198,7 @@ export function insertClip(
   if (plan.clips.some((item) => item.id === clip.id)) {
     return unchanged(plan, error('CLIP_ID_DUPLICATE', `clip:${clip.id}`, '片段 ID 已存在'))
   }
-  if (localClipContentDurationMs(clip) < minimumSourceMs(plan)) {
+  if (localClipContentDurationMs(clip) < minimumClipMs(plan, clip)) {
     return unchanged(plan, error('CLIP_TOO_SHORT', `clip:${clip.id}`, '片段过短'))
   }
   const next = clonePlan(plan)
@@ -272,7 +297,7 @@ export function trimClipStart(
   }
   const clip = plan.clips[index]
   const speed = Number(clip.speed) || 1
-  const minRange = minSourceRange(plan, speed)
+  const minRange = minSourceRangeFor(plan, clip, speed)
   const target = clamp(
     Math.round(Number(clip.sourceInMs) + (Number(deltaMs) || 0)),
     0,
@@ -313,7 +338,7 @@ export function trimClipEnd(
   }
   const clip = plan.clips[index]
   const speed = Number(clip.speed) || 1
-  const minRange = minSourceRange(plan, speed)
+  const minRange = minSourceRangeFor(plan, clip, speed)
   const maxOut = Math.max(0, Math.round(Number(clip.source.durationMs)))
   const target = clamp(
     Math.round(Number(clip.sourceOutMs) + (Number(deltaMs) || 0)),
@@ -361,7 +386,7 @@ export function splitClip(
   const clip = plan.clips[index]
   const speed = Number(clip.speed) || 1
   const content = localClipContentDurationMs(clip)
-  const minMs = minimumSourceMs(plan)
+  const minMs = minimumClipMs(plan, clip)
   if (content < minMs * 2) {
     return unchanged(plan, error('SPLIT_TOO_SHORT', `clip:${clipId}`, '片段太短，无法分割'))
   }
@@ -370,7 +395,7 @@ export function splitClip(
     return unchanged(plan, error('SPLIT_TOO_SHORT', `clip:${clipId}`, '分割点太靠近片段边缘'))
   }
   const sourceSplit = Math.round(Number(clip.sourceInMs) + offset * speed)
-  const minRange = minSourceRange(plan, speed)
+  const minRange = minSourceRangeFor(plan, clip, speed)
   if (sourceSplit - Number(clip.sourceInMs) < minRange
     || Number(clip.sourceOutMs) - sourceSplit < minRange) {
     return unchanged(plan, error('SPLIT_TOO_SHORT', `clip:${clipId}`, '分割点太靠近素材边界'))
@@ -597,5 +622,167 @@ export function addCue(plan: EditPlanV1, cue: EditSubtitleCue): EditCommandResul
 export function deleteCue(plan: EditPlanV1, cueId: string): EditCommandResult {
   const next = clonePlan(plan)
   next.subtitles = next.subtitles.filter((cue) => cue.id !== cueId)
+  return { plan: next, issues: [], focusClipId: null }
+}
+
+let cueSeq = 0
+
+/** 新建 cue id：时间戳 + 自增序号，避免同毫秒内连续命令产生重复 ID */
+function nextCueId(): string {
+  cueSeq = (cueSeq + 1) % 1296
+  return `cue_${Date.now().toString(36)}${cueSeq.toString(36).padStart(2, '0')}`
+}
+
+function projectAppearanceOf(plan: EditPlanV1): EditSubtitleAppearance {
+  return plan.project?.subtitleAppearance ?? subtitleAppearanceForPreset('default')
+}
+
+function sortSubtitles(plan: EditPlanV1): void {
+  plan.subtitles = [...plan.subtitles].sort(
+    (left, right) => left.startMs - right.startMs || left.id.localeCompare(right.id),
+  )
+}
+
+export function setCueTime(
+  plan: EditPlanV1,
+  cueId: string,
+  { startMs, endMs }: { startMs: number; endMs: number },
+): EditCommandResult {
+  const cue = plan.subtitles.find((item) => item.id === cueId)
+  if (!cue) return { plan, issues: [], focusClipId: null }
+  const next = clonePlan(plan)
+  const target = next.subtitles.find((item) => item.id === cueId)
+  const s = Math.max(0, Math.round(Number(startMs) || 0))
+  let e = Math.max(0, Math.round(Number(endMs) || 0))
+  if (e <= s) e = s + 100
+  target.startMs = s
+  target.endMs = e
+  return { plan: next, issues: [], focusClipId: null }
+}
+
+export function setCueAppearance(
+  plan: EditPlanV1,
+  cueId: string,
+  patch: Partial<EditSubtitleAppearance>,
+): EditCommandResult {
+  const cue = plan.subtitles.find((item) => item.id === cueId)
+  if (!cue) return { plan, issues: [], focusClipId: null }
+  const next = clonePlan(plan)
+  const target = next.subtitles.find((item) => item.id === cueId)
+  // patch 只写显式字段，其余继承工程默认；范围校验交给保存时的后端 normalizeEditPlan
+  const base = target.appearance ?? structuredClone(projectAppearanceOf(next))
+  target.appearance = { ...base, ...patch }
+  target.style = 'custom'
+  return { plan: next, issues: [], focusClipId: null }
+}
+
+export function applyAppearanceToAll(
+  plan: EditPlanV1,
+  appearance: EditSubtitleAppearance,
+): EditCommandResult {
+  const next = clonePlan(plan)
+  for (const cue of next.subtitles) cue.appearance = { ...appearance }
+  return { plan: next, issues: [], focusClipId: null }
+}
+
+export function setSubtitleProjectDefaults(
+  plan: EditPlanV1,
+  { appearance, safeAreaPct }: { appearance: EditSubtitleAppearance; safeAreaPct?: number },
+): EditCommandResult {
+  const next = clonePlan(plan)
+  next.project.subtitleAppearance = { ...appearance }
+  if (safeAreaPct !== undefined) {
+    next.project.subtitleSafeAreaPct = clamp(Math.round(Number(safeAreaPct) || 0), 0, 30)
+  }
+  return { plan: next, issues: [], focusClipId: null }
+}
+
+export function mergeCueWithNext(plan: EditPlanV1, cueId: string): EditCommandResult {
+  const index = plan.subtitles.findIndex((cue) => cue.id === cueId)
+  if (index < 0 || index + 1 >= plan.subtitles.length) {
+    return { plan, issues: [], focusClipId: null }
+  }
+  const cue = plan.subtitles[index]
+  const nextCue = plan.subtitles[index + 1]
+  // 近似相邻（间隔 ≤200ms）才允许合并，避免把跨镜头的两句台词拼在一起
+  if (nextCue.startMs - cue.endMs > 200) {
+    return {
+      plan,
+      issues: [warning('CUE_NOT_MERGABLE', `subtitles.${cueId}`, '两条字幕间隔过大，无法合并')],
+      focusClipId: null,
+    }
+  }
+  const next = clonePlan(plan)
+  const target = next.subtitles[index]
+  target.text = `${target.text}${nextCue.text}`
+  target.endMs = nextCue.endMs
+  next.subtitles.splice(index + 1, 1)
+  return { plan: next, issues: [], focusClipId: null }
+}
+
+export function splitCueAt(plan: EditPlanV1, cueId: string, atMs: number): EditCommandResult {
+  const cue = plan.subtitles.find((item) => item.id === cueId)
+  if (!cue || atMs <= cue.startMs + 50 || atMs >= cue.endMs - 50) {
+    return {
+      plan,
+      issues: [warning('CUE_SPLIT_RANGE', `subtitles.${cueId}`, '分割点需位于字幕内部')],
+      focusClipId: null,
+    }
+  }
+  const next = clonePlan(plan)
+  const target = next.subtitles.find((item) => item.id === cueId)
+  // follow/anchor 保留在前半段，后半段独立；syncFollowedCues 不处理 cue 拆分，这里手动二分
+  const tail: EditSubtitleCue = {
+    ...structuredClone(target),
+    id: nextCueId(),
+    startMs: atMs,
+    follow: false,
+    anchor: null,
+  }
+  target.endMs = atMs
+  next.subtitles.push(tail)
+  sortSubtitles(next)
+  return { plan: next, issues: [], focusClipId: null }
+}
+
+export function addCueAtPlayhead(
+  plan: EditPlanV1,
+  atMs: number,
+  project: EditProjectSettings,
+): EditCommandResult {
+  const next = clonePlan(plan)
+  const start = Math.max(0, Math.round(Number(atMs) || 0))
+  const appearance = structuredClone(project?.subtitleAppearance ?? subtitleAppearanceForPreset('default'))
+  next.subtitles.push({
+    id: nextCueId(),
+    text: '',
+    startMs: start,
+    endMs: start + 2000,
+    style: 'custom',
+    role: null,
+    source: 'manual',
+    follow: false,
+    anchor: null,
+    lineId: null,
+    warnings: [],
+    appearance,
+  })
+  sortSubtitles(next)
+  return { plan: next, issues: [], focusClipId: null }
+}
+
+export function setCueFollow(plan: EditPlanV1, cueId: string, follow: boolean): EditCommandResult {
+  const cue = plan.subtitles.find((item) => item.id === cueId)
+  if (!cue) return { plan, issues: [], focusClipId: null }
+  if (follow && !cue.anchor) {
+    return {
+      plan,
+      issues: [warning('CUE_ANCHOR_MISSING', `subtitles.${cueId}`, '该字幕没有对应片段，无法开启跟随')],
+      focusClipId: null,
+    }
+  }
+  const next = clonePlan(plan)
+  const target = next.subtitles.find((item) => item.id === cueId)
+  target.follow = Boolean(follow)
   return { plan: next, issues: [], focusClipId: null }
 }

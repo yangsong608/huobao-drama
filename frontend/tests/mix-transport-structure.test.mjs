@@ -118,9 +118,12 @@ test('dubbing step four is one full-height workspace without a duplicate preview
   assert.doesNotMatch(dubbing, /dub-preview-grid/)
   assert.doesNotMatch(dubbing, /dub-preview-main/)
   assert.match(dubbing, /<template #actions>/)
-  assert.match(dubbing, /<template #settings>/)
+  // Task 11：旧混音卡（字幕模式/原声/ducking/BGM）移除，设置收口到整集设置与导出对话框
+  assert.doesNotMatch(dubbing, /<template #settings>/)
+  assert.doesNotMatch(dubbing, /workbench\.mixTitle/)
   assert.match(dubbing, /\.dub-mix-stage :deep\(\.mx-stage\) \{ flex: 1; height: auto; min-height: 480px; \}/)
-  assert.match(dubbing, /\.dub-mix-card\.is-inline/)
+  assert.match(dubbing, /:episode-number="episodeNumber"/)
+  assert.match(dubbing, /:drama-aspect="dramaAspect"/)
 })
 
 test('mix stage forwards settings into the inspector and toggles it persistently', () => {

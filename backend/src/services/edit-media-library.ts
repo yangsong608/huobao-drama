@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { getReadableEpisode } from './edit-access.js'
+import { listEditImageAssets } from './edit-image-assets.js'
 import { editSourceFromUrl } from './edit-media.js'
 
 export interface EditMediaStoryboardResponse {
@@ -15,7 +16,7 @@ export interface EditMediaStoryboardResponse {
 }
 
 export async function getEditMediaLibrary(episodeId: number) {
-  getReadableEpisode(episodeId)
+  const { episode } = getReadableEpisode(episodeId)
 
   const storyboardRows = db.select().from(schema.storyboards)
     .where(and(eq(schema.storyboards.episodeId, episodeId), isNull(schema.storyboards.deletedAt)))
@@ -53,6 +54,18 @@ export async function getEditMediaLibrary(episodeId: number) {
     })
   }
 
+  // 图片素材：分镜首帧/合成图（尺寸未知填 0，前端按容器缩放）+ 项目 edit/assets 已上传图片
+  const storyboardImages = storyboardRows
+    .filter((row) => row.firstFrameImage || row.composedImage)
+    .map((row) => ({
+      url: `/${row.firstFrameImage || row.composedImage}`,
+      width: 0,
+      height: 0,
+      fingerprint: `sb-${row.id}`,
+      source: 'storyboard' as const,
+      label: `分镜 ${row.storyboardNumber}`,
+    }))
+  const uploadedImages = await listEditImageAssets(episode.dramaId)
   const lineRows = db.select().from(schema.storyboardLines)
     .where(and(
       eq(schema.storyboardLines.episodeId, episodeId),
@@ -101,6 +114,7 @@ export async function getEditMediaLibrary(episodeId: number) {
     video_takes: videoTakes,
     lines,
     audio: { mix: null, audio_ref: null },
+    images: [...storyboardImages, ...uploadedImages],
     import_enabled: false,
   }
 }

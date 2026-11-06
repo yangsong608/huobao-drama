@@ -1,0 +1,43 @@
+import { readFileSync } from 'node:fs'
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+
+const root = new URL('..', import.meta.url)
+const read = (path) => readFileSync(new URL(path, root), 'utf8')
+
+test('导出对话框：降级警告、模式与确认', () => {
+  const dialog = read('app/components/edit/EditExportDialog.vue')
+  assert.match(dialog, /collectExportWarnings/)
+  assert.match(dialog, /subtitleMode/)
+  assert.match(dialog, /setCurrent/)
+  assert.match(dialog, /editAPI\.render/)
+  assert.match(dialog, /renderStatus/)
+  assert.match(dialog, /base_version|baseVersion/)
+})
+
+test('导出警告镜像后端编码', () => {
+  const src = read('app/utils/edit-export-warnings.ts')
+  for (const code of ['TRANSITION_HARD_CUT', 'FILTER_UNSUPPORTED', 'TRANSFORM_UNSUPPORTED', 'OVERLAY_UNSUPPORTED']) {
+    assert.match(src, new RegExp(code))
+  }
+})
+
+test('图片选择器：上传、列表与插入', () => {
+  const picker = read('app/components/edit/EditImagePicker.vue')
+  assert.match(picker, /editAPI\.uploadImage/)
+  assert.match(picker, /emit\('insert'/)
+  assert.match(picker, /type="file"/)
+})
+
+test('editAPI 新端点与四语言文案', () => {
+  const api = read('app/composables/useApi.ts')
+  for (const name of ['extractFrame', 'uploadImage', 'render', 'renderStatus']) {
+    assert.match(api, new RegExp(`${name}\\(`))
+  }
+  const zh = JSON.parse(read('app/locales/zh.json'))
+  assert.ok(zh.edit.exportTitle)
+  assert.ok(zh.edit.exportWarningTitle)
+  assert.ok(zh.edit.subtitleBurn)
+  assert.ok(zh.edit.imagePickerTitle)
+  assert.ok(zh.edit.frameFreezeInserted)
+})

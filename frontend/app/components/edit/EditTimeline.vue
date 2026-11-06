@@ -5,6 +5,25 @@
       <span>{{ t('edit.clipCount', { n: plan.clips.length }) }}</span>
       <span>{{ t('edit.duration') }} {{ formatPrecise(layout.duration_ms) }}</span>
       <div class="ed-timeline-tools">
+        <!-- 可见操作入口（spec 6.8：不依赖右键和快捷键），右键菜单只是快捷路径 -->
+        <button
+          class="ed-tool is-text" type="button" :disabled="readonly"
+          @click="openMenuFromButton($event, frameMenuItems())"
+        >{{ t('edit.frameOps') }} ▾</button>
+        <button
+          class="ed-tool is-text" type="button"
+          @click="openMenuFromButton($event, subtitleMenuItems())"
+        >{{ t('edit.subtitleMenu') }} ▾</button>
+        <button class="ed-tool is-text" type="button" :disabled="!canSplit" @click="splitAtPlayhead">
+          {{ t('edit.split') }}
+        </button>
+        <button class="ed-tool is-text" type="button" :disabled="!selectedClipId || readonly" @click="removeSelected">
+          {{ t('edit.delete') }}
+        </button>
+        <button class="ed-tool is-text" type="button" @click="$emit('fit-view')">
+          {{ t('edit.fitView') }}
+        </button>
+        <span class="ed-tools-sep"></span>
         <button class="ed-tool" type="button" :title="t('edit.snap')" :class="{ 'is-on': snapEnabled }" @click="snapEnabled = !snapEnabled">
           <Magnet :size="13" />
         </button>
@@ -51,6 +70,7 @@
               }"
               :style="clipStyle(view)"
               @pointerdown.stop="startDrag($event, 'move', { clipId: view.clip_id })"
+              @contextmenu.prevent.stop="openClipMenu($event, view)"
             >
               <span class="ed-tl-clip-label">{{ view.label }}</span>
               <span class="ed-tl-clip-time">{{ formatPrecise(view.content_duration_ms) }}</span>
@@ -76,10 +96,11 @@
               :class="{ 'is-selected': cue.id === selectedCueId, 'is-follow': cue.follow }"
               :style="{ left: `${cue.left}px`, width: `${cue.width}px` }"
               @pointerdown.stop="startDrag($event, 'cue', { cueId: cue.id, startMs: cue.startMs, endMs: cue.endMs })"
+              @contextmenu.prevent.stop="openCueMenu($event, cue)"
             >
               <span>{{ cue.text }}</span>
             </div>
-            <p v-if="!cueViews.length" class="ed-tl-empty">{{ t('edit.subtitleEmpty') }}</p>
+            <p v-if="!cueViews.length && showSubtitles" class="ed-tl-empty">{{ t('edit.subtitleEmpty') }}</p>
           </div>
 
           <div class="ed-tl-track is-audio">
@@ -115,6 +136,15 @@
           ></div>
         </div>
       </div>
+
+      <!-- 右键菜单与工具栏下拉共用同一套菜单（x/y 由打开处决定） -->
+      <ContextMenu
+        :show="Boolean(menu)"
+        :x="menu?.x ?? 0"
+        :y="menu?.y ?? 0"
+        :items="menu?.items ?? []"
+        @update:show="onMenuShowChange"
+      />
     </div>
   </section>
 </template>
@@ -122,6 +152,7 @@
 <script setup>
 import { useI18n } from 'vue-i18n'
 import { Link2, Magnet, Scissors, ZoomIn, ZoomOut } from 'lucide-vue-next'
+import ContextMenu from '~/components/ContextMenu.vue'
 import { formatClock } from '~/utils/edit-plan'
 import { formatPrecise } from '~/utils/edit-timecode'
 import { activeClipIndex } from '~/utils/edit-layout'
@@ -135,10 +166,12 @@ const props = defineProps({
   selectedCueId: { type: String, default: '' },
   readonly: { type: Boolean, default: false },
   audioMode: { type: String, default: 'none' },
+  showSubtitles: { type: Boolean, default: true },
 })
 const emit = defineEmits([
   'seek', 'select-clip', 'select-cue', 'move-clip', 'trim-clip',
   'split-clip', 'move-cue', 'remove-transition',
+  'frame-op', 'cue-op', 'toggle-subtitles', 'fit-view', 'open-subtitles', 'remove-clip',
 ])
 const { t } = useI18n()
 
@@ -181,11 +214,16 @@ const clipViews = computed(() => props.layout.clips.map((item) => {
   }
 }))
 
-const cueViews = computed(() => props.plan.subtitles.map((cue) => ({
-  ...cue,
-  left: pad + Math.max(0, cue.startMs) * pxPerMs.value,
-  width: Math.max(3, (cue.endMs - cue.startMs) * pxPerMs.value),
-})))
+// 隐藏字幕轨时只隐藏字幕块本身，轨道槽位保留，避免轨头/轨道错位
+const cueViews = computed(() => (
+  props.showSubtitles
+    ? props.plan.subtitles.map((cue) => ({
+      ...cue,
+      left: pad + Math.max(0, cue.startMs) * pxPerMs.value,
+      width: Math.max(3, (cue.endMs - cue.startMs) * pxPerMs.value),
+    }))
+    : []
+))
 
 const transitionViews = computed(() => props.layout.transitions.map((transition) => {
   const to = props.layout.clips.find((clip) => clip.clip_id === transition.to_clip_id)
@@ -386,6 +424,81 @@ function splitAtPlayhead() {
   })
 }
 
+// ---- 右键菜单与工具栏下拉（共用 ContextMenu 与同一套事件，spec 6.8） ----
+const menu = ref(null)
+
+function onMenuShowChange(value) {
+  if (!value) menu.value = null
+}
+
+function openMenuAt(event, items) {
+  menu.value = { items, x: event.clientX, y: event.clientY }
+}
+
+function openMenuFromButton(event, items) {
+  const rect = event.currentTarget.getBoundingClientRect()
+  menu.value = { items, x: rect.left, y: rect.bottom + 4 }
+}
+
+// 工具栏下拉（无 view）按播放头定位片段；右键（有 view）按被点片段定位
+function frameMenuItems(view) {
+  const at = view ? Math.round(view.timeline_start_ms) : Math.round(props.currentMs)
+  const clipId = view?.clip_id ?? clipIdAt(props.currentMs)
+  return [
+    { key: 'delete-frame', label: t('edit.frameDelete'), shortcut: 'D', action: () => emit('frame-op', { kind: 'delete-frame', clipId, atMs: at }) },
+    { key: 'duplicate-frame', label: t('edit.frameDuplicate'), action: () => emit('frame-op', { kind: 'duplicate-frame', clipId, atMs: at }) },
+    { key: 'insert-image', label: t('edit.frameInsertImage'), action: () => emit('frame-op', { kind: 'insert-image', clipId, atMs: at }) },
+    { separator: true, key: 'sep', label: '' },
+    { key: 'extend-1s', label: t('edit.frameExtend'), action: () => emit('frame-op', { kind: 'extend-1s', clipId, atMs: at }) },
+  ]
+}
+
+function clipIdAt(ms) {
+  const index = activeClipIndex(props.layout, ms)
+  return props.layout.clips[index]?.clip_id ?? ''
+}
+
+function openClipMenu(event, view) {
+  if (props.readonly) return
+  emit('select-clip', view.clip_id)
+  openMenuAt(event, frameMenuItems(view))
+}
+
+function subtitleMenuItems() {
+  // 切换项文案按当前状态在 subtitleShow / subtitleHide 之间取值（edit.subtitleToggle 通用键由 Task 23 复用）
+  return [
+    { key: 'new', label: t('edit.subtitleNew'), action: () => emit('open-subtitles') },
+    { key: 'toggle', label: props.showSubtitles ? t('edit.subtitleHide') : t('edit.subtitleShow'), action: () => emit('toggle-subtitles') },
+    { key: 'list', label: t('edit.subtitleOpenList'), action: () => emit('open-subtitles') },
+  ]
+}
+
+function openCueMenu(event, cue) {
+  if (props.readonly) return
+  emit('select-cue', cue.id)
+  const next = props.plan.subtitles[props.plan.subtitles.findIndex((item) => item.id === cue.id) + 1]
+  openMenuAt(event, [
+    { key: 'edit', label: t('edit.cueEdit'), action: () => emit('cue-op', { kind: 'edit', cueId: cue.id }) },
+    { key: 'split', label: t('edit.cueSplit'), disabled: cue.endMs - cue.startMs < 200, action: () => emit('cue-op', { kind: 'split', cueId: cue.id }) },
+    { key: 'merge-next', label: t('edit.cueMerge'), disabled: !next, reason: next ? undefined : t('edit.cueMergeNone'), action: () => emit('cue-op', { kind: 'merge-next', cueId: cue.id }) },
+    { separator: true, key: 'sep', label: '' },
+    { key: 'delete', label: t('edit.delete'), danger: true, action: () => emit('cue-op', { kind: 'delete', cueId: cue.id }) },
+  ])
+}
+
+function removeSelected() {
+  if (props.selectedClipId) emit('remove-clip', props.selectedClipId)
+}
+
+// 适应画幅：把缩放调到整条成片刚好铺满可视宽度（供 EditWorkbench 通过 ref 调用）
+function zoomToFit() {
+  const width = scrollRef.value?.clientWidth ?? 0
+  if (width <= 0) return
+  zoom.value = Math.max(0.02, Math.min(8, (width - pad * 2) / Math.max(1, Number(props.layout.duration_ms) || 1)))
+}
+
+defineExpose({ zoomToFit })
+
 onMounted(() => {
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)
@@ -414,6 +527,8 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border); border-radius: 6px; background: var(--bg-2);
   color: var(--text-2); cursor: pointer;
 }
+.ed-tool.is-text { width: auto; padding: 0 8px; font-size: 11px; white-space: nowrap; }
+.ed-tools-sep { width: 1px; height: 16px; margin: 0 3px; background: var(--border); }
 .ed-tool:hover { color: var(--text-0); border-color: var(--accent); }
 .ed-tool.is-on { color: var(--accent-text); border-color: var(--accent); background: var(--accent-bg); }
 .ed-tool:disabled { opacity: .4; cursor: not-allowed; }

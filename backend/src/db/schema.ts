@@ -97,6 +97,12 @@ export const episodes = sqliteTable('episodes', {
   editSyncHash: text('edit_sync_hash'),
   /** 是否已纳入剪辑工作台（V3）；M1 只读不写 */
   editEnabled: integer('edit_enabled', { mode: 'boolean' }).default(false),
+  /** 当前成片指针（权威字段） */
+  currentFilmId: integer('current_film_id'),
+  /** 混音页上次选择的源成片 */
+  mixSourceMergeId: integer('mix_source_merge_id'),
+  /** 剪辑页上次打开的工程 */
+  editProjectId: integer('edit_project_id'),
   /** 来源小说章节（V3） */
   sourceChapterNo: integer('source_chapter_no'),
   sourcePartNo: integer('source_part_no'),
@@ -327,6 +333,20 @@ export const videoMerges = sqliteTable('video_merges', {
   dialogueTrackUrl: text('dialogue_track_url'),
   bgmUrl: text('bgm_url'),
   mixOptions: text('mix_options'), // JSON
+  /** 成片来源：legacy 旧拼接 / export 导出产物 / edit 剪辑渲染 */
+  origin: text('origin').default('legacy'),
+  /** 作为工程源成片时指向的源（成片中心） */
+  sourceMergeId: integer('source_merge_id'),
+  /** 由哪次导出产出 */
+  exportId: integer('export_id'),
+  /** 由哪次剪辑版本渲染产出 */
+  editRevisionId: integer('edit_revision_id'),
+  /** 由哪次混音版本参与产出 */
+  mixRevisionId: integer('mix_revision_id'),
+  /** 产出时的计划哈希 */
+  planHash: text('plan_hash'),
+  /** 是否烧录字幕 */
+  subtitleBurned: integer('subtitle_burned', { mode: 'boolean' }).default(false),
   createdAt: text('created_at').notNull(),
   completedAt: text('completed_at'),
   deletedAt: text('deleted_at'),
@@ -624,6 +644,8 @@ export const mixRevisions = sqliteTable('mix_revisions', {
   editSyncHash: text('edit_sync_hash'),
   dialogueSyncHash: text('dialogue_sync_hash'),
   sourceKind: text('source_kind').default('legacy'),
+  /** 混音源成片（video_merges.id，成片中心） */
+  sourceFilmId: integer('source_film_id'),
 })
 
 /** 导出记录 */
@@ -658,6 +680,12 @@ export const episodeExports = sqliteTable('episode_exports', {
   renderMode: text('render_mode'),
   subtitleMode: text('subtitle_mode'),
   fileName: text('file_name'),
+  /** 导出源拼接记录（video_merges.id） */
+  sourceMergeId: integer('source_merge_id'),
+  /** 导出源成片（video_merges.id，成片中心） */
+  filmId: integer('film_id'),
+  /** 所属剪辑工程（edit_projects.id） */
+  projectId: integer('project_id'),
 })
 
 /** 剪辑草稿：每集最多一份，可变 */
@@ -670,6 +698,8 @@ export const episodeEditDrafts = sqliteTable('episode_edit_drafts', {
   editSyncHash: text('edit_sync_hash'),
   version: integer('version').notNull().default(0),
   baseRevisionId: integer('base_revision_id'),
+  /** 所属剪辑工程（edit_projects.id） */
+  projectId: integer('project_id'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })
@@ -687,6 +717,8 @@ export const editRevisions = sqliteTable('edit_revisions', {
   clipCount: integer('clip_count'),
   note: text('note'),
   isCurrent: integer('is_current', { mode: 'boolean' }).notNull().default(false),
+  /** 所属剪辑工程（edit_projects.id） */
+  projectId: integer('project_id'),
   createdAt: text('created_at').notNull(),
 })
 
@@ -712,8 +744,25 @@ export const editRenders = sqliteTable('edit_renders', {
   durationMs: integer('duration_ms'),
   sizeBytes: integer('size_bytes'),
   error: text('error'),
+  /** 所属剪辑工程（edit_projects.id） */
+  projectId: integer('project_id'),
   createdAt: text('created_at').notNull(),
   finishedAt: text('finished_at'),
+  deletedAt: text('deleted_at'),
+})
+
+/** 剪辑工程：一部源成片一个工程 */
+export const editProjects = sqliteTable('edit_projects', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  sourceMergeId: integer('source_merge_id'),
+  sourceUrl: text('source_url'),
+  sourceFingerprint: text('source_fingerprint'),
+  title: text('title').notNull(),
+  status: text('status').default('active'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
   deletedAt: text('deleted_at'),
 })
 

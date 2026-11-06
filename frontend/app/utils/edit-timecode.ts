@@ -29,3 +29,24 @@ export function msToFrames(ms: number, fps: number): number {
 export function framesToMs(frames: number, fps: number): number {
   return Math.round((Number(frames) || 0) * frameDurationMs(fps))
 }
+
+/** 字幕时间显示：mm:ss.mmm（超过 1 小时为 h:mm:ss.mmm），与 formatPrecise 同口径 */
+export const formatClockMs = formatPrecise
+
+/** 解析 mm:ss.mmm / h:mm:ss.mmm / 纯毫秒数字为毫秒；无法解析时返回 NaN */
+export function parseClockMs(text: string): number {
+  const raw = String(text ?? '').trim()
+  if (!raw) return Number.NaN
+  if (/^-?\d+(\.\d+)?$/.test(raw)) return Math.round(Number(raw))
+  const parts = raw.split(':')
+  if (parts.length < 2 || parts.length > 3) return Number.NaN
+  let total = 0
+  for (const part of parts) {
+    if (!/^\d+(\.\d+)?$/.test(part.trim())) return Number.NaN
+  }
+  for (const part of parts.slice(0, -1)) {
+    total = (total + Number(part.trim())) * 60
+  }
+  const last = Number(parts[parts.length - 1].trim())
+  return Math.round((total + last) * 1000)
+}

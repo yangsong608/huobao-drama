@@ -22,6 +22,8 @@ const { db, schema } = await import('../src/db/index.ts')
 const { setEditWorkspaceMode } = await import('../src/services/app-settings.ts')
 const { roughCutEditPlan, suggestEditSubtitles } = await import('../src/services/edit-actions-service.ts')
 const { getEpisodeEditState } = await import('../src/services/edit-service.ts')
+const { assembleStoryboardClips, persistInitialProjectPlan } = await import('../src/services/edit-bootstrap.ts')
+const { createEmptyEditPlan, projectSettingsForAspect } = await import('../src/services/edit-plan.ts')
 const app = new Hono()
 app.route('/', (await import('../src/routes/edit.ts')).default)
 
@@ -67,6 +69,37 @@ db.insert(schema.storyboardLines).values([
   },
 ]).run()
 
+// 工程化：为两集各建旧版工程（source_merge_id 为空）；动作集落分镜初始版本 + 草稿，
+// 等价于旧 bootstrap 行为（版本 v1 + 草稿 v1，含 2 个分镜片段）。
+setEditWorkspaceMode('on')
+const legacyProject = db.insert(schema.editProjects).values({
+  episodeId: episode.id, dramaId: drama.id, sourceMergeId: null,
+  title: '旧版工程', status: 'active', createdAt: ts, updatedAt: ts,
+}).returning().get()
+db.update(schema.episodes).set({ editProjectId: legacyProject.id })
+  .where(eq(schema.episodes.id, episode.id)).run()
+const assembly = await assembleStoryboardClips(episode.id, projectSettingsForAspect('16:9'))
+const seedPlan = {
+  ...createEmptyEditPlan(episode.id, projectSettingsForAspect('16:9')),
+  clips: assembly.clips,
+  transitions: assembly.transitions,
+}
+persistInitialProjectPlan({
+  episodeId: episode.id,
+  dramaId: drama.id,
+  projectId: legacyProject.id,
+  plan: seedPlan,
+  mode: 'on',
+})
+
+const emptyProject = db.insert(schema.editProjects).values({
+  episodeId: emptyEpisode.id, dramaId: drama.id, sourceMergeId: null,
+  title: '无分镜工程', status: 'active', createdAt: ts, updatedAt: ts,
+}).returning().get()
+db.update(schema.episodes).set({ editProjectId: emptyProject.id })
+  .where(eq(schema.episodes.id, emptyEpisode.id)).run()
+setEditWorkspaceMode('readonly')
+
 after(() => {
   fs.rmSync(root, { recursive: true, force: true })
 })
@@ -97,7 +130,7 @@ test('replace 初剪按分镜重建主轨并清空字幕', async () => {
     anchor: null,
   })
 
-  const result = await roughCutEditPlan(episode.id, {
+  const result = await roughCutEditPlan(episode.id, legacyProject, {
     mode: 'replace',
     plan,
     create_revision: false,
@@ -115,7 +148,7 @@ test('replace 初剪按分镜重建主轨并清空字幕', async () => {
 test('append 跳过已存在的分镜并统计 skipped', async () => {
   setEditWorkspaceMode('on')
   const state = await getEpisodeEditState(episode.id)
-  const result = await roughCutEditPlan(episode.id, {
+  const result = await roughCutEditPlan(episode.id, legacyProject, {
     mode: 'append',
     plan: state.plan,
     create_revision: false,
@@ -131,7 +164,7 @@ test('create_revision=true 在替换前创建快照版本', async () => {
   const draftBefore = db.select().from(schema.episodeEditDrafts)
     .where(eq(schema.episodeEditDrafts.episodeId, episode.id))
     .get()
-  const result = await roughCutEditPlan(episode.id, {
+  const result = await roughCutEditPlan(episode.id, legacyProject, {
     mode: 'replace',
     plan: state.plan,
     create_revision: true,
@@ -155,7 +188,7 @@ test('create_revision=true 在替换前创建快照版本', async () => {
 test('无可用分镜时初剪返回 ROUGH_CUT_NO_MATERIAL', async () => {
   setEditWorkspaceMode('on')
   await assert.rejects(
-    () => roughCutEditPlan(emptyEpisode.id, { mode: 'replace' }),
+    () => roughCutEditPlan(emptyEpisode.id, emptyProject, { mode: 'replace' }),
     (error: any) => error.code === 'ROUGH_CUT_NO_MATERIAL' && error.status === 400,
   )
 })
@@ -176,17 +209,17 @@ test('fill 只补缺失字幕，replace 保留手动字幕', async () => {
   }
   const base = { ...state.plan, subtitles: [manual] }
 
-  const filled = suggestEditSubtitles(episode.id, { mode: 'fill', plan: base })
+  const filled = suggestEditSubtitles(episode.id, legacyProject, { mode: 'fill', plan: base })
   assert.equal(filled.added, 2)
   assert.equal(filled.updated, 0)
   assert.ok(filled.plan.subtitles.some((cue: any) => cue.id === 'cue_manual'))
   assert.equal(filled.plan.subtitles.filter((cue: any) => cue.source === 'line').length, 2)
 
-  const filledAgain = suggestEditSubtitles(episode.id, { mode: 'fill', plan: filled.plan })
+  const filledAgain = suggestEditSubtitles(episode.id, legacyProject, { mode: 'fill', plan: filled.plan })
   assert.equal(filledAgain.added, 0)
   assert.equal(filledAgain.skipped, 2)
 
-  const replaced = suggestEditSubtitles(episode.id, { mode: 'replace', plan: filled.plan })
+  const replaced = suggestEditSubtitles(episode.id, legacyProject, { mode: 'replace', plan: filled.plan })
   assert.equal(replaced.updated, 2)
   assert.equal(replaced.added, 2)
   assert.equal(replaced.skipped, 1)
@@ -226,7 +259,7 @@ test('归一化失败时不写初剪前快照，也不移动分集指针', async
   }
   const before = dbCounts(episode.id)
   await assert.rejects(
-    () => roughCutEditPlan(episode.id, {
+    () => roughCutEditPlan(episode.id, legacyProject, {
       mode: 'append',
       plan: collidingPlan,
       create_revision: true,

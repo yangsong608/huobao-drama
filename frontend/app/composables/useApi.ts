@@ -76,35 +76,69 @@ export const episodeAPI = {
 }
 
 export const editAPI = {
-  get: (episodeId: number) => api.get(`/episodes/${episodeId}/edit`),
+  get: (episodeId: number, projectId?: number) =>
+    api.get(`/episodes/${episodeId}/edit${projectId ? `?project_id=${projectId}` : ''}`),
+  projects: (episodeId: number) => api.get(`/episodes/${episodeId}/edit/projects`),
+  openProject: (episodeId: number, filmId: number) =>
+    api.post(`/episodes/${episodeId}/edit/projects`, { film_id: filmId }),
   media: (episodeId: number) => api.get(`/episodes/${episodeId}/edit/media`),
   saveDraft: (episodeId: number, body: {
     base_version: number
     plan: unknown
     force?: boolean
+    project_id?: number
   }) => api.put(`/episodes/${episodeId}/edit/draft`, body),
   discardDraft: (episodeId: number) => api.del(`/episodes/${episodeId}/edit/draft`),
-  revisions: (episodeId: number) => api.get(`/episodes/${episodeId}/edit/revisions`),
-  revision: (episodeId: number, revisionId: number) =>
-    api.get(`/episodes/${episodeId}/edit/revisions/${revisionId}`),
+  revisions: (episodeId: number, projectId?: number) =>
+    api.get(`/episodes/${episodeId}/edit/revisions${projectId ? `?project_id=${projectId}` : ''}`),
+  revision: (episodeId: number, revisionId: number, projectId?: number) =>
+    api.get(`/episodes/${episodeId}/edit/revisions/${revisionId}${projectId ? `?project_id=${projectId}` : ''}`),
   createRevision: (episodeId: number, body: {
     base_version: number
     note?: string
     plan?: unknown
     update_draft?: boolean
+    project_id?: number
   }) => api.post(`/episodes/${episodeId}/edit/revisions`, body),
-  restoreRevision: (episodeId: number, revisionId: number, body: { base_version: number }) =>
+  restoreRevision: (episodeId: number, revisionId: number, body: { base_version: number; project_id?: number }) =>
     api.post(`/episodes/${episodeId}/edit/revisions/${revisionId}/restore`, body),
   roughCut: (episodeId: number, body: {
     mode: 'replace' | 'append'
     plan: unknown
     create_revision?: boolean
     base_version?: number
+    project_id?: number
   }) => api.post(`/episodes/${episodeId}/edit/rough-cut`, body),
   suggestSubtitles: (episodeId: number, body: {
     mode: 'fill' | 'replace'
     plan: unknown
+    project_id?: number
   }) => api.post(`/episodes/${episodeId}/edit/subtitles/suggest`, body),
+  // 帧操作（Task 19）：抽帧 body 为 { project_id?, clip_id, offset_ms }，返回 { url, width, height, fingerprint }
+  extractFrame(episodeId: number, body: {
+    project_id?: number
+    clip_id: string
+    offset_ms: number
+  }) {
+    return api.post(`/episodes/${episodeId}/edit/frames`, body)
+  },
+  // 图片素材上传（Task 19，multipart 走既有 uploadForm 封装），返回 { url, width, height, fingerprint }
+  uploadImage(episodeId: number, file: File) {
+    return uploadForm(`/episodes/${episodeId}/edit/assets/images`, file)
+  },
+  // 剪辑导出（Task 21）：返回 { export_id }；状态行字段与后端 getEditExportStatus 同构
+  render(episodeId: number, body: {
+    project_id?: number
+    preset: 'vertical-hd' | 'horizontal-hd' | 'vertical-high'
+    subtitle_mode: 'burn' | 'soft' | 'none'
+    set_current?: boolean
+    base_version: number
+  }) {
+    return api.post(`/episodes/${episodeId}/edit/render`, body)
+  },
+  renderStatus(episodeId: number, exportId: number) {
+    return api.get(`/episodes/${episodeId}/edit/render/${exportId}`)
+  },
 }
 
 // 全自动流水线：改写 → 提取 → 资产生图 → 分镜 → 视频提示词 → 视频
@@ -682,6 +716,28 @@ export interface MixPlan {
   master: { lufs: number; truePeak: number; limiter: string }
 }
 
+/** 混音源成片快照（与后端 MixPlanSource 镜像，Task 7 mix-source.ts） */
+export interface MixSourceSnapshot {
+  filmId: number
+  kind: 'concat' | 'mix' | 'edit' | 'import'
+  url: string
+  durationMs: number
+  hasAudio: boolean
+  containsDialogue: boolean
+  containsBgm: boolean
+}
+
+export interface MixSourceWarning {
+  code: string
+  message: string
+}
+
+/** 混音计划响应携带的源成片与警告（GET /mix、PUT /mix/source） */
+export type MixPlanWithSource = MixPlan & {
+  source_film: MixSourceSnapshot | null
+  source_warnings: MixSourceWarning[]
+}
+
 export type SoundscapeCategory = 'ambience' | 'sfx' | 'crowd' | 'bgm'
 export type SoundscapeMode = 'scenes' | 'episode-bed' | 'assets-only'
 export type SoundscapeCrowdMode = 'walla' | 'lines'
@@ -860,6 +916,17 @@ export const mixAPI = {
   autoTracks: (episodeId: number, assetId: number) =>
     api.post<{ tracks: EpisodeAudioTrack[]; clips: EpisodeAudioClip[] }>(`/episodes/${episodeId}/audio/assets/${assetId}/tracks`),
   getPlan: (episodeId: number) => api.get<MixPlan>(`/episodes/${episodeId}/mix`),
+  /** GET /mix 支持 ?source_film_id= 预览指定源成片（不写持久化），响应带 source_film / source_warnings */
+  plan: (episodeId: number, sourceFilmId?: number | null) =>
+    api.get<MixPlan & {
+      source_film: MixSourceSnapshot | null
+      source_warnings: MixSourceWarning[]
+    }>(`/episodes/${episodeId}/mix${sourceFilmId ? `?source_film_id=${sourceFilmId}` : ''}`),
+  setSource: (episodeId: number, filmId: number) =>
+    api.put<MixPlan & {
+      source_film: MixSourceSnapshot | null
+      source_warnings: MixSourceWarning[]
+    }>(`/episodes/${episodeId}/mix/source`, { film_id: filmId }),
   savePlan: (
     episodeId: number,
     data: {
@@ -909,7 +976,7 @@ export const mixAPI = {
 }
 
 export type ExportKind = 'mix' | 'video' | 'stems'
-export type ExportSubtitleMode = 'soft' | 'burn' | 'none'
+export type ExportSubtitleMode = 'soft' | 'burn' | 'none' | 'copy'
 export type ExportStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface ExportRecord {
@@ -960,7 +1027,7 @@ export const exportAPI = {
   checks: (episodeId: number) => api.get<ExportChecks>(`/episodes/${episodeId}/export-checks`),
   start: (
     episodeId: number,
-    data: { kind?: ExportKind; preset?: string; subtitle_mode?: ExportSubtitleMode; set_current?: boolean } = {},
+    data: { kind?: ExportKind; preset?: string; subtitle_mode?: ExportSubtitleMode; source_film_id?: number; title?: string; set_current?: boolean } = {},
   ) => api.post<{ record: ExportRecord; reused: boolean }>(`/episodes/${episodeId}/exports`, data),
   list: (episodeId: number) => api.get<{ items: ExportRecord[] }>(`/episodes/${episodeId}/exports`),
   get: (id: number) => api.get<ExportRecord>(`/exports/${id}`),
@@ -969,6 +1036,52 @@ export const exportAPI = {
   setCurrent: (id: number, episodeId?: number) =>
     api.post<ExportRecord>(`/exports/${id}/current`, episodeId ? { episode_id: episodeId } : {}),
   remove: (id: number) => api.del<ExportRecord>(`/exports/${id}`),
+}
+
+/** 成片（Film Hub · Phase B）：列表/详情/设当前/删除/重命名/投影重试 */
+export interface FilmSummary {
+  id: number
+  title: string
+  kind: 'concat' | 'mix' | 'edit' | 'import'
+  origin: string
+  url: string
+  subtitle_url: string | null
+  duration_ms: number
+  duration_unknown: boolean
+  created_at: string
+  is_current: boolean
+  source_merge_id: number | null
+  export_id: number | null
+  edit_revision_id: number | null
+  mix_revision_id: number | null
+  edit_project_id: number | null
+}
+
+export interface FilmListResult {
+  episode_id: number
+  current_film_id: number | null
+  films: FilmSummary[]
+}
+
+export const filmAPI = {
+  list(episodeId: number, limit = 50) {
+    return api.get<FilmListResult>(`/episodes/${episodeId}/films?limit=${limit}`)
+  },
+  get(filmId: number) {
+    return api.get<FilmSummary>(`/films/${filmId}`)
+  },
+  setCurrent(episodeId: number, filmId: number) {
+    return api.post(`/episodes/${episodeId}/films/${filmId}/current`)
+  },
+  remove(filmId: number) {
+    return api.del(`/films/${filmId}`)
+  },
+  rename(filmId: number, title: string) {
+    return api.patch(`/films/${filmId}`, { title })
+  },
+  projectExport(episodeId: number, exportId: number) {
+    return api.post<{ film_id: number }>(`/episodes/${episodeId}/exports/${exportId}/project-film`)
+  },
 }
 
 export const dubbingAPI = {
@@ -1176,6 +1289,8 @@ export const aiConfigAPI = {
   update: (id: number, d: any) => api.put(`/ai-configs/${id}`, d),
   del: (id: number) => api.del(`/ai-configs/${id}`),
   test: (d: any) => api.post('/ai-configs/test', d),
+  comfyWorkflows: (d: { base_url: string; api_key?: string; kind?: string }) =>
+    api.post<{ workflows: any[] }>('/ai-configs/comfyui/workflows', d),
 }
 
 // lang 缺省/为 zh 时读写基础版（不带 query，保持原请求形态）

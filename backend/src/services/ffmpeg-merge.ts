@@ -15,6 +15,7 @@ import { projectSubdirPath, projectStorageRelative } from './project-storage.js'
 import { buildMergeTransitionGraph, computeMergeSourceHash, mergeTransitionStyle } from './merge-plan.js'
 import { prepareTransitionInsertion, type TransitionSnapshotEntry } from './transition-merge.js'
 import { normalizeVideoAudioMode, type VideoAudioMode } from './video-audio.js'
+import { bootstrapCurrentFilmIfEmpty } from './film-hub.js'
 
 interface MergeClip {
   url: string
@@ -116,6 +117,8 @@ export async function mergeEpisodeVideos(
     provider: 'ffmpeg',
     model: 'ffmpeg-concat-h264-aac',
     status: 'processing',
+    kind: 'concat',
+    origin: 'concat',
     scenes: JSON.stringify(videos),
     transitions: options.useAiTransitions ? JSON.stringify(transitionsSnapshot) : null,
     sourceHash: computeMergeSourceHash(clips, audioMode),
@@ -247,10 +250,8 @@ async function doMerge(mergeId: number, episodeId: number, dramaId: number, clip
     .set({ status: 'completed', mergedUrl: mergedRelative, duration, completedAt: now() })
     .where(eq(schema.videoMerges.id, mergeId))
 
-  // 更新 episode
-  await db.update(schema.episodes)
-    .set({ videoUrl: mergedRelative, updatedAt: now() })
-    .where(eq(schema.episodes.id, episodeId))
+  // 更新 episode 当前成片（仅当该集还没有 currentFilmId 时才接管）
+  bootstrapCurrentFilmIfEmpty(episodeId, mergeId)
 
   logTaskSuccess('MergeTask', 'episode-merge', {
     mergeId, episodeId, output: mergedRelative, duration, clips: videos.length,

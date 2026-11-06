@@ -49,13 +49,12 @@ test('新建库包含剪辑工作台表、列与索引', () => {
 
     const indexes = objects(sqlite, 'index')
     for (const name of [
-      'idx_edit_drafts_episode',
-      'idx_edit_revisions_no',
-      'idx_edit_revisions_current',
-      'idx_edit_renders_cache',
+      'idx_edit_drafts_project',
+      'idx_edit_revisions_project_no',
+      'idx_edit_revisions_project_current',
+      'idx_edit_renders_project_cache',
       'idx_edit_renders_sync',
       'idx_edit_renders_revision',
-      'idx_edit_renders_cache_key',
       'idx_media_proxies_source',
     ]) {
       assert.ok(indexes.has(name), `缺少索引 ${name}`)

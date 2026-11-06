@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import { eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 
 const require = createRequire(import.meta.url)
@@ -63,9 +64,27 @@ const offEpisode = db.insert(schema.episodes).values({
   dramaId: drama.id, episodeNumber: 5, title: '开关关闭', createdAt: ts, updatedAt: ts,
 }).returning().get()
 
+// 成片行 + 打开工程（工程化剪辑状态：读路径按工程组织）
+const film = db.insert(schema.videoMerges).values({
+  episodeId: videoEpisode.id, dramaId: drama.id, title: '成片',
+  provider: 'ffmpeg', model: 'test',
+  status: 'completed', mergedUrl: sourceUrl, kind: 'concat', createdAt: ts,
+}).returning().get()
+const { openProjectForFilm } = await import('../src/services/edit-project-service.ts')
+const filmProject = openProjectForFilm(videoEpisode.id, film.id).project
+
+// 草稿优先集：旧版工程（source_merge_id 为空，不服务本测试用途，仅承载草稿/版本）
+const legacyProject = db.insert(schema.editProjects).values({
+  episodeId: draftEpisode.id, dramaId: drama.id, sourceMergeId: null,
+  title: '旧版工程', status: 'active', createdAt: ts, updatedAt: ts,
+}).returning().get()
+db.update(schema.episodes).set({ editProjectId: legacyProject.id })
+  .where(eq(schema.episodes.id, draftEpisode.id)).run()
+
 const revisionPlan = createEmptyEditPlan(draftEpisode.id, projectSettingsForAspect('16:9'))
 db.insert(schema.editRevisions).values({
   episodeId: draftEpisode.id,
+  projectId: legacyProject.id,
   revisionNo: 1,
   planJson: JSON.stringify(revisionPlan),
   planHash: planHashOf(revisionPlan),
@@ -80,6 +99,7 @@ const draftPlan = createEmptyEditPlan(draftEpisode.id, {
 db.insert(schema.episodeEditDrafts).values({
   episodeId: draftEpisode.id,
   dramaId: drama.id,
+  projectId: legacyProject.id,
   planJson: JSON.stringify(draftPlan),
   planHash: planHashOf(draftPlan),
   editSyncHash: editSyncHashOf(draftPlan),
@@ -105,6 +125,9 @@ test('空集返回空计划且不创建草稿/版本', async () => {
   assert.equal(data.episode_id, emptyEpisode.id)
   assert.equal(data.enabled, true)
   assert.equal(data.mode, 'readonly')
+  assert.equal(data.empty_reason, 'NO_FILM')
+  assert.equal(data.project, null)
+  assert.deepEqual(data.films, [])
   assert.deepEqual(data.plan.clips, [])
   assert.equal(data.layout.duration_ms, 0)
   assert.equal(data.current_revision, null)
@@ -120,22 +143,28 @@ test('空集返回空计划且不创建草稿/版本', async () => {
   assert.equal(revisions.length, 0)
 })
 
-test('当前成片 bootstrap 为单片段并返回原声预览', async () => {
+test('当前成片 bootstrap 为单片段并返回工程信息', async () => {
   const response = await app.request(`/episodes/${videoEpisode.id}/edit`)
   assert.equal(response.status, 200, await response.clone().text())
   const data = (await json(response)).data
+  assert.equal(data.empty_reason, null)
+  assert.equal(data.project.id, filmProject.id)
+  assert.equal(data.project.source_merge_id, film.id)
+  assert.equal(data.legacy_project, false)
   assert.equal(data.plan.clips.length, 1)
-  assert.equal(data.plan.clips[0].source.kind, 'episode-video')
+  assert.equal(data.plan.clips[0].source.kind, 'merge')
   assert.equal(data.plan.clips[0].source.url, sourceUrl)
   assert.equal(data.plan.clips[0].source.width, 320)
   assert.equal(data.plan.clips[0].source.height, 240)
   assert.equal(data.plan.clips[0].source.fps, 25)
-  assert.equal(data.plan.project.aspect, '9:16')
-  assert.equal(data.plan.project.width, 1080)
-  assert.equal(data.plan.project.height, 1920)
+  // 成片 320x240 → 16:9（画幅取成片宽高比，不再是剧集 9:16）
+  assert.equal(data.plan.project.aspect, '16:9')
+  assert.equal(data.plan.project.width, 1920)
+  assert.equal(data.plan.project.height, 1080)
   assert.ok(Math.abs(data.layout.duration_ms - 2000) <= 200)
+  // Task 24（§6.9）：单片段源成片有原声 → mode='video'（混音不可用时回放源原声，reference_only 仅在 stale 时为 true）
   assert.equal(data.audio.mode, 'video')
-  assert.equal(data.audio.url, sourceUrl)
+  assert.equal(data.audio.reference_only, false)
   assert.equal(data.hashes.plan_hash.length, 32)
   assert.equal(data.hashes.edit_sync_hash.length, 32)
   assert.equal(data.draft_dirty, false)
@@ -148,12 +177,14 @@ test('当前成片 bootstrap 为单片段并返回原声预览', async () => {
   assert.equal(revisions.length, 0)
 })
 
-test('缺失媒体不抛错，提示 MEDIA_MISSING 并返回空计划', async () => {
+test('无成片（含媒体缺失路径）返回 NO_FILM 空态', async () => {
   const response = await app.request(`/episodes/${missingEpisode.id}/edit`)
   assert.equal(response.status, 200, await response.clone().text())
   const data = (await json(response)).data
+  assert.equal(data.empty_reason, 'NO_FILM')
+  assert.equal(data.project, null)
   assert.deepEqual(data.plan.clips, [])
-  assert.ok(data.media_warnings.some((item: any) => item.code === 'MEDIA_MISSING'))
+  assert.deepEqual(data.films, [])
 })
 
 test('已有草稿时草稿优先，并返回版本指针与 dirty 标记', async () => {
@@ -197,12 +228,14 @@ test('开关 off 返回 403，非法与大编号返回 400/404', async () => {
   assert.equal(missing.status, 404)
 })
 
-test('on 模式只提升 can_edit，不会在 M1 写草稿', async () => {
+test('on 模式无成片返回空态且不写草稿', async () => {
   setEditWorkspaceMode('on')
   const response = await app.request(`/episodes/${emptyEpisode.id}/edit`)
   assert.equal(response.status, 200)
   const data = (await json(response)).data
   assert.equal(data.mode, 'on')
+  assert.equal(data.empty_reason, 'NO_FILM')
+  assert.equal(data.project, null)
   assert.equal(data.capabilities.can_edit, true)
   const drafts = db.select().from(schema.episodeEditDrafts).all()
     .filter((row) => row.episodeId === emptyEpisode.id)

@@ -3,7 +3,8 @@
  */
 export type ExportKind = 'mix' | 'video' | 'stems'
 export type ExportPresetKey = 'vertical-hd' | 'horizontal-hd' | 'vertical-high' | 'audio-wav' | 'stems'
-export type ExportSubtitleMode = 'soft' | 'burn' | 'none'
+/** copy（复制源成片外挂字幕）不在任何预设的 subtitleModes 内，仅导出服务在有源成片时放行 */
+export type ExportSubtitleMode = 'soft' | 'burn' | 'none' | 'copy'
 
 export interface ExportPreset {
   key: ExportPresetKey

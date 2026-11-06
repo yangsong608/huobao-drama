@@ -155,7 +155,25 @@ export async function ensureMergedVideo(
     if (durationMs <= 0) continue
     clips.push({ storyboardId: sb.id, storyboardNumber: sb.storyboardNumber, durationMs, videoUrl: url, transition: sb.transition || 'cut' })
   }
-  if (!clips.length) throw new Error('本集还没有可用的镜头视频')
+  if (!clips.length) {
+    // 成片中心收口：没有分镜镜头时，允许直接以当前成片（或最近一次非混音合片）作为导出/配音源
+    const episodeRow = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
+    const candidates = db.select().from(schema.videoMerges)
+      .where(eq(schema.videoMerges.episodeId, episodeId))
+      .all()
+      .filter((m) => m.status === 'completed' && m.mergedUrl && m.kind !== 'mix' && !m.deletedAt)
+      .sort((a, b) => (b.id || 0) - (a.id || 0))
+    const fallback = candidates.find((m) => m.id === episodeRow?.currentFilmId) || candidates[0]
+    const fallbackUrl = fallback?.mergedUrl || ''
+    const fallbackPath = fallbackUrl ? getAbsolutePath(fallbackUrl) : ''
+    if (fallbackUrl && fs.existsSync(fallbackPath)) {
+      const durationMs = await probeDurationMs(fallbackPath)
+      if (durationMs > 0) {
+        return { videoPath: fallbackPath, videoUrl: fallbackUrl, durationMs, clips: [], remixed: false }
+      }
+    }
+    throw new Error('本集还没有可用的镜头视频')
+  }
 
   const sum = clips.reduce((n, c) => n + c.durationMs, 0)
   const latest = db.select().from(schema.videoMerges)
@@ -491,12 +509,11 @@ async function runDubbing(episodeId: number, dramaId: number, options: DubOption
 
   const outputUrl = record.outputUrl
   const note = synth.failed ? `完成，${synth.failed} 句合成失败` : '完成'
+  // 视频指针与时长由导出投影 → setCurrentFilm 统一回写，这里只更新配音状态
   updateEpisode(episodeId, {
-    videoUrl: outputUrl,
     dubStatus: 'done',
     dubProgress: 100,
     dubNote: note,
-    duration: Math.round((record.durationMs || 0) / 1000),
   })
 
   state.status = 'done'

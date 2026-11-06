@@ -19,6 +19,7 @@ delete process.env.EDIT_WORKSPACE
 
 const { db, schema } = await import('../src/db/index.ts')
 const { setEditWorkspaceMode } = await import('../src/services/app-settings.ts')
+const { openProjectForFilm } = await import('../src/services/edit-project-service.ts')
 const app = new Hono()
 app.route('/', (await import('../src/routes/edit.ts')).default)
 
@@ -44,6 +45,14 @@ db.insert(schema.storyboards).values({
   episodeId: episode.id, storyboardNumber: 1, title: '镜一',
   videoUrl, duration: 2, createdAt: ts, updatedAt: ts,
 }).run()
+
+// 成片行 + 打开工程（版本按 project_id 组织；首次 GET 在 on 模式落初始版本 v1 + 草稿 v1）
+const film = db.insert(schema.videoMerges).values({
+  episodeId: episode.id, dramaId: drama.id, title: '成片',
+  provider: 'ffmpeg', model: 'test',
+  status: 'completed', mergedUrl: videoUrl, kind: 'concat', createdAt: ts,
+}).returning().get()
+const project = openProjectForFilm(episode.id, film.id).project
 
 after(() => {
   fs.rmSync(root, { recursive: true, force: true })
@@ -76,6 +85,7 @@ test('创建版本递增 revision_no 并同步草稿', async () => {
   const plan = state.plan
   plan.project.tailGapMs = 500
   const response = await postRevision({
+    project_id: project.id,
     base_version: 1,
     note: '手动版本',
     plan,
@@ -90,10 +100,11 @@ test('创建版本递增 revision_no 并同步草稿', async () => {
   assert.equal(data.draft_version, 2)
   assert.equal(data.draft_dirty, false)
 
-  const list = await app.request(`/episodes/${episode.id}/edit/revisions`)
+  const list = await app.request(`/episodes/${episode.id}/edit/revisions?project_id=${project.id}`)
   assert.equal(list.status, 200)
   const items = (await json(list)).data.items
   assert.equal(items.length, 2)
+  assert.ok(items.every((item: any) => item.project_id === project.id))
   assert.equal(items[0].revision_no, 2)
   assert.equal(items[0].is_current, true)
   assert.equal(items[1].revision_no, 1)
@@ -102,22 +113,22 @@ test('创建版本递增 revision_no 并同步草稿', async () => {
 
 test('过期 base_version 返回 409，详情返回不可变计划', async () => {
   setEditWorkspaceMode('on')
-  const stale = await postRevision({ base_version: 1, note: '过期' })
+  const stale = await postRevision({ project_id: project.id, base_version: 1, note: '过期' })
   assert.equal(stale.status, 409)
   const staleData = await json(stale)
   assert.equal(staleData.code, 'EDIT_VERSION_CONFLICT')
   assert.equal(staleData.data.current_version, 2)
 
-  const list = await app.request(`/episodes/${episode.id}/edit/revisions`)
+  const list = await app.request(`/episodes/${episode.id}/edit/revisions?project_id=${project.id}`)
   const items = (await json(list)).data.items
   const first = items.find((item: any) => item.revision_no === 1)
-  const detail = await app.request(`/episodes/${episode.id}/edit/revisions/${first.id}`)
+  const detail = await app.request(`/episodes/${episode.id}/edit/revisions/${first.id}?project_id=${project.id}`)
   assert.equal(detail.status, 200)
   const detailData = (await json(detail)).data
   assert.equal(detailData.revision.revision_no, 1)
   assert.equal(detailData.plan.project.tailGapMs, 0)
 
-  const missing = await app.request(`/episodes/${episode.id}/edit/revisions/99999`)
+  const missing = await app.request(`/episodes/${episode.id}/edit/revisions/99999?project_id=${project.id}`)
   assert.equal(missing.status, 404)
   assert.equal((await json(missing)).code, 'EDIT_REVISION_NOT_FOUND')
 })
@@ -128,6 +139,7 @@ test('update_draft=false 保留草稿并返回真实 dirty', async () => {
   const plan = state.plan
   plan.project.tailGapMs = 900
   const response = await postRevision({
+    project_id: project.id,
     base_version: state.draft.version,
     note: '仅版本',
     plan,
@@ -143,7 +155,7 @@ test('update_draft=false 保留草稿并返回真实 dirty', async () => {
 test('恢复旧版本会创建新版本并同步草稿', async () => {
   setEditWorkspaceMode('on')
   const before = await loadState()
-  const list = await app.request(`/episodes/${episode.id}/edit/revisions`)
+  const list = await app.request(`/episodes/${episode.id}/edit/revisions?project_id=${project.id}`)
   const items = (await json(list)).data.items
   const first = items.find((item: any) => item.revision_no === 1)
 
@@ -152,7 +164,7 @@ test('恢复旧版本会创建新版本并同步草稿', async () => {
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base_version: before.draft.version }),
+      body: JSON.stringify({ project_id: project.id, base_version: before.draft.version }),
     },
   )
   assert.equal(response.status, 200, await response.clone().text())
@@ -169,9 +181,9 @@ test('恢复旧版本会创建新版本并同步草稿', async () => {
 
 test('readonly 可读版本列表但禁止创建与恢复', async () => {
   setEditWorkspaceMode('readonly')
-  const list = await app.request(`/episodes/${episode.id}/edit/revisions`)
+  const list = await app.request(`/episodes/${episode.id}/edit/revisions?project_id=${project.id}`)
   assert.equal(list.status, 200)
-  const create = await postRevision({ base_version: 1 })
+  const create = await postRevision({ project_id: project.id, base_version: 1 })
   assert.equal(create.status, 403)
   assert.equal((await json(create)).code, 'EDIT_READONLY')
   const restore = await app.request(
@@ -179,7 +191,7 @@ test('readonly 可读版本列表但禁止创建与恢复', async () => {
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base_version: 1 }),
+      body: JSON.stringify({ project_id: project.id, base_version: 1 }),
     },
   )
   assert.equal(restore.status, 403)

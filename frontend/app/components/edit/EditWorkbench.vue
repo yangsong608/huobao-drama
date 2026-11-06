@@ -8,6 +8,7 @@
       :can-undo="canUndo"
       :can-redo="canRedo"
       :can-edit="canEdit"
+      :legacy="Boolean(topState.legacy_project)"
       :rough-cut-busy="roughCutBusy"
       :subtitle-busy="subtitleBusy"
       @back="$emit('back')"
@@ -18,8 +19,10 @@
       @open-revisions="openRevisions"
       @rough-cut="runRoughCut"
       @suggest-subtitles="runSubtitleSuggest"
+      @open-export="exportOpen = true"
       @shortcuts="shortcutsOpen = true"
       @toggle-media="mediaOpen = !mediaOpen"
+      @toggle-subtitles="subtitlesOpen = !subtitlesOpen"
     />
 
     <div v-if="saveStatus === 'error'" class="ed-banner is-error">
@@ -37,18 +40,21 @@
     </div>
 
     <div class="ed-main" :class="{ 'is-empty': !plan.clips.length, 'is-media-open': mediaOpen }">
-      <EditMediaLibrary
+      <EditSidebar
         class="ed-media-slot"
-        :media="media"
-        :loading="mediaLoading"
-        :error="mediaError"
-        :readonly="!canEdit"
-        :used-storyboard-ids="usedStoryboardIds"
-        :rough-cut-available="topState.rough_cut_available"
-        @add-storyboard="addStoryboard"
-        @add-all="addAllStoryboards"
-        @rough-cut="runRoughCut"
-        @retry="loadMedia"
+        :films="films"
+        :loading="filmsLoading"
+        :current-film-id="currentFilmId"
+        :active-film-id="activeFilmId"
+        :can-edit="canEdit"
+        @open="switchFilm"
+        @refresh="loadFilms"
+        @rename="renameFilm"
+        @remove="removeFilm"
+        @set-current="setCurrentFilm"
+        @open-mix="openFilmInMix"
+        @open-exports="$emit('back')"
+        @new-concat="goNewConcat"
       />
 
       <section class="ed-stage">
@@ -74,21 +80,28 @@
             :fps="plan.project.fps"
             :playing="playing"
             :audio-mode="audioMode"
+            :audio-banner="audioBanner"
             :playback-rate="playbackRate"
+            :layout="layout"
+            :selected-cue-id="selectedCueId"
+            :show-safe-area="showSafeArea"
             @toggle="togglePlayback"
             @seek="seek"
             @step="stepFrame"
             @ended="onClipEnded"
             @error="onPreviewError"
+            @select-cue="selectCue"
           />
           <EditTimeline
+            ref="timelineRef"
             :plan="plan"
             :layout="layout"
             :current-ms="currentMs"
             :selected-clip-id="selectedClipId"
             :selected-cue-id="selectedCueId"
             :readonly="!canEdit"
-            :audio-mode="audioMode"
+            :audio-mode="audioMode === 'mix' ? 'video' : audioMode"
+            :show-subtitles="showSubtitles"
             @seek="seek"
             @select-clip="selectClip"
             @select-cue="selectCue"
@@ -97,6 +110,12 @@
             @split-clip="splitAt"
             @move-cue="moveCueTo"
             @remove-transition="removeTransitionById"
+            @frame-op="onFrameOp"
+            @cue-op="onCueOp"
+            @toggle-subtitles="showSubtitles = !showSubtitles"
+            @fit-view="fitView"
+            @open-subtitles="subtitlesOpen = true"
+            @remove-clip="removeClipById"
           />
         </template>
       </section>
@@ -110,6 +129,7 @@
         :state="inspectorState"
         :current-ms="currentMs"
         :readonly="!canEdit"
+        :cue="selectedCue"
         @trim-start="trimSelectedStart"
         @trim-end="trimSelectedEnd"
         @speed="setSelectedSpeed"
@@ -117,8 +137,27 @@
         @fades="setSelectedFades"
         @split="splitAt"
         @remove="removeSelected"
+        @cue-update="updateSelectedCue"
+        @cue-apply-all="applyAllAppearance"
+        @cue-set-default="setDefaultAppearance"
+        @cue-delete="deleteSelectedCue"
+        @cue-split="splitSelectedCue"
+        @cue-merge-next="mergeSelectedCueNext"
+        @cue-align-start="alignCueStart"
+        @cue-align-end="alignCueEnd"
+        @cue-follow="toggleCueFollow"
       />
     </div>
+
+    <!-- 字幕覆盖层渲染在 EditPreview 内部（EditSubtitleOverlay），此处只负责状态与安全区开关 -->
+    <EditSubtitleList
+      :open="subtitlesOpen"
+      :cues="plan.subtitles"
+      :selected-cue-id="selectedCueId"
+      @close="subtitlesOpen = false"
+      @select="selectCueFromList"
+      @add="addCueAtPlayheadCmd"
+    />
 
     <EditRevisionsDrawer
       :open="revisionsOpen"
@@ -138,6 +177,27 @@
       @reload="reloadFromConflict"
       @overwrite="overwriteConflict"
       @copy="copyConflict"
+    />
+
+    <!-- 帧操作图片选择器：插入图片片段（Task 22 遗留的 insert-image 分支在这里落地） -->
+    <EditImagePicker
+      :open="imagePickerOpen"
+      :episode-id="Number(props.state.episode_id)"
+      :project-id="stateProjectId"
+      @close="imagePickerOpen = false"
+      @insert="insertImage"
+    />
+
+    <!-- 剪辑导出确认：只读展示降级清单，导出以保存后的服务端计划为准 -->
+    <EditExportDialog
+      :open="exportOpen"
+      :episode-id="Number(props.state.episode_id)"
+      :project-id="stateProjectId"
+      :version="version"
+      :plan="plan"
+      :can-edit="canEdit"
+      @close="exportOpen = false"
+      @exported="onExported"
     />
 
     <div v-if="shortcutsOpen" class="ed-modal-mask" @click.self="shortcutsOpen = false">
@@ -166,20 +226,24 @@ import { toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import EditTopBar from '~/components/edit/EditTopBar.vue'
 import EditPreview from '~/components/edit/EditPreview.vue'
+import EditSidebar from '~/components/edit/EditSidebar.vue'
 import EditTimeline from '~/components/edit/EditTimeline.vue'
 import EditClipInspector from '~/components/edit/EditClipInspector.vue'
+import EditSubtitleList from '~/components/edit/EditSubtitleList.vue'
 import EditEmptyState from '~/components/edit/EditEmptyState.vue'
-import EditMediaLibrary from '~/components/edit/EditMediaLibrary.vue'
 import EditRevisionsDrawer from '~/components/edit/EditRevisionsDrawer.vue'
 import EditConflictDialog from '~/components/edit/EditConflictDialog.vue'
-import { editAPI } from '~/composables/useApi'
+import EditImagePicker from '~/components/edit/EditImagePicker.vue'
+import EditExportDialog from '~/components/edit/EditExportDialog.vue'
+import { editAPI, filmAPI } from '~/composables/useApi'
+import { useEditClock } from '~/composables/useEditClock'
 import { useEditPlan } from '~/composables/useEditPlan'
-import { useEditMedia } from '~/composables/useEditMedia'
 import {
-  appendClip,
-  createClipFromSource,
+  addCueAtPlayhead,
+  applyAppearanceToAll,
   createCommandId,
   deleteCue,
+  mergeCueWithNext,
   moveClip,
   moveCue,
   removeClip,
@@ -187,10 +251,17 @@ import {
   setClipFades,
   setClipGap,
   setClipSpeed,
+  setCueAppearance,
+  setCueFollow,
+  setCueText,
+  setCueTime,
+  setSubtitleProjectDefaults,
   splitClip,
+  splitCueAt,
   trimClipEnd,
   trimClipStart,
 } from '~/utils/edit-commands'
+import { insertFreezeFrame, insertImageClip, rippleDeleteFrame } from '~/utils/edit-frame-commands'
 import { activeClipIndex, sourceTimeAt } from '~/utils/edit-layout'
 import { framesToMs, msToFrames } from '~/utils/edit-timecode'
 import { mediaUrl } from '~/utils/edit-plan'
@@ -199,7 +270,8 @@ const props = defineProps({
   state: { type: Object, required: true },
   episodeLabel: { type: String, default: '' },
 })
-defineEmits(['back'])
+const emit = defineEmits(['back', 'open-film'])
+const route = useRoute()
 const { t } = useI18n()
 
 // props.state 是页面 ref 解包后的深层代理，useEditPlan 内部 structuredClone 会抛 DataCloneError，
@@ -233,14 +305,78 @@ const {
   retrySave,
 } = useEditPlan(toRaw(props.state))
 
-const {
-  media,
-  loading: mediaLoading,
-  error: mediaError,
-  load: loadMedia,
-} = useEditMedia(props.state.episode_id)
+// 左侧成片列表：一次性拉取，操作后刷新；currentFilmId 用于禁用删除当前成片。
+const films = ref([])
+const filmsLoading = ref(false)
+const currentFilmId = computed(() => Number(topState.value?.films?.find((f) => f.is_current)?.id)
+  || Number(topState.value?.project?.source_merge_id) || 0)
+const activeFilmId = computed(() => Number(topState.value?.project?.source_merge_id) || 0)
+
+async function loadFilms() {
+  filmsLoading.value = true
+  try {
+    films.value = (await filmAPI.list(props.state.episode_id)).films ?? []
+  } catch {
+    films.value = []
+  } finally {
+    filmsLoading.value = false
+  }
+}
+
+async function switchFilm(film) {
+  if (Number(film?.id) === activeFilmId.value) return
+  if (dirty.value) {
+    await saveNow()
+    if (saveStatus.value === 'error' || saveStatus.value === 'conflict') {
+      timelineMessage.value = t('edit.saveBeforeSwitch')
+      return
+    }
+  }
+  emit('open-film', film.id)
+}
+
+async function renameFilm(film, title) {
+  try {
+    await filmAPI.rename(film.id, title)
+    await loadFilms()
+  } catch (cause) {
+    timelineMessage.value = cause instanceof Error ? cause.message : t('edit.openFailed')
+  }
+}
+
+async function removeFilm(film) {
+  try {
+    await filmAPI.remove(film.id)
+    await loadFilms()
+  } catch (cause) {
+    timelineMessage.value = cause instanceof Error ? cause.message : t('edit.openFailed')
+  }
+}
+
+async function setCurrentFilm(film) {
+  try {
+    await filmAPI.setCurrent(props.state.episode_id, film.id)
+    await loadFilms()
+  } catch (cause) {
+    timelineMessage.value = cause instanceof Error ? cause.message : t('edit.openFailed')
+  }
+}
+
+// 成片在混音工作台打开：配音/混音路由与剪辑页同级，直接回剧集页带参数。
+function openFilmInMix(film) {
+  navigateTo({
+    path: route.path.replace(/\/edit$/, ''),
+    query: { panel: 'dubbing', step: '3', film: String(film.id) },
+  })
+}
+
+// 回剧集页拼接导出条，新建拼接成片。
+function goNewConcat() {
+  navigateTo(`${route.path.replace(/\/edit$/, '')}#exports`)
+}
 
 const previewRef = ref(null)
+const timelineRef = ref(null)
 const currentMs = ref(0)
 const playing = ref(false)
 const selection = ref(null)
@@ -254,6 +390,12 @@ const revisions = ref([])
 const revisionsLoading = ref(false)
 const revisionBusy = ref(false)
 const conflictBusy = ref(false)
+// 帧操作 UI（Task 23）：图片选择器与定格抽帧；导出确认弹窗。
+const imagePickerOpen = ref(false)
+const pendingInsertAt = ref(null)
+const freezeBusy = ref(false)
+const exportOpen = ref(false)
+const stateProjectId = computed(() => Number(props.state.project?.id) || 0)
 
 // 服务端派生字段（台词放置、素材告警、音频、混音状态、初剪可用性）只读：
 // 编辑动作后在后台刷新，避免检查器/顶栏长期显示页面加载时的旧值。
@@ -278,10 +420,33 @@ const selectedClipId = computed(() => (
 const selectedCueId = computed(() => (
   selection.value?.type === 'cue' ? selection.value.id : ''
 ))
-const actionBusy = computed(() => roughCutBusy.value || subtitleBusy.value)
-const audioMode = computed(() => (
-  plan.value.clips.some((clip) => clip.source?.hasAudio) ? 'video' : 'none'
+const selectedCue = computed(() => (
+  plan.value.subtitles.find((cue) => cue.id === selectedCueId.value) ?? null
 ))
+const showSafeArea = ref(false)
+const subtitlesOpen = ref(false)
+// 字幕轨显示状态：默认显示，工具栏「字幕 ▾ → 显示/隐藏字幕轨」切换（与 EditTimeline 的 prop 默认一致）
+const showSubtitles = ref(true)
+const actionBusy = computed(() => roughCutBusy.value || subtitleBusy.value)
+// 音频模式基于服务端 state.audio（§6.9）：mix=混音成片音轨 / video=源原声参考 / none=静音预览
+const audioMode = computed(() => {
+  const mode = String(derived.value.audio?.mode || '')
+  return mode === 'mix' || mode === 'video' ? mode : 'none'
+})
+// 回退横幅：混音过期回放原声 / 完全无音轨，其余（含混音对齐）不提示
+const audioBanner = computed(() => {
+  const audio = derived.value.audio
+  if (audio?.mode === 'video' && audio.reference_only) return t('edit.audioBannerStale')
+  if (audio?.mode === 'none') return t('edit.audioBannerNone')
+  return ''
+})
+
+// 播放时钟（§6.9）：mode='mix' 时 WebAudio 音频是主时钟，视频每帧对齐（漂移 >120ms 才 seek）；
+// mode='video'/'none' 保持视频即时钟，不走 WebAudio。
+const clock = useEditClock({
+  audioUrl: () => mediaUrl(derived.value.audio?.url || ''),
+  playing: () => playing.value,
+})
 
 const activeLayoutClip = computed(() => {
   const index = activeClipIndex(layout.value, currentMs.value)
@@ -316,11 +481,6 @@ const clipKey = computed(() => {
     ? `${clip.id}:${clip.source?.url || ''}:${clip.sourceInMs}`
     : ''
 })
-
-const usedStoryboardIds = computed(() => plan.value.clips
-  .filter((clip) => clip.source?.kind === 'storyboard')
-  .map((clip) => Number(clip.source.id))
-  .filter((id) => Number.isFinite(id)))
 
 const selectedPlacement = computed(() => {
   if (!selectedClipId.value) return null
@@ -364,7 +524,8 @@ async function refreshDerived() {
   if (!props.state.episode_id) return
   const seq = ++derivedSeq
   try {
-    const fresh = await editAPI.get(props.state.episode_id)
+    // 指定工程刷新派生数据，避免后台刷新把其他工程的台词放置/混音状态混进来。
+    const fresh = await editAPI.get(props.state.episode_id, props.state.project?.id || undefined)
     if (seq !== derivedSeq) return
     derived.value = {
       line_placements: fresh.line_placements ?? [],
@@ -392,6 +553,7 @@ function seek(ms) {
   const end = Math.max(0, Number(layout.value.duration_ms) || 0)
   const value = Math.max(0, Math.min(end, Math.round(Number(ms) || 0)))
   currentMs.value = value
+  if (audioMode.value === 'mix') clock.seek(value)
   const index = activeClipIndex(layout.value, value)
   const item = layout.value.clips[index]
   if (item && value >= item.timeline_start_ms && value < item.timeline_end_ms) {
@@ -405,6 +567,7 @@ function playFromCurrent() {
   if (currentMs.value >= Math.max(0, layout.value.duration_ms - 1)) seek(0)
   playing.value = true
   lastTick = 0
+  if (audioMode.value === 'mix') void clock.start(currentMs.value)
   cancelAnimationFrame(rafId)
   rafId = requestAnimationFrame(tick)
 }
@@ -415,7 +578,17 @@ function tick(now) {
   const delta = Math.min(250, Math.max(0, now - lastTick))
   lastTick = now
   const end = Math.max(0, Number(layout.value.duration_ms) || 0)
-  currentMs.value = Math.min(end, currentMs.value + delta)
+  // 混音对齐：WebAudio 音频是主时钟；音源结束（running=false）或未就绪时回退视频即时钟
+  const clockIsMaster = audioMode.value === 'mix' && clock.mode.value === 'mix' && clock.running.value
+  if (clockIsMaster) {
+    currentMs.value = Math.min(end, clock.audioMs())
+  } else {
+    currentMs.value = Math.min(end, currentMs.value + delta)
+  }
+  clock.syncVideo(
+    previewRef.value?.video ?? null,
+    (ms) => sourceTimeAt(plan.value, layout.value, ms),
+  )
   if (currentMs.value >= end) {
     pausePlayback()
     return
@@ -426,6 +599,7 @@ function tick(now) {
 function pausePlayback() {
   playing.value = false
   cancelAnimationFrame(rafId)
+  clock.stop()
   previewRef.value?.pause()
   // 暂停后把视频拉回时钟位置，消除 rAF 与视频播放之间的漂移。
   if (activeClip.value) previewRef.value?.seek(sourceMs.value)
@@ -532,6 +706,121 @@ function removeTransitionById(transitionId) {
   )
 }
 
+// ---- 时间线帧操作 / 字幕块右键（EditTimeline frame-op / cue-op 事件，spec 6.8） ----
+function fpsOfPlan(p) {
+  return Number(p?.project?.fps) || 30
+}
+
+function onFrameOp({ kind, clipId, atMs }) {
+  if (!canEdit.value) return
+  if (kind === 'delete-frame') {
+    // 帧级涟漪删除；片段过短时命令返回 FRAME_DELETE_TOO_SHORT，runCommand 会把错误原文提示出来
+    runCommand((value) => rippleDeleteFrame(value, atMs, fpsOfPlan(value)), { selectFocus: false })
+  } else if (kind === 'duplicate-frame') {
+    insertFreezeAt(clipId, atMs)
+  } else if (kind === 'extend-1s') {
+    extendClipByMs(clipId, 1000)
+  } else if (kind === 'insert-image') {
+    // 插入图片：先记住插入点，打开图片选择器，选中图片后在 insertImage 里落命令
+    pendingInsertAt.value = { clipId, atMs: Math.round(Number(atMs) || 0) }
+    imagePickerOpen.value = true
+  }
+}
+
+/**
+ * 定格插入（复制这一帧）：按片段内容内偏移调抽帧接口取 PNG，
+ * 再用 insertFreezeFrame 在播放头处插入 1 秒定格片段。
+ * 抽帧/命令失败都会把后端错误原文提示出来（不静默失败）。
+ */
+async function insertFreezeAt(clipId, atMs) {
+  if (!canEdit.value || freezeBusy.value) return
+  const item = layout.value.clips.find((entry) => entry.clip_id === clipId)
+  if (!clipId || !item) {
+    notify(t('edit.actionFailed'))
+    return
+  }
+  freezeBusy.value = true
+  try {
+    // offset_ms 是「片段内容内偏移」（后端 Task 19 定义），必须用时间线绝对时间减片段起点换算
+    const body = {
+      clip_id: clipId,
+      offset_ms: Math.max(0, Math.round(Number(atMs) || 0) - item.timeline_start_ms),
+    }
+    if (stateProjectId.value > 0) body.project_id = stateProjectId.value
+    const frame = await editAPI.extractFrame(props.state.episode_id, body)
+    const ok = runCommand((value) => insertFreezeFrame(
+      value,
+      atMs,
+      fpsOfPlan(value),
+      {
+        url: frame.url,
+        width: frame.width,
+        height: frame.height,
+        fingerprint: frame.fingerprint,
+        label: t('edit.freezeFrameName'),
+      },
+      1000,
+    ), { selectFocus: false })
+    if (ok) notify(t('edit.frameFreezeInserted'))
+  } catch (cause) {
+    notify(cause?.message || t('edit.actionFailed'))
+  } finally {
+    freezeBusy.value = false
+  }
+}
+
+// 图片选择器选中图片：在记住的插入点落图片片段命令（片段内部会先分割再插入）
+function insertImage(img) {
+  const at = pendingInsertAt.value || { atMs: Math.round(currentMs.value) }
+  imagePickerOpen.value = false
+  runCommand((value) => insertImageClip(
+    value,
+    at.atMs,
+    fpsOfPlan(value),
+    {
+      url: img.url,
+      width: img.width,
+      height: img.height,
+      fingerprint: img.fingerprint,
+      label: img.label,
+    },
+    3000,
+  ), { selectFocus: false })
+}
+
+// 导出完成：刷新左侧成片列表并提示（成片由后端投影进成片中心）
+function onExported() {
+  void loadFilms()
+  notify(t('edit.exportDone'))
+  scheduleDerivedRefresh()
+}
+
+function extendClipByMs(clipId, deltaMs) {
+  runCommand((value) => trimClipEnd(value, clipId, deltaMs, { ripple: false }))
+}
+
+function onCueOp({ kind, cueId }) {
+  if (!canEdit.value) return
+  if (kind === 'edit') {
+    selection.value = { type: 'cue', id: cueId }
+  } else if (kind === 'split') {
+    runCommand((value) => splitCueAt(value, cueId, Math.round(currentMs.value)), { selectFocus: false })
+  } else if (kind === 'merge-next') {
+    runCommand((value) => mergeCueWithNext(value, cueId), { selectFocus: false })
+  } else if (kind === 'delete') {
+    runCommand((value) => deleteCue(value, cueId), { selectFocus: false })
+  }
+}
+
+function fitView() {
+  timelineRef.value?.zoomToFit()
+}
+
+function removeClipById(clipId) {
+  if (!clipId || !canEdit.value) return
+  runCommand((value) => removeClip(value, clipId, { ripple: true }))
+}
+
 function trimSelectedStart(deltaMs) {
   if (!selectedClipId.value) return
   runCommand((value) => trimClipStart(value, selectedClipId.value, deltaMs, { ripple: true }))
@@ -579,38 +868,73 @@ function removeSelection() {
   }
 }
 
-function addStoryboard(item) {
-  if (!canEdit.value || !item?.playable || !item.source) return
-  const id = createCommandId('clp')
-  // item 来自 useEditMedia 的深层 ref，item.source 是代理；createClipFromSource 的结果会被
-  // insertClip 的 structuredClone 克隆，必须先去代理。
-  const ok = runCommand((value) => appendClip(value, createClipFromSource(id, toRaw(item.source))))
-  if (!ok) return
-  selection.value = { type: 'clip', id }
-  const layoutClip = layout.value.clips.find((clip) => clip.clip_id === id)
-  if (layoutClip) seek(layoutClip.timeline_start_ms)
-  notify(t('edit.addedToTimeline', { n: item.number }))
+// ---- 字幕命令（检查器 cue 页 / 字幕抽屉） ----
+function updateSelectedCue(patch) {
+  if (!selectedCueId.value) return
+  applyCommand((p) => {
+    if (patch.text !== undefined) return setCueText(p, selectedCueId.value, patch.text)
+    if (patch.appearance !== undefined) return setCueAppearance(p, selectedCueId.value, patch.appearance)
+    return setCueTime(p, selectedCueId.value, patch)
+  })
 }
 
-function addAllStoryboards() {
-  if (!canEdit.value) return
-  const candidates = (media.value?.storyboards ?? []).filter(
-    (item) => item.playable && item.source && !usedStoryboardIds.value.includes(item.id),
+function applyAllAppearance(appearance) {
+  runCommand((p) => applyAppearanceToAll(p, appearance), { selectFocus: false })
+}
+
+function setDefaultAppearance(appearance) {
+  runCommand((p) => setSubtitleProjectDefaults(p, { appearance }), { selectFocus: false })
+}
+
+function deleteSelectedCue() {
+  if (!selectedCueId.value) return
+  const ok = runCommand((value) => deleteCue(value, selectedCueId.value), { selectFocus: false })
+  if (ok) selection.value = null
+}
+
+function splitSelectedCue() {
+  if (!selectedCueId.value) return
+  runCommand(
+    (value) => splitCueAt(value, selectedCueId.value, Math.round(currentMs.value)),
+    { selectFocus: false },
   )
-  if (!candidates.length) return
-  const ids = candidates.map(() => createCommandId('clp'))
-  const ok = runCommand((value) => {
-    let next = value
-    candidates.forEach((item, index) => {
-      next = appendClip(next, createClipFromSource(ids[index], toRaw(item.source))).plan
-    })
-    return { plan: next, issues: [], focusClipId: ids[0] }
-  })
-  if (!ok) return
-  selection.value = { type: 'clip', id: ids[0] }
-  const layoutClip = layout.value.clips.find((clip) => clip.clip_id === ids[0])
-  if (layoutClip) seek(layoutClip.timeline_start_ms)
-  notify(t('edit.addedCountToTimeline', { n: candidates.length }))
+}
+
+function mergeSelectedCueNext() {
+  if (!selectedCueId.value) return
+  runCommand((value) => mergeCueWithNext(value, selectedCueId.value), { selectFocus: false })
+}
+
+function alignCueStart() {
+  if (!selectedCueId.value) return
+  applyCommand((p) => setCueTime(p, selectedCueId.value, {
+    startMs: Math.round(currentMs.value),
+    endMs: Math.round(p.subtitles.find((cue) => cue.id === selectedCueId.value)?.endMs ?? currentMs.value),
+  }))
+}
+
+function alignCueEnd() {
+  if (!selectedCueId.value) return
+  applyCommand((p) => setCueTime(p, selectedCueId.value, {
+    startMs: Math.round(p.subtitles.find((cue) => cue.id === selectedCueId.value)?.startMs ?? 0),
+    endMs: Math.round(currentMs.value),
+  }))
+}
+
+function toggleCueFollow(value) {
+  if (!selectedCueId.value) return
+  runCommand((p) => setCueFollow(p, selectedCueId.value, Boolean(value)), { selectFocus: false })
+}
+
+function addCueAtPlayheadCmd() {
+  if (!canEdit.value) return
+  runCommand((p) => addCueAtPlayhead(p, currentMs.value, p.project), { selectFocus: false })
+}
+
+function selectCueFromList(cueId) {
+  selectCue(cueId)
+  const cue = plan.value.subtitles.find((item) => item.id === cueId)
+  seek(cue?.startMs ?? currentMs.value)
 }
 
 function handleActionError(cause, fallbackKey) {
@@ -923,12 +1247,18 @@ watch(sourceMs, (ms) => {
   if (!playing.value) previewRef.value?.seek(ms)
 })
 
+// 音轨切换（audio.url 变化）：useEditClock 已停旧时钟并清缓存，播放中时从当前位置重建
+watch(() => derived.value.audio?.url, (url, old) => {
+  if (url === old) return
+  if (playing.value && audioMode.value === 'mix') void clock.start(currentMs.value)
+})
+
 watch(saveStatus, (value) => {
   if (value === 'saved') scheduleDerivedRefresh()
 })
 
 onMounted(() => {
-  void loadMedia()
+  void loadFilms()
   window.addEventListener('keydown', onKeydown)
 })
 

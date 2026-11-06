@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **范围说明（2026-11-06，新设计扩展了本计划的范围限制）**：本计划是历史 S2 计划，正文与 Global Constraints 中“不做服务端渲染/导出、不做帧级操作、不做字幕样式/位置编辑、不做成片列表”等限制，已被 `docs/superpowers/specs/2026-11-06-film-hub-mix-edit-redesign.md` 扩展。执行新功能时以该规格说明与实践计划为准；本文件不重写历史任务，仅保留当时范围记录。
+
 **Goal:** 在已交付的只读剪辑工作台（M1）之上，交付可编辑时间线、素材库、检查器、命令/撤销、300ms 自动保存、草稿冲突、不可变版本、多片段分镜 bootstrap、一键初剪与字幕建议，且 `edit_workspace=readonly/off` 时绝不写入。
 
 **Architecture:** 后端新增纯函数层（URL 规范化、计划归一化、布局、台词放置、字幕建议）、写服务层（草稿/版本事务、初剪/字幕动作）和路由层；前端以 `plan` 为唯一可变状态，命令纯函数产出新计划，快照式历史 + 300ms 防抖自动保存，DOM 时间线负责交互，单 `<video>` 播放当前活动片段。所有写接口只允许 `edit_workspace=on`。

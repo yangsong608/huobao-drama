@@ -1,16 +1,27 @@
 <template>
   <figure class="ed-preview">
-    <div class="ed-preview-frame" :class="{ 'is-empty': !src }">
+    <div ref="frameRef" class="ed-preview-frame" :class="{ 'is-empty': !src }">
       <video
         ref="videoRef"
         :src="src || undefined"
         :poster="poster || undefined"
+        :muted="audioMode === 'mix'"
         playsinline
         preload="metadata"
         @loadedmetadata="onLoadedMetadata"
         @ended="$emit('ended')"
         @error="$emit('error', $event)"
         @click="$emit('toggle')"
+      />
+      <EditSubtitleOverlay
+        :plan="plan"
+        :layout="layout"
+        :current-ms="currentMs"
+        :container-width="frameWidth"
+        :container-height="frameHeight"
+        :selected-cue-id="selectedCueId"
+        :show-safe-area="showSafeArea"
+        @select="(id) => emit('select-cue', id)"
       />
       <div v-if="!src" class="ed-preview-empty">
         <Clapperboard :size="26" />
@@ -50,7 +61,7 @@
         @input="onScrub"
       />
       <span class="ed-meta">{{ fps }} fps</span>
-      <span v-if="audioMode === 'video'" class="ed-audio">{{ t('edit.audioModeVideo') }}</span>
+      <span v-if="audioBanner" class="ed-audio">{{ audioBanner }}</span>
     </div>
   </figure>
 </template>
@@ -58,12 +69,14 @@
 <script setup>
 import { useI18n } from 'vue-i18n'
 import { Clapperboard, Pause, Play, SkipBack, SkipForward } from 'lucide-vue-next'
+import EditSubtitleOverlay from '~/components/edit/EditSubtitleOverlay.vue'
 import { formatPrecise } from '~/utils/edit-timecode'
 
 const props = defineProps({
   src: { type: String, default: '' },
   poster: { type: String, default: '' },
   plan: { type: Object, default: () => ({ clips: [] }) },
+  layout: { type: Object, default: null },
   activeClipId: { type: String, default: '' },
   clipKey: { type: String, default: '' },
   sourceMs: { type: Number, default: 0 },
@@ -72,11 +85,34 @@ const props = defineProps({
   fps: { type: Number, default: 30 },
   playing: { type: Boolean, default: false },
   audioMode: { type: String, default: 'none' },
+  audioBanner: { type: String, default: '' },
   playbackRate: { type: Number, default: 1 },
+  selectedCueId: { type: String, default: '' },
+  showSafeArea: { type: Boolean, default: false },
 })
-const emit = defineEmits(['toggle', 'seek', 'step', 'ended', 'error'])
+const emit = defineEmits(['toggle', 'seek', 'step', 'ended', 'error', 'select-cue'])
 const { t } = useI18n()
 const videoRef = ref(null)
+const frameRef = ref(null)
+const frameWidth = ref(0)
+const frameHeight = ref(0)
+
+// 预览框尺寸：字幕覆盖层按容器像素换算字号/锚点，需要随窗口实时测量。
+let frameObserver = null
+onMounted(() => {
+  if (!('ResizeObserver' in window) || !frameRef.value) return
+  frameObserver = new ResizeObserver((entries) => {
+    const rect = entries[0]?.contentRect
+    if (!rect) return
+    frameWidth.value = Math.round(rect.width)
+    frameHeight.value = Math.round(rect.height)
+  })
+  frameObserver.observe(frameRef.value)
+})
+onBeforeUnmount(() => {
+  frameObserver?.disconnect()
+  frameObserver = null
+})
 
 const activeClip = computed(() => (
   props.plan.clips.find((clip) => clip.id === props.activeClipId) ?? null
@@ -168,7 +204,7 @@ watch(
   },
 )
 
-defineExpose({ seek, sync: seek, play, pause })
+defineExpose({ seek, sync: seek, play, pause, video: videoRef })
 </script>
 
 <style scoped>

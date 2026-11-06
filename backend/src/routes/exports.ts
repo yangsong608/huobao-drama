@@ -20,7 +20,9 @@ import {
   retryExport,
   setCurrentExport,
   startEpisodeExport,
+  type ExportRecord,
 } from '../services/export-service.js'
+import { MixSourceError } from '../services/mix-source.js'
 
 const app = new Hono()
 
@@ -29,7 +31,28 @@ function parseId(raw: string | undefined): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null
 }
 
+/** 记录透出 source_film_id/title/project_id（snake_case 别名，原始字段保留） */
+function exportView(record: ExportRecord) {
+  let params: Record<string, unknown> = {}
+  try {
+    params = JSON.parse(record.paramsJson || '{}') as Record<string, unknown>
+  } catch {
+    params = {}
+  }
+  const paramSourceId = typeof params.sourceFilmId === 'number' ? params.sourceFilmId : null
+  const title = typeof params.title === 'string' && params.title ? params.title : null
+  return {
+    ...record,
+    source_film_id: record.sourceMergeId ?? paramSourceId,
+    project_id: record.projectId ?? null,
+    title,
+  }
+}
+
 function handleError(c: Context, error: unknown, fallback: string) {
+  if (error instanceof MixSourceError) {
+    return c.json({ code: error.code, message: error.message }, error.status as any)
+  }
   if (error instanceof ExportError) {
     if (error.status === 404) return notFound(c, error.message)
     if (error.status === 400) return badRequest(c, error.message)
@@ -51,7 +74,7 @@ app.get('/episodes/:id/export-checks', async (c) => {
 app.get('/episodes/:id/exports', (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
-  return success(c, { items: listExports(episodeId) })
+  return success(c, { items: listExports(episodeId).map(exportView) })
 })
 
 app.post('/episodes/:id/exports', async (c) => {
@@ -67,8 +90,13 @@ app.post('/episodes/:id/exports', async (c) => {
       set_current: body.set_current,
       setCurrent: body.setCurrent,
       aspect: body.aspect,
+      sourceFilmId: body.source_film_id ?? body.sourceFilmId,
+      source_film_id: body.source_film_id ?? body.sourceFilmId,
+      title: body.title ?? null,
+      projectId: body.project_id ?? body.projectId,
+      project_id: body.project_id ?? body.projectId,
     })
-    return success(c, { record: result.record, reused: result.reused })
+    return success(c, { record: exportView(result.record), reused: result.reused })
   } catch (error) {
     return handleError(c, error, '启动导出失败')
   }
@@ -79,7 +107,7 @@ app.get('/exports/:id', (c) => {
   if (!id) return badRequest(c, '导出编号无效')
   const record = getExport(id)
   if (!record || record.deletedAt) return notFound(c, '导出记录不存在')
-  return success(c, record)
+  return success(c, exportView(record))
 })
 
 app.post('/exports/:id/cancel', async (c) => {

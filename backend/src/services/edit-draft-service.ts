@@ -1,52 +1,46 @@
 /**
- * 草稿写入（S2 Task 5）：保存与丢弃。
- * 写闸门（off/readonly 403）先于计划归一化与任何写行；
- * 保存走单个 BEGIN IMMEDIATE 事务，事务内重新读取草稿版本做二次校验，
- * 避免"预检查通过 → 并发写入"之间的竞态。
+ * 工程草稿写入（设计 §6.1、§6.11）：保存与丢弃。
+ * 草稿按 project_id 唯一（idx_edit_drafts_project）；写闸门（off/readonly 403）
+ * 先于计划归一化与任何写行；保存走 BEGIN IMMEDIATE 事务并在事务内二次校验版本。
  */
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { getWritableEpisode } from './edit-access.js'
 import { throwVersionConflict } from './edit-conflict.js'
 import { EditWorkspaceError } from './edit-errors.js'
 import {
-  aspectOf,
   computeLayout,
   editSyncHashOf,
   planHashOf,
-  projectSettingsForAspect,
+  subtitleAppearanceForPreset,
   type EditProjectSettings,
 } from './edit-plan.js'
 import { normalizeEditPlan } from './edit-normalize.js'
 import { layoutResponse, parsePlanJson, planHashes } from './edit-response.js'
+import type { EditPlanV1 } from './edit-plan.js'
 import { loadEditTimelineData } from './edit-timeline-data.js'
 import { buildEditTimeline, dialogPlacementsOf } from './edit-timeline.js'
+import type { EditProjectRow } from './edit-project-service.js'
 
-function projectFor(episode: typeof schema.episodes.$inferSelect): EditProjectSettings {
-  const drama = db.select().from(schema.dramas)
-    .where(eq(schema.dramas.id, episode.dramaId))
-    .get()
-  return projectSettingsForAspect(aspectOf(drama?.aspectRatio), 30)
-}
-
-function currentDraft(episodeId: number) {
+export function draftFor(projectId: number) {
   return db.select().from(schema.episodeEditDrafts)
-    .where(eq(schema.episodeEditDrafts.episodeId, episodeId))
-    .get()
+    .where(eq(schema.episodeEditDrafts.projectId, projectId))
+    .get() ?? null
 }
 
-function currentRevision(episodeId: number) {
+export function currentRevisionFor(projectId: number) {
   return db.select().from(schema.editRevisions)
     .where(and(
-      eq(schema.editRevisions.episodeId, episodeId),
+      eq(schema.editRevisions.projectId, projectId),
       eq(schema.editRevisions.isCurrent, true),
     ))
-    .get()
+    .orderBy(desc(schema.editRevisions.createdAt), desc(schema.editRevisions.id))
+    .get() ?? null
 }
 
-function draftDirtyOf(episodeId: number): boolean {
-  const draft = currentDraft(episodeId)
-  const revision = currentRevision(episodeId)
+export function draftDirtyFor(projectId: number): boolean {
+  const draft = draftFor(projectId)
+  const revision = currentRevisionFor(projectId)
   return Boolean(draft) && (
     !revision
     || !revision.planHash
@@ -54,34 +48,71 @@ function draftDirtyOf(episodeId: number): boolean {
   )
 }
 
+/**
+ * 工程当前计划（草稿优先，其次当前版本）；两者都不可解析时抛 EDIT_NO_PLAN。
+ * 与 getEpisodeEditState 的读优先级一致，复用同一 parsePlanJson，不另造第二套反序列化。
+ */
+export function loadProjectPlan(project: EditProjectRow): EditPlanV1 {
+  const draftPlan = parsePlanJson(draftFor(project.id)?.planJson)
+  if (draftPlan) return draftPlan
+  const revisionPlan = parsePlanJson(currentRevisionFor(project.id)?.planJson)
+  if (revisionPlan) return revisionPlan
+  throw new EditWorkspaceError(409, 'EDIT_NO_PLAN', '工程还没有计划，无法执行该操作')
+}
+
+function projectSettingsFor(project: EditProjectRow): EditProjectSettings {
+  const drama = db.select().from(schema.dramas)
+    .where(eq(schema.dramas.id, project.dramaId)).get()
+  const raw = drama?.aspectRatio
+  const aspect = raw === '9:16' || raw === '16:9' || raw === '1:1' ? raw : '16:9'
+  const width = aspect === '16:9' ? 1920 : 1080
+  const height = aspect === '16:9' ? 1080 : 1920
+  return {
+    aspect,
+    width,
+    height,
+    fps: 30,
+    background: 'black',
+    defaultFit: aspect === '16:9' ? 'fit' : 'fill',
+    defaultTransition: 'cut',
+    defaultSubtitleStyle: 'default',
+    defaultExportPreset: aspect === '9:16' ? 'edit-vertical-hd' : 'edit-horizontal-hd',
+    tailGapMs: 0,
+    subtitleAppearance: subtitleAppearanceForPreset('default'),
+    subtitleSafeAreaPct: 8,
+  }
+}
+
 export async function saveEditDraft(
   episodeId: number,
+  project: EditProjectRow,
   input: Record<string, unknown>,
 ) {
-  // 写闸门先跑：off/readonly 直接 403，不归一化计划、不写任何行。
   const episode = getWritableEpisode(episodeId)
-  const project = projectFor(episode)
-  const { plan, issues } = normalizeEditPlan(input.plan, { episodeId, project })
-  // 只接受 JSON 数字：null / "0" / true 之类的隐式转换不算有效的 base_version。
+  const fallback = projectSettingsFor(project)
+  const { plan, issues } = normalizeEditPlan(input.plan, {
+    episodeId,
+    project: fallback,
+  })
   const rawBaseVersion = input.base_version
   const baseVersion = typeof rawBaseVersion === 'number' ? rawBaseVersion : Number.NaN
   if (!Number.isSafeInteger(baseVersion) || baseVersion < 0) {
     throw new EditWorkspaceError(400, 'EDIT_BASE_VERSION', '缺少有效的 base_version')
   }
   const force = input.force === true
-  const before = currentDraft(episodeId)
+  const before = draftFor(project.id)
   if (!force && (before?.version ?? 0) !== baseVersion) {
-    throwVersionConflict(episodeId, before)
+    throwVersionConflict(episodeId, before ?? undefined)
   }
 
   const ts = new Date().toISOString()
   const planJson = JSON.stringify(plan)
   const planHash = planHashOf(plan)
   const syncHash = editSyncHashOf(plan)
-  const revision = currentRevision(episodeId)
+  const revision = currentRevisionFor(project.id)
   const result = db.transaction((tx) => {
     const live = tx.select().from(schema.episodeEditDrafts)
-      .where(eq(schema.episodeEditDrafts.episodeId, episodeId))
+      .where(eq(schema.episodeEditDrafts.projectId, project.id))
       .get()
     if (!force && (live?.version ?? 0) !== baseVersion) {
       return { conflict: live ?? undefined, version: 0 }
@@ -89,24 +120,17 @@ export async function saveEditDraft(
     const version = (live?.version ?? 0) + 1
     if (live) {
       tx.update(schema.episodeEditDrafts).set({
-        planJson,
-        planHash,
-        editSyncHash: syncHash,
-        version,
-        baseRevisionId: revision?.id ?? null,
-        updatedAt: ts,
-      }).where(eq(schema.episodeEditDrafts.episodeId, episodeId)).run()
+        planJson, planHash, editSyncHash: syncHash, version,
+        baseRevisionId: revision?.id ?? null, updatedAt: ts,
+      }).where(eq(schema.episodeEditDrafts.projectId, project.id)).run()
     } else {
       tx.insert(schema.episodeEditDrafts).values({
-        episodeId,
-        dramaId: episode.dramaId,
-        planJson,
-        planHash,
-        editSyncHash: syncHash,
-        version,
+        episodeId: project.episodeId,
+        dramaId: project.dramaId,
+        projectId: project.id,
+        planJson, planHash, editSyncHash: syncHash, version,
         baseRevisionId: revision?.id ?? null,
-        createdAt: ts,
-        updatedAt: ts,
+        createdAt: ts, updatedAt: ts,
       }).run()
     }
     return { conflict: null, version }
@@ -125,14 +149,14 @@ export async function saveEditDraft(
     layout: layoutResponse(computeLayout(plan)),
     hashes: planHashes(plan, dialogPlacementsOf(timeline.linePlacements)),
     issues,
-    draft_dirty: draftDirtyOf(episodeId),
+    draft_dirty: draftDirtyFor(project.id),
   }
 }
 
-export function discardEditDraft(episodeId: number) {
-  getWritableEpisode(episodeId)
+export function discardEditDraft(project: EditProjectRow) {
+  getWritableEpisode(project.episodeId)
   const result = db.delete(schema.episodeEditDrafts)
-    .where(eq(schema.episodeEditDrafts.episodeId, episodeId))
+    .where(eq(schema.episodeEditDrafts.projectId, project.id))
     .run()
   return { discarded: result.changes > 0 }
 }

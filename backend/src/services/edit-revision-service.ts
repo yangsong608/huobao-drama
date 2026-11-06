@@ -1,14 +1,10 @@
 /**
- * 不可变剪辑版本（S2 Task 6）：列表、详情、创建与恢复。
- * - 写闸门（off/readonly 403）先于计划归一化与任何写行；
- * - 新版本号 = 该集最大 revision_no + 1；
- * - 清除其他 is_current、插入新版本、同步草稿、更新分集指针在同一
- *   BEGIN IMMEDIATE 事务内完成，事务内二次校验草稿版本；
- * - 恢复 = 以旧版本计划创建新版本，旧行保持不可变。
+ * 不可变剪辑版本（工程作用域）：版本号按工程自增；恢复 = 以旧计划建新版本。
+ * episodes 指针只在被改工程是当前打开工程时同步。
  */
 import { and, desc, eq, max } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
-import { getReadableEpisode, getWritableEpisode } from './edit-access.js'
+import { getWritableEpisode } from './edit-access.js'
 import { throwVersionConflict } from './edit-conflict.js'
 import { EditWorkspaceError } from './edit-errors.js'
 import {
@@ -16,70 +12,29 @@ import {
   computeLayout,
   editSyncHashOf,
   planHashOf,
-  projectSettingsForAspect,
   renderHashOf,
+  subtitleAppearanceForPreset,
   type EditProjectSettings,
 } from './edit-plan.js'
 import { normalizeEditPlan } from './edit-normalize.js'
 import { parsePlanJson, revisionResponse } from './edit-response.js'
+import { currentRevisionFor, draftDirtyFor, draftFor } from './edit-draft-service.js'
+import type { EditProjectRow } from './edit-project-service.js'
 
-function projectFor(episode: typeof schema.episodes.$inferSelect): EditProjectSettings {
-  const drama = db.select().from(schema.dramas)
-    .where(eq(schema.dramas.id, episode.dramaId))
-    .get()
-  return projectSettingsForAspect(aspectOf(drama?.aspectRatio), 30)
-}
-
-function draftOf(episodeId: number) {
-  return db.select().from(schema.episodeEditDrafts)
-    .where(eq(schema.episodeEditDrafts.episodeId, episodeId))
-    .get()
-}
-
-/** 当前版本读取：与 edit-service.ts 同一 canonical 排序（createdAt desc, id desc）。 */
-function currentRevisionOf(episodeId: number) {
-  return db.select().from(schema.editRevisions)
-    .where(and(
-      eq(schema.editRevisions.episodeId, episodeId),
-      eq(schema.editRevisions.isCurrent, true),
-    ))
-    .orderBy(desc(schema.editRevisions.createdAt), desc(schema.editRevisions.id))
-    .get()
-}
-
-function dirtyOf(episodeId: number): boolean {
-  const draft = draftOf(episodeId)
-  const revision = currentRevisionOf(episodeId)
-  return Boolean(draft) && (
-    !revision
-    || !revision.planHash
-    || draft!.planHash !== revision.planHash
-  )
-}
-
-function planOrThrow(raw: unknown, episodeId: number, project: EditProjectSettings) {
-  if (raw == null) {
-    throw new EditWorkspaceError(400, 'EDIT_PLAN_INVALID', '没有可保存的计划')
-  }
-  return normalizeEditPlan(raw, { episodeId, project })
-}
-
-export function listEditRevisions(episodeId: number) {
-  getReadableEpisode(episodeId)
+export function listEditRevisions(project: EditProjectRow) {
   const items = db.select().from(schema.editRevisions)
-    .where(eq(schema.editRevisions.episodeId, episodeId))
+    .where(eq(schema.editRevisions.projectId, project.id))
     .orderBy(desc(schema.editRevisions.revisionNo), desc(schema.editRevisions.id))
     .all()
-    .map(revisionResponse)
+    .map((row) => ({ ...revisionResponse(row), project_id: row.projectId }))
   return { items }
 }
 
-export function getEditRevision(episodeId: number, revisionId: number) {
-  getReadableEpisode(episodeId)
+export function getEditRevision(project: EditProjectRow, revisionId: number) {
   const row = db.select().from(schema.editRevisions)
     .where(and(
       eq(schema.editRevisions.id, revisionId),
-      eq(schema.editRevisions.episodeId, episodeId),
+      eq(schema.editRevisions.projectId, project.id),
     ))
     .get()
   if (!row) throw new EditWorkspaceError(404, 'EDIT_REVISION_NOT_FOUND', '剪辑版本不存在')
@@ -88,20 +43,44 @@ export function getEditRevision(episodeId: number, revisionId: number) {
   return { revision: revisionResponse(row), plan }
 }
 
+function fallbackSettingsOf(project: EditProjectRow): EditProjectSettings {
+  const drama = db.select().from(schema.dramas)
+    .where(eq(schema.dramas.id, project.dramaId)).get()
+  const raw = drama?.aspectRatio
+  const aspect = raw === '9:16' || raw === '16:9' || raw === '1:1' ? raw : '16:9'
+  return {
+    aspect,
+    width: aspect === '16:9' ? 1920 : 1080,
+    height: aspect === '16:9' ? 1080 : 1920,
+    fps: 30,
+    background: 'black',
+    defaultFit: aspect === '16:9' ? 'fit' : 'fill',
+    defaultTransition: 'cut',
+    defaultSubtitleStyle: 'default',
+    defaultExportPreset: aspect === '9:16' ? 'edit-vertical-hd' : 'edit-horizontal-hd',
+    tailGapMs: 0,
+    subtitleAppearance: subtitleAppearanceForPreset('default'),
+    subtitleSafeAreaPct: 8,
+  }
+}
+
 export function createEditRevision(
-  episodeId: number,
+  project: EditProjectRow,
   input: Record<string, unknown>,
 ) {
-  // 写闸门先跑：off/readonly 直接 403，不归一化计划、不写任何行。
-  const episode = getWritableEpisode(episodeId)
-  const project = projectFor(episode)
-  const draft = draftOf(episodeId)
-  const current = currentRevisionOf(episodeId)
+  const episodeId = project.episodeId
+  getWritableEpisode(episodeId)
+  const fallback = fallbackSettingsOf(project)
+  const draft = draftFor(project.id)
+  const current = currentRevisionFor(project.id)
 
   const source = input.plan
     ?? parsePlanJson(draft?.planJson)
     ?? parsePlanJson(current?.planJson)
-  const { plan } = planOrThrow(source, episodeId, project)
+  if (source == null) {
+    throw new EditWorkspaceError(400, 'EDIT_PLAN_INVALID', '没有可保存的计划')
+  }
+  const { plan } = normalizeEditPlan(source, { episodeId, project: fallback })
   const force = input.force === true
   const baseVersion = input.base_version === undefined || input.base_version === null
     ? null
@@ -110,7 +89,7 @@ export function createEditRevision(
     throw new EditWorkspaceError(400, 'EDIT_BASE_VERSION', '缺少有效的 base_version')
   }
   if (!force && baseVersion !== null && (draft?.version ?? 0) !== baseVersion) {
-    throwVersionConflict(episodeId, draft)
+    throwVersionConflict(episodeId, draft ?? undefined)
   }
 
   const updateDraft = input.update_draft !== false
@@ -125,26 +104,27 @@ export function createEditRevision(
 
   const result = db.transaction((tx) => {
     const liveDraft = tx.select().from(schema.episodeEditDrafts)
-      .where(eq(schema.episodeEditDrafts.episodeId, episodeId))
+      .where(eq(schema.episodeEditDrafts.projectId, project.id))
       .get()
     if (!force && baseVersion !== null && (liveDraft?.version ?? 0) !== baseVersion) {
       return { conflict: liveDraft ?? null, revision: null, draftVersion: null }
     }
     const maxRow = tx.select({ value: max(schema.editRevisions.revisionNo) })
       .from(schema.editRevisions)
-      .where(eq(schema.editRevisions.episodeId, episodeId))
+      .where(eq(schema.editRevisions.projectId, project.id))
       .get()
     const revisionNo = Number(maxRow?.value ?? 0) + 1
 
     tx.update(schema.editRevisions)
       .set({ isCurrent: false })
       .where(and(
-        eq(schema.editRevisions.episodeId, episodeId),
+        eq(schema.editRevisions.projectId, project.id),
         eq(schema.editRevisions.isCurrent, true),
       ))
       .run()
     const inserted = tx.insert(schema.editRevisions).values({
       episodeId,
+      projectId: project.id,
       revisionNo,
       planJson,
       planHash,
@@ -157,37 +137,33 @@ export function createEditRevision(
       createdAt: ts,
     }).returning().get()
 
-    tx.update(schema.episodes).set({
-      editRevisionId: inserted.id,
-      editPlanHash: planHash,
-      editSyncHash: syncHash,
-      editEnabled: true,
-      updatedAt: ts,
-    }).where(eq(schema.episodes.id, episodeId)).run()
+    const episode = tx.select().from(schema.episodes)
+      .where(eq(schema.episodes.id, episodeId)).get()
+    if (episode?.editProjectId === project.id) {
+      tx.update(schema.episodes).set({
+        editRevisionId: inserted.id,
+        editPlanHash: planHash,
+        editSyncHash: syncHash,
+        editEnabled: true,
+        updatedAt: ts,
+      }).where(eq(schema.episodes.id, episodeId)).run()
+    }
 
     let draftVersion = liveDraft?.version ?? null
     if (updateDraft) {
       draftVersion = (liveDraft?.version ?? 0) + 1
       if (liveDraft) {
         tx.update(schema.episodeEditDrafts).set({
-          planJson,
-          planHash,
-          editSyncHash: syncHash,
-          version: draftVersion,
-          baseRevisionId: inserted.id,
-          updatedAt: ts,
-        }).where(eq(schema.episodeEditDrafts.episodeId, episodeId)).run()
+          planJson, planHash, editSyncHash: syncHash, version: draftVersion,
+          baseRevisionId: inserted.id, updatedAt: ts,
+        }).where(eq(schema.episodeEditDrafts.projectId, project.id)).run()
       } else {
         tx.insert(schema.episodeEditDrafts).values({
           episodeId,
-          dramaId: episode.dramaId,
-          planJson,
-          planHash,
-          editSyncHash: syncHash,
-          version: draftVersion,
-          baseRevisionId: inserted.id,
-          createdAt: ts,
-          updatedAt: ts,
+          dramaId: project.dramaId,
+          projectId: project.id,
+          planJson, planHash, editSyncHash: syncHash, version: draftVersion,
+          baseRevisionId: inserted.id, createdAt: ts, updatedAt: ts,
         }).run()
       }
     }
@@ -201,26 +177,26 @@ export function createEditRevision(
   return {
     revision: revisionResponse(result.revision),
     draft_version: result.draftVersion,
-    draft_dirty: dirtyOf(episodeId),
+    draft_dirty: draftDirtyFor(project.id),
   }
 }
 
 export function restoreEditRevision(
-  episodeId: number,
+  project: EditProjectRow,
   revisionId: number,
   input: Record<string, unknown>,
 ) {
-  getWritableEpisode(episodeId)
+  getWritableEpisode(project.episodeId)
   const row = db.select().from(schema.editRevisions)
     .where(and(
       eq(schema.editRevisions.id, revisionId),
-      eq(schema.editRevisions.episodeId, episodeId),
+      eq(schema.editRevisions.projectId, project.id),
     ))
     .get()
   if (!row) throw new EditWorkspaceError(404, 'EDIT_REVISION_NOT_FOUND', '剪辑版本不存在')
   const plan = parsePlanJson(row.planJson)
   if (!plan) throw new EditWorkspaceError(500, 'EDIT_REVISION_CORRUPT', '版本计划损坏')
-  return createEditRevision(episodeId, {
+  return createEditRevision(project, {
     plan,
     base_version: input.base_version,
     note: `恢复自版本 v${row.revisionNo}`,

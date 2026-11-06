@@ -275,3 +275,51 @@ test('撤销历史限制 50 步且丢弃分叉', () => {
   assert.deepEqual(history.present.clips.map((item) => item.id), ['x'])
   assert.equal(canRedo(history), false)
 })
+
+function imageClip(id, durationMs, overrides = {}) {
+  const src = {
+    kind: 'asset',
+    id,
+    url: `static/${id}.png`,
+    durationMs,
+    width: 800,
+    height: 600,
+    fps: null,
+    hasAudio: false,
+    fingerprint: `${id}:1`,
+  }
+  return {
+    ...createClipFromSource(id, src),
+    kind: 'image',
+    sourceOutMs: durationMs,
+    ...overrides,
+  }
+}
+
+test('图片片段最短 1 帧：插入、裁剪、分割放行一帧图片（规范 §6.3）', () => {
+  // fps 30 → 1 帧约 33ms；视频的 3 帧（100ms）下限不再适用于图片
+  const inserted = insertClip(plan([clip('a')]), imageClip('img1', 33))
+  assert.equal(inserted.issues.filter((item) => item.severity === 'error').length, 0, '一帧图片应可插入')
+
+  const trimmedEnd = trimClipEnd(plan([imageClip('img1', 1000)]), 'img1', -967)
+  assert.equal(trimmedEnd.issues.filter((item) => item.severity === 'error').length, 0, '图片可裁到 1 帧')
+  assert.equal(computeLocalLayout(trimmedEnd.plan).clips[0].content_duration_ms, 33)
+
+  const trimmedStart = trimClipStart(plan([imageClip('img1', 1000)]), 'img1', 967)
+  assert.equal(trimmedStart.issues.filter((item) => item.severity === 'error').length, 0, '图片可从头部裁到 1 帧')
+  assert.equal(computeLocalLayout(trimmedStart.plan).clips[0].content_duration_ms, 33)
+
+  const split = splitClip(plan([imageClip('img1', 100)]), 'img1', 50, 'img2')
+  assert.equal(split.issues.filter((item) => item.severity === 'error').length, 0, '小图片应可分割')
+  assert.deepEqual(split.plan.clips.map((item) => item.id), ['img1', 'img2'])
+  assert.equal(computeLocalLayout(split.plan).clips[0].content_duration_ms, 50)
+  assert.equal(computeLocalLayout(split.plan).clips[1].content_duration_ms, 50)
+})
+
+test('视频片段仍保持 3 帧最短时长', () => {
+  const inserted = insertClip(plan([clip('a')]), clip('v', { sourceOutMs: 99 }))
+  assert.ok(inserted.issues.some((item) => item.severity === 'error' && item.code === 'CLIP_TOO_SHORT'))
+
+  const trimmed = trimClipEnd(plan([clip('v', { sourceOutMs: 300 })]), 'v', -250)
+  assert.equal(computeLocalLayout(trimmed.plan).clips[0].content_duration_ms, 100, '视频不得裁破 3 帧下限')
+})

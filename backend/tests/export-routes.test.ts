@@ -74,6 +74,9 @@ test('导出检查返回台词、视频、混音、字幕、FFmpeg 与磁盘结�
   assert.equal(checks.mixReady, false)
   assert.equal(checks.videoReady, false)
   assert.equal(checks.stemsReady, false)
+  // 无成片时不再 500：混音检查项给出朴素中文提示
+  assert.equal(checks.mix.ok, false)
+  assert.match(checks.mix.message, /请先在拼接导出生成一部成片/)
 })
 
 test('部分台词未生成时检查项为未通过', async () => {
@@ -142,4 +145,54 @@ test('单条导出可查询，删除后返回软删记录', async () => {
 
   const gone = await app.request(`/exports/${record.id}`)
   assert.equal(gone.status, 404, await gone.clone().text())
+})
+
+test('源成片不可读时启动导出返回 422 中文提示', async () => {
+  const [broken] = db.insert(schema.videoMerges).values({
+    episodeId: episode.id, dramaId: drama.id, title: '损坏成片',
+    provider: 'ffmpeg', model: 'test', status: 'completed', kind: 'concat', origin: 'concat',
+    mergedUrl: `static/projects/${drama.id}/videos/missing.mp4`, duration: 1,
+    createdAt: ts, completedAt: ts,
+  }).returning().all()
+
+  const response = await app.request(`/episodes/${episode.id}/exports`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      kind: 'video', preset: 'horizontal-hd', subtitle_mode: 'copy', source_film_id: broken.id,
+    }),
+  })
+  assert.equal(response.status, 422, await response.clone().text())
+  const data = await body(response)
+  assert.equal(data.code, 'MIX_SOURCE_UNREADABLE')
+  assert.match(data.message, /所选成片文件无法读取/)
+})
+
+test('导出记录透传 source_film_id/title/project_id', async () => {
+  const [record] = db.insert(schema.episodeExports).values({
+    episodeId: episode.id,
+    kind: 'video',
+    preset: 'horizontal-hd',
+    paramsJson: JSON.stringify({ preset: 'horizontal-hd', title: '第一集 混音成片', sourceFilmId: 42 }),
+    sourceMergeId: 42,
+    projectId: 7,
+    status: 'completed',
+    outputUrl: `static/projects/${drama.id}/episodes/${episode.id}/exports/3/out.mp4`,
+    createdAt: ts,
+    finishedAt: ts,
+  }).returning().all()
+
+  const detail = await app.request(`/exports/${record.id}`)
+  assert.equal(detail.status, 200)
+  const data = (await body(detail)).data
+  assert.equal(data.source_film_id, 42)
+  assert.equal(data.project_id, 7)
+  assert.equal(data.title, '第一集 混音成片')
+
+  const list = await app.request(`/episodes/${episode.id}/exports`)
+  assert.equal(list.status, 200)
+  const item = (await body(list)).data.items.find((row: any) => row.id === record.id)
+  assert.equal(item.source_film_id, 42)
+  assert.equal(item.project_id, 7)
+  assert.equal(item.title, '第一集 混音成片')
 })

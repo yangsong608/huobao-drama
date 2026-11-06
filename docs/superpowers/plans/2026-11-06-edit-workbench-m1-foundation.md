@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **范围说明（2026-11-06，新设计已取代本计划的索引与工程模型）**：本计划是历史 M1 计划，正文中的“每集一份草稿”“按 episode_id 建唯一索引”“剪辑源为分镜/单片段”等约定，已被 `docs/superpowers/specs/2026-11-06-film-hub-mix-edit-redesign.md` 取代。新实施以该规格说明为准；本文件不重写历史任务，仅保留当时范围记录。
+
 **Goal:** 在不影响现有分集、配音、混音、导出链路的前提下，完成剪辑工作台的第一块可独立验收的地基：SQLite 表/列迁移、`edit-plan` 纯函数（类型/布局/校验/哈希）、`edit-media` 媒体探测、聚合只读 API，以及 `/drama/:id/episode/:episodeNumber/edit` 只读页面。
 
 **Architecture:** 后端新增 5 张表并给 3 张既有表幂等补列；`edit-plan.ts` 保持纯函数、无 DB/FFmpeg 依赖，时间线位置全部由 `sourceIn/sourceOut/speed/gap/transition` 派生；`edit-media.ts` 负责逻辑路径 → 本地文件 → ffprobe 元数据与指纹；`edit-service.ts` 在 `edit_workspace=readonly` 下只读当前成片单片段，不创建草稿/版本。前端新增独立 `/edit` 页面，只渲染一个 `<video>`、一个派生时间线和一个只读检查器，与现有混音工作台完全分离。

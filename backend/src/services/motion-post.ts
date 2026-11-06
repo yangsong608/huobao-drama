@@ -29,6 +29,7 @@ import {
   type ShotMotion,
 } from './motion-plan.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { setCurrentFilm } from './film-hub.js'
 
 export interface MotionPostOptions {
   bgmUrl?: string | null
@@ -321,7 +322,8 @@ export async function renderMotionPost(episodeId: number, dramaId: number, optio
       provider: 'ffmpeg',
       model: 'ffmpeg-motion-xfade',
       status: 'completed',
-      kind: 'motion',
+      kind: 'concat',
+      origin: 'concat',
       scenes: JSON.stringify(clips.map((c) => c.storyboardId)),
       mergedUrl: url,
       duration: Math.round(durationMs / 1000),
@@ -360,12 +362,7 @@ export async function renderMotionPost(episodeId: number, dramaId: number, optio
     }).run()
 
     if (options.setAsEpisodeVideo) {
-      db.update(schema.episodes).set({
-        videoUrl: url,
-        subtitleUrl,
-        duration: Math.round(durationMs / 1000),
-        updatedAt: now(),
-      }).where(eq(schema.episodes.id, episodeId)).run()
+      setCurrentFilm(episodeId, mergeId)
     }
     if (options.bgmUrl) {
       db.update(schema.episodes).set({ bgmUrl: options.bgmUrl, updatedAt: now() }).where(eq(schema.episodes.id, episodeId)).run()

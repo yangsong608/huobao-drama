@@ -10,6 +10,7 @@
         <span :class="['ed-chip', readonly ? 'is-muted' : 'is-on']">
           {{ readonly ? t('edit.readonly') : t('edit.on') }}
         </span>
+        <span v-if="legacy" class="ed-chip is-muted">{{ t('edit.legacyProject') }}</span>
         <span :class="['ed-chip', `is-${state.mix_status.status}`]">{{ mixLabel }}</span>
       </div>
 
@@ -51,9 +52,21 @@
             <Wand2 :size="13" />
             <span>{{ roughCutBusy ? t('edit.roughCutRunning') : t('edit.roughCut') }}</span>
           </button>
+          <button
+            class="ed-action"
+            type="button"
+            :disabled="roughCutBusy || subtitleBusy"
+            @click="$emit('open-export')"
+          >
+            <Download :size="13" />
+            <span>{{ t('edit.exportTitle') }}</span>
+          </button>
         </template>
         <button class="ed-action" type="button" @click="$emit('open-revisions')">
           <History :size="13" /><span>{{ t('edit.versionTitle') }}</span>
+        </button>
+        <button class="ed-icon" type="button" :title="t('edit.subtitleListTitle')" @click="$emit('toggle-subtitles')">
+          <Captions :size="15" />
         </button>
         <button class="ed-icon" type="button" :title="t('edit.libraryToggle')" @click="$emit('toggle-media')">
           <PanelLeft :size="15" />
@@ -80,7 +93,7 @@
 <script setup>
 import { useI18n } from 'vue-i18n'
 import {
-  ArrowLeft, Captions, History, Keyboard, PanelLeft, Redo2, Scissors, Trash2, Undo2, Wand2,
+  ArrowLeft, Captions, Download, History, Keyboard, PanelLeft, Redo2, Scissors, Trash2, Undo2, Wand2,
 } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -91,12 +104,13 @@ const props = defineProps({
   canUndo: { type: Boolean, default: false },
   canRedo: { type: Boolean, default: false },
   canEdit: { type: Boolean, default: false },
+  legacy: { type: Boolean, default: false },
   roughCutBusy: { type: Boolean, default: false },
   subtitleBusy: { type: Boolean, default: false },
 })
 defineEmits([
   'back', 'undo', 'redo', 'save', 'discard', 'open-revisions',
-  'rough-cut', 'suggest-subtitles', 'shortcuts', 'toggle-media',
+  'rough-cut', 'suggest-subtitles', 'open-export', 'shortcuts', 'toggle-media', 'toggle-subtitles',
 ])
 const { t } = useI18n()
 

@@ -19,6 +19,7 @@ import { ffmpeg } from '../utils/ffmpeg.js'
 import { getImageAdapter, getVideoAdapter } from './adapters/registry'
 import { imageModelSupportsReferenceImages, imageReferenceLimit } from './model-capabilities.js'
 import { normalizeVideoAudioMode, type VideoAudioMode } from './video-audio.js'
+import { bootstrapCurrentFilmIfEmpty } from './film-hub.js'
 import type { AIConfig, ComfyTimelineTask, ImageProviderAdapter } from './adapters/types'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn, redactUrl } from '../utils/task-logger.js'
 
@@ -728,6 +729,7 @@ export async function handleVideoComplete(record: SysTaskRecord, videoUrl: strin
       ? Math.max(1, Math.round(timeline.totalFrames / timeline.fps))
       : undefined)
     // 完成状态与业务回写原子提交；恢复旧任务不能覆盖用户后来生成的视频。
+    let newMergeId: number | null = null
     db.transaction(tx => {
       const newer = record.storyboardId ? tx.select({ id: schema.sysTask.id }).from(schema.sysTask)
         .where(and(eq(schema.sysTask.storyboardId, record.storyboardId), eq(schema.sysTask.type, 'video'), gt(schema.sysTask.id, record.id))).get() : null
@@ -739,12 +741,13 @@ export async function handleVideoComplete(record: SysTaskRecord, videoUrl: strin
         const taskKey = record.taskId || `task-${record.id}`
         const existing = tx.select({ id: schema.videoMerges.id }).from(schema.videoMerges)
           .where(and(eq(schema.videoMerges.episodeId, episodeId), eq(schema.videoMerges.taskId, taskKey),
-            eq(schema.videoMerges.kind, 'comfyui'))).get()
+            eq(schema.videoMerges.kind, 'concat'))).get()
         if (existing) {
           tx.update(schema.videoMerges).set({ status: 'completed', mergedUrl: localPath, duration: mergeDuration ?? null,
-            completedAt: now(), errorMsg: null }).where(eq(schema.videoMerges.id, existing.id)).run()
+            kind: 'concat', origin: 'concat', completedAt: now(), errorMsg: null })
+            .where(eq(schema.videoMerges.id, existing.id)).run()
         } else {
-          tx.insert(schema.videoMerges).values({
+          const inserted = tx.insert(schema.videoMerges).values({
             episodeId,
             dramaId: record.dramaId ?? undefined,
             title: mergeTitle,
@@ -755,7 +758,8 @@ export async function handleVideoComplete(record: SysTaskRecord, videoUrl: strin
             mergedUrl: localPath,
             duration: mergeDuration ?? null,
             taskId: taskKey,
-            kind: 'comfyui',
+            kind: 'concat',
+            origin: 'concat',
             mixOptions: JSON.stringify({
               audioMode,
               source: 'comfyui-timeline',
@@ -765,11 +769,14 @@ export async function handleVideoComplete(record: SysTaskRecord, videoUrl: strin
             createdAt: now(),
             completedAt: now(),
           }).run()
+          newMergeId = getInsertId(inserted as any)
         }
       }
       tx.update(schema.sysTask).set({ localPath, status: 'completed', stage: 'completed', errorCode: null,
         errorMsg: null, completedAt: now(), updatedAt: now() }).where(eq(schema.sysTask.id, record.id)).run()
     })
+    // 事务提交后：仅当本次新建了拼接成片且该集还没有当前成片时，才接管当前指针
+    if (newMergeId != null) bootstrapCurrentFilmIfEmpty(episodeId, newMergeId)
   } catch (error) {
     await failTask(record.id, safeTaskError(error), 'delivery_failed')
   }

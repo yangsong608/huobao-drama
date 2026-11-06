@@ -30,6 +30,7 @@ const {
   cancelExport,
   retryExport,
   deleteExport,
+  setCurrentExport,
   recoverInterruptedExports,
   resetExportRuntime,
 } = await import('../src/services/export-service.ts')
@@ -287,20 +288,32 @@ test('进行中的导出禁止删除，需先取消', async () => {
   assert.equal(done.status, 'cancelled')
 })
 
-test('删除当前成片回退到其他视频记录', async () => {
+test('删除当前成片导出被拒绝，切换后可删除并软删成片', async () => {
   const current = listExports(episode.id)
     .filter((item) => item.kind === 'video' && item.isCurrent)
     .sort((a, b) => b.id - a.id)[0]
   assert.ok(current, '缺少当前视频导出')
+  assert.ok(current.filmId, '当前视频导出缺少成片指针')
+  await assert.rejects(
+    () => deleteExport(current.id),
+    (error: any) => error?.status === 409 && /当前成片/.test(String(error.message)),
+  )
+
+  // 先把其他视频导出设为当前成片，再删除旧导出
+  const other = listExports(episode.id)
+    .filter((item) => item.kind === 'video' && item.status === 'completed' && item.id !== current.id)
+    .sort((a, b) => b.id - a.id)[0]
+  assert.ok(other, '缺少其他已完成的视频导出')
+  await setCurrentExport(other.id)
   const removed = await deleteExport(current.id)
   assert.ok(removed.deletedAt)
   assert.equal(removed.isCurrent, false)
-  const remaining = listExports(episode.id).filter((item) => item.kind === 'video')
-  assert.ok(remaining.length >= 1)
-  const fallback = remaining.find((item) => item.isCurrent)
-  assert.ok(fallback, '删除当前成片后未回退到其他视频')
+  const removedFilm = db.select().from(schema.videoMerges)
+    .where(eq(schema.videoMerges.id, current.filmId!)).get()!
+  assert.ok(removedFilm.deletedAt, '导出删除时应同时软删其成片')
   const episodeRow = db.select().from(schema.episodes).where(eq(schema.episodes.id, episode.id)).get()!
-  assert.equal(episodeRow.videoUrl, fallback!.outputUrl)
+  assert.equal(episodeRow.currentFilmId, other.filmId)
+  assert.equal(episodeRow.videoUrl, other.outputUrl)
 })
 
 test('启动恢复把遗留的 pending/running 标记为失败', () => {

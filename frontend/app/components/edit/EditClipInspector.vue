@@ -1,6 +1,121 @@
 <template>
   <aside class="ed-inspector">
-    <template v-if="clip">
+    <template v-if="cue">
+      <header class="ed-insp-head">
+        <b>{{ t('edit.subtitleEditTitle') }}</b>
+        <span>{{ formatClockMs(cue.startMs) }} – {{ formatClockMs(cue.endMs) }}</span>
+      </header>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.subtitleText') }}</h4>
+        <textarea
+          v-model="textDraft"
+          class="ed-insp-textarea"
+          rows="2"
+          @change="emitPatch({ text: textDraft })"
+        />
+      </section>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.subtitleTime') }}</h4>
+        <div class="ed-row">
+          <label>{{ t('edit.startTime') }}
+            <input :value="formatClockMs(cue.startMs)" @change="onStartInput($event)" />
+          </label>
+          <label>{{ t('edit.endTime') }}
+            <input :value="formatClockMs(cue.endMs)" @change="onEndInput($event)" />
+          </label>
+        </div>
+        <div class="ed-row">
+          <button class="frameBack" type="button" @click="nudgeFrames(-1)">−1 {{ t('edit.frameUnit') }}</button>
+          <button class="frameForward" type="button" @click="nudgeFrames(1)">+1 {{ t('edit.frameUnit') }}</button>
+        </div>
+        <div class="ed-row">
+          <button class="alignPlayhead" type="button" @click="$emit('cue-align-start')">{{ t('edit.alignPlayheadStart') }}</button>
+          <button class="alignPlayhead" type="button" @click="$emit('cue-align-end')">{{ t('edit.alignPlayheadEnd') }}</button>
+        </div>
+        <label class="ed-check">
+          <input type="checkbox" :checked="cue.follow" @change="$emit('cue-follow', $event.target.checked)" />
+          {{ t('edit.followClip') }}
+        </label>
+      </section>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.subtitleStyle') }}</h4>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.fontFamily') }}</span>
+          <select v-model="styleDraft.fontFamily" @change="applyStyleDraft()">
+            <option v-for="f in fonts" :key="f" :value="f">{{ f }}</option>
+          </select>
+        </label>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.fontSize') }} {{ styleDraft.fontSize }}px</span>
+          <input type="range" min="12" max="120" v-model.number="styleDraft.fontSize" @change="applyStyleDraft()" />
+        </label>
+        <div class="ed-row">
+          <label>{{ t('edit.textColor') }} <input type="color" v-model="styleDraft.color" @change="applyStyleDraft()" /></label>
+          <label>{{ t('edit.strokeColor') }} <input type="color" v-model="styleDraft.strokeColor" @change="applyStyleDraft()" /></label>
+        </div>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.strokeWidth') }} {{ styleDraft.strokeWidth }}</span>
+          <input type="range" min="0" max="8" step="0.5" v-model.number="styleDraft.strokeWidth" @change="applyStyleDraft()" />
+        </label>
+        <div class="ed-row">
+          <label>{{ t('edit.backgroundColor') }} <input type="color" v-model="bgColor" @change="applyStyleDraft()" /></label>
+          <label>{{ t('edit.backgroundOpacity') }}
+            <input type="range" min="0" max="100" v-model.number="styleDraft.backgroundOpacity" @change="applyStyleDraft()" />
+          </label>
+        </div>
+        <div class="ed-row" role="radiogroup">
+          <button v-for="a in ['left', 'center', 'right']" :key="a" type="button"
+            :class="{ 'is-on': styleDraft.align === a }" @click="styleDraft.align = a; applyStyleDraft()">
+            {{ t(`edit.align_${a}`) }}
+          </button>
+        </div>
+      </section>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.subtitlePosition') }}</h4>
+        <div class="ed-row" role="radiogroup">
+          <button type="button" :class="{ 'is-on': styleDraft.yPct <= 33 }" @click="setPosition(styleDraft.xPct ?? 50, 12)">{{ t('edit.posTop') }}</button>
+          <button type="button" :class="{ 'is-on': styleDraft.yPct > 33 && styleDraft.yPct <= 66 }" @click="setPosition(styleDraft.xPct ?? 50, 50)">{{ t('edit.posMiddle') }}</button>
+          <button type="button" :class="{ 'is-on': styleDraft.yPct > 66 }" @click="setPosition(styleDraft.xPct ?? 50, 85)">{{ t('edit.posBottom') }}</button>
+        </div>
+        <div class="ed-nineGrid" role="radiogroup">
+          <button v-for="cell in NINE_GRID" :key="cell.key" type="button"
+            :class="{ 'is-on': cell.x === (styleDraft.xPct ?? 50) && cell.y === (styleDraft.yPct ?? 85) }"
+            :title="`${cell.x}, ${cell.y}`"
+            @click="setPosition(cell.x, cell.y)" />
+        </div>
+        <div class="ed-row">
+          <label>X <input type="range" min="0" max="100" v-model.number="styleDraft.xPct" @change="applyStyleDraft()" /></label>
+          <label>Y <input type="range" min="0" max="100" v-model.number="styleDraft.yPct" @change="applyStyleDraft()" /></label>
+        </div>
+        <label class="ed-check">
+          <input type="checkbox" v-model="showSafeAreaLocal" /> {{ t('edit.showSafeArea') }}
+        </label>
+        <p v-if="outOfBounds" class="ed-insp-warn">{{ t('edit.subtitleOutOfBounds') }}</p>
+      </section>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.subtitleBatch') }}</h4>
+        <div class="ed-row">
+          <button type="button" @click="$emit('cue-apply-all', effectiveAppearance)">{{ t('edit.applyAll') }}</button>
+          <button type="button" @click="$emit('cue-set-default', effectiveAppearance)">{{ t('edit.setDefault') }}</button>
+        </div>
+      </section>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.subtitleActions') }}</h4>
+        <div class="ed-row">
+          <button class="is-danger" type="button" @click="$emit('cue-delete')">{{ t('edit.deleteCue') }}</button>
+          <button type="button" @click="$emit('cue-split')">{{ t('edit.splitAtPlayhead') }}</button>
+          <button type="button" @click="$emit('cue-merge-next')">{{ t('edit.mergeNext') }}</button>
+        </div>
+      </section>
+    </template>
+
+    <template v-else-if="clip">
       <header class="ed-insp-head">
         <b>{{ clip.source?.label || t('edit.clip') }}</b>
         <span>{{ clip.source?.kind }}</span>
@@ -139,8 +254,8 @@
 <script setup>
 import { useI18n } from 'vue-i18n'
 import { MousePointer2, Scissors, Trash2 } from 'lucide-vue-next'
-import { formatClock } from '~/utils/edit-plan'
-import { formatPrecise } from '~/utils/edit-timecode'
+import { formatClock, SUBTITLE_FONT_WHITELIST, resolveCueAppearance } from '~/utils/edit-plan'
+import { formatPrecise, formatClockMs, parseClockMs, frameDurationMs } from '~/utils/edit-timecode'
 
 const props = defineProps({
   plan: { type: Object, required: true },
@@ -150,8 +265,13 @@ const props = defineProps({
   state: { type: Object, required: true },
   currentMs: { type: Number, default: 0 },
   readonly: { type: Boolean, default: false },
+  cue: { type: Object, default: null },
 })
-defineEmits(['trim-start', 'trim-end', 'speed', 'gap', 'fades', 'split', 'remove'])
+const emit = defineEmits([
+  'trim-start', 'trim-end', 'speed', 'gap', 'fades', 'split', 'remove',
+  'cue-update', 'cue-apply-all', 'cue-set-default', 'cue-delete', 'cue-split',
+  'cue-merge-next', 'cue-align-start', 'cue-align-end', 'cue-follow',
+])
 const { t } = useI18n()
 
 const clip = computed(() => props.plan.clips.find((item) => item.id === props.clipId) ?? null)
@@ -169,6 +289,106 @@ const canSplit = computed(() => Boolean(
 const splitOffsetMs = computed(() => (
   layoutClip.value ? Math.round(props.currentMs - layoutClip.value.timeline_start_ms) : 0
 ))
+
+// ---- 字幕编辑（cue 页） ----
+const fonts = SUBTITLE_FONT_WHITELIST
+const NINE_GRID = [
+  { key: 'tl', x: 12, y: 12 }, { key: 'tc', x: 50, y: 12 }, { key: 'tr', x: 88, y: 12 },
+  { key: 'ml', x: 12, y: 50 }, { key: 'mc', x: 50, y: 50 }, { key: 'mr', x: 88, y: 50 },
+  { key: 'bl', x: 12, y: 85 }, { key: 'bc', x: 50, y: 85 }, { key: 'br', x: 88, y: 85 },
+]
+
+function defaultStyleDraft() {
+  const base = props.cue
+    ? resolveCueAppearance(props.cue, props.plan.project)
+    : null
+  return {
+    fontFamily: base?.fontFamily ?? 'PingFang SC',
+    fontSize: Number(base?.fontSize ?? 48),
+    color: base?.color ?? '#FFFFFF',
+    strokeColor: base?.strokeColor ?? '#000000',
+    strokeWidth: Number(base?.strokeWidth ?? 2),
+    backgroundColor: base?.backgroundColor ?? null,
+    backgroundOpacity: Number(base?.backgroundOpacity ?? 0),
+    align: base?.align ?? 'center',
+    xPct: Number(base?.xPct ?? 50),
+    yPct: Number(base?.yPct ?? 85),
+  }
+}
+
+const textDraft = ref('')
+const styleDraft = ref(defaultStyleDraft())
+const showSafeAreaLocal = ref(false)
+
+watch(
+  () => props.cue,
+  (cue) => {
+    if (!cue) return
+    textDraft.value = String(cue.text ?? '')
+    styleDraft.value = defaultStyleDraft()
+  },
+  { immediate: true, deep: true },
+)
+
+const effectiveAppearance = computed(() => ({ ...styleDraft.value }))
+
+// 背景色允许为 null（无背景），color input 需要一个具体色值
+const bgColor = computed({
+  get: () => styleDraft.value.backgroundColor ?? '#000000',
+  set: (value) => { styleDraft.value.backgroundColor = value },
+})
+
+const safeAreaPct = computed(() => (
+  Math.max(0, Number(props.plan.project?.subtitleSafeAreaPct ?? 8))
+))
+const outOfBounds = computed(() => (
+  styleDraft.value.xPct < safeAreaPct.value
+  || styleDraft.value.xPct > 100 - safeAreaPct.value
+  || styleDraft.value.yPct < safeAreaPct.value
+  || styleDraft.value.yPct > 100 - safeAreaPct.value
+))
+
+function emitPatch(patch) {
+  emit('cue-update', patch)
+}
+
+function applyStyleDraft() {
+  emit('cue-update', { appearance: { ...styleDraft.value } })
+}
+
+function setPosition(x, y) {
+  styleDraft.value.xPct = x
+  styleDraft.value.yPct = y
+  applyStyleDraft()
+}
+
+function nudgeFrames(delta) {
+  if (!props.cue) return
+  const frame = frameDurationMs(props.plan.project?.fps ?? 30)
+  const shift = Math.round(frame * (Number(delta) || 0))
+  emit('cue-update', {
+    startMs: Math.max(0, Math.round(props.cue.startMs) + shift),
+    endMs: Math.max(0, Math.round(props.cue.endMs) + shift),
+  })
+}
+
+function onStartInput(event) {
+  const value = parseClockMs(event.target.value)
+  if (!Number.isFinite(value) || !props.cue) {
+    event.target.value = formatClockMs(props.cue?.startMs ?? 0)
+    return
+  }
+  emit('cue-update', { startMs: Math.max(0, value), endMs: Math.round(props.cue.endMs) })
+}
+
+function onEndInput(event) {
+  const value = parseClockMs(event.target.value)
+  if (!Number.isFinite(value) || !props.cue) {
+    event.target.value = formatClockMs(props.cue?.endMs ?? 0)
+    return
+  }
+  emit('cue-update', { startMs: Math.round(props.cue.startMs), endMs: Math.max(0, value) })
+}
 </script>
 
 <style scoped>
@@ -193,6 +413,34 @@ const splitOffsetMs = computed(() => (
   color: var(--text-1); font-size: 9px; cursor: pointer;
 }
 .ed-insp-row button:hover, .ed-insp-actions button:hover { border-color: var(--accent); }
+.ed-insp-row button.is-on { border-color: var(--accent); color: var(--accent-text); background: var(--accent-bg); }
+.ed-insp-row button.is-danger { color: var(--action-danger); border-color: color-mix(in srgb, var(--action-danger) 40%, var(--border)); }
+.ed-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 9px; color: var(--text-3); }
+.ed-row label { display: inline-flex; align-items: center; gap: 4px; }
+.ed-row input[type='range'] { width: 90px; accent-color: var(--accent); }
+.ed-row input[type='color'] { width: 24px; height: 20px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-2); cursor: pointer; }
+.ed-row input[type='text'], .ed-row input:not([type]) {
+  width: 82px; height: 22px; padding: 0 5px; border: 1px solid var(--border); border-radius: 5px;
+  background: var(--bg-2); color: var(--text-0); font-size: 10px; font-variant-numeric: tabular-nums;
+}
+.ed-row select {
+  height: 24px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-2);
+  color: var(--text-0); font-size: 10px;
+}
+.ed-check { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-2); cursor: pointer; }
+.ed-check input { accent-color: var(--accent); }
+.ed-nineGrid {
+  display: grid; grid-template-columns: repeat(3, 26px); grid-auto-rows: 18px; gap: 4px; width: fit-content;
+}
+.ed-nineGrid button {
+  border: 1px solid var(--border); border-radius: 4px; background: var(--bg-2); cursor: pointer; padding: 0;
+}
+.ed-nineGrid button:hover { border-color: var(--accent); }
+.ed-nineGrid button.is-on { background: var(--accent-bg); border-color: var(--accent); }
+.ed-insp-textarea {
+  width: 100%; min-height: 44px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-2); color: var(--text-0); font-size: 11px; line-height: 1.5; resize: vertical;
+}
 .ed-insp-field { display: flex; flex-direction: column; gap: 3px; font-size: 9px; color: var(--text-3); }
 .ed-insp-field input[type='range'] { width: 100%; accent-color: var(--accent); }
 .ed-insp-field input[type='number'] {

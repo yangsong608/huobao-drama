@@ -40,6 +40,12 @@ import { measureLoudness, validateExport } from './export-validation.js'
 import { writeZip } from './export-zip.js'
 import { renderMixAudio } from './mix-render.js'
 import { getDubbingDefaults } from './app-settings.js'
+import { FilmError, projectFilmFromExport, setCurrentFilm } from './film-hub.js'
+import {
+  MixSourceError,
+  resolveMixSource,
+  type MixPlanSource,
+} from './mix-source.js'
 
 export type ExportRecord = typeof schema.episodeExports.$inferSelect
 type ExportStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
@@ -75,6 +81,11 @@ export interface StartEpisodeExportInput {
   setCurrent?: boolean
   set_current?: boolean
   aspect?: string | null
+  sourceFilmId?: number | null
+  source_film_id?: number | null
+  title?: string | null
+  projectId?: number | null
+  project_id?: number | null
 }
 
 interface ExportJob {
@@ -159,6 +170,9 @@ interface ExportParams {
   subtitleFontSize?: number | null
   subtitleMarginV?: number | null
   narratorPrefix?: boolean
+  sourceFilmId?: number | null
+  title?: string | null
+  subtitleUrl?: string | null
 }
 
 function currentSubtitleSettings(): SubtitleRenderSettings {
@@ -186,6 +200,7 @@ function paramsJsonOf(
   plan: MixPlan,
   setCurrent = false,
   subtitle: SubtitleRenderSettings | null = null,
+  extra: { sourceFilmId?: number | null; title?: string | null; subtitleUrl?: string | null } = {},
 ): string {
   return JSON.stringify(canonicalize({
     preset: preset.key,
@@ -193,7 +208,10 @@ function paramsJsonOf(
     targetLufs: plan.master.lufs,
     truePeak: plan.master.truePeak,
     ...(setCurrent ? { setCurrent: true } : {}),
-    ...(preset.kind === 'video' && subtitleMode !== 'none' && subtitle
+    ...(extra.sourceFilmId ? { sourceFilmId: extra.sourceFilmId } : {}),
+    ...(extra.title ? { title: extra.title } : {}),
+    ...(extra.subtitleUrl ? { subtitleUrl: extra.subtitleUrl } : {}),
+    ...(preset.kind === 'video' && (subtitleMode === 'soft' || subtitleMode === 'burn') && subtitle
       ? {
           subtitleFontSize: subtitle.fontSize,
           subtitleMarginV: subtitle.marginV,
@@ -203,12 +221,13 @@ function paramsJsonOf(
   }))
 }
 
-/** “设为当前”只是副作用，不参与复用键，否则同内容会因该选项无法复用 */
+/** “设为当前”与渲染产物地址只是副作用，不参与复用键，否则同内容会因该选项无法复用 */
 function reuseParamsJson(paramsJson: string | null): string {
   if (!paramsJson) return ''
   try {
     const parsed = JSON.parse(paramsJson) as Record<string, unknown>
     delete parsed.setCurrent
+    delete parsed.subtitleUrl
     return JSON.stringify(canonicalize(parsed))
   } catch {
     return paramsJson
@@ -331,7 +350,42 @@ export async function getExportChecks(episodeId: number): Promise<ExportChecks> 
     .filter((row) => !row.stale)
   const ready = lines.filter((row) => row.status === 'ready' && row.audioUrl && row.audioDurationMs)
 
-  const plan = await compileMixPlan(episodeId, episode.dramaId)
+  let plan: MixPlan
+  try {
+    plan = await compileMixPlan(episodeId, episode.dramaId)
+  } catch (error) {
+    // 集内没有任何可用成片时不再抛 500：返回带提示的空检查，前端检查列表照常渲染
+    if (!(error instanceof MixSourceError) || error.code !== 'MIX_SOURCE_MISSING') throw error
+    const ffmpeg = await checkFfmpegSuite()
+    const ffmpegOk = ffmpeg.ffmpeg && ffmpeg.ffprobe
+    const freeBytes = diskFreeBytes(episode.dramaId)
+    const missingMessage = '请先在拼接导出生成一部成片'
+    return {
+      episodeId,
+      lines: {
+        ok: lines.length === 0,
+        message: lines.length === 0 ? '还没有台词' : `台词 ${ready.length}/${lines.length} 已生成`,
+        total: lines.length,
+        ready: ready.length,
+      },
+      video: { ok: false, message: missingMessage, durationMs: 0, clips: 0 },
+      mix: { ok: false, message: missingMessage, durationMs: 0, trackCount: 0, planHash: null },
+      subtitles: { ok: false, message: '没有可生成字幕的台词', count: 0 },
+      ffmpeg: {
+        ok: ffmpegOk,
+        message: ffmpegOk ? 'FFmpeg 可用' : 'FFmpeg / FFprobe 不可用，请在设置中指定目录',
+      },
+      disk: {
+        ok: true,
+        message: `剩余 ${freeBytes == null ? '未知' : formatBytes(freeBytes)}`,
+        freeBytes,
+        requiredBytes: 0,
+      },
+      mixReady: false,
+      videoReady: false,
+      stemsReady: false,
+    }
+  }
   const planHash = hashMixPlan(plan)
   const dialogueCount = dialogueClipsOf(plan).length
   const clipCount = usableClipCount(plan)
@@ -461,10 +515,11 @@ function removeExportFiles(dir: string): void {
 function fileNameFor(
   episode: typeof schema.episodes.$inferSelect,
   preset: ExportPreset,
+  title?: string | null,
 ): string {
   return buildExportFilename({
     episodeNumber: episode.episodeNumber || 1,
-    title: episode.title || '未命名',
+    title: String(title || '').trim() || episode.title || '未命名',
     preset,
     at: new Date(),
   })
@@ -480,6 +535,8 @@ interface PipelineContext {
   signal: AbortSignal
   merged?: EnsureMergedResult
   subtitleSettings?: SubtitleRenderSettings | null
+  source?: { film: MixPlanSource; subtitleUrl: string | null } | null
+  title?: string | null
 }
 
 interface PipelineResult {
@@ -613,26 +670,34 @@ async function runStemsPipeline(context: PipelineContext): Promise<PipelineResul
 }
 
 async function runVideoPipeline(context: PipelineContext): Promise<PipelineResult> {
-  const { recordId, episode, preset, subtitleMode, plan, signal } = context
+  const { recordId, episode, preset, subtitleMode, plan, signal, source } = context
   const dir = exportDirOf(episode.dramaId, episode.id, recordId)
   fs.mkdirSync(dir, { recursive: true })
-  const filename = fileNameFor(episode, preset)
+  const filename = fileNameFor(episode, preset, context.title)
   const outputPath = path.join(dir, filename)
   const mixPath = path.join(dir, `mix-${recordId}.wav`)
 
   const { ensureMergedVideo, buildEpisodeSubtitles } = await import('./dubbing.js')
 
   setProgress(recordId, 5)
-  const merged = context.merged ?? await ensureMergedVideo(episode.id, episode.dramaId, {
-    onProgress: () => setProgress(recordId, 8),
-    signal,
-  })
+  const merged = context.merged ?? (source
+    ? {
+        videoPath: getAbsolutePath(source.film.url),
+        videoUrl: source.film.url,
+        durationMs: source.film.durationMs,
+        clips: [],
+        remixed: false,
+      }
+    : await ensureMergedVideo(episode.id, episode.dramaId, {
+        onProgress: () => setProgress(recordId, 8),
+        signal,
+      }))
   if (signal.aborted) throw new ExportCancelledError()
 
   let subtitleUrl: string | null = null
   let srtPath: string | null = null
   let assPath: string | null = null
-  if (subtitleMode !== 'none') {
+  if (subtitleMode === 'soft' || subtitleMode === 'burn') {
     const defaults = context.subtitleSettings || currentSubtitleSettings()
     const subs = await buildEpisodeSubtitles(episode.id, episode.dramaId, merged, {
       subtitleMode,
@@ -645,6 +710,22 @@ async function runVideoPipeline(context: PipelineContext): Promise<PipelineResul
     srtPath = subs.srtPath
     assPath = subs.assPath
     subtitleUrl = subs.srtUrl
+  } else if (subtitleMode === 'copy' && source?.subtitleUrl) {
+    try {
+      const abs = getAbsolutePath(source.subtitleUrl)
+      if (fs.existsSync(abs)) {
+        const target = path.join(dir, `source${path.extname(abs) || '.srt'}`)
+        fs.copyFileSync(abs, target)
+        subtitleUrl = exportUrlOf(
+          episode.dramaId,
+          episode.id,
+          recordId,
+          path.basename(target),
+        )
+      }
+    } catch {
+      subtitleUrl = null
+    }
   }
   setProgress(recordId, 18)
 
@@ -767,25 +848,47 @@ async function executeExport(recordId: number, signal: AbortSignal, token: numbe
   const params = (() => {
     try { return JSON.parse(row.paramsJson || '{}') } catch { return {} }
   })() as ExportParams
-  const subtitleMode = normalizeSubtitleMode(params.subtitleMode, preset)
-  const subtitleSettings = row.kind === 'video' && subtitleMode !== 'none'
+  const subtitleMode = row.kind === 'video' && params.subtitleMode === 'copy'
+    ? 'copy' as ExportSubtitleMode
+    : normalizeSubtitleMode(params.subtitleMode, preset)
+  const subtitleSettings = row.kind === 'video' && (subtitleMode === 'soft' || subtitleMode === 'burn')
     ? subtitleSettingsFromParams(params)
     : null
   const dir = exportDirOf(episode.dramaId, episode.id, recordId)
 
   try {
     setProgress(recordId, 3)
-    // 先对齐合片：计划里的原声床与时长必须基于本次实际使用的成片
+    // 解析源成片（复制字幕/源画面导出时必须），再对齐合片：计划里的原声床与时长必须基于本次实际使用的成片
+    const sourceFilmId = Number(params.sourceFilmId ?? 0) || null
+    let source: PipelineContext['source'] = null
+    if (row.kind === 'video' && sourceFilmId) {
+      const resolved = await resolveMixSource(episode.id, sourceFilmId)
+      const sourceRow = db.select().from(schema.videoMerges)
+        .where(eq(schema.videoMerges.id, resolved.source.filmId)).get()
+      source = { film: resolved.source, subtitleUrl: sourceRow?.subtitleUrl ?? null }
+    }
     let merged: PipelineContext['merged']
     if (row.kind === 'video') {
-      const { ensureMergedVideo } = await import('./dubbing.js')
-      merged = await ensureMergedVideo(episode.id, episode.dramaId, {
-        onProgress: () => setProgress(recordId, 3),
-        signal,
-      })
+      if (source) {
+        merged = {
+          videoPath: getAbsolutePath(source.film.url),
+          videoUrl: source.film.url,
+          durationMs: source.film.durationMs,
+          clips: [],
+          remixed: false,
+        }
+      } else {
+        const { ensureMergedVideo } = await import('./dubbing.js')
+        merged = await ensureMergedVideo(episode.id, episode.dramaId, {
+          onProgress: () => setProgress(recordId, 3),
+          signal,
+        })
+      }
       if (signal.aborted) throw new ExportCancelledError()
     }
-    const plan = await compileMixPlan(episode.id, episode.dramaId)
+    const plan = await compileMixPlan(episode.id, episode.dramaId, {
+      sourceFilmId: source?.film.filmId ?? null,
+    })
     if (signal.aborted) throw new ExportCancelledError()
     setProgress(recordId, 5)
 
@@ -799,6 +902,8 @@ async function executeExport(recordId: number, signal: AbortSignal, token: numbe
       signal,
       merged,
       subtitleSettings,
+      source,
+      title: typeof params.title === 'string' ? params.title : null,
     }
 
     let result: PipelineResult
@@ -816,7 +921,11 @@ async function executeExport(recordId: number, signal: AbortSignal, token: numbe
     const planHash = hashMixPlan(plan)
     const sourceVideoHash = sourceVideoHashOf(episode.id, episode)
     const subtitleHash = row.kind === 'video' ? subtitleHashOf(plan) : null
-    const paramsJson = paramsJsonOf(preset, subtitleMode, plan, context.setCurrent, subtitleSettings)
+    const paramsJson = paramsJsonOf(preset, subtitleMode, plan, context.setCurrent, subtitleSettings, {
+      sourceFilmId: row.sourceMergeId,
+      title: context.title,
+      subtitleUrl: result.subtitleUrl ?? null,
+    })
 
     db.update(schema.episodeExports)
       .set({
@@ -841,16 +950,36 @@ async function executeExport(recordId: number, signal: AbortSignal, token: numbe
       ))
       .run()
 
-    // 只有设为当前成片时才回写集字幕，避免旧导出覆盖当前成片的字幕
-    if (result.subtitleUrl && context.setCurrent) {
-      db.update(schema.episodes)
-        .set({ subtitleUrl: result.subtitleUrl, updatedAt: now() })
-        .where(eq(schema.episodes.id, episode.id))
-        .run()
+    // 软字幕地址写入 params：投影成片后由 setCurrentFilm 统一镜像到集
+    if (row.kind === 'video' && result.subtitleUrl) {
+      try {
+        const parsed = JSON.parse(paramsJson || '{}') as Record<string, unknown>
+        parsed.subtitleUrl = result.subtitleUrl
+        const withSubtitle = JSON.stringify(canonicalize(parsed))
+        db.update(schema.episodeExports)
+          .set({ paramsJson: withSubtitle })
+          .where(eq(schema.episodeExports.id, recordId))
+          .run()
+      } catch {
+        /* params 解析失败时跳过字幕记录，不影响导出成功 */
+      }
     }
 
-    if (row.kind === 'video' && context.setCurrent) {
-      await setCurrentExport(recordId)
+    // 只有视频导出投影为成片；音频/分轨不进入成片中心
+    if (row.kind === 'video') {
+      try {
+        const filmId = projectFilmFromExport(recordId)
+        const film = db.select().from(schema.videoMerges)
+          .where(eq(schema.videoMerges.id, filmId)).get()
+        // 投影函数已按 params.setCurrent 处理；这里只记录失败不改变导出成功状态
+        void film
+      } catch (error) {
+        const message = error instanceof FilmError ? error.message : '成片入库失败，可重试'
+        db.update(schema.episodeExports)
+          .set({ error: message })
+          .where(eq(schema.episodeExports.id, recordId))
+          .run()
+      }
     }
   } catch (error) {
     if (!isCurrentRun(recordId, token)) return
@@ -909,24 +1038,42 @@ async function startEpisodeExportLocked(
     throw error
   }
   const kind = preset.kind
-  const subtitleMode = normalizeSubtitleMode(input.subtitleMode ?? input.subtitle_mode, preset)
+  const requestedSourceId = Number(input.sourceFilmId ?? input.source_film_id ?? 0) || null
+  const sourceResolved = kind === 'video' && requestedSourceId
+    ? await resolveMixSource(episodeId, requestedSourceId)
+    : null
+  const requestedSubtitle = String(input.subtitleMode ?? input.subtitle_mode ?? '').trim()
+  const subtitleMode: ExportSubtitleMode = kind === 'video' && requestedSubtitle === 'copy'
+    ? 'copy'
+    : normalizeSubtitleMode(input.subtitleMode ?? input.subtitle_mode, preset)
+  if (subtitleMode === 'copy' && !sourceResolved) {
+    throw new ExportError('复制字幕需要先选择源成片', 400)
+  }
   const setCurrent = Boolean(input.setCurrent ?? input.set_current) && kind === 'video'
 
-  const plan = await compileMixPlan(episodeId, episode.dramaId)
+  const plan = await compileMixPlan(episodeId, episode.dramaId, {
+    sourceFilmId: sourceResolved?.source.filmId ?? null,
+  })
   if (plan.durationMs <= 0 || usableClipCount(plan) <= 0) {
     throw new ExportError('没有可导出的音频，请先生成台词或混音', 400)
   }
-  if (kind === 'video' && subtitleMode !== 'none' && dialogueClipsOf(plan).length === 0) {
+  if (kind === 'video' && (subtitleMode === 'soft' || subtitleMode === 'burn')
+    && dialogueClipsOf(plan).length === 0) {
     throw new ExportError('没有可生成字幕的台词，请先生成语音', 400)
   }
 
   const planHash = hashMixPlan(plan)
   const sourceVideoHash = sourceVideoHashOf(episodeId, episode)
   const subtitleHash = kind === 'video' ? subtitleHashOf(plan) : null
-  const subtitleSettings = kind === 'video' && subtitleMode !== 'none'
+  const subtitleSettings = kind === 'video' && (subtitleMode === 'soft' || subtitleMode === 'burn')
     ? currentSubtitleSettings()
     : null
-  const paramsJson = paramsJsonOf(preset, subtitleMode, plan, setCurrent, subtitleSettings)
+  // 导出记录的源成片：显式指定优先，否则回退最近一次合片；paramsJson 与落库必须同值，否则复用键失配
+  const exportSourceId = sourceResolved?.source.filmId ?? latestCompletedMerge(episodeId)?.id ?? null
+  const paramsJson = paramsJsonOf(preset, subtitleMode, plan, setCurrent, subtitleSettings, {
+    sourceFilmId: exportSourceId,
+    title: input.title ?? null,
+  })
   const key = reuseKeyOf({
     kind, preset: preset.key, planHash, sourceVideoHash, subtitleHash, paramsJson,
   })
@@ -964,6 +1111,8 @@ async function startEpisodeExportLocked(
     planHash,
     sourceVideoHash,
     subtitleHash,
+    sourceMergeId: exportSourceId,
+    projectId: Number(input.projectId ?? input.project_id ?? 0) || null,
     status: 'pending',
     progress: 0,
     isCurrent: false,
@@ -985,30 +1134,16 @@ export async function setCurrentExport(id: number, options: { episodeId?: number
   if (record.status !== 'completed' || !record.outputUrl) {
     throw new ExportError('导出尚未完成，不能设为当前成片', 409)
   }
-  if (!fs.existsSync(getAbsolutePath(record.outputUrl))) {
-    throw new ExportError('导出文件不存在，请重新导出', 409)
+  let filmId = record.filmId
+  if (!filmId) filmId = projectFilmFromExport(record.id)
+  try {
+    setCurrentFilm(record.episodeId, filmId)
+  } catch (error) {
+    if (error instanceof FilmError) {
+      throw new ExportError(error.message, error.status as 400 | 404 | 409 | 507)
+    }
+    throw error
   }
-
-  db.update(schema.episodeExports)
-    .set({ isCurrent: false })
-    .where(and(
-      eq(schema.episodeExports.episodeId, record.episodeId),
-      eq(schema.episodeExports.kind, 'video'),
-      eq(schema.episodeExports.isCurrent, true),
-    ))
-    .run()
-  db.update(schema.episodeExports)
-    .set({ isCurrent: true })
-    .where(eq(schema.episodeExports.id, id))
-    .run()
-  db.update(schema.episodes)
-    .set({
-      videoUrl: record.outputUrl,
-      duration: Math.round((record.durationMs || 0) / 1000),
-      updatedAt: now(),
-    })
-    .where(eq(schema.episodes.id, record.episodeId))
-    .run()
   return getExport(id)!
 }
 
@@ -1048,7 +1183,10 @@ export async function retryExport(id: number): Promise<ExportRecord> {
   const params = (() => {
     try { return JSON.parse(record.paramsJson || '{}') } catch { return {} }
   })() as { subtitleMode?: ExportSubtitleMode; setCurrent?: boolean }
-  const subtitleMode = normalizeSubtitleMode(params.subtitleMode, preset)
+  // 重试保持 copy 模式：源成片记录仍在（sourceMergeId），不能退化成重新生成字幕
+  const subtitleMode = preset.kind === 'video' && params.subtitleMode === 'copy'
+    ? 'copy' as ExportSubtitleMode
+    : normalizeSubtitleMode(params.subtitleMode, preset)
 
   db.update(schema.episodeExports)
     .set({
@@ -1081,37 +1219,19 @@ export async function deleteExport(id: number): Promise<ExportRecord> {
   if (['pending', 'running'].includes(String(record.status))) {
     throw new ExportError('导出进行中，请先取消再删除', 409)
   }
-  const wasCurrent = Boolean(record.isCurrent)
+  const film = record.filmId
+    ? db.select().from(schema.videoMerges).where(eq(schema.videoMerges.id, record.filmId)).get()
+    : undefined
+  const episode = db.select().from(schema.episodes).where(eq(schema.episodes.id, record.episodeId)).get()
+  if (film && episode?.currentFilmId === film.id) {
+    throw new ExportError('这是当前成片的导出记录，请先把其他成片设为当前', 409)
+  }
   db.update(schema.episodeExports)
     .set({ deletedAt: now(), isCurrent: false })
     .where(eq(schema.episodeExports.id, id))
     .run()
-
-  if (record.kind === 'video' && wasCurrent) {
-    const fallback = db.select().from(schema.episodeExports)
-      .where(and(
-        eq(schema.episodeExports.episodeId, record.episodeId),
-        eq(schema.episodeExports.kind, 'video'),
-        eq(schema.episodeExports.status, 'completed'),
-        isNull(schema.episodeExports.deletedAt),
-      ))
-      .orderBy(desc(schema.episodeExports.id))
-      .all()
-      .find((row) => row.outputUrl && fs.existsSync(getAbsolutePath(row.outputUrl)))
-    if (fallback) {
-      db.update(schema.episodeExports)
-        .set({ isCurrent: true })
-        .where(eq(schema.episodeExports.id, fallback.id))
-        .run()
-      db.update(schema.episodes)
-        .set({
-          videoUrl: fallback.outputUrl,
-          duration: Math.round((fallback.durationMs || 0) / 1000),
-          updatedAt: now(),
-        })
-        .where(eq(schema.episodes.id, record.episodeId))
-        .run()
-    }
+  if (film && !film.deletedAt) {
+    db.update(schema.videoMerges).set({ deletedAt: now() }).where(eq(schema.videoMerges.id, film.id)).run()
   }
   return getExport(id)!
 }

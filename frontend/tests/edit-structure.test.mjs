@@ -98,7 +98,7 @@ test('S2 素材库、检查器、版本与冲突组件结构', () => {
 test('S2 工作台集成自动保存、撤销、版本、初剪与快捷键', () => {
   const workbench = read('app/components/edit/EditWorkbench.vue')
   for (const token of [
-    'useEditPlan', 'useEditMedia', 'EditMediaLibrary', 'EditRevisionsDrawer',
+    'useEditPlan', 'EditSidebar', 'switchFilm', 'EditRevisionsDrawer',
     'EditConflictDialog', 'applyCommand', 'acceptRecovery', 'roughCut',
     'suggestSubtitles', 'onKeydown', 'saveNow',
   ]) {

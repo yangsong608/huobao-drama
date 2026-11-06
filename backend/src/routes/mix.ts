@@ -14,10 +14,11 @@ import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { badRequest, notFound, serverError, success } from '../utils/response.js'
 import { db, schema } from '../db/index.js'
-import { eq } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import {
+  MIX_BUS_KEYS,
   MixPlanError,
-  compileMixPlan,
+  compileMixPlanDetailed,
   ensureDefaultBuses,
   hashMixPlan,
   saveMixPlan,
@@ -25,8 +26,19 @@ import {
   createMixRevision,
   listMixRevisions,
   restoreMixRevision,
+  type MixBus,
+  type MixBusKey,
+  type MixClip,
+  type MixPlan,
+  type MixTrack,
   type MixPlanInputBus,
 } from '../services/mix-plan.js'
+import {
+  MixSourceError,
+  persistMixSource,
+  type MixSourceWarning,
+} from '../services/mix-source.js'
+import { getAbsolutePath } from '../utils/storage.js'
 import { renderMixAudio } from '../services/mix-render.js'
 import { projectStorageRelative, projectSubdirPath } from '../services/project-storage.js'
 import {
@@ -72,6 +84,9 @@ function statusError(c: Context, status: 400 | 404 | 409 | 503, message: string)
 function handleError(c: Context, error: any, fallback: string) {
   if (error instanceof AudioEngineError) {
     return c.json({ code: 503, message: error.message, error_code: error.code }, 503)
+  }
+  if (error instanceof MixSourceError) {
+    return c.json({ code: error.code, message: error.message }, error.status)
   }
   if (error instanceof MixPlanError || error instanceof SeparationError) {
     return statusError(c, error.status, error.message)
@@ -133,15 +148,276 @@ function roundRange(value: unknown): number | null {
   return Number.isFinite(n) ? Math.round(n) : null
 }
 
+function sourceQueryId(c: Context): number | null | undefined {
+  const raw = c.req.query('source_film_id')
+  if (raw === undefined || raw === '') return undefined
+  return parseId(raw) ?? null
+}
+
+function planResponse(plan: any, warnings: any[]) {
+  return { ...plan, source_film: plan.source ?? null, source_warnings: warnings }
+}
+
+const FALLBACK_ROLE_BUS: Record<string, MixBusKey> = {
+  dialogue: 'dialogue',
+  voice: 'dialogue',
+  crowd: 'dialogue',
+  original: 'original',
+  ambience: 'original',
+  sfx: 'sfx',
+  bgm: 'bgm',
+}
+
+function fallbackClipSource(raw: string | null | undefined): { url: string | null; usable: boolean; reason: string | null } {
+  const url = String(raw || '').trim()
+  if (!url) return { url: null, usable: false, reason: '缺少音频素材' }
+  if (/^https?:\/\//i.test(url)) return { url, usable: true, reason: null }
+  try {
+    if (!fs.existsSync(getAbsolutePath(url))) return { url, usable: false, reason: '音频文件不存在' }
+  } catch {
+    return { url, usable: false, reason: '音频路径无效' }
+  }
+  return { url, usable: true, reason: null }
+}
+
+/**
+ * 本集没有任何可用成片时的降级编译：保留总线、音轨片段与虚拟对白轨，无原声床。
+ * 源成片是混音的主输入，但空集也要能打开混音台并校验试听范围，因此这里在路由层兜底。
+ */
+async function compilePlanWithoutSource(episodeId: number, dramaId: number): Promise<MixPlan> {
+  const buses: MixBus[] = ensureDefaultBuses(episodeId)
+    .map((row) => (MIX_BUS_KEYS as readonly string[]).includes(row.key)
+      ? {
+        id: row.id,
+        key: row.key as MixBusKey,
+        name: row.name,
+        volume: row.volume ?? 1,
+        muted: Boolean(row.muted),
+        solo: Boolean(row.solo),
+        effectiveMuted: false,
+        ducking: Boolean(row.ducking),
+        duckRatio: row.duckRatio ?? 6,
+        duckAttackMs: row.duckAttackMs ?? 20,
+        duckReleaseMs: row.duckReleaseMs ?? 250,
+        lufsTarget: row.lufsTarget ?? null,
+        limiterCeiling: row.limiterCeiling ?? null,
+      }
+      : null)
+    .filter((bus): bus is MixBus => bus !== null)
+  const busByKey = new Map<MixBusKey, MixBus>(buses.map((bus) => [bus.key, bus]))
+
+  const trackRows = db.select().from(schema.episodeAudioTracks)
+    .where(eq(schema.episodeAudioTracks.episodeId, episodeId))
+    .orderBy(asc(schema.episodeAudioTracks.sortOrder), asc(schema.episodeAudioTracks.id))
+    .all()
+  const clipRows = db.select().from(schema.episodeAudioClips)
+    .where(eq(schema.episodeAudioClips.episodeId, episodeId))
+    .orderBy(asc(schema.episodeAudioClips.startMs), asc(schema.episodeAudioClips.id))
+    .all()
+  const tracks: MixTrack[] = trackRows.map((row) => {
+    const role = String(row.role || '').trim() || row.kind || 'custom'
+    const explicitBus = row.busId
+      ? buses.find((bus) => bus.id === row.busId)?.key
+      : undefined
+    return {
+      id: row.id,
+      role,
+      name: row.name,
+      busId: explicitBus ?? FALLBACK_ROLE_BUS[role] ?? 'sfx',
+      virtual: false,
+      volume: row.volume ?? 1,
+      pan: row.pan ?? 0,
+      muted: Boolean(row.muted),
+      solo: Boolean(row.solo),
+      effectiveMuted: false,
+      ducking: Boolean(row.ducking),
+      locked: Boolean(row.locked),
+      hidden: Boolean(row.hidden),
+      loop: Boolean(row.loop),
+      color: row.color ?? null,
+      height: row.height ?? 72,
+      sortOrder: row.sortOrder ?? 0,
+      origin: row.origin ?? null,
+      stemAssetId: row.stemAssetId ?? null,
+      clips: clipRows.filter((clip) => clip.trackId === row.id).map((clip) => {
+        const src = fallbackClipSource(clip.audioUrl || clip.sourceUrl)
+        return {
+          id: clip.id,
+          assetId: clip.assetId ?? null,
+          takeId: clip.takeId ?? null,
+          lineId: clip.lineId ?? null,
+          name: clip.name ?? null,
+          startMs: clip.startMs,
+          endMs: clip.endMs,
+          sourceStartMs: clip.sourceStartMs ?? 0,
+          gainDb: clip.gainDb ?? 0,
+          pan: clip.pan ?? 0,
+          fadeInMs: clip.fadeInMs ?? 0,
+          fadeOutMs: clip.fadeOutMs ?? 0,
+          fadeCurve: clip.fadeCurve || 'linear',
+          loop: Boolean(clip.loop),
+          muted: Boolean(clip.muted),
+          locked: Boolean(clip.locked),
+          audioUrl: src.url,
+          usable: src.usable,
+          reason: src.reason,
+        }
+      }),
+    }
+  })
+
+  // 动态加载：dubbing 依赖 export-service，静态引用会形成循环
+  const { previewTimeline: readTimeline } = await import('../services/dubbing.js')
+  const timeline = await readTimeline(episodeId, dramaId)
+  const takes = db.select().from(schema.lineTakes)
+    .where(eq(schema.lineTakes.episodeId, episodeId))
+    .orderBy(asc(schema.lineTakes.takeNo))
+    .all()
+  const activeByLine = new Map<number, (typeof takes)[number]>()
+  for (const take of takes) {
+    if (!take.isActive || take.deletedAt) continue
+    activeByLine.set(take.lineId, take)
+  }
+  const dialogueClips: MixClip[] = []
+  for (const cue of timeline.cues) {
+    const take = activeByLine.get(cue.lineId)
+    const src = fallbackClipSource(take?.audioUrl || cue.audioUrl)
+    if (!src.url) continue
+    dialogueClips.push({
+      id: null,
+      assetId: null,
+      takeId: take?.id ?? null,
+      lineId: cue.lineId,
+      name: null,
+      startMs: cue.startMs,
+      endMs: cue.endMs,
+      sourceStartMs: 0,
+      gainDb: 0,
+      pan: 0,
+      fadeInMs: 0,
+      fadeOutMs: 0,
+      fadeCurve: 'linear',
+      loop: false,
+      muted: false,
+      locked: false,
+      audioUrl: src.url,
+      usable: src.usable,
+      reason: src.reason,
+    })
+  }
+  tracks.unshift({
+    id: null,
+    role: 'voice',
+    name: '对白',
+    busId: 'dialogue',
+    virtual: true,
+    volume: 1,
+    pan: 0,
+    muted: false,
+    solo: false,
+    effectiveMuted: false,
+    ducking: false,
+    locked: false,
+    hidden: false,
+    loop: false,
+    color: '#f59e0b',
+    height: 72,
+    sortOrder: -1,
+    origin: null,
+    stemAssetId: null,
+    clips: dialogueClips,
+  })
+
+  const soloActive = tracks.some((track) => track.solo)
+    || buses.some((bus) => bus.key !== 'master' && bus.solo)
+  const soloedBusKeys = new Set<MixBusKey>()
+  for (const track of tracks) {
+    const bus = busByKey.get(track.busId)!
+    if (!soloActive) {
+      track.effectiveMuted = track.muted || bus.muted
+      continue
+    }
+    if (track.solo) {
+      track.effectiveMuted = false
+      if (bus.key !== 'master') soloedBusKeys.add(bus.key)
+      continue
+    }
+    track.effectiveMuted = bus.solo ? track.muted : true
+  }
+  for (const bus of buses) {
+    bus.effectiveMuted = bus.key === 'master'
+      ? bus.muted
+      : soloActive ? !(bus.solo || soloedBusKeys.has(bus.key)) : bus.muted
+  }
+
+  const clipEnd = tracks.reduce(
+    (max, track) => track.clips.reduce((inner, clip) => Math.max(inner, clip.endMs), max),
+    0,
+  )
+  const master = busByKey.get('master')!
+  return {
+    version: 1,
+    episodeId,
+    durationMs: Math.max(0, timeline.totalDurationMs, clipEnd),
+    sampleRate: 48000,
+    buses,
+    tracks,
+    master: {
+      lufs: master.lufsTarget ?? -16,
+      truePeak: master.limiterCeiling ?? -1.5,
+      limiter: 'alimiter',
+    },
+  }
+}
+
+/** 统一编译入口：源成片缺失（集内无任何可用成片）时降级为无源计划，其余错误原样抛出 */
+async function compileEpisodePlan(
+  episodeId: number,
+  dramaId: number,
+  sourceFilmId?: number | null,
+): Promise<{ plan: MixPlan; warnings: MixSourceWarning[] }> {
+  try {
+    return await compileMixPlanDetailed(episodeId, dramaId, { sourceFilmId })
+  } catch (error) {
+    if (error instanceof MixSourceError && error.status === 400 && error.code === 'MIX_SOURCE_MISSING') {
+      return {
+        plan: await compilePlanWithoutSource(episodeId, dramaId),
+        warnings: [{ code: 'MIX_SOURCE_FALLBACK', message: '本集还没有可用成片，可先添加配音与音效。' }],
+      }
+    }
+    throw error
+  }
+}
+
 app.get('/episodes/:id/mix', async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   const episode = findEpisode(episodeId)
   if (!episode) return notFound(c, '集不存在')
+  const sourceFilmId = sourceQueryId(c)
+  if (sourceFilmId === null) return badRequest(c, '源成片编号无效')
   try {
-    return success(c, await compileMixPlan(episodeId, episode.dramaId))
+    const { plan, warnings } = await compileEpisodePlan(episodeId, episode.dramaId, sourceFilmId)
+    return success(c, planResponse(plan, warnings))
   } catch (error: any) {
     return handleError(c, error, '读取混音计划失败')
+  }
+})
+
+app.put('/episodes/:id/mix/source', async (c) => {
+  const episodeId = parseId(c.req.param('id'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  const episode = findEpisode(episodeId)
+  if (!episode) return notFound(c, '集不存在')
+  const body = await c.req.json().catch(() => ({}))
+  const filmId = parseId(String(body.film_id ?? ''))
+  if (!filmId) return badRequest(c, '缺少源成片')
+  try {
+    await persistMixSource(episodeId, filmId)
+    const { plan, warnings } = await compileMixPlanDetailed(episodeId, episode.dramaId)
+    return success(c, planResponse(plan, warnings))
+  } catch (error: any) {
+    return handleError(c, error, '切换源成片失败')
   }
 })
 
@@ -155,12 +431,22 @@ app.put('/episodes/:id/mix', async (c) => {
   }
   const body = await c.req.json().catch(() => ({}))
   try {
-    const plan = await saveMixPlan(episodeId, episode.dramaId, {
-      buses: Array.isArray(body.buses) ? body.buses.map(busInput) : undefined,
-      tracks: Array.isArray(body.tracks) ? body.tracks : undefined,
-      clips: Array.isArray(body.clips) ? body.clips : undefined,
-      virtualTracks: Array.isArray(body.virtualTracks) ? body.virtualTracks : undefined,
-    })
+    let plan: MixPlan
+    try {
+      plan = await saveMixPlan(episodeId, episode.dramaId, {
+        buses: Array.isArray(body.buses) ? body.buses.map(busInput) : undefined,
+        tracks: Array.isArray(body.tracks) ? body.tracks : undefined,
+        clips: Array.isArray(body.clips) ? body.clips : undefined,
+        virtualTracks: Array.isArray(body.virtualTracks) ? body.virtualTracks : undefined,
+      })
+    } catch (error) {
+      // 保存已落库后才会编译返回值；集内无任何可用成片时降级为无源计划
+      if (error instanceof MixSourceError && error.status === 400 && error.code === 'MIX_SOURCE_MISSING') {
+        plan = await compilePlanWithoutSource(episodeId, episode.dramaId)
+      } else {
+        throw error
+      }
+    }
     return success(c, plan)
   } catch (error: any) {
     return handleError(c, error, '保存混音计划失败')
@@ -232,7 +518,7 @@ app.post('/episodes/:id/mix/preview', async (c) => {
   if (!episode) return notFound(c, '集不存在')
   const body = await c.req.json().catch(() => ({}))
   try {
-    const plan = await compileMixPlan(episodeId, episode.dramaId)
+    const { plan } = await compileEpisodePlan(episodeId, episode.dramaId)
     if (plan.durationMs <= 0) throw new MixPlanError('本集还没有可用的音频片段，无法试听')
     const start = Math.max(0, Math.min(plan.durationMs - 1, roundRange(body.start_ms ?? body.startMs) ?? 0))
     const rawEnd = roundRange(body.end_ms ?? body.endMs)
@@ -272,7 +558,7 @@ app.post('/episodes/:id/mix/render', async (c) => {
   const format = body.format === undefined ? 'm4a' : String(body.format)
   if (format !== 'wav' && format !== 'm4a') return badRequest(c, '导出格式仅支持 wav 或 m4a')
   try {
-    const plan = await compileMixPlan(episodeId, episode.dramaId)
+    const { plan } = await compileEpisodePlan(episodeId, episode.dramaId)
     if (plan.durationMs <= 0) throw new MixPlanError('本集还没有可用的音频片段，无法导出')
     const outputPath = path.join(mixDir(episode.dramaId), `mix-${episodeId}-${Date.now()}.${format}`)
     const result = await renderMixAudio(plan, { outputPath, format })

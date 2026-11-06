@@ -6,6 +6,7 @@
  * - solo 只派生 effectiveMuted，不改写 muted；
  * - 任何编辑 300ms 防抖保存；范围试听与版本先落库，保证与服务端渲染一致。
  */
+import { useRoute } from 'vue-router'
 import {
   dubbingAPI,
   mixAPI,
@@ -14,9 +15,12 @@ import {
   type MixBusKey,
   type MixClip,
   type MixPlan,
+  type MixPlanWithSource,
   type MixPreviewResult,
   type MixRenderResult,
   type MixRevision,
+  type MixSourceSnapshot,
+  type MixSourceWarning,
   type MixTrack,
   type SeparationStatus,
   type SoundscapePreview,
@@ -140,6 +144,20 @@ export function useMixStage(options: UseMixStageOptions) {
   const snapMs = ref(100)
   const history = ref<MixSnapshot[]>([])
   const future = ref<MixSnapshot[]>([])
+  /** 源成片快照与警告（GET /mix · PUT /mix/source 返回，Task 8） */
+  const sourceFilm = ref<MixSourceSnapshot | null>(null)
+  const sourceWarnings = ref<MixSourceWarning[]>([])
+  const exportSource = computed(() => sourceFilm.value)
+
+  // 成片中心「在混音中打开」通过 ?film= 指定初始源成片；无路由上下文（单测）时忽略
+  let routeRef: ReturnType<typeof useRoute> | null = null
+  try {
+    routeRef = useRoute()
+  } catch { /* 非 Nuxt 上下文 */ }
+  function routeFilmId(): number | null {
+    const raw = Number(routeRef?.query?.film)
+    return Number.isSafeInteger(raw) && raw > 0 ? raw : null
+  }
 
   let uidSeq = 0
   let pendingSnapshot: MixSnapshot | null = null
@@ -262,17 +280,42 @@ export function useMixStage(options: UseMixStageOptions) {
     if (selected.value && (!selectedTrack.value || !selectedClip.value)) selected.value = null
   }
 
+  /** 从计划响应同步源成片快照与警告（source_film 为 Task 8 字段，source 兼容旧字段名） */
+  function applySourceMeta(next: MixPlan & {
+    source_film?: MixSourceSnapshot | null
+    source?: MixSourceSnapshot | null
+    source_warnings?: MixSourceWarning[]
+  }) {
+    sourceFilm.value = next.source_film ?? next.source ?? null
+    sourceWarnings.value = next.source_warnings ?? []
+  }
+
   /** 只重取计划，保留播放头、选中与撤销栈（台词重排后同步虚拟轨） */
   async function refreshPlan() {
     const episodeId = options.episodeId()
     if (!episodeId) return
-    const next = await mixAPI.getPlan(episodeId)
+    const next = await mixAPI.plan(episodeId)
+    applySourceMeta(next)
     const selectedBefore = selected.value ? { ...selected.value } : null
     applyPlan(next)
     if (selectedBefore) {
       selected.value = selectedBefore
       if (!selectedTrack.value || !selectedClip.value) selected.value = null
     }
+  }
+
+  /** 更换源成片：先落库当前编辑，再切换并由服务端整体重编译（撤销栈与播放头重置） */
+  async function selectSourceFilm(filmId: number) {
+    const episodeId = options.episodeId()
+    if (!episodeId) throw new Error('未选择剧集')
+    await flushSave()
+    const next = await mixAPI.setSource(episodeId, filmId)
+    applySourceMeta(next)
+    applyPlan(next, true)
+    dirty.value = false
+    playheadMs.value = 0
+    preview.value = null
+    return next
   }
 
   function snapshot(): MixSnapshot {
@@ -517,7 +560,8 @@ export function useMixStage(options: UseMixStageOptions) {
     error.value = ''
     try {
       const [next, assetResult, revisionResult, status, soundscape] = await Promise.all([
-        mixAPI.getPlan(episodeId),
+        // 初次进入本集时优先使用路由 ?film= 指定的源成片；刷新走已持久化的选择
+        mixAPI.plan(episodeId, episodeChanged ? routeFilmId() : undefined),
         mixAPI.assets(episodeId),
         mixAPI.revisions(episodeId),
         mixAPI.separationStatus(episodeId),
@@ -525,6 +569,7 @@ export function useMixStage(options: UseMixStageOptions) {
       ])
       if (token !== loadToken) return
       applyPlan(next, resetHistory)
+      applySourceMeta(next)
       assets.value = assetResult.items
       revisions.value = revisionResult.items
       separation.value = status
@@ -1108,6 +1153,10 @@ export function useMixStage(options: UseMixStageOptions) {
     canUndo,
     canRedo,
     durationMs,
+    sourceFilm,
+    sourceWarnings,
+    exportSource,
+    selectSourceFilm,
     load,
     loadAssets,
     save,

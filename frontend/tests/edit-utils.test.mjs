@@ -10,6 +10,8 @@ const {
 } = await import('../app/utils/edit-layout.ts')
 const {
   formatPrecise,
+  formatClockMs,
+  parseClockMs,
   snapToFrame,
   msToFrames,
   framesToMs,
@@ -137,6 +139,12 @@ test('精确时间码与帧吸附', () => {
   assert.equal(msToFrames(500, 30), 15)
   assert.ok(Math.abs(snapToFrame(1010, 30) - 1000) < 1)
   assert.ok(Math.abs(snapToFrame(1020, 30) - 1033.333) < 1)
+})
+
+test('字幕时间 mm:ss.mmm 解析与回写', () => {
+  assert.equal(formatClockMs(61234), '01:01.234')
+  assert.equal(parseClockMs('01:02.500'), 62500)
+  assert.equal(parseClockMs('1:02:03.250'), 3723250)
 })
 
 test('吸附点收集与阈值选择', () => {

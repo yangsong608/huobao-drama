@@ -927,13 +927,9 @@ export const sqliteSchemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_audio_assets_episode ON episode_audio_assets (episode_id, kind, source_hash)`,
   `CREATE INDEX IF NOT EXISTS idx_mix_revisions_episode ON mix_revisions (episode_id, revision_no)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_mix_revisions_current ON mix_revisions (episode_id) WHERE is_current = 1`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_drafts_episode ON episode_edit_drafts (episode_id)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_revisions_no ON edit_revisions (episode_id, revision_no)`,
-  `CREATE INDEX IF NOT EXISTS idx_edit_revisions_current ON edit_revisions (episode_id, is_current)`,
   `CREATE INDEX IF NOT EXISTS idx_edit_renders_cache ON edit_renders (episode_id, kind, status, render_hash)`,
   `CREATE INDEX IF NOT EXISTS idx_edit_renders_sync ON edit_renders (episode_id, kind, status, edit_sync_hash)`,
   `CREATE INDEX IF NOT EXISTS idx_edit_renders_revision ON edit_renders (edit_revision_id)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_renders_cache_key ON edit_renders (episode_id, kind, cache_key)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_media_proxies_source ON episode_media_proxies (episode_id, source_url, source_fingerprint)`,
   `CREATE INDEX IF NOT EXISTS idx_episode_exports_episode ON episode_exports (episode_id, created_at)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_episode_exports_current ON episode_exports (episode_id, kind) WHERE is_current = 1`,
@@ -1050,6 +1046,184 @@ function rebuildStoryboardLinesIfNeeded(sqlite: Database.Database) {
   } finally {
     sqlite.pragma('foreign_keys = ON')
   }
+}
+
+/**
+ * 成片中心迁移：旧库补列、建 edit_projects、历史 kind/origin/current_film_id 回填，
+ * 并把旧剪辑索引重建为按工程组织的新索引。全部幂等，可重复执行。
+ */
+function migrateFilmHub(sqlite: Database.Database): void {
+  const episodeColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(episodes)').all() as { name: string }[]).map((row) => row.name),
+  )
+  const episodeFilmColumns: Record<string, string> = {
+    current_film_id: 'INTEGER',
+    mix_source_merge_id: 'INTEGER',
+    edit_project_id: 'INTEGER',
+  }
+  for (const [name, type] of Object.entries(episodeFilmColumns)) {
+    if (!episodeColumns.has(name)) sqlite.exec(`ALTER TABLE episodes ADD COLUMN ${name} ${type}`)
+  }
+
+  const mergeColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(video_merges)').all() as { name: string }[]).map((row) => row.name),
+  )
+  const mergeFilmColumns: Record<string, string> = {
+    origin: "TEXT DEFAULT 'legacy'",
+    source_merge_id: 'INTEGER',
+    export_id: 'INTEGER',
+    edit_revision_id: 'INTEGER',
+    mix_revision_id: 'INTEGER',
+    plan_hash: 'TEXT',
+    subtitle_burned: 'INTEGER DEFAULT 0',
+  }
+  for (const [name, type] of Object.entries(mergeFilmColumns)) {
+    if (!mergeColumns.has(name)) sqlite.exec(`ALTER TABLE video_merges ADD COLUMN ${name} ${type}`)
+  }
+  // 补列后重读一次，后续回填与索引判断以最终列集合为准
+  const finalMergeColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(video_merges)').all() as { name: string }[]).map((row) => row.name),
+  )
+
+  const mixColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(mix_revisions)').all() as { name: string }[]).map((row) => row.name),
+  )
+  if (!mixColumns.has('source_film_id')) sqlite.exec('ALTER TABLE mix_revisions ADD COLUMN source_film_id INTEGER')
+
+  const exportColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(episode_exports)').all() as { name: string }[]).map((row) => row.name),
+  )
+  const exportFilmColumns: Record<string, string> = {
+    source_merge_id: 'INTEGER',
+    film_id: 'INTEGER',
+    project_id: 'INTEGER',
+  }
+  for (const [name, type] of Object.entries(exportFilmColumns)) {
+    if (!exportColumns.has(name)) sqlite.exec(`ALTER TABLE episode_exports ADD COLUMN ${name} ${type}`)
+  }
+
+  for (const table of ['episode_edit_drafts', 'edit_revisions', 'edit_renders']) {
+    const columns = new Set(
+      (sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((row) => row.name),
+    )
+    if (!columns.has('project_id')) sqlite.exec(`ALTER TABLE ${table} ADD COLUMN project_id INTEGER`)
+  }
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS edit_projects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      episode_id INTEGER NOT NULL,
+      drama_id INTEGER NOT NULL,
+      source_merge_id INTEGER,
+      source_url TEXT,
+      source_fingerprint TEXT,
+      title TEXT NOT NULL,
+      status TEXT DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      deleted_at TEXT
+    )
+  `)
+
+  sqlite.exec(`
+    UPDATE video_merges SET kind = 'concat'
+    WHERE kind IS NULL OR kind IN ('comfyui', 'motion')
+  `)
+  sqlite.exec("UPDATE video_merges SET origin = 'legacy' WHERE origin IS NULL")
+
+  // 极旧库的 video_merges 可能还没有 episode_id/merged_url/deleted_at 列，按 URL 回填与索引需跳过
+  if (finalMergeColumns.has('episode_id') && finalMergeColumns.has('merged_url') && finalMergeColumns.has('deleted_at')) {
+    sqlite.exec(`
+      UPDATE episodes SET current_film_id = (
+        SELECT vm.id FROM video_merges vm
+        WHERE vm.episode_id = episodes.id
+          AND vm.merged_url = episodes.video_url
+          AND vm.status = 'completed'
+          AND vm.deleted_at IS NULL
+        ORDER BY vm.id DESC
+        LIMIT 1
+      )
+      WHERE current_film_id IS NULL
+        AND video_url IS NOT NULL AND video_url <> ''
+    `)
+  }
+
+  sqlite.exec(`
+    INSERT INTO edit_projects (episode_id, drama_id, source_merge_id, source_url, title, status, created_at, updated_at)
+    SELECT e.id, e.drama_id, NULL, e.video_url,
+           '第 ' || e.episode_number || ' 集（旧版剪辑）', 'active', e.updated_at, e.updated_at
+    FROM episodes e
+    WHERE (
+      EXISTS (SELECT 1 FROM episode_edit_drafts d WHERE d.episode_id = e.id)
+      OR EXISTS (SELECT 1 FROM edit_revisions r WHERE r.episode_id = e.id)
+      OR EXISTS (SELECT 1 FROM edit_renders x WHERE x.episode_id = e.id)
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM edit_projects p
+      WHERE p.episode_id = e.id AND p.source_merge_id IS NULL AND p.deleted_at IS NULL
+    )
+  `)
+
+  sqlite.exec(`
+    UPDATE episode_edit_drafts SET project_id = (
+      SELECT p.id FROM edit_projects p
+      WHERE p.episode_id = episode_edit_drafts.episode_id
+        AND p.source_merge_id IS NULL AND p.deleted_at IS NULL
+      LIMIT 1
+    ) WHERE project_id IS NULL
+  `)
+  sqlite.exec(`
+    UPDATE edit_revisions SET project_id = (
+      SELECT p.id FROM edit_projects p
+      WHERE p.episode_id = edit_revisions.episode_id
+        AND p.source_merge_id IS NULL AND p.deleted_at IS NULL
+      LIMIT 1
+    ) WHERE project_id IS NULL
+  `)
+  sqlite.exec(`
+    UPDATE edit_renders SET project_id = (
+      SELECT p.id FROM edit_projects p
+      WHERE p.episode_id = edit_renders.episode_id
+        AND p.source_merge_id IS NULL AND p.deleted_at IS NULL
+      LIMIT 1
+    ) WHERE project_id IS NULL
+  `)
+  sqlite.exec(`
+    UPDATE episodes SET edit_project_id = (
+      SELECT p.id FROM edit_projects p
+      WHERE p.episode_id = episodes.id
+        AND p.source_merge_id IS NULL AND p.deleted_at IS NULL
+      LIMIT 1
+    )
+    WHERE edit_project_id IS NULL AND edit_revision_id IS NOT NULL
+  `)
+  sqlite.exec(`
+    UPDATE episode_exports SET project_id = (
+      SELECT r.project_id FROM edit_revisions r WHERE r.id = episode_exports.edit_revision_id
+    )
+    WHERE project_id IS NULL AND edit_revision_id IS NOT NULL
+  `)
+
+  for (const name of [
+    'idx_edit_drafts_episode',
+    'idx_edit_revisions_no',
+    'idx_edit_revisions_current',
+    'idx_edit_renders_cache_key',
+  ]) {
+    sqlite.exec(`DROP INDEX IF EXISTS ${name}`)
+  }
+  sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_drafts_project ON episode_edit_drafts (project_id) WHERE project_id IS NOT NULL')
+  sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_revisions_project_no ON edit_revisions (project_id, revision_no) WHERE project_id IS NOT NULL')
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_edit_revisions_project_current ON edit_revisions (project_id, is_current) WHERE project_id IS NOT NULL')
+  sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_renders_project_cache ON edit_renders (project_id, kind, cache_key) WHERE project_id IS NOT NULL AND cache_key IS NOT NULL')
+  if (finalMergeColumns.has('export_id') && finalMergeColumns.has('deleted_at')) {
+    sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_films_export ON video_merges (export_id) WHERE export_id IS NOT NULL AND deleted_at IS NULL')
+  }
+  if (finalMergeColumns.has('episode_id')) {
+    sqlite.exec('CREATE INDEX IF NOT EXISTS idx_films_episode ON video_merges (episode_id, created_at)')
+  }
+  sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_projects_source ON edit_projects (episode_id, source_merge_id) WHERE source_merge_id IS NOT NULL AND deleted_at IS NULL')
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_edit_projects_legacy ON edit_projects (episode_id) WHERE source_merge_id IS NULL AND deleted_at IS NULL')
 }
 
 export function initSqliteSchema(sqlite: Database.Database) {
@@ -1273,6 +1447,9 @@ export function initSqliteSchema(sqlite: Database.Database) {
       SELECT 1 FROM edit_revisions WHERE edit_revisions.episode_id = episodes.id
     )
   `)
+
+  // ===== 成片中心迁移：补列、edit_projects、历史回填与索引重建 =====
+  migrateFilmHub(sqlite)
 
   // 小说故事坐标：旧库先加列再回填，避免被新库默认值 first 覆盖历史作品。
   const novelColumns = new Set((sqlite.prepare('PRAGMA table_info(novels)').all() as { name: string }[]).map((c) => c.name))

@@ -125,3 +125,43 @@ test('重复 ID、空源、过短片段与非法版本拒绝保存', () => {
     (error: unknown) => error instanceof EditPlanRejectedError && error.code === 'VERSION',
   )
 })
+
+test('字幕外观归一化：custom 接受、未知字体回退并警告、数值夹取', () => {
+  const plan = dirtyPlan()
+  plan.project.subtitleAppearance = {
+    fontFamily: 'NotAFont', fontSize: 500, color: 'red', strokeColor: '#000000',
+    strokeWidth: 99, backgroundColor: '#000000', backgroundOpacity: 200,
+    align: 'diagonal', xPct: -5, yPct: 150,
+  }
+  plan.subtitles.push({
+    id: 'cue_x', text: '测试', startMs: 0, endMs: 500, style: 'custom',
+    role: null, source: 'manual', follow: false, anchor: null, lineId: null,
+    warnings: [],
+    appearance: { ...plan.project.subtitleAppearance },
+  })
+  const { plan: normalized, issues } = normalizeEditPlan(plan, { episodeId: 7, project })
+  const appearance = normalized.project.subtitleAppearance
+  assert.equal(appearance.fontFamily, 'PingFang SC')
+  assert.equal(appearance.fontSize, 120)
+  assert.equal(appearance.color, '#FFFFFF')
+  assert.equal(appearance.strokeWidth, 8)
+  assert.equal(appearance.backgroundOpacity, 100)
+  assert.equal(appearance.align, 'center')
+  assert.equal(appearance.xPct, 0)
+  assert.equal(appearance.yPct, 100)
+  assert.ok(issues.some((i) => i.code === 'SUBTITLE_FONT' && i.severity === 'warning'))
+  assert.equal(normalized.subtitles[0].style, 'custom')
+  assert.equal(normalized.project.subtitleSafeAreaPct, 8)
+})
+
+test('旧计划（无 subtitleAppearance/appearance）归一化不报错且默认来自 defaultSubtitleStyle', () => {
+  const plan = dirtyPlan()
+  // 模拟旧计划：不携带 subtitleAppearance 与 cue.appearance
+  delete (plan.project as Record<string, unknown>).subtitleAppearance
+  delete (plan.project as Record<string, unknown>).subtitleSafeAreaPct
+  const { plan: normalized, issues } = normalizeEditPlan(plan, { episodeId: 7, project })
+  assert.equal(normalized.project.subtitleAppearance.fontSize, 48)
+  assert.equal(normalized.project.subtitleSafeAreaPct, 8)
+  assert.equal(normalized.subtitles[0].appearance, undefined)
+  assert.ok(!issues.some((i) => i.severity === 'error'))
+})

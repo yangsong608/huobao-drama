@@ -11,9 +11,11 @@
     </div>
     <EditWorkbench
       v-else-if="state"
+      :key="workbenchKey"
       :state="state"
       :episode-label="episodeLabel"
       @back="goBack"
+      @open-film="openFilm"
     />
   </div>
 </template>
@@ -44,6 +46,15 @@ const episodeLabel = computed(() => {
     : t('episode.topbar.episodeN', { n })
 })
 
+// ?film=<成片 id>：进入页面即打开该成片对应的剪辑工程
+const filmParam = computed(() => {
+  const raw = Number(route.query.film)
+  return Number.isSafeInteger(raw) && raw > 0 ? raw : 0
+})
+
+// 工程切换后整体重挂载工作台，useEditPlan 用新 state 重新初始化，避免旧草稿/历史残留。
+const workbenchKey = computed(() => `${state.value?.episode_id ?? 0}:${state.value?.project?.id ?? 0}`)
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -54,7 +65,12 @@ async function load() {
     )
     if (!found) throw new Error(t('edit.episodeNotFound'))
     episode.value = found
-    state.value = await editAPI.get(found.id)
+    let projectId
+    if (filmParam.value) {
+      const opened = await editAPI.openProject(found.id, filmParam.value)
+      projectId = opened?.data?.project?.id ?? opened?.project?.id
+    }
+    state.value = await editAPI.get(found.id, projectId)
   } catch (cause) {
     state.value = null
     error.value = cause instanceof Error ? cause.message : t('edit.loadFailed')
@@ -62,6 +78,12 @@ async function load() {
     loading.value = false
   }
 }
+
+function openFilm(filmId) {
+  navigateTo({ query: { ...route.query, film: String(filmId) } })
+}
+
+watch(filmParam, () => { if (!loading.value) load() })
 
 function goBack() {
   navigateTo(`/drama/${dramaId}/episode/${episodeNumber}`)

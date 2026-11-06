@@ -28,7 +28,7 @@ test('export session polls 1.5s while a record is pending or running', () => {
   assert.match(session, /POLL_INTERVAL_MS = 1500/)
   assert.match(session, /record\.status === 'pending'/)
   assert.match(session, /record\.status === 'running'/)
-  assert.match(session, /async function start\(kind: ExportKind\)/)
+  assert.match(session, /async function start\(kind: ExportKind, overrides: \{/)
   assert.match(session, /async function retry/)
   assert.match(session, /async function cancel/)
   assert.match(session, /async function setCurrent/)

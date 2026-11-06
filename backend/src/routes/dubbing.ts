@@ -8,11 +8,12 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { badRequest, notFound, success } from '../utils/response.js'
-import { now } from '../utils/response.js'
 import { db, schema } from '../db/index.js'
 import { renderMotionPost } from '../services/motion-post.js'
 import { eq } from 'drizzle-orm'
 import { isDubbingEnabled, setDubbingEnabled } from '../services/app-settings.js'
+import { setCurrentFilm } from '../services/film-hub.js'
+import { handleFilmError } from './films.js'
 import {
   getDubbingState,
   isDubbing,
@@ -134,21 +135,19 @@ app.post('/episodes/:id/motion-post', async (c) => {
   }
 })
 
-/** POST /episodes/:id/video-version — 回滚到某个成片版本（M4-5） */
+/** POST /episodes/:id/video-version — 切换当前成片版本（成片中心指针） */
 app.post('/episodes/:id/video-version', async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   const body = await c.req.json().catch(() => ({}))
-  const mergeId = parseId(String(body.merge_id ?? ''))
-  if (!mergeId) return badRequest(c, 'merge_id 必填')
-  const row = db.select().from(schema.videoMerges).where(eq(schema.videoMerges.id, mergeId)).get()
-  if (!row || !row.mergedUrl) return notFound(c, '该版本不存在或没有成片')
-  if (row.episodeId !== episodeId) return badRequest(c, '版本不属于该集')
-  db.update(schema.episodes)
-    .set({ videoUrl: row.mergedUrl, subtitleUrl: row.subtitleUrl ?? null, updatedAt: now() })
-    .where(eq(schema.episodes.id, episodeId))
-    .run()
-  return success(c, { video_url: row.mergedUrl, kind: row.kind || 'concat' })
+  const filmId = Number(body.merge_id ?? body.mergeId)
+  if (!Number.isSafeInteger(filmId) || filmId <= 0) return badRequest(c, '成片编号无效')
+  try {
+    const result = setCurrentFilm(episodeId, filmId)
+    return success(c, result)
+  } catch (error) {
+    return handleFilmError(c, error)
+  }
 })
 
 /** GET /dubbing/status — 开关状态，前端据此显示入口 */

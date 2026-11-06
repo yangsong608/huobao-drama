@@ -132,6 +132,39 @@ test('哈希：稳定、忽略非渲染元数据、字幕只进 plan/subtitle', 
   assert.notEqual(planHashOf(subtitled), planHashOf(plan))
   assert.notEqual(subtitleHashOf(subtitled), subtitleHashOf(plan))
   assert.equal(renderHashOf(subtitled), renderHashOf(plan))
+
+  // cue 外观修改必须改变 plan/subtitle 哈希（Task 15 裁决：外观参与哈希）
+  const styled = basePlan()
+  styled.subtitles = [{
+    ...cue,
+    appearance: {
+      fontFamily: 'Arial', fontSize: 42, color: '#ff0000', strokeColor: '#000000',
+      strokeWidth: 2, backgroundColor: '#000000', backgroundOpacity: 0.5,
+      align: 'center', xPct: 50, yPct: 80,
+    },
+  }]
+  assert.notEqual(planHashOf(styled), planHashOf(subtitled), '外观变化应改变 planHash')
+  assert.notEqual(subtitleHashOf(styled), subtitleHashOf(subtitled), '外观变化应改变 subtitleHash')
+})
+
+test('哈希：cue 外观字段参与字幕哈希', () => {
+  const cue: EditSubtitleCue = {
+    id: 'cue_1', text: '你好', startMs: 0, endMs: 1000,
+    style: 'default', source: 'manual', follow: false,
+  }
+  const plain = basePlan()
+  plain.subtitles = [cue]
+  const styled = basePlan()
+  styled.subtitles = [{
+    ...cue,
+    appearance: {
+      fontFamily: 'PingFang SC', fontSize: 44, color: '#ffffff', strokeColor: '#000000',
+      strokeWidth: 1, backgroundColor: null, backgroundOpacity: 0,
+      align: 'center', xPct: 50, yPct: 85,
+    },
+  }]
+  assert.notEqual(planHashOf(plain), planHashOf(styled))
+  assert.notEqual(subtitleHashOf(plain), subtitleHashOf(styled))
 })
 
 test('哈希：淡入淡出只影响 renderHash，不影响 editSyncHash', () => {

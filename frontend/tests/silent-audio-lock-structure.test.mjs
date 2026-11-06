@@ -14,9 +14,9 @@ test('剧集静音模式锁定原声选项并强制 mute', () => {
   assert.match(session, /if \(originalAudioLocked\.value\) originalAudio\.value = 'mute'/)
 })
 
-test('配音混音面板在静音模式禁用原声与压低强度', () => {
-  assert.match(stage, /:disabled="originalAudioLocked"/)
-  assert.match(stage, /workbench\.originalAudioSilentLocked/)
+test('Task 11 移除旧混音卡后，静音锁定不再出现在配音工作台（设置收口到整集设置/导出对话框）', () => {
+  assert.doesNotMatch(stage, /:disabled="originalAudioLocked"/)
+  assert.doesNotMatch(stage, /workbench\.originalAudioSilentLocked/)
 })
 
 test('四语言提供静音锁定提示', () => {

@@ -14,29 +14,16 @@
         <span v-if="separationRunning" class="mx-chip is-accent">{{ t('mix.separating') }}</span>
         <span v-else-if="separation?.engine === 'basic'" class="mx-chip is-warning">{{ t('mix.engineBasic') }}</span>
         <span v-if="soundscapeRunning" class="mx-chip is-accent">{{ t('mix.soundscape.running') }}</span>
+        <button class="mx-source-pill" type="button" :disabled="!episodeId" @click="sourcePickerOpen = true">
+          {{ t('mix.sourcePicker.label') }}：{{ t(`films.kind.${sourceFilm?.kind || 'concat'}`) }}
+          <ChevronDown :size="11" />
+        </button>
       </div>
       <div class="mx-top-actions">
         <template v-if="$slots.actions">
           <slot name="actions" />
           <span class="mx-divider" />
         </template>
-        <button class="mx-btn" :class="{ 'is-primary': !hasAssets }" type="button" :disabled="!episodeId || separationRunning || soundscapeRunning || loading" @click="requestSeparate(false)">
-          <AudioWaveform :size="12" />
-          {{ hasAssets ? t('mix.reseparate') : t('mix.separate') }}
-        </button>
-        <button v-if="separationRunning" class="mx-btn is-plain" type="button" @click="onCancelSeparation">{{ t('mix.separationCancel') }}</button>
-        <button
-          class="mx-btn"
-          :class="{ 'is-primary': hasAssets && !soundscapeRunning }"
-          type="button"
-          :disabled="!canGenerateSound || separationRunning || soundscapeRunning || loading"
-          :title="canGenerateSound ? t('mix.soundscape.entryHint') : t('mix.soundscape.needMerge')"
-          @click="openSoundscape"
-        >
-          <Sparkles :size="12" />
-          {{ t('mix.soundscape.entry') }}
-        </button>
-        <button v-if="soundscapeRunning" class="mx-btn is-plain" type="button" @click="onCancelSoundscape">{{ t('mix.soundscape.cancel') }}</button>
         <span class="mx-divider" />
         <button class="mx-icon" type="button" :title="t('mix.undo')" :disabled="!canUndo || soundscapeRunning" @click="undo"><Undo2 :size="13" /></button>
         <button class="mx-icon" type="button" :title="t('mix.redo')" :disabled="!canRedo || soundscapeRunning" @click="redo"><Redo2 :size="13" /></button>
@@ -106,9 +93,15 @@
     <div v-if="soundscapeRunning" class="mx-progress">
       <div class="mx-progress-bar"><span :style="{ width: `${soundscapeStatus?.progress || 0}%` }" /></div>
       <span class="mx-progress-text">{{ soundscapeStatus?.step || t('mix.soundscape.preparing') }} · {{ soundscapeStatus?.progress || 0 }}%</span>
+      <button class="mx-btn is-plain" type="button" @click="onCancelSoundscape">{{ t('mix.soundscape.cancel') }}</button>
     </div>
 
     <p v-if="error" class="mx-error">{{ error }}</p>
+    <p v-for="warning in sourceWarnings" :key="warning.code" class="mx-source-warning">
+      {{ warning.code === 'MIX_SOURCE_NON_CONCAT'
+        ? t('mix.sourceWarnings.nonConcat')
+        : warning.message }}
+    </p>
 
     <div v-if="videoUrl" class="mx-monitor">
       <div class="mx-monitor-stage">
@@ -275,6 +268,37 @@
         <template v-if="$slots.settings" #settings>
           <slot name="settings" />
         </template>
+        <template #episode-settings>
+          <MixEpisodeSettings
+            class="mx-ins-settings"
+            :source="sourceFilm"
+            :warnings="sourceWarnings"
+            :tracks="tracks"
+            :soundscape-running="soundscapeRunning"
+            :can-generate-sound="canGenerateSound"
+            :duration-ms="totalDuration"
+            :separation="separation"
+            :has-any-audio="hasAnyAudio"
+            @change-source="sourcePickerOpen = true"
+            @toggle-role="setRoleMuted"
+            @set-role-volume="setRoleVolume"
+            @generate-sound="openSoundscape"
+            @withdraw-sound="onCancelSoundscape"
+            @open-export="exportOpen = true"
+          />
+        </template>
+        <template #stem-library>
+          <MixStemLibrary
+            :separation="separation"
+            :assets="assets"
+            :busy="separationRunning || soundscapeRunning"
+            @separate="requestSeparate"
+            @cancel-separation="onCancelSeparation"
+            @insert-asset="insertAsset"
+            @remove-asset="requestRemoveAsset"
+            @preview-asset="previewAsset"
+          />
+        </template>
       </MixClipInspector>
     </div>
 
@@ -374,6 +398,23 @@
       @preview="onSoundscapePreview"
       @start="onSoundscapeStart"
     />
+
+    <FilmPicker
+      v-model:show="sourcePickerOpen"
+      :episode-id="episodeId"
+      :model-value="sourceFilm?.filmId ?? null"
+      mode="mix"
+      @select="onSelectSourceFilm"
+    />
+    <MixExportDialog
+      :open="exportOpen"
+      :source="sourceFilm"
+      :episode-number="episodeNumber"
+      :default-preset="defaultExportPreset"
+      :active="activeExport"
+      @close="exportOpen = false"
+      @start="startMixExport"
+    />
   </section>
 </template>
 
@@ -384,6 +425,7 @@ import { toast } from 'vue-sonner'
 import {
   AudioLines,
   AudioWaveform,
+  ChevronDown,
   Film,
   Loader2,
   Magnet,
@@ -405,6 +447,8 @@ import {
 } from 'lucide-vue-next'
 import type {
   EpisodeAudioAsset,
+  ExportKind,
+  ExportSubtitleMode,
   MixBus,
   MixBusKey,
   MixClip,
@@ -413,13 +457,18 @@ import type {
   SoundscapeRequest,
   TimelineCue,
 } from '~/composables/useApi'
+import { useExportSession } from '~/composables/useExportSession'
 import { useMixPlayback } from '~/composables/useMixPlayback'
 import { useMixStage, type StageClip, type StageTrack } from '~/composables/useMixStage'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
 import AppMenu from '~/components/AppMenu.vue'
 import AppMenuItem from '~/components/AppMenuItem.vue'
+import FilmPicker from '~/components/FilmPicker.vue'
 import MixClipInspector from '~/components/MixClipInspector.vue'
+import MixEpisodeSettings from '~/components/MixEpisodeSettings.vue'
+import MixExportDialog from '~/components/MixExportDialog.vue'
 import MixSoundscapeDialog from '~/components/MixSoundscapeDialog.vue'
+import MixStemLibrary from '~/components/MixStemLibrary.vue'
 import MixTimeline from '~/components/MixTimeline.vue'
 import MixTrackHead from '~/components/MixTrackHead.vue'
 import SubtitlePreview from '~/components/SubtitlePreview.vue'
@@ -432,6 +481,9 @@ const props = defineProps<{
   lineNumbers?: Record<number, number>
   videoUrl?: string | null
   cues?: TimelineCue[]
+  /** 导出对话框默认标题与预设需要 */
+  episodeNumber?: number
+  dramaAspect?: string
 }>()
 
 const emit = defineEmits<{
@@ -474,6 +526,9 @@ const {
   canUndo,
   canRedo,
   durationMs: planDuration,
+  sourceFilm,
+  sourceWarnings,
+  selectSourceFilm,
   load,
   refreshPlan,
   retimeLine,
@@ -538,6 +593,8 @@ const inspectorOpen = ref(readInspectorPreference())
 const soundscapeOpen = ref(false)
 const soundscapePreviewing = ref(false)
 const soundscapeError = ref('')
+const sourcePickerOpen = ref(false)
+const exportOpen = ref(false)
 
 const playback = useMixPlayback({
   tracks: () => tracks.value,
@@ -575,6 +632,14 @@ const currentCueText = computed(() => {
 const hasAssets = computed(() => assets.value.length > 0)
 const canGenerateSound = computed(() => Boolean(props.episodeId && props.durationMs > 0))
 const hasAnyAudio = computed(() => tracks.value.some(track => track.clips.length > 0))
+
+/** 源成片快照与警告由 useMixStage 统一维护（GET /mix · PUT /mix/source，Task 8/11） */
+
+/** 导出会话：导出对话框用 active 展示进行中的任务 */
+const exportSession = useExportSession({ episodeId: () => props.episodeId })
+const { active: activeExport } = exportSession
+const defaultExportPreset = computed(() => props.dramaAspect === '9:16' ? 'vertical-hd' : 'horizontal-hd')
+
 const showEmpty = computed(() => !hasAnyAudio.value && !tracks.value.some(track => !track.virtual))
 const selection = computed(() => {
   if (!selectedClip.value || !selectedTrack.value) return null
@@ -679,7 +744,10 @@ watch(() => props.episodeId, (id, previous) => {
   activeTrackUid.value = null
   rangeStartMs.value = 0
   rangeEndMs.value = 0
-  if (id) void load()
+  if (id) {
+    void load()
+    void exportSession.refresh()
+  }
 }, { immediate: true })
 
 watch(videoUrl, () => {
@@ -755,6 +823,7 @@ onBeforeUnmount(() => {
   }
   pausePreview()
   playback.dispose()
+  exportSession.dispose()
   dispose()
 })
 onBeforeUnmount(() => emit('soundscape-busy', false))
@@ -1011,6 +1080,32 @@ function toggleSelectedTrackMute() {
   const track = selectedTrack.value ?? activeTrack.value
   if (track) updateTrack(track, { muted: !track.muted })
 }
+
+// 方案板虚拟轨（原声 / 配音对白 / 背景音乐）
+const VIRTUAL_ROLE_TRACKS = ['voice', 'original', 'bgm']
+
+function setRoleMuted(role: string, muted: boolean) {
+  const track = tracks.value.find((item) => item.role === role)
+  if (!track) return
+  if (role === 'voice' || role === 'bgm') {
+    const source = sourceFilm.value
+    if (source && source.kind !== 'concat' && !muted) {
+      const ok = window.confirm(t('mix.episode.enableNonConcatConfirm'))
+      if (!ok) return
+    }
+  }
+  beginChange()
+  track.muted = muted
+  endChange()
+}
+
+function setRoleVolume(role: string, volume: number) {
+  const track = tracks.value.find((item) => item.role === role)
+  if (!track) return
+  beginChange()
+  track.volume = Math.max(0, Math.min(1, volume))
+  endChange()
+}
 function toggleSnap() {
   snap.value = !snap.value
 }
@@ -1098,6 +1193,16 @@ function insertAsset(asset: EpisodeAudioAsset) {
   }
 }
 
+/** 素材库试听：临时 Audio 元素播放，不占用监听总线 */
+function previewAsset(asset: EpisodeAudioAsset) {
+  if (!asset.url) {
+    toast.error(t('mix.assetNoUrl'))
+    return
+  }
+  const url = /^(https?:|blob:|data:|\/)/i.test(asset.url) ? asset.url : `/${asset.url}`
+  const audio = new Audio(url)
+  audio.play().catch(() => toast.error(t('mix.previewFailed')))
+}
 function pauseTransport() {
   previewToken += 1
   videoPreview.value?.pause()
@@ -1298,6 +1403,33 @@ async function onCancelSoundscape() {
     toast.error(err?.message || t('mix.soundscape.cancelFailed'))
   }
 }
+async function onSelectSourceFilm(film: { id: number }) {
+  try {
+    await selectSourceFilm(film.id)
+    toast.success(t('mix.sourcePicker.change'))
+  } catch (err: any) {
+    toast.error(err?.message || t('mix.actionFailed'))
+  }
+}
+
+async function startMixExport(payload: {
+  kind: ExportKind; preset: string; subtitleMode: ExportSubtitleMode; title: string; setCurrent: boolean
+}) {
+  const record = await exportSession.start(payload.kind, {
+    preset: payload.preset,
+    subtitleMode: payload.subtitleMode,
+    sourceFilmId: sourceFilm.value?.filmId ?? null,
+    title: payload.title,
+    setCurrent: payload.setCurrent,
+  })
+  if (!record) {
+    toast.error(exportSession.error.value || t('mix.actionFailed'))
+    return
+  }
+  toast.success(t('mix.export.started'))
+  exportOpen.value = false
+}
+
 async function onSaveRevision() {
   try {
     const revision = await saveRevision()
@@ -1489,6 +1621,10 @@ defineExpose({ seekTo, pause, play: togglePlay })
 .mx-progress-bar span { display: block; height: 100%; background: var(--accent); transition: width .2s ease; }
 .mx-progress-text { font-size: 9px; color: var(--accent-text); white-space: nowrap; }
 .mx-error { margin: 0; padding: 5px 10px; border-bottom: 1px solid var(--border); background: var(--action-danger-bg); font-size: 10px; color: var(--action-danger); }
+.mx-source-warning { margin: 0; padding: 5px 10px; border-bottom: 1px solid var(--border); background: var(--warning-bg); font-size: 10px; line-height: 1.5; color: var(--warning); }
+.mx-source-pill { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border: 1px solid var(--accent-glow); border-radius: 999px; background: var(--accent-bg); color: var(--accent-text); font: inherit; font-size: 9.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.mx-source-pill:hover { filter: brightness(1.08); }
+.mx-source-pill:disabled { opacity: .5; cursor: default; }
 .mx-monitor { flex: none; display: flex; align-items: stretch; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--bg-0); }
 .mx-monitor-stage { flex: none; width: 264px; }
 .mx-monitor-stage :deep(.sub-stage) { max-height: 148px; aspect-ratio: 16 / 9; }

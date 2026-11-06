@@ -12,9 +12,14 @@ import { and, asc, eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { getAbsolutePath } from '../utils/storage.js'
-import { hasAudioStream, probeDurationMs } from './audio-mix.js'
+import { probeDurationMs } from './audio-mix.js'
 import { normalizeVideoAudioMode } from './video-audio.js'
 import type { previewTimeline } from './dubbing.js'
+import {
+  resolveMixSource,
+  type MixPlanSource,
+  type MixSourceWarning,
+} from './mix-source.js'
 
 export const MIX_BUS_KEYS = ['dialogue', 'original', 'sfx', 'bgm', 'master'] as const
 export type MixBusKey = typeof MIX_BUS_KEYS[number]
@@ -135,6 +140,7 @@ export interface MixPlan {
   buses: MixBus[]
   tracks: MixTrack[]
   master: { lufs: number; truePeak: number; limiter: string }
+  source?: MixPlanSource
 }
 
 type BusRow = typeof schema.audioBuses.$inferSelect
@@ -338,29 +344,6 @@ async function readableDurationMs(url: string, fallbackMs = 0): Promise<number> 
   }
 }
 
-/** 最近一次非混音合片作为原声总床来源；文件不可读时返回 null */
-async function latestMergeBed(episodeId: number): Promise<{ url: string; durationMs: number } | null> {
-  const rows = db.select().from(schema.videoMerges)
-    .where(eq(schema.videoMerges.episodeId, episodeId))
-    .all()
-    .filter((row) => row.status === 'completed' && row.mergedUrl && !row.deletedAt && row.kind !== 'mix')
-    .sort((a, b) => (b.id || 0) - (a.id || 0))
-  for (const row of rows) {
-    const url = row.mergedUrl!
-    const durationMs = await readableDurationMs(url, Math.max(0, Math.round((row.duration || 0) * 1000)))
-    if (durationMs <= 0) continue
-    // 无音轨合片不能当原声床，否则混音会因 [1:a] 匹配不到流而整体失败
-    let hasAudio = false
-    try {
-      hasAudio = await hasAudioStream(getAbsolutePath(url))
-    } catch {
-      hasAudio = false
-    }
-    if (hasAudio) return { url, durationMs }
-  }
-  return null
-}
-
 function buildVirtualBedTrack(bed: { url: string; durationMs: number }): MixTrack {
   const source = clipSource(bed.url)
   return {
@@ -462,10 +445,16 @@ async function buildVirtualBgmTrack(
   }
 }
 
-/** 从数据库编译当前集的 MixPlan；不落库 */
-export async function compileMixPlan(episodeId: number, dramaId: number): Promise<MixPlan> {
+/** 从数据库编译当前集的 MixPlan；不落库。源感知：原声床/时长/静音策略由解析出的源成片决定 */
+export async function compileMixPlanDetailed(
+  episodeId: number,
+  dramaId: number,
+  options: { sourceFilmId?: number | null } = {},
+): Promise<{ plan: MixPlan; source: MixPlanSource; warnings: MixSourceWarning[] }> {
   const episode = requireEpisode(episodeId)
   const drama = db.select().from(schema.dramas).where(eq(schema.dramas.id, dramaId)).get()
+  const resolved = await resolveMixSource(episodeId, options.sourceFilmId)
+  const source = resolved.source
   const busRows = ensureDefaultBuses(episodeId)
   const buses: MixBus[] = busRows.map((row) => ({
     id: row.id,
@@ -540,8 +529,10 @@ export async function compileMixPlan(episodeId: number, dramaId: number): Promis
   ))
   // 无声集必须在混音层再次静音原声，避免旧合片把原声带回成片
   const silentEpisode = normalizeVideoAudioMode(episode.videoAudioMode) === 'silent'
-  const bed = hasOriginalUserTrack || silentEpisode ? null : await latestMergeBed(episodeId)
-  const targetDurationMs = Math.max(0, timeline.totalDurationMs, dbClipEnd, bed?.durationMs || 0)
+  const bed = hasOriginalUserTrack || silentEpisode || !source.hasAudio
+    ? null
+    : { url: source.url, durationMs: source.durationMs }
+  const targetDurationMs = Math.max(0, source.durationMs, timeline.totalDurationMs, dbClipEnd)
   const excludedCrowdLineIds = soundscapeCrowdLineIds(episodeId)
   const virtualTracks: MixTrack[] = [
     buildVirtualDialogueTrack(episodeId, timeline, excludedCrowdLineIds),
@@ -550,6 +541,12 @@ export async function compileMixPlan(episodeId: number, dramaId: number): Promis
   if (!hasBgmUserTrack) {
     const bgmTrack = await buildVirtualBgmTrack(episode, drama, targetDurationMs)
     if (bgmTrack) virtualTracks.push(bgmTrack)
+  }
+  // 非拼接成片已含配音/配乐：默认关闭虚拟对白与 BGM，用户显式覆盖才开启
+  if (source.kind !== 'concat') {
+    for (const track of virtualTracks) {
+      if (track.role === 'voice' || track.role === 'bgm') track.muted = true
+    }
   }
   applyVirtualOverrides(virtualTracks, readVirtualOverrides(episode.mixVirtualTracks))
   tracks.unshift(...virtualTracks)
@@ -582,22 +579,35 @@ export async function compileMixPlan(episodeId: number, dramaId: number): Promis
     (max, track) => track.clips.reduce((inner, clip) => Math.max(inner, clip.endMs), max),
     0,
   )
-  const durationMs = Math.max(0, timeline.totalDurationMs, clipEnd)
+  const durationMs = Math.max(0, source.durationMs, timeline.totalDurationMs, clipEnd)
   const master = busByKey.get('master')!
 
   return {
-    version: 1,
-    episodeId: episode.id,
-    durationMs,
-    sampleRate: 48000,
-    buses,
-    tracks,
-    master: {
-      lufs: master.lufsTarget ?? -16,
-      truePeak: master.limiterCeiling ?? -1.5,
-      limiter: 'alimiter',
+    plan: {
+      version: 1,
+      episodeId: episode.id,
+      durationMs,
+      sampleRate: 48000,
+      buses,
+      tracks,
+      master: {
+        lufs: master.lufsTarget ?? -16,
+        truePeak: master.limiterCeiling ?? -1.5,
+        limiter: 'alimiter',
+      },
+      source,
     },
+    source,
+    warnings: resolved.warnings,
   }
+}
+
+export async function compileMixPlan(
+  episodeId: number,
+  dramaId: number,
+  options: { sourceFilmId?: number | null } = {},
+): Promise<MixPlan> {
+  return (await compileMixPlanDetailed(episodeId, dramaId, options)).plan
 }
 
 function canonicalize(value: unknown): unknown {
@@ -993,6 +1003,7 @@ export async function createMixRevision(episodeId: number, note?: string): Promi
       planHash: hashMixPlan(plan),
       note: note ? String(note).slice(0, 500) : null,
       isCurrent: true,
+      sourceFilmId: plan.source?.filmId ?? null,
       createdAt: now(),
     }).returning().get()
     tx.update(schema.episodes).set({ mixRevisionId: inserted.id })
@@ -1132,7 +1143,12 @@ export function restoreMixRevision(episodeId: number, revisionId: number): { rev
     tx.update(schema.mixRevisions).set({ isCurrent: true })
       .where(eq(schema.mixRevisions.id, revisionId))
       .run()
-    tx.update(schema.episodes).set({ mixRevisionId: revisionId, mixVirtualTracks: virtualOverridesJson, updatedAt: now() })
+    tx.update(schema.episodes).set({
+      mixRevisionId: revisionId,
+      mixVirtualTracks: virtualOverridesJson,
+      ...(row.sourceFilmId ? { mixSourceMergeId: row.sourceFilmId } : {}),
+      updatedAt: now(),
+    })
       .where(eq(schema.episodes.id, episodeId))
       .run()
   })

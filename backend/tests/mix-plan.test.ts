@@ -135,6 +135,11 @@ test('空轨道也生成默认总线与虚拟对白轨', async () => {
   assert.deepEqual(created.map((bus) => bus.key), ['dialogue', 'original', 'sfx', 'bgm', 'master'])
   const again = ensureDefaultBuses(emptyEpisode.id)
   assert.deepEqual(again.map((bus) => bus.id), created.map((bus) => bus.id))
+  db.insert(schema.videoMerges).values({
+    episodeId: emptyEpisode.id, dramaId: 1, title: '空集成片', provider: 'ffmpeg', model: 'test',
+    status: 'completed', kind: 'concat', origin: 'concat', mergedUrl: shotUrl, duration: 2,
+    createdAt: ts, completedAt: ts,
+  }).run()
 
   const plan = await compileMixPlan(emptyEpisode.id, 1)
   assert.equal(plan.buses.length, 5)
@@ -504,6 +509,11 @@ test('保存混音计划保留生成轨 origin 与片段引用，新轨无法伪
   const [saveEpisode] = db.insert(schema.episodes).values({
     dramaId: 1, episodeNumber: 7, title: '第7集', createdAt: ts, updatedAt: ts,
   }).returning().all()
+  db.insert(schema.videoMerges).values({
+    episodeId: saveEpisode.id, dramaId: 1, title: '保存集成片', provider: 'ffmpeg', model: 'test',
+    status: 'completed', kind: 'concat', origin: 'concat', mergedUrl: shotUrl, duration: 2,
+    createdAt: ts, completedAt: ts,
+  }).run()
   const asset = db.insert(schema.episodeAudioAssets).values({
     episodeId: saveEpisode.id, dramaId: 1, kind: 'soundscape', status: 'ready',
     sourceHash: 'a'.repeat(64), url: toneUrl, durationMs: 1000,

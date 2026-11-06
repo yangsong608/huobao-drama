@@ -19,7 +19,25 @@ export type EditAspect = '9:16' | '16:9' | '1:1'
 export type EditFit = 'fill' | 'fit'
 export type EditFilterPreset =
   | 'none' | 'clear' | 'warm' | 'cool' | 'cinematic' | 'mono' | 'vintage'
-export type EditSubtitleStyle = 'default' | 'outline' | 'box'
+export type EditSubtitleStyle = 'default' | 'outline' | 'box' | 'custom'
+
+export interface EditSubtitleAppearance {
+  fontFamily: string
+  fontSize: number
+  color: string
+  strokeColor: string
+  strokeWidth: number
+  backgroundColor: string | null
+  backgroundOpacity: number
+  align: 'left' | 'center' | 'right'
+  xPct: number
+  yPct: number
+}
+
+export const SUBTITLE_FONT_WHITELIST = [
+  'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
+  'Source Han Sans SC', 'SimHei', 'KaiTi', 'Songti SC', 'Arial', 'Georgia',
+] as const
 export type EditTransitionType = 'dissolve' | 'white' | 'push-left' | 'blur'
 export type EditSourceKind =
   | 'storyboard'
@@ -40,6 +58,8 @@ export interface EditProjectSettings {
   defaultSubtitleStyle: EditSubtitleStyle
   defaultExportPreset: string
   tailGapMs: number
+  subtitleAppearance: EditSubtitleAppearance
+  subtitleSafeAreaPct: number
 }
 
 export interface EditClipSource {
@@ -106,6 +126,7 @@ export interface EditSubtitleCue {
   anchor?: { clipId: string; offsetMs: number } | null
   lineId?: number | null
   warnings?: string[]
+  appearance?: EditSubtitleAppearance
 }
 
 export interface EditTextStyle {
@@ -157,6 +178,17 @@ export interface EditLayout {
   transitions: { id: string; fromClipId: string; toClipId: string; overlapMs: number }[]
 }
 
+/**
+ * state.audio（设计 §6.9）：
+ * - mix：mix_status aligned 且存在最新 kind='mix' completed 成片（url=混音成片，WebAudio 主时钟）
+ * - video：混音不可用但单片段源成片有原声（reference_only = mix_status stale，视频即时钟）
+ * - none：两者皆无，静音预览
+ */
+export type EditAudioState =
+  | { mode: 'mix'; url: string; reference_only: false; duration_ms?: number }
+  | { mode: 'video'; url?: string; reference_only: boolean; duration_ms?: number }
+  | { mode: 'none'; reference_only: false }
+
 export interface EditPlanV1 {
   version: typeof EDIT_PLAN_VERSION
   episodeId: number
@@ -191,6 +223,27 @@ export function minimumClipMs(fps: number): number {
   return Math.ceil((MIN_CLIP_FRAMES * 1000) / Math.max(1, fps))
 }
 
+/** 预设默认外观（设计 6.6 默认值表） */
+export function subtitleAppearanceForPreset(style: EditSubtitleStyle): EditSubtitleAppearance {
+  const base: EditSubtitleAppearance = {
+    fontFamily: 'PingFang SC',
+    fontSize: 48,
+    color: '#FFFFFF',
+    strokeColor: '#000000',
+    strokeWidth: 2,
+    backgroundColor: null,
+    backgroundOpacity: 0,
+    align: 'center',
+    xPct: 50,
+    yPct: 85,
+  }
+  if (style === 'outline') return { ...base, strokeWidth: 4 }
+  if (style === 'box') {
+    return { ...base, fontSize: 46, strokeWidth: 0, backgroundColor: '#000000', backgroundOpacity: 60 }
+  }
+  return base
+}
+
 export function projectSettingsForAspect(aspect: EditAspect, fps = 30): EditProjectSettings {
   const width = aspect === '16:9' ? 1920 : 1080
   const height = aspect === '16:9' ? 1080 : aspect === '9:16' ? 1920 : 1080
@@ -209,6 +262,8 @@ export function projectSettingsForAspect(aspect: EditAspect, fps = 30): EditProj
         ? 'edit-horizontal-hd'
         : 'edit-source',
     tailGapMs: 0,
+    subtitleAppearance: subtitleAppearanceForPreset('default'),
+    subtitleSafeAreaPct: 8,
   }
 }
 
@@ -506,6 +561,7 @@ function subtitleRows(plan: EditPlanV1) {
       startMs: cue.startMs,
       endMs: cue.endMs,
       style: cue.style,
+      appearance: cue.appearance ?? null,
       role: cue.role ?? null,
       source: cue.source,
       follow: cue.follow,

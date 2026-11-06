@@ -7,6 +7,27 @@ export const MAX_GAP_MS = 300_000
 export type EditAspect = '9:16' | '16:9' | '1:1'
 export type EditSourceKind = 'storyboard' | 'take' | 'asset' | 'merge' | 'episode-video' | 'import'
 
+// 与 backend/src/services/edit-plan.ts 的 EditSubtitleStyle / EditSubtitleAppearance 同构
+export type EditSubtitleStyle = 'default' | 'outline' | 'box' | 'custom'
+
+export interface EditSubtitleAppearance {
+  fontFamily: string
+  fontSize: number
+  color: string
+  strokeColor: string
+  strokeWidth: number
+  backgroundColor: string | null
+  backgroundOpacity: number
+  align: 'left' | 'center' | 'right'
+  xPct: number
+  yPct: number
+}
+
+export const SUBTITLE_FONT_WHITELIST = [
+  'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
+  'Source Han Sans SC', 'SimHei', 'KaiTi', 'Songti SC', 'Arial', 'Georgia',
+] as const
+
 export interface EditProjectSettings {
   aspect: EditAspect
   width: number
@@ -15,9 +36,11 @@ export interface EditProjectSettings {
   background: 'black' | 'blur'
   defaultFit: 'fill' | 'fit'
   defaultTransition: 'cut' | 'dissolve'
-  defaultSubtitleStyle: 'default' | 'outline' | 'box'
+  defaultSubtitleStyle: EditSubtitleStyle
   defaultExportPreset: string
   tailGapMs: number
+  subtitleAppearance: EditSubtitleAppearance
+  subtitleSafeAreaPct: number
 }
 
 export interface EditClipSource {
@@ -72,11 +95,14 @@ export interface EditSubtitleCue {
   text: string
   startMs: number
   endMs: number
-  style: string
+  style: EditSubtitleStyle
   follow: boolean
   anchor?: { clipId: string; offsetMs: number } | null
   source: string
   role?: string | null
+  lineId?: number | null
+  warnings?: string[]
+  appearance?: EditSubtitleAppearance
 }
 
 export interface EditOverlay {
@@ -272,9 +298,11 @@ export interface EditWorkspaceState {
     summary: unknown
   }
   renders: { cut: unknown; audio_ref: unknown }
+  // 与 backend/src/services/edit-plan.ts 的 EditAudioState 同构（§6.9）
   audio: {
-    mode: 'video' | 'none'
+    mode: 'mix' | 'video' | 'none'
     url?: string
+    reference_only: boolean
     duration_ms?: number
   }
   media_warnings: EditIssue[]
@@ -304,4 +332,78 @@ export function mediaUrl(raw: string | null | undefined): string {
   if (!value) return ''
   if (/^(https?:|blob:|data:|\/)/i.test(value)) return value
   return `/${value}`
+}
+
+/** 预设默认外观（与 backend subtitleAppearanceForPreset 同构，Task 15 设计 6.6 默认值表） */
+export function subtitleAppearanceForPreset(style: EditSubtitleStyle): EditSubtitleAppearance {
+  const base: EditSubtitleAppearance = {
+    fontFamily: 'PingFang SC',
+    fontSize: 48,
+    color: '#FFFFFF',
+    strokeColor: '#000000',
+    strokeWidth: 2,
+    backgroundColor: null,
+    backgroundOpacity: 0,
+    align: 'center',
+    xPct: 50,
+    yPct: 85,
+  }
+  if (style === 'outline') return { ...base, strokeWidth: 4 }
+  if (style === 'box') {
+    return { ...base, fontSize: 46, strokeWidth: 0, backgroundColor: '#000000', backgroundOpacity: 60 }
+  }
+  return base
+}
+
+/**
+ * 字幕最终外观：cue 显式外观 > 预设默认 > 工程默认（与后端同规则）。
+ * 兼容旧计划缺失 subtitleAppearance 的情况，回落到 default 预设。
+ */
+export function resolveCueAppearance(cue, project) {
+  if (cue.appearance) return cue.appearance
+  if (cue.style !== 'custom') return subtitleAppearanceForPreset(cue.style)
+  return project?.subtitleAppearance ?? subtitleAppearanceForPreset('default')
+}
+
+function bootstrapFps(value: unknown): number {
+  const fps = Number(value)
+  if (!Number.isFinite(fps) || fps <= 0) return 30
+  const rounded = Math.round(fps)
+  return rounded >= 24 && rounded <= 30 ? rounded : 30
+}
+
+export function projectSettingsForAspect(aspect: EditAspect, fps = 30): EditProjectSettings {
+  const width = aspect === '16:9' ? 1920 : 1080
+  const height = aspect === '16:9' ? 1080 : aspect === '9:16' ? 1920 : 1080
+  return {
+    aspect,
+    width,
+    height,
+    fps: bootstrapFps(fps),
+    background: 'black',
+    defaultFit: aspect === '16:9' ? 'fit' : 'fill',
+    defaultTransition: 'cut',
+    defaultSubtitleStyle: 'default',
+    defaultExportPreset: aspect === '9:16'
+      ? 'edit-vertical-hd'
+      : aspect === '16:9'
+        ? 'edit-horizontal-hd'
+        : 'edit-source',
+    tailGapMs: 0,
+    subtitleAppearance: subtitleAppearanceForPreset('default'),
+    subtitleSafeAreaPct: 8,
+  }
+}
+
+export function createEmptyEditPlan(episodeId: number, project: EditProjectSettings): EditPlanV1 {
+  return {
+    version: 1,
+    episodeId,
+    project: structuredClone(project),
+    clips: [],
+    transitions: [],
+    subtitles: [],
+    overlays: [],
+    markers: [],
+  }
 }

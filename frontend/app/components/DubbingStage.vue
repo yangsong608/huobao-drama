@@ -353,6 +353,8 @@
               :line-numbers="mixLineNumbers"
               :video-url="videoUrl"
               :cues="timelineCues"
+              :episode-number="episodeNumber"
+              :drama-aspect="dramaAspect"
               @soundscape-busy="mixSoundscapeBusy = $event"
               @locate-line="locateMixLine"
               @regenerate-line="regenerateMixLine"
@@ -363,45 +365,6 @@
                   <Loader2 v-if="loading" :size="11" class="animate-spin" />
                   {{ t('workbench.refreshTimeline') }}
                 </button>
-              </template>
-
-              <template #settings>
-                <section class="dub-mix-card is-inline">
-                  <h3 class="dub-card-title">{{ t('workbench.mixTitle') }}</h3>
-                  <label class="dub-field">
-                    <span class="dub-field-label">{{ t('workbench.subtitleMode') }}</span>
-                    <BaseSelect v-model="subtitleMode" :options="subtitleOptions" />
-                  </label>
-                  <label class="dub-field">
-                    <span class="dub-field-label">{{ t('workbench.originalAudio') }}</span>
-                    <BaseSelect v-model="originalAudio" :options="originalOptions" :disabled="originalAudioLocked" />
-                    <span v-if="originalAudioLocked" class="dub-field-hint">{{ t('workbench.originalAudioSilentLocked') }}</span>
-                  </label>
-                  <label class="dub-field">
-                    <span class="dub-field-label">{{ t('workbench.ducking') }} <span class="mono">{{ duckingRatio }}</span></span>
-                    <input v-model.number="duckingRatio" class="dub-range" type="range" min="2" max="12" step="1" :disabled="originalAudioLocked" />
-                    <span class="dub-field-hint">{{ t('workbench.duckingHint') }}</span>
-                  </label>
-                  <label class="dub-field">
-                    <span class="dub-field-label">{{ t('workbench.bgm') }}</span>
-                    <BaseSelect v-model="bgmName" :options="bgmOptions" :placeholder="t('workbench.bgmNone')" />
-                  </label>
-                  <label class="dub-field">
-                    <span class="dub-field-label">{{ t('workbench.bgmVolume') }} <span class="mono">{{ bgmVolumePct }}%</span></span>
-                    <input v-model.number="bgmVolumePct" class="dub-range" type="range" min="0" max="100" step="1" />
-                  </label>
-                  <div class="dub-mix-actions">
-                    <button class="btn btn-sm" type="button" :disabled="bgmSaving || !episodeId" @click="applyBgm">
-                      <Loader2 v-if="bgmSaving" :size="11" class="animate-spin" />
-                      {{ t('workbench.bgmApply') }}
-                    </button>
-                    <label class="btn btn-sm dub-upload" :class="{ disabled: bgmUploading }">
-                      {{ bgmUploading ? t('workbench.bgmUploading') : t('workbench.bgmUpload') }}
-                      <input type="file" accept="audio/*" :disabled="bgmUploading" @change="uploadBgm" />
-                    </label>
-                  </div>
-                  <p class="dub-hint">{{ t('workbench.mixHint') }}</p>
-                </section>
               </template>
             </MixStage>
             <div class="dub-next-bar">
@@ -556,11 +519,17 @@ import LineList from '~/components/LineList.vue'
 import MixStage from '~/components/MixStage.vue'
 import TakeInspector from '~/components/TakeInspector.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   episodeId: number | null
   dramaId: number
   step: number
-}>()
+  /** 导出成片弹窗需要：集数与画幅（预设跟随画幅） */
+  episodeNumber?: number
+  dramaAspect?: string
+}>(), {
+  episodeNumber: 0,
+  dramaAspect: '16:9',
+})
 
 const emit = defineEmits<{
   'update:step': [step: number]
@@ -584,21 +553,10 @@ const {
   loading,
   synthesizing,
   saving,
-  subtitleMode,
-  originalAudio,
-  originalAudioLocked,
-  duckingRatio,
-  bgmName,
-  bgmVolumePct,
-  bgmSaving,
-  bgmUploading,
   busy,
   readyCount,
   failedCount,
   statusLabel,
-  subtitleOptions,
-  originalOptions,
-  bgmOptions,
   serviceBanner,
   serviceError,
   dialogueSpeakers,
@@ -625,8 +583,6 @@ const {
   load,
   loadVoices,
   loadTimeline,
-  applyBgm,
-  uploadBgm,
   addLine,
   removeLine,
   moveLine,

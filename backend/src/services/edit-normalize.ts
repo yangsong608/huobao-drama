@@ -13,9 +13,11 @@ import {
   MAX_TAIL_GAP_MS,
   MAX_TRANSITION_MS,
   MIN_TRANSITION_MS,
+  SUBTITLE_FONT_WHITELIST,
   clipContentDurationMs,
   computeLayout,
   minimumClipMs,
+  subtitleAppearanceForPreset,
   validateEditPlan,
   type EditAspect,
   type EditClip,
@@ -27,6 +29,7 @@ import {
   type EditPlanV1,
   type EditProjectSettings,
   type EditSourceKind,
+  type EditSubtitleAppearance,
   type EditSubtitleCue,
   type EditSubtitleStyle,
   type EditTransition,
@@ -60,7 +63,9 @@ function text(value: unknown, fallback = ''): string {
 const ASPECTS = new Set<EditAspect>(['9:16', '16:9', '1:1'])
 const SOURCE_KINDS = new Set<EditSourceKind>(['storyboard', 'take', 'asset', 'merge', 'episode-video', 'import'])
 const FILTER_PRESETS = new Set<EditFilterPreset>(['none', 'clear', 'warm', 'cool', 'cinematic', 'mono', 'vintage'])
-const SUBTITLE_STYLES = new Set<EditSubtitleStyle>(['default', 'outline', 'box'])
+const SUBTITLE_STYLES = new Set<EditSubtitleStyle>(['default', 'outline', 'box', 'custom'])
+const SUBTITLE_ALIGNS = new Set(['left', 'center', 'right'])
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
 const TRANSITION_TYPES = new Set<EditTransitionType>(['dissolve', 'white', 'push-left', 'blur'])
 
 function issue(
@@ -70,6 +75,42 @@ function issue(
   message: string,
 ): EditIssue {
   return { severity, code, path, message }
+}
+
+function normalizeAppearance(
+  raw: unknown,
+  fallback: EditSubtitleAppearance,
+  issues: EditIssue[],
+  path: string,
+): EditSubtitleAppearance {
+  const input = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const fontFamily = typeof input.fontFamily === 'string'
+    && (SUBTITLE_FONT_WHITELIST as readonly string[]).includes(input.fontFamily)
+    ? input.fontFamily
+    : fallback.fontFamily
+  if (fontFamily !== input.fontFamily) {
+    issues.push(issue('warning', 'SUBTITLE_FONT', path, '字体不在白名单，已回退'))
+  }
+  const color = typeof input.color === 'string' && HEX_COLOR.test(input.color) ? input.color : fallback.color
+  const strokeColor = typeof input.strokeColor === 'string' && HEX_COLOR.test(input.strokeColor)
+    ? input.strokeColor
+    : fallback.strokeColor
+  const backgroundColor = typeof input.backgroundColor === 'string' && HEX_COLOR.test(input.backgroundColor)
+    ? input.backgroundColor
+    : null
+  const align = SUBTITLE_ALIGNS.has(input.align as string) ? input.align as 'left' | 'center' | 'right' : fallback.align
+  return {
+    fontFamily,
+    fontSize: clamp(round(input.fontSize, fallback.fontSize), 12, 120),
+    color,
+    strokeColor,
+    strokeWidth: clamp(round(input.strokeWidth, fallback.strokeWidth), 0, 8),
+    backgroundColor,
+    backgroundOpacity: clamp(round(input.backgroundOpacity, fallback.backgroundOpacity), 0, 100),
+    align,
+    xPct: clamp(round(input.xPct, fallback.xPct), 0, 100),
+    yPct: clamp(round(input.yPct, fallback.yPct), 0, 100),
+  }
 }
 
 function normalizeProject(raw: unknown, fallback: EditProjectSettings, issues: EditIssue[]): EditProjectSettings {
@@ -113,6 +154,10 @@ function normalizeProject(raw: unknown, fallback: EditProjectSettings, issues: E
     defaultSubtitleStyle: style,
     defaultExportPreset: text(input.defaultExportPreset, fallback.defaultExportPreset),
     tailGapMs,
+    subtitleAppearance: input.subtitleAppearance === undefined
+      ? subtitleAppearanceForPreset(style) // 旧计划：按 defaultSubtitleStyle 预设生成
+      : normalizeAppearance(input.subtitleAppearance, subtitleAppearanceForPreset(style), issues, 'project.subtitleAppearance'),
+    subtitleSafeAreaPct: clamp(round(input.subtitleSafeAreaPct, fallback.subtitleSafeAreaPct ?? 8), 0, 30),
   }
 }
 
@@ -346,6 +391,9 @@ function normalizeSubtitles(
         : null,
       lineId: Number.isSafeInteger(Number(input.lineId)) && Number(input.lineId) > 0 ? Number(input.lineId) : null,
       warnings: Array.isArray(input.warnings) ? input.warnings.filter((item): item is string => typeof item === 'string') : [],
+      ...(input.appearance !== undefined
+        ? { appearance: normalizeAppearance(input.appearance, plan.project.subtitleAppearance, issues, `subtitles[${position}].appearance`) }
+        : {}),
     })
   })
 

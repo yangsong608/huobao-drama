@@ -43,6 +43,7 @@ import bgm from './routes/bgm.js'
 import novels from './routes/novels.js'
 import novelImports from './routes/novelImports.js'
 import novelJobs from './routes/novelJobs.js'
+import films from './routes/films.js'
 import { requestLogger, errorHandler } from './middleware/logger.js'
 import { resumeInterruptedTasks } from './services/generation.js'
 import { initMcp, setMcpMainApp } from './services/mcp.js'
@@ -125,6 +126,8 @@ api.route('/bgm', bgm)
 api.route('/novels', novelImports)
 api.route('/novels', novels)
 api.route('/novel-jobs', novelJobs)
+// 成片中心：/episodes/:id/films、/films/:id、/episodes/:id/exports/:exportId/project-film
+api.route('/', films)
 
 app.route('/api/v1', api)
 
