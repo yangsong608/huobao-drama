@@ -16,6 +16,10 @@ const {
   setTransition,
   removeTransition,
   closeGaps,
+  duplicateClip,
+  addMarker,
+  deleteMarker,
+  DEFAULT_MARKER_COLOR,
   moveCue,
   setCueText,
   deleteCue,
@@ -322,4 +326,40 @@ test('视频片段仍保持 3 帧最短时长', () => {
 
   const trimmed = trimClipEnd(plan([clip('v', { sourceOutMs: 300 })]), 'v', -250)
   assert.equal(computeLocalLayout(trimmed.plan).clips[0].content_duration_ms, 100, '视频不得裁破 3 帧下限')
+})
+
+test('复制片段：原样克隆插入其后并承接指向后段的转场', () => {
+  const base = plan(
+    [clip('a'), clip('b')],
+    { transitions: [{ id: 'tr_ab', fromClipId: 'a', toClipId: 'b', type: 'dissolve', durationMs: 400 }] },
+  )
+  const result = duplicateClip(base, 'a', 'a_copy')
+  assert.deepEqual(result.plan.clips.map((item) => item.id), ['a', 'a_copy', 'b'])
+  const copy = result.plan.clips[1]
+  assert.equal(copy.source.id, 'a')
+  assert.equal(copy.sourceInMs, result.plan.clips[0].sourceInMs)
+  assert.equal(copy.sourceOutMs, result.plan.clips[0].sourceOutMs)
+  assert.equal(copy.gapBeforeMs, 0)
+  assert.deepEqual(starts(result), [0, 5000, 9600], '副本承接 400ms 转场，b 起点前移 400ms')
+  assert.deepEqual(result.plan.transitions, [{ id: 'tr_ab', fromClipId: 'a_copy', toClipId: 'b', type: 'dissolve', durationMs: 400 }])
+
+  const missing = duplicateClip(base, 'zz', 'zz_copy')
+  assert.ok(missing.issues.some((item) => item.severity === 'error' && item.code === 'CLIP_NOT_FOUND'))
+  const dupId = duplicateClip(base, 'a', 'b')
+  assert.ok(dupId.issues.some((item) => item.severity === 'error' && item.code === 'CLIP_ID_DUPLICATE'))
+})
+
+test('时间线标记：添加、点击定位与删除', () => {
+  const base = plan([clip('a')])
+  const added = addMarker(base, { id: 'mk1', atMs: 2500, label: '高潮', color: '#ff5470' })
+  assert.deepEqual(added.plan.markers, [{ id: 'mk1', atMs: 2500, label: '高潮', color: '#ff5470' }])
+
+  const second = addMarker(added.plan, { id: 'mk2', atMs: 1000, label: '', color: '' })
+  assert.deepEqual(second.plan.markers.map((item) => item.atMs), [1000, 2500], '标记按时间排序')
+  assert.equal(second.plan.markers[0].color, DEFAULT_MARKER_COLOR, '未指定颜色时用默认标记色')
+
+  const removed = deleteMarker(second.plan, 'mk1')
+  assert.deepEqual(removed.plan.markers.map((item) => item.id), ['mk2'])
+  const missing = deleteMarker(second.plan, 'zz')
+  assert.ok(missing.issues.some((item) => item.severity === 'error' && item.code === 'MARKER_NOT_FOUND'))
 })

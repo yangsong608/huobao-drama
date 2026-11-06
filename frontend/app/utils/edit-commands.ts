@@ -432,6 +432,64 @@ export function splitClip(
   }
 }
 
+export function duplicateClip(plan: EditPlanV1, clipId: string, newClipId: string): EditCommandResult {
+  const index = plan.clips.findIndex((clip) => clip.id === clipId)
+  if (index < 0) {
+    return unchanged(plan, error('CLIP_NOT_FOUND', `clip:${clipId}`, '片段不存在'))
+  }
+  if (plan.clips.some((clip) => clip.id === newClipId)) {
+    return unchanged(plan, error('CLIP_ID_DUPLICATE', `clip:${newClipId}`, '片段 ID 已存在'))
+  }
+  const clip = plan.clips[index]
+  const nextClip = nextClipOf(plan, index)
+  const issues: EditCommandIssue[] = []
+  const copy = clampClipFades({
+    ...structuredClone(clip),
+    id: newClipId,
+    gapBeforeMs: 0,
+  }, issues)
+  const next = clonePlan(plan)
+  next.clips.splice(index + 1, 0, copy)
+  // 原片段指向后段的转场由副本承接，保持转场相邻语义（与 splitClip 一致）
+  next.transitions = next.transitions.map((transition) => (
+    nextClip && transition.fromClipId === clipId && transition.toClipId === nextClip.id
+      ? { ...transition, fromClipId: newClipId }
+      : transition
+  ))
+  return {
+    plan: sync(next, issues),
+    issues,
+    focusClipId: newClipId,
+  }
+}
+
+export const DEFAULT_MARKER_COLOR = '#f59e0b'
+
+export function addMarker(
+  plan: EditPlanV1,
+  marker: { id: string; atMs: number; label?: string; color?: string },
+): EditCommandResult {
+  const entry = {
+    id: marker.id,
+    atMs: Math.max(0, Math.round(Number(marker.atMs) || 0)),
+    label: String(marker.label ?? ''),
+    color: String(marker.color ?? '') || DEFAULT_MARKER_COLOR,
+  }
+  const next = clonePlan(plan)
+  next.markers = [...next.markers, entry].sort((a, b) => a.atMs - b.atMs)
+  return { plan: sync(next), issues: [], focusClipId: null }
+}
+
+export function deleteMarker(plan: EditPlanV1, markerId: string): EditCommandResult {
+  const index = plan.markers.findIndex((item) => item.id === markerId)
+  if (index < 0) {
+    return unchanged(plan, error('MARKER_NOT_FOUND', `marker:${markerId}`, '标记不存在'))
+  }
+  const next = clonePlan(plan)
+  next.markers.splice(index, 1)
+  return { plan: sync(next), issues: [], focusClipId: null }
+}
+
 export function setClipSpeed(
   plan: EditPlanV1,
   clipId: string,

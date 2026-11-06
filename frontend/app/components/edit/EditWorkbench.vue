@@ -116,6 +116,10 @@
             @fit-view="fitView"
             @open-subtitles="subtitlesOpen = true"
             @remove-clip="removeClipById"
+            @duplicate-clip="duplicateClipById"
+            @add-marker="addMarkerAt"
+            @delete-marker="deleteMarkerById"
+            @close-gaps="closeAllGaps"
           />
         </template>
       </section>
@@ -241,8 +245,12 @@ import { useEditPlan } from '~/composables/useEditPlan'
 import {
   addCueAtPlayhead,
   applyAppearanceToAll,
+  addMarker,
+  closeGaps,
   createCommandId,
   deleteCue,
+  deleteMarker,
+  duplicateClip,
   mergeCueWithNext,
   moveClip,
   moveCue,
@@ -819,6 +827,31 @@ function fitView() {
 function removeClipById(clipId) {
   if (!clipId || !canEdit.value) return
   runCommand((value) => removeClip(value, clipId, { ripple: true }))
+}
+
+function duplicateClipById(clipId) {
+  if (!clipId || !canEdit.value) return
+  const newId = createCommandId('clp')
+  const ok = runCommand((value) => duplicateClip(value, clipId, newId))
+  if (ok) selection.value = { type: 'clip', id: newId }
+}
+
+function addMarkerAt(atMs) {
+  if (!canEdit.value) return
+  runCommand((value) => addMarker(value, {
+    id: createCommandId('mk'),
+    atMs: Math.max(0, Math.round(Number(atMs) || 0)),
+  }), { selectFocus: false })
+}
+
+function deleteMarkerById(markerId) {
+  if (!markerId || !canEdit.value) return
+  runCommand((value) => deleteMarker(value, markerId), { selectFocus: false })
+}
+
+function closeAllGaps() {
+  if (!canEdit.value) return
+  runCommand((value) => closeGaps(value), { selectFocus: false })
 }
 
 function trimSelectedStart(deltaMs) {

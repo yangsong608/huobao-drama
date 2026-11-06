@@ -128,6 +128,18 @@
             >×</button>
           </div>
 
+          <div
+            v-for="marker in markerViews"
+            :key="marker.id"
+            class="ed-tl-marker"
+            :style="{ left: `${marker.left}px`, '--marker-color': marker.color || 'var(--warning, #f59e0b)' }"
+            :title="marker.title"
+            @pointerdown.stop.prevent="emit('seek', marker.atMs)"
+            @contextmenu.prevent.stop="openMarkerMenu($event, marker)"
+          >
+            <span class="ed-tl-marker-flag"></span>
+          </div>
+
           <div class="ed-tl-playhead" :style="{ left: `${playheadLeft}px` }"></div>
           <div
             v-if="snapLine !== null"
@@ -172,6 +184,7 @@ const emit = defineEmits([
   'seek', 'select-clip', 'select-cue', 'move-clip', 'trim-clip',
   'split-clip', 'move-cue', 'remove-transition',
   'frame-op', 'cue-op', 'toggle-subtitles', 'fit-view', 'open-subtitles', 'remove-clip',
+  'duplicate-clip', 'add-marker', 'delete-marker', 'close-gaps',
 ])
 const { t } = useI18n()
 
@@ -229,6 +242,14 @@ const transitionViews = computed(() => props.layout.transitions.map((transition)
   const to = props.layout.clips.find((clip) => clip.clip_id === transition.to_clip_id)
   return { ...transition, left: pad + (to?.timeline_start_ms ?? 0) * pxPerMs.value }
 }))
+
+const markerViews = computed(() => props.plan.markers.map((marker) => ({
+  ...marker,
+  left: pad + Math.max(0, marker.atMs) * pxPerMs.value,
+  title: marker.label
+    ? `${marker.label} ${formatPrecise(marker.atMs)}`
+    : formatPrecise(marker.atMs),
+})))
 
 const activeIndex = computed(() => activeClipIndex(props.layout, props.currentMs))
 const activeClip = computed(() => props.plan.clips[activeIndex.value] ?? null)
@@ -445,11 +466,17 @@ function frameMenuItems(view) {
   const at = view ? Math.round(view.timeline_start_ms) : Math.round(props.currentMs)
   const clipId = view?.clip_id ?? clipIdAt(props.currentMs)
   return [
+    { key: 'split-clip', label: t('edit.split'), shortcut: 'S', disabled: !canSplit.value, action: () => splitAtPlayhead() },
+    { key: 'duplicate-clip', label: t('edit.clipDuplicate'), disabled: !clipId, action: () => emit('duplicate-clip', clipId) },
+    { separator: true, key: 'sep0', label: '' },
     { key: 'delete-frame', label: t('edit.frameDelete'), shortcut: 'D', action: () => emit('frame-op', { kind: 'delete-frame', clipId, atMs: at }) },
     { key: 'duplicate-frame', label: t('edit.frameDuplicate'), action: () => emit('frame-op', { kind: 'duplicate-frame', clipId, atMs: at }) },
     { key: 'insert-image', label: t('edit.frameInsertImage'), action: () => emit('frame-op', { kind: 'insert-image', clipId, atMs: at }) },
     { separator: true, key: 'sep', label: '' },
     { key: 'extend-1s', label: t('edit.frameExtend'), action: () => emit('frame-op', { kind: 'extend-1s', clipId, atMs: at }) },
+    { separator: true, key: 'sep2', label: '' },
+    { key: 'add-marker', label: t('edit.markerAdd'), action: () => emit('add-marker', Math.round(props.currentMs)) },
+    { key: 'close-gaps', label: t('edit.closeGaps'), action: () => emit('close-gaps') },
   ]
 }
 
@@ -471,6 +498,15 @@ function subtitleMenuItems() {
     { key: 'toggle', label: props.showSubtitles ? t('edit.subtitleHide') : t('edit.subtitleShow'), action: () => emit('toggle-subtitles') },
     { key: 'list', label: t('edit.subtitleOpenList'), action: () => emit('open-subtitles') },
   ]
+}
+
+function openMarkerMenu(event, marker) {
+  if (props.readonly) return
+  openMenuAt(event, [
+    { key: 'seek', label: t('edit.markerGoto'), action: () => emit('seek', marker.atMs) },
+    { separator: true, key: 'sep', label: '' },
+    { key: 'delete', label: t('edit.markerDelete'), danger: true, action: () => emit('delete-marker', marker.id) },
+  ])
 }
 
 function openCueMenu(event, cue) {
@@ -598,6 +634,18 @@ onBeforeUnmount(() => {
   background: transparent; color: var(--text-3); cursor: pointer; line-height: 1;
 }
 .ed-tl-transition button:hover { background: var(--bg-hover); color: var(--action-danger); }
+.ed-tl-marker {
+  position: absolute; top: 22px; transform: translateX(-50%); z-index: 3;
+  width: 12px; height: 12px; cursor: pointer;
+}
+.ed-tl-marker-flag {
+  display: block; width: 8px; height: 8px; margin: 2px;
+  background: var(--marker-color, #f59e0b);
+  transform: rotate(45deg);
+  border-radius: 1px;
+  box-shadow: 0 0 0 1px var(--bg-0);
+}
+.ed-tl-marker:hover .ed-tl-marker-flag { transform: rotate(45deg) scale(1.25); }
 .ed-tl-playhead {
   position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
   background: var(--accent); pointer-events: none; z-index: 5;

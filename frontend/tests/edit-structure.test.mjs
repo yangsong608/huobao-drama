@@ -169,3 +169,37 @@ test('S2 四语文案覆盖新增键', () => {
     }
   }
 })
+
+test('时间线剪辑增强：复制片段、标记与关闭间隙全链路接线', () => {
+  const timeline = read('app/components/edit/EditTimeline.vue')
+  const workbench = read('app/components/edit/EditWorkbench.vue')
+  const commands = read('app/utils/edit-commands.ts')
+  const zh = read('app/locales/zh.json')
+
+  assert.match(commands, /export function duplicateClip\(/)
+  assert.match(commands, /export function addMarker\(/)
+  assert.match(commands, /export function deleteMarker\(/)
+  assert.match(commands, /export const DEFAULT_MARKER_COLOR/)
+
+  assert.match(timeline, /duplicate-clip/)
+  assert.match(timeline, /add-marker/)
+  assert.match(timeline, /delete-marker/)
+  assert.match(timeline, /close-gaps/)
+  assert.match(timeline, /ed-tl-marker/)
+  assert.match(timeline, /openMarkerMenu/)
+
+  assert.match(workbench, /@duplicate-clip="duplicateClipById"/)
+  assert.match(workbench, /@add-marker="addMarkerAt"/)
+  assert.match(workbench, /@delete-marker="deleteMarkerById"/)
+  assert.match(workbench, /@close-gaps="closeAllGaps"/)
+
+  for (const key of ['clipDuplicate', 'markerAdd', 'markerGoto', 'markerDelete', 'closeGaps']) {
+    assert.match(zh, new RegExp(`"${key}":`), `zh 缺少 ${key}`)
+  }
+  for (const locale of ['en', 'ja', 'ko']) {
+    const data = read(`app/locales/${locale}.json`)
+    for (const key of ['clipDuplicate', 'markerAdd', 'markerGoto', 'markerDelete', 'closeGaps']) {
+      assert.match(data, new RegExp(`"${key}":`), `${locale} 缺少 ${key}`)
+    }
+  }
+})
