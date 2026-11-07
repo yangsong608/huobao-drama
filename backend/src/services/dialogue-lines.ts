@@ -48,6 +48,18 @@ interface Span {
 const NARRATION_WORDS = /旁白|画外音|解说/
 const INNER_WORDS = /心声|内心|独白/
 
+/** 导演备注句：旁白捕获里剔除（画面切黑 / 画面不出现成品吉他…） */
+const DIRECTOR_NOTE_RE = /^(画面|镜头|切黑|黑场|淡出|淡入|定格|转场|空镜|特写|俯拍|仰拍|推镜|摇镜)/
+/** 表头键冒号（人物：/场景：/道具：…）不是对白 */
+const HEADER_LABEL_RE = /(人物|场景|道具|镜头|时长|镜号|秒|特写|转场|画外|旁白)$/
+/** 群杂拟声：短引语且近处无说话动词时不生成台词（「哎哟」） */
+const SPEECH_VERB_RE = /说|道|问|喊|答|嘟囔|自语|吼|叫|嘀咕|念|叹|哼/
+/** 宾语前置标记：@B 前紧邻这些字时 B 是受事（冲路过的 @六婶），不是说话人 */
+const OBJECT_MARK_RE = /[的着冲朝向对跟和给望被让与同]$/
+/** 非角色说话人标签（队里一人 / 另一人…） */
+const CROWD_SPEAKER_RE = /一人|众人|路人|旁人|人群|队员|街坊|客人|伙计|掌柜|老板|小二|妇人|老汉|汉子|姑娘|少年|孩子/
+const CROWD_LABEL_TAIL_RE = /(接|说道|说|道|喊|叫|问|答|嘟囔)$/
+
 /** 切段时间码：0-3秒： / 3–6秒: */
 export function splitSegments(videoPrompt: string, fallbackDurationMs = 0): Segment[] {
   const text = videoPrompt || ''
@@ -190,16 +202,71 @@ interface Draft {
   needsReview: boolean
 }
 
-/** 抽一个镜头内的所有台词草稿（引号优先，裸旁白补位） */
+interface Mention {
+  at: number
+  end: number
+  member: CastMember
+}
+
+function collectMentions(masked: string, colonIdx: number, cast: CastMember[]): Mention[] {
+  const out: Mention[] = []
+  for (const member of [...cast].sort((a, b) => b.name.length - a.name.length)) {
+    if (!member.name) continue
+    const needle = `@${member.name}`
+    let idx = masked.indexOf(needle)
+    while (idx >= 0 && idx < colonIdx) {
+      if (!out.some((x) => idx >= x.at && idx < x.end)) out.push({ at: idx, end: idx + needle.length, member })
+      idx = masked.indexOf(needle, idx + 1)
+    }
+  }
+  return out.sort((a, b) => a.at - b.at)
+}
+
+/** 冒号对白定说话人：从冒号往前找第一个非受事、非听众的 @角色；找不到再认群杂标签 */
+function resolveColonSpeaker(masked: string, colonIdx: number, cast: CastMember[]): { name: string | null; id: number | null; unknown: boolean } | null {
+  const mentions = collectMentions(masked, colonIdx, cast)
+  for (let k = mentions.length - 1; k >= 0; k--) {
+    const m = mentions[k]
+    const adjacent = masked.slice(m.end, colonIdx).trim() === ''
+    if (adjacent && k > 0) continue
+    const prevChar = masked.slice(0, m.at).replace(/\s+$/, '').slice(-1)
+    if (OBJECT_MARK_RE.test(prevChar)) continue
+    return { name: m.member.name, id: m.member.id ?? null, unknown: false }
+  }
+  const seg = masked.slice(0, colonIdx)
+  const punct = Math.max(
+    seg.lastIndexOf('，'),
+    seg.lastIndexOf('。'),
+    seg.lastIndexOf('；'),
+    seg.lastIndexOf('！'),
+    seg.lastIndexOf('？'),
+    seg.lastIndexOf('、'),
+    seg.lastIndexOf(' '),
+    seg.lastIndexOf('　'),
+  )
+  const label = seg.slice(punct + 1).trim().replace(CROWD_LABEL_TAIL_RE, '').trim()
+  if (label && [...label].length <= 6 && !label.includes('@') && !HEADER_LABEL_RE.test(label) && CROWD_SPEAKER_RE.test(label)) {
+    const hit = cast.find((c) => c.name === label)
+    return { name: hit ? hit.name : label, id: hit?.id ?? null, unknown: !hit }
+  }
+  if (mentions.length) return { name: '未知', id: null, unknown: true }
+  return null
+}
+
+/** 抽一个镜头内的所有台词草稿（引号优先，冒号对白与裸旁白补位，按文中位置排序） */
 export function extractDrafts(segmentText: string, cast: CastMember[]): Draft[] {
-  const drafts: Draft[] = []
+  type Positioned = Draft & { at: number }
+  const drafts: Positioned[] = []
   const spans = findQuotedSpans(segmentText)
 
   for (const span of spans) {
     const cleaned = cleanLineText(span.inner)
     if (!cleaned) continue
+    // 群杂拟声：≤3 字短引语且近处无说话动词（队里一阵「哎哟」）
+    if ([...cleaned].length <= 3 && !SPEECH_VERB_RE.test(segmentText.slice(Math.max(0, span.start - 16), span.start))) continue
     const speaker = pickSpeaker(segmentText.slice(0, span.start), cast)
     drafts.push({
+      at: span.start,
       text: cleaned,
       type: speaker.type,
       name: speaker.name,
@@ -214,6 +281,7 @@ export function extractDrafts(segmentText: string, cast: CastMember[]): Draft[] 
     .map((ch, i) => (spans.some((s) => i >= s.start && i < s.end) ? '　' : ch))
     .join('')
   const narrationRe = /(旁白|画外音|心声|内心独白)\s*(?:（[^）]*）|\([^)]*\))?\s*[：:]/g
+  const narrationSpans: { start: number; end: number }[] = []
   let m: RegExpExecArray | null
   while ((m = narrationRe.exec(masked))) {
     const from = m.index + m[0].length
@@ -224,12 +292,15 @@ export function extractDrafts(segmentText: string, cast: CastMember[]): Draft[] 
       const at = rest.indexOf('@')
       if (at >= 0) to = from + at
     }
+    narrationSpans.push({ start: m.index, end: to })
     const raw = segmentText.slice(from, to)
     const longNarration = [...cleanLineText(raw)].length > 80
     for (const sentence of splitSentences(raw)) {
       const cleaned = cleanLineText(sentence)
       if (!cleaned) continue
+      if (DIRECTOR_NOTE_RE.test(cleaned)) continue
       drafts.push({
+        at: from,
         text: cleaned,
         type: INNER_WORDS.test(m[1]) ? 'inner' : 'narration',
         name: '旁白',
@@ -239,7 +310,51 @@ export function extractDrafts(segmentText: string, cast: CastMember[]): Draft[] 
     }
   }
 
+  // 冒号对白：旁白区间也挖空后扫「@角色 动作：台词」（无引号新写法）
+  const inNarration = (i: number) => narrationSpans.some((s) => i >= s.start && i < s.end)
+  const masked2 = masked
+    .split('')
+    .map((ch, i) => (inNarration(i) ? '　' : ch))
+    .join('')
+
+  for (let i = 0; i < masked2.length; i++) {
+    if (masked2[i] !== '：' && masked2[i] !== ':') continue
+    if (HEADER_LABEL_RE.test(masked2.slice(Math.max(0, i - 2), i))) continue
+    let end = masked2.length
+    for (let j = i + 1; j < masked2.length; j++) {
+      if (masked2[j] === '：' || masked2[j] === ':' || masked2[j] === '@') {
+        end = j
+        break
+      }
+    }
+    for (const ns of narrationSpans) {
+      if (ns.start > i + 1 && ns.start < end) end = ns.start
+    }
+    // 下一个是冒号时，退掉句末标点后的说话人标签（转头吃味：/另一人接：）
+    if (masked2[end] === '：' || masked2[end] === ':') {
+      const seg = segmentText.slice(i + 1, end)
+      const tail = seg.match(/(?:。|！|？|!|\?|；)([^。！？!?；]*)$/)
+      if (tail && [...tail[1]].length <= 6) end -= [...tail[1]].length
+    }
+    // 引号扫描已覆盖该区间，避免重复计入
+    if (spans.some((s) => s.end > i + 1 && s.start < end)) continue
+    const cleaned = cleanLineText(segmentText.slice(i + 1, end))
+    if (!cleaned) continue
+    const speaker = resolveColonSpeaker(masked2, i, cast)
+    if (!speaker) continue
+    drafts.push({
+      at: i + 1,
+      text: cleaned,
+      type: 'dialogue',
+      name: speaker.name,
+      characterId: speaker.id,
+      needsReview: speaker.unknown || [...cleaned].length > 80,
+    })
+  }
+
   return drafts
+    .sort((a, b) => a.at - b.at)
+    .map(({ at: _at, ...draft }) => draft)
 }
 
 export interface ParseOptions {

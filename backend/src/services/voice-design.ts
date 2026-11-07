@@ -11,7 +11,7 @@ import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { callTextJson, extractJson } from './text-call.js'
 import { getPipelineRuleOrDefault } from './pipeline-rules.js'
-import { activateVoice, createVoice, getVoice, listVoiceRows, setNarratorVoice, updateVoice } from './voice-profile.js'
+import { activateVoice, createVoice, getVoice, listVoiceRows, setNarratorVoice, updateVoice, type VoiceRow } from './voice-profile.js'
 import { mastra } from '../mastra/index.js'
 import { buildAgentRequestContext } from '../agents/context.js'
 
