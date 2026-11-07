@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { success, created, now, badRequest } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
@@ -182,6 +182,12 @@ app.put('/:id', async (c) => {
 app.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   logTaskStart('StoryboardAPI', 'delete', { storyboardId: id })
+  const ts = now()
+  // 台词随分镜软删，避免 storyboard_id 悬空（否则选音色报「镜头不存在」、时间轴丢 cue）
+  await db.update(schema.storyboardLines)
+    .set({ deletedAt: ts, updatedAt: ts })
+    .where(and(eq(schema.storyboardLines.storyboardId, id), isNull(schema.storyboardLines.deletedAt)))
+    .run()
   await db.delete(schema.storyboardCharacters).where(eq(schema.storyboardCharacters.storyboardId, id))
   await db.delete(schema.storyboardProps).where(eq(schema.storyboardProps.storyboardId, id))
   await db.delete(schema.storyboards).where(eq(schema.storyboards.id, id))

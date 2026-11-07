@@ -310,10 +310,6 @@
                 <span>{{ t('generate.concurrency') }}</span>
                 <BaseSelect v-model="batchConcurrency" :options="batchConcurrencyOptions" />
               </label>
-              <label class="dub-gen-check">
-                <input v-model="batchForce" type="checkbox" />
-                <span>{{ t('generate.force') }}</span>
-              </label>
               <div class="dub-gen-batch-actions">
                 <button
                   v-if="!generationRunning"
@@ -339,7 +335,6 @@
                   ok: batchJob.ok,
                   failed: batchJob.failed,
                   skipped: batchJob.skipped,
-                  cached: batchJob.cached,
                 }) }}</span>
                 <span v-if="batchJob.status === 'running' && batchJob.currentLineId">
                   {{ t('generate.progressNote', { id: batchJob.currentLineId }) }}
@@ -930,7 +925,6 @@ const batchConcurrencyOptions = [1, 2, 3, 4].map(value => ({
   label: t('generate.concurrencyValue', { n: value }),
   value,
 }))
-const batchForce = ref(false)
 const retryingFailed = ref(false)
 const batchJob = computed(() => takes.batchJob.value)
 const batchProgress = computed(() => takes.batchProgress.value)
@@ -939,11 +933,9 @@ const generationRunning = computed(() =>
 
 function startGenerationBatch() {
   if (!lines.value.length || generationRunning.value) return
-  if (batchForce.value && !window.confirm(t('generate.forceConfirm'))) return
   void synthesizeAll({
     filter: batchFilter.value,
     contextMode: batchContextMode.value,
-    force: batchForce.value,
     concurrency: batchConcurrency.value,
   })
 }
@@ -997,7 +989,6 @@ async function generateActiveTake(payload: { mode: 'off' | 'light' | 'deep'; ove
   const result = await takes.generate(activeLine.value.id, {
     contextMode: payload.mode,
     overrides: payload.overrides,
-    force: true,
   })
   if (!result) return
   serviceError.value = ''

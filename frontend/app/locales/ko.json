@@ -2628,15 +2628,13 @@
     "contextMode": "문맥",
     "concurrency": "동시 실행",
     "concurrencyValue": "{n}개",
-    "force": "캐시 무시",
     "start": "생성 시작",
     "cancel": "작업 취소",
-    "summary": "완료 {done}/{total} · 성공 {ok} · 실패 {failed} · 건너뜀 {skipped} · 캐시 {cached}",
+    "summary": "완료 {done}/{total} · 성공 {ok} · 실패 {failed} · 건너뜀 {skipped}",
     "progressNote": "대사 #{id} 처리 중",
     "cancelled": "작업이 취소되었습니다",
     "done": "생성 완료",
-    "startHint": "일괄 생성은 대사마다 새 Take를 저장하고 최신 버전을 활성화합니다.",
-    "forceConfirm": "캐시를 무시하고 선택한 대사를 다시 합성합니다. 계속할까요?"
+    "startHint": "일괄 생성은 대사마다 새 Take를 저장하고 최신 버전을 활성화합니다."
   },
   "mix": {
     "episode": {
@@ -2750,8 +2748,8 @@
       "sceneLabel": "장면 {n}",
       "noScenes": "이 에피소드에 연결된 장면이 없습니다",
       "sceneRequired": "장면을 하나 이상 선택하세요",
-      "overwrite": "생성된 오디오 덮어쓰기",
-      "overwriteHint": "끄면 같은 프롬프트와 파라미터의 캐시 소재를 재사용합니다",
+      "overwrite": "매번 다시 생성",
+      "overwriteHint": "기본 켜짐: 매번 사운드 소재를 새로 생성합니다. 끄면 같은 프롬프트와 파라미터의 캐시 소재를 재사용합니다",
       "previewTitle": "생성 미리보기",
       "previewCount": "{n}개",
       "estimated": "생성 시간 약 {s}초",

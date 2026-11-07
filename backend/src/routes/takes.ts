@@ -232,7 +232,6 @@ takes.post('/episodes/:id/takes/batch', async (c) => {
     lineIds: Array.isArray(rawIds) ? rawIds.map(Number) : null,
     filter: filter === 'all' || filter === 'failed' || filter === 'audio_stale' ? filter : 'pending',
     contextMode: contextModeOf(body),
-    force: Boolean(body?.force),
     concurrency: body?.concurrency !== undefined ? Number(body.concurrency) : undefined,
   })
   return success(c, { job_id: job.id })

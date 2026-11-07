@@ -269,7 +269,7 @@ const form = reactive({
   categories: ['ambience', 'sfx', 'crowd'] as SoundscapeCategory[],
   crowdMode: 'walla' as SoundscapeCrowdMode,
   sceneIds: [] as number[],
-  overwrite: false,
+  overwrite: true,
 })
 const allScenes = ref(true)
 const scenes = ref<SceneRow[]>([])
@@ -353,7 +353,7 @@ function resetForm() {
   form.categories = ['ambience', 'sfx', 'crowd']
   form.crowdMode = 'walla'
   form.sceneIds = []
-  form.overwrite = false
+  form.overwrite = true
   allScenes.value = true
   resetDrafts()
   resetDurations()

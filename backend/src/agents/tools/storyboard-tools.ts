@@ -6,7 +6,7 @@ import { createTool } from '@mastra/core/tools'
 import type { ToolExecutionContext } from '@mastra/core/tools'
 import { z } from 'zod'
 import { db, getInsertId, schema } from '../../db/index.js'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 import { now } from '../../utils/response.js'
 import { logTaskProgress, logTaskSuccess } from '../../utils/task-logger.js'
 import { getDramaId, getEpisodeId } from '../context.js'
@@ -290,6 +290,15 @@ const saveStoryboards = createTool({
         await db.delete(schema.storyboardProps)
           .where(eq(schema.storyboardProps.storyboardId, storyboardId))
       }
+      // 分镜整体重建时挂载台词一并软删，避免 storyboard_id 悬空成孤儿（绝对锚点台词保留）
+      await db.update(schema.storyboardLines)
+        .set({ deletedAt: ts, updatedAt: ts })
+        .where(and(
+          eq(schema.storyboardLines.episodeId, episodeId),
+          isNotNull(schema.storyboardLines.storyboardId),
+          isNull(schema.storyboardLines.deletedAt),
+        ))
+        .run()
       await db.delete(schema.storyboards).where(eq(schema.storyboards.episodeId, episodeId))
     }
 

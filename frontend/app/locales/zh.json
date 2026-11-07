@@ -2628,15 +2628,13 @@
     "contextMode": "语境",
     "concurrency": "并发",
     "concurrencyValue": "{n} 路",
-    "force": "忽略缓存",
     "start": "开始生成",
     "cancel": "取消任务",
-    "summary": "完成 {done}/{total} · 成功 {ok} · 失败 {failed} · 跳过 {skipped} · 缓存 {cached}",
+    "summary": "完成 {done}/{total} · 成功 {ok} · 失败 {failed} · 跳过 {skipped}",
     "progressNote": "正在处理台词 #{id}",
     "cancelled": "任务已取消",
     "done": "生成完成",
-    "startHint": "批量生成会为每句保存新版本，并自动启用最新版本。",
-    "forceConfirm": "忽略缓存将重新合成选中范围内的台词，继续吗？"
+    "startHint": "批量生成会为每句保存新版本，并自动启用最新版本。"
   },
   "mix": {
     "episode": {
@@ -2750,8 +2748,8 @@
       "sceneLabel": "场景 {n}",
       "noScenes": "当前剧集没有关联场景",
       "sceneRequired": "至少选择一个场景",
-      "overwrite": "覆盖已有生成",
-      "overwriteHint": "关闭时优先复用相同提示词与参数的缓存素材",
+      "overwrite": "每次重新生成",
+      "overwriteHint": "默认开启：每次都真实生成声音素材；关闭后复用相同提示词与参数的缓存素材",
       "previewTitle": "生成预览",
       "previewCount": "{n} 条",
       "estimated": "约 {s} 秒生成时间",

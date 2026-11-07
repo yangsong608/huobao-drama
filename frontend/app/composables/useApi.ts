@@ -428,7 +428,6 @@ export interface TakeBatchJob {
   ok: number
   failed: number
   skipped: number
-  cached: number
   currentLineId: number | null
   errors: { lineId: number; message: string }[]
   cancelRequested: boolean
@@ -1178,7 +1177,6 @@ export const takeAPI = {
     line_ids?: number[] | null
     filter?: 'pending' | 'failed' | 'audio_stale' | 'all'
     context_mode?: 'off' | 'light' | 'deep'
-    force?: boolean
     concurrency?: number
   } = {}) => api.post<{ job_id: string }>(`/episodes/${episodeId}/takes/batch`, body),
   batchStatus: (episodeId: number, jobId: string) =>

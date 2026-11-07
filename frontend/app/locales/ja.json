@@ -2628,15 +2628,13 @@
     "contextMode": "文脈",
     "concurrency": "並列数",
     "concurrencyValue": "{n} 並列",
-    "force": "キャッシュを無視",
     "start": "生成開始",
     "cancel": "タスクを中止",
-    "summary": "完了 {done}/{total} · 成功 {ok} · 失敗 {failed} · スキップ {skipped} · キャッシュ {cached}",
+    "summary": "完了 {done}/{total} · 成功 {ok} · 失敗 {failed} · スキップ {skipped}",
     "progressNote": "台詞 #{id} を処理中",
     "cancelled": "タスクを中止しました",
     "done": "生成完了",
-    "startHint": "一括生成は台詞ごとに新しい Take を保存し、最新版を有効化します。",
-    "forceConfirm": "キャッシュを無視して対象の台詞を再合成します。続行しますか？"
+    "startHint": "一括生成は台詞ごとに新しい Take を保存し、最新版を有効化します。"
   },
   "mix": {
     "episode": {
@@ -2750,8 +2748,8 @@
       "sceneLabel": "シーン {n}",
       "noScenes": "このエピソードに関連シーンがありません",
       "sceneRequired": "少なくとも1つのシーンを選択してください",
-      "overwrite": "生成済み音声を上書き",
-      "overwriteHint": "オフの場合、同じプロンプトとパラメータのキャッシュ素材を再利用します",
+      "overwrite": "毎回再生成",
+      "overwriteHint": "デフォルト有効：毎回音声素材を新しく生成します。オフにすると同じプロンプトとパラメータのキャッシュ素材を再利用します",
       "previewTitle": "生成プレビュー",
       "previewCount": "{n} 件",
       "estimated": "生成時間 約 {s} 秒",

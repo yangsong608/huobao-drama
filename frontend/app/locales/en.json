@@ -2628,15 +2628,13 @@
     "contextMode": "Context",
     "concurrency": "Workers",
     "concurrencyValue": "{n} workers",
-    "force": "Ignore cache",
     "start": "Start generation",
     "cancel": "Cancel job",
-    "summary": "Done {done}/{total} · OK {ok} · Failed {failed} · Skipped {skipped} · Cached {cached}",
+    "summary": "Done {done}/{total} · OK {ok} · Failed {failed} · Skipped {skipped}",
     "progressNote": "Processing line #{id}",
     "cancelled": "Job cancelled",
     "done": "Generation complete",
-    "startHint": "Batch generation saves a new take per line and activates the latest version.",
-    "forceConfirm": "Ignoring the cache re-synthesizes the selected lines. Continue?"
+    "startHint": "Batch generation saves a new take per line and activates the latest version."
   },
   "mix": {
     "episode": {
@@ -2750,8 +2748,8 @@
       "sceneLabel": "Scene {n}",
       "noScenes": "This episode has no linked scenes",
       "sceneRequired": "Select at least one scene",
-      "overwrite": "Overwrite generated audio",
-      "overwriteHint": "When off, cached assets with the same prompt and parameters are reused",
+      "overwrite": "Regenerate every time",
+      "overwriteHint": "On by default: always generates soundscape assets fresh; turn off to reuse cached assets with the same prompt and parameters",
       "previewTitle": "Preview",
       "previewCount": "{n} items",
       "estimated": "~{s}s generation time",

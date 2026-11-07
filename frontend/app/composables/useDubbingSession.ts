@@ -19,7 +19,6 @@ import { useLineTakes } from '~/composables/useLineTakes'
 import { useVoiceProfiles } from '~/composables/useVoiceProfiles'
 
 export interface SynthesizeAllOptions {
-  force?: boolean
   filter?: 'pending' | 'failed' | 'audio_stale' | 'all'
   contextMode?: 'off' | 'light' | 'deep'
   concurrency?: number
@@ -496,9 +495,8 @@ export function useDubbingSession(options: {
     synthesizing.value = true
     try {
       const job = await takeStore.startBatch({
-        filter: optionsBatch.filter ?? (optionsBatch.force ? 'all' : 'pending'),
+        filter: optionsBatch.filter ?? 'pending',
         contextMode: optionsBatch.contextMode ?? 'light',
-        force: Boolean(optionsBatch.force),
         ...(optionsBatch.concurrency ? { concurrency: optionsBatch.concurrency } : {}),
         ...(optionsBatch.lineIds ? { lineIds: optionsBatch.lineIds } : {}),
       })
