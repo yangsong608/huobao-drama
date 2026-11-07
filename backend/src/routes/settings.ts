@@ -14,6 +14,15 @@ import {
   NovelSettingsValidationError,
   getMediaSettings,
   setMediaSettings,
+  getUiSettings,
+  setUiSettings,
+  getDirectorSettings,
+  setDirectorSettings,
+  getEditSettings,
+  setEditSettings,
+  getAgentSettings,
+  setAgentSettings,
+  FoundationSettingsValidationError,
   CONTENT_LANGUAGES,
   type ContentLanguage,
 } from '../services/app-settings.js'
@@ -100,6 +109,51 @@ app.put('/novel', async (c) => {
     return success(c, { settings: setNovelSettings(body) })
   } catch (error) {
     if (error instanceof NovelSettingsValidationError) return badRequest(c, error.message)
+    throw error
+  }
+})
+
+// GET/PUT /ui|director|edit|agent — B0 基础层四命名空间（整体 JSON 存储，读取时叠加环境变量，环境变量值不落库）
+app.get('/ui', (c) => success(c, { settings: getUiSettings() }))
+app.put('/ui', async (c) => {
+  const body = await c.req.json().catch(() => null)
+  try {
+    return success(c, { settings: setUiSettings(body) })
+  } catch (error) {
+    if (error instanceof FoundationSettingsValidationError) return badRequest(c, error.message)
+    throw error
+  }
+})
+
+app.get('/director', (c) => success(c, { settings: getDirectorSettings() }))
+app.put('/director', async (c) => {
+  const body = await c.req.json().catch(() => null)
+  try {
+    return success(c, { settings: setDirectorSettings(body) })
+  } catch (error) {
+    if (error instanceof FoundationSettingsValidationError) return badRequest(c, error.message)
+    throw error
+  }
+})
+
+app.get('/edit', (c) => success(c, { settings: getEditSettings() }))
+app.put('/edit', async (c) => {
+  const body = await c.req.json().catch(() => null)
+  try {
+    return success(c, { settings: setEditSettings(body) })
+  } catch (error) {
+    if (error instanceof FoundationSettingsValidationError) return badRequest(c, error.message)
+    throw error
+  }
+})
+
+app.get('/agent', (c) => success(c, { settings: getAgentSettings() }))
+app.put('/agent', async (c) => {
+  const body = await c.req.json().catch(() => null)
+  try {
+    return success(c, { settings: setAgentSettings(body) })
+  } catch (error) {
+    if (error instanceof FoundationSettingsValidationError) return badRequest(c, error.message)
     throw error
   }
 })

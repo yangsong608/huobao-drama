@@ -30,6 +30,7 @@ export const novelAPI = {
   remove: (id: number) => api.del(`/novels/${id}`),
   exportUrl: (id: number, format: 'txt' | 'md') => `${API_BASE}/novels/${id}/export?format=${format}`,
   previewImport: (id: number, data: Record<string, unknown>) => api.post(`/novels/${id}/imports/preview`, data),
+  contextPackPreview: (id: number, data: Record<string, unknown>) => api.post(`/novels/${id}/context-pack/preview`, data),
   imports: (id: number) => api.get(`/novels/${id}/imports`),
   importToDrama: (id: number, data: Record<string, unknown>) => api.post(`/novels/${id}/imports`, data),
   previewSync: (id: number, importId: number) => api.get(`/novels/${id}/imports/${importId}/preview`),
@@ -43,6 +44,30 @@ export const novelAPI = {
   startGraphAudit: (id: number) => api.post(`/novels/${id}/graph/audit`, {}),
   startGraphChapter: (id: number, chapterNo: number) =>
     api.post(`/novels/${id}/graph/chapters/${chapterNo}`, {}),
+  workbench: (id: number) => api.get(`/novels/${id}/workbench`),
+  annotations: (id: number, params: { chapterNo?: number; status?: string | string[] } = {}) =>
+    api.get(`/novels/${id}/annotations${query({
+      chapter_no: params.chapterNo,
+      status: Array.isArray(params.status) ? params.status.join(',') : params.status,
+    })}`),
+  createAnnotation: (id: number, data: Record<string, unknown>) =>
+    api.post(`/novels/${id}/annotations`, data),
+  updateAnnotation: (id: number, annotationId: number, data: Record<string, unknown>) =>
+    api.put(`/novels/${id}/annotations/${annotationId}`, data),
+  deleteAnnotation: (id: number, annotationId: number) =>
+    api.del(`/novels/${id}/annotations/${annotationId}`),
+  foreshadows: (id: number, params: { chapterNo?: number; status?: string | string[] } = {}) =>
+    api.get(`/novels/${id}/foreshadows${query({
+      chapter_no: params.chapterNo,
+      status: Array.isArray(params.status) ? params.status.join(',') : params.status,
+    })}`),
+  foreshadowCandidates: (id: number) => api.get(`/novels/${id}/foreshadows/candidates`),
+  createForeshadow: (id: number, data: Record<string, unknown>) =>
+    api.post(`/novels/${id}/foreshadows`, data),
+  updateForeshadow: (id: number, foreshadowId: number, data: Record<string, unknown>) =>
+    api.put(`/novels/${id}/foreshadows/${foreshadowId}`, data),
+  deleteForeshadow: (id: number, foreshadowId: number) =>
+    api.del(`/novels/${id}/foreshadows/${foreshadowId}`),
   chapters: (id: number) => api.get(`/novels/${id}/chapters`),
   saveChapter: (id: number, chapterNo: number, data: Record<string, unknown>) =>
     api.put(`/novels/${id}/chapters/${chapterNo}`, data),

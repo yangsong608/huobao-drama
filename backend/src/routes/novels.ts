@@ -53,6 +53,27 @@ import {
   type StartNovelJobOptions,
 } from '../services/novel-job-runner.js'
 import { buildNovelExport, NovelExportError } from '../services/novel-export.js'
+import { NovelWorkbenchNotFoundError, getNovelWorkbench } from '../services/novel-workbench.js'
+import {
+  ANNOTATION_STATUSES,
+  NovelAnnotationNotFoundError,
+  NovelAnnotationValidationError,
+  createAnnotation,
+  deleteAnnotation,
+  listAnnotations,
+  updateAnnotation,
+} from '../services/novel-annotations.js'
+import {
+  FORESHADOW_STATUSES,
+  NovelForeshadowConflictError,
+  NovelForeshadowNotFoundError,
+  NovelForeshadowValidationError,
+  createForeshadow,
+  deleteForeshadow,
+  extractForeshadowCandidates,
+  listForeshadows,
+  updateForeshadow,
+} from '../services/novel-foreshadows.js'
 import {
   CompassDataError,
   getNovelGraph,
@@ -292,6 +313,151 @@ app.delete('/:id', (c) => {
   const id = parseId(c.req.param('id'))
   if (!id) return badRequest(c, '小说编号无效')
   if (!deleteNovel(id)) return notFound(c, '小说不存在')
+  return success(c, { deleted: true })
+})
+
+app.get('/:id/workbench', (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '小说编号无效')
+  try {
+    return success(c, getNovelWorkbench(id))
+  } catch (error) {
+    if (error instanceof NovelWorkbenchNotFoundError) return notFound(c, error.message)
+    throw error
+  }
+})
+
+app.get('/:id/annotations', (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '小说编号无效')
+  if (!getNovel(id)) return notFound(c, '小说不存在')
+  const chapterRaw = c.req.query('chapter_no')
+  const chapterNo = chapterRaw === undefined ? undefined : parsePositiveInt(chapterRaw)
+  if (chapterRaw !== undefined && !chapterNo) return badRequest(c, 'chapter_no 必须是正整数')
+  const statusRaw = c.req.query('status')
+  let statuses: string[] | undefined
+  if (statusRaw) {
+    statuses = statusRaw.split(',').map((item) => item.trim()).filter(Boolean)
+    if (statuses.some((item) => !(ANNOTATION_STATUSES as readonly string[]).includes(item))) {
+      return badRequest(c, `status 必须是 ${ANNOTATION_STATUSES.join(' / ')}`)
+    }
+  }
+  return success(c, { items: listAnnotations(id, { chapterNo: chapterNo ?? undefined, statuses }) })
+})
+
+app.post('/:id/annotations', async (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '小说编号无效')
+  if (!getNovel(id)) return notFound(c, '小说不存在')
+  const body = await readBody(c)
+  if (!body) return badRequest(c, '请求体必须是对象')
+  try {
+    return created(c, createAnnotation(id, body))
+  } catch (error) {
+    if (error instanceof NovelAnnotationValidationError) return badRequest(c, error.message)
+    throw error
+  }
+})
+
+app.put('/:id/annotations/:annotationId', async (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '小说编号无效')
+  const annotationId = parsePositiveInt(c.req.param('annotationId'))
+  if (!annotationId) return badRequest(c, '批注编号无效')
+  if (!getNovel(id)) return notFound(c, '小说不存在')
+  const body = await readBody(c)
+  if (!body) return badRequest(c, '请求体必须是对象')
+  try {
+    return success(c, updateAnnotation(id, annotationId, body))
+  } catch (error) {
+    if (error instanceof NovelAnnotationNotFoundError) return notFound(c, error.message)
+    if (error instanceof NovelAnnotationValidationError) return badRequest(c, error.message)
+    throw error
+  }
+})
+
+app.delete('/:id/annotations/:annotationId', (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '小说编号无效')
+  const annotationId = parsePositiveInt(c.req.param('annotationId'))
+  if (!annotationId) return badRequest(c, '批注编号无效')
+  if (!getNovel(id)) return notFound(c, '小说不存在')
+  if (!deleteAnnotation(id, annotationId)) return notFound(c, '批注不存在')
+  return success(c, { deleted: true })
+})
+
+app.get('/:id/foreshadows', (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '小说编号无效')
+  if (!getNovel(id)) return notFound(c, '小说不存在')
+  const chapterRaw = c.req.query('chapter_no')
+  const chapterNo = chapterRaw === undefined ? undefined : parsePositiveInt(chapterRaw)
+  if (chapterRaw !== undefined && !chapterNo) return badRequest(c, 'chapter_no 必须是正整数')
+  const statusRaw = c.req.query('status')
+  let statuses: string[] | undefined
+  if (statusRaw) {
+    statuses = statusRaw.split(',').map((item) => item.trim()).filter(Boolean)
+    if (statuses.some((item) => !(FORESHADOW_STATUSES as readonly string[]).includes(item))) {
+      return badRequest(c, `status 必须是 ${FORESHADOW_STATUSES.join(' / ')}`)
+    }
+  }
+  return success(c, { items: listForeshadows(id, { chapterNo: chapterNo ?? undefined, statuses }) })
+})
+
+app.get('/:id/foreshadows/candidates', (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '小说编号无效')
+  if (!getNovel(id)) return notFound(c, '小说不存在')
+  try {
+    return success(c, extractForeshadowCandidates(id))
+  } catch (error) {
+    if (error instanceof NovelForeshadowNotFoundError) return notFound(c, error.message)
+    throw error
+  }
+})
+
+app.post('/:id/foreshadows', async (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '小说编号无效')
+  if (!getNovel(id)) return notFound(c, '小说不存在')
+  const body = await readBody(c)
+  if (!body) return badRequest(c, '请求体必须是对象')
+  try {
+    return created(c, createForeshadow(id, body))
+  } catch (error) {
+    if (error instanceof NovelForeshadowNotFoundError) return notFound(c, error.message)
+    if (error instanceof NovelForeshadowValidationError) return badRequest(c, error.message)
+    throw error
+  }
+})
+
+app.put('/:id/foreshadows/:foreshadowId', async (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '小说编号无效')
+  const foreshadowId = parsePositiveInt(c.req.param('foreshadowId'))
+  if (!foreshadowId) return badRequest(c, '伏笔编号无效')
+  if (!getNovel(id)) return notFound(c, '小说不存在')
+  const body = await readBody(c)
+  if (!body) return badRequest(c, '请求体必须是对象')
+  try {
+    return success(c, updateForeshadow(id, foreshadowId, body))
+  } catch (error) {
+    if (error instanceof NovelForeshadowNotFoundError) return notFound(c, error.message)
+    if (error instanceof NovelForeshadowValidationError) return badRequest(c, error.message)
+    if (error instanceof NovelForeshadowConflictError) {
+      return c.json({ code: 409, message: error.message }, 409)
+    }
+    throw error
+  }
+})
+
+app.delete('/:id/foreshadows/:foreshadowId', (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return badRequest(c, '小说编号无效')
+  const foreshadowId = parsePositiveInt(c.req.param('foreshadowId'))
+  if (!foreshadowId) return badRequest(c, '伏笔编号无效')
+  if (!getNovel(id)) return notFound(c, '小说不存在')
+  if (!deleteForeshadow(id, foreshadowId)) return notFound(c, '伏笔不存在')
   return success(c, { deleted: true })
 })
 

@@ -97,6 +97,7 @@ import { useI18n } from 'vue-i18n'
 import { BookOpen, Plus, Search, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { useNovelStore } from '~/stores/novel'
+import { useAgentPageAdapter } from '~/composables/useAgentPageAdapter'
 import NovelProjectCard from '~/components/novel/ProjectCard.vue'
 import NovelCreateProjectDialog from '~/components/novel/CreateProjectDialog.vue'
 
@@ -104,6 +105,15 @@ definePageMeta({ layout: 'novel' })
 
 const { t } = useI18n()
 const store = useNovelStore()
+
+useAgentPageAdapter({
+  id: 'novel-library',
+  match: { name: 'novels', path: '/novels' },
+  scope: () => ({ workspace_key: 'novel-library', kind: 'novel-library' }),
+  entries: ['floating'],
+  quickPrompts: () => [t('assistant.prompts.novelLibrary1'), t('assistant.prompts.novelLibrary2')],
+  supportedScopes: ['novel-library'],
+})
 
 const keyword = ref('')
 const status = ref('')

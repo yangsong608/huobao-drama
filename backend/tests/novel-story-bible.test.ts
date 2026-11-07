@@ -40,20 +40,25 @@ function insertDrama(storyBible: unknown): number {
   return Number(res.lastInsertRowid)
 }
 
-test('buildStoryBible 只保留五个已知键的非空字符串', () => {
+test('buildStoryBible 只保留已知键的非空字符串', () => {
   const bible = buildStoryBible({
     coreSeed: '  一名侦探追查失踪案  ',
     characterDynamics: '侦探与助手互相试探',
     worldBuilding: '',
     plotArchitecture: 42,
     characterState: '   ',
+    adaptationNotes: '  改编时保留雨夜氛围  ',
     extra: '忽略',
   })
   assert.deepEqual(bible, {
     coreSeed: '一名侦探追查失踪案',
     characterDynamics: '侦探与助手互相试探',
+    adaptationNotes: '改编时保留雨夜氛围',
   })
-  assert.deepEqual([...STORY_BIBLE_KEYS], ['coreSeed', 'characterDynamics', 'worldBuilding', 'plotArchitecture', 'characterState'])
+  assert.deepEqual(
+    [...STORY_BIBLE_KEYS],
+    ['coreSeed', 'characterDynamics', 'worldBuilding', 'plotArchitecture', 'characterState', 'adaptationNotes'],
+  )
 })
 
 test('getStoryBible 对缺失剧集、空值、坏 JSON、数组一律返回空对象', () => {
@@ -67,16 +72,17 @@ test('getStoryBible 对缺失剧集、空值、坏 JSON、数组一律返回空�
   assert.deepEqual(getStoryBible(dramaId), { coreSeed: '核心', worldBuilding: '世界' })
 })
 
-test('formatStoryBible 按五件套顺序拼接并带中文段标题', () => {
+test('formatStoryBible 按已知键顺序拼接并带中文段标题', () => {
   const bible = {
     characterState: '当前状态',
     worldBuilding: '世界观',
     coreSeed: '核心种子',
     plotArchitecture: '剧情架构',
     characterDynamics: '人物关系',
+    adaptationNotes: '改编备注内容',
   }
   const text = formatStoryBible(bible, 6000)
-  const order = ['【核心种子】', '核心种子', '【人物关系】', '人物关系', '【世界观设定】', '世界观', '【剧情架构】', '剧情架构', '【人物状态】', '当前状态']
+  const order = ['【核心种子】', '核心种子', '【人物关系】', '人物关系', '【世界观设定】', '世界观', '【剧情架构】', '剧情架构', '【人物状态】', '当前状态', '【改编备注】', '改编备注内容']
   let cursor = -1
   for (const piece of order) {
     const index = text.indexOf(piece, cursor + 1)

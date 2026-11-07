@@ -693,6 +693,22 @@
 
               <div class="config-row">
                 <div class="config-main">
+                  <div class="config-line"><span class="config-name">{{ t('settings.novel.workbenchLayout') }}</span></div>
+                  <div class="config-sub">{{ t('settings.novel.workbenchLayoutHint') }}</div>
+                </div>
+                <div class="lang-picker">
+                  <button
+                    v-for="layout in ['split', 'tabs']"
+                    :key="layout"
+                    type="button"
+                    :class="['lang-option', { on: (novelSettings.workbench?.layout || 'split') === layout }]"
+                    @click="saveNovel({ workbench: { layout } })"
+                  >{{ t(`settings.novel.layout${layout === 'split' ? 'Split' : 'Tabs'}`) }}</button>
+                </div>
+              </div>
+
+              <div class="config-row">
+                <div class="config-main">
                   <div class="config-line"><span class="config-name">{{ t('settings.novel.importWords') }}</span></div>
                   <div class="config-sub">{{ t('settings.novel.importWordsHint') }}</div>
                 </div>
@@ -1065,134 +1081,272 @@
         </div>
 
         <!-- ===== Agent 配置（左侧 tab 切换，Prompt 与 Skills 整合在同一 Agent 下） ===== -->
-        <div v-else-if="tab === 'agents'" class="skills-layout">
-          <!-- Agent 左侧 tab 列表 -->
-          <aside class="skills-agent-list">
-            <div class="skills-agent-title">{{ t('settings.skills.agentList') }}</div>
+        <div v-else-if="tab === 'agents'" class="agent-center">
+          <!-- 智能体中心左侧子导航：固定八个子区 -->
+          <aside class="agent-center-nav">
+            <div class="skills-agent-title">{{ t('settings.agentCenter.title') }}</div>
+            <input
+              v-model="agentCenterSearch"
+              class="input agent-center-search"
+              :placeholder="t('settings.agentCenter.searchPlaceholder')"
+            />
             <button
-              v-for="a in agentDefs"
-              :key="a.type"
-              :class="['skills-agent-item', { active: selectedAgent === a.type }]"
-              @click="selectAgent(a.type)"
+              v-for="section in agentCenterSections"
+              :key="section.id"
+              :class="['skills-agent-item', { active: agentCenterSection === section.id }]"
+              @click="openAgentCenterSection(section.id)"
             >
-              <span class="agent-type-badge">{{ a.icon }}</span>
-              <span class="skills-agent-label">{{ a.label }}</span>
-              <span v-if="agentSkillCount(a.type) > 0" class="skill-count-badge">{{ agentSkillCount(a.type) }}</span>
+              <component :is="section.icon" :size="15" class="agent-center-nav-icon" />
+              <span class="skills-agent-label">{{ section.label }}</span>
+              <span v-if="section.id === 'production'" class="skill-count-badge">{{ productionAgentDefs.length }}</span>
+              <span v-else-if="section.id === 'presets'" class="skill-count-badge">{{ presetAgentDefs.length }}</span>
             </button>
+            <p v-if="!agentCenterSections.length" class="field-hint agent-center-no-match">
+              {{ t('settings.agentCenter.searchEmpty') }}
+            </p>
           </aside>
 
-          <!-- 右侧主区域 -->
-          <div class="settings-scroll skills-main">
-            <div class="settings-head skills-head">
-              <span class="agent-type-badge skills-head-badge">{{ selectedAgentIcon }}</span>
-              <div class="skills-head-copy">
-                <h2 class="settings-title">{{ selectedAgentLabel }}</h2>
-                <div class="dim" style="font-size:12px;margin-top:2px;display:flex;align-items:center;gap:6px">
-                  {{ selectedAgentType }}
-                  <span v-if="getAgentCfg(selectedAgent) && !getAgentCfg(selectedAgent).is_default" class="tag tag-success">{{ t('settings.common.custom') }}</span>
-                  <span v-else class="tag">{{ t('common.default') }}</span>
+          <!-- 右侧内容区按子区渲染 -->
+          <div class="settings-scroll skills-main agent-center-main">
+            <!-- 1. 总览与开关 -->
+            <template v-if="agentCenterSection === 'overview'">
+              <div class="settings-head agent-center-head">
+                <div class="skills-head-copy">
+                  <h2 class="settings-title">{{ t('settings.agentCenter.overview.title') }}</h2>
+                  <p class="settings-desc">{{ t('settings.agentCenter.overview.desc') }}</p>
                 </div>
+                <button class="btn btn-primary btn-sm ml-auto" :disabled="agentTogglesSaving" @click="saveAgentToggles">
+                  <Loader2 v-if="agentTogglesSaving" :size="12" class="animate-spin" />
+                  {{ t('common.save') }}
+                </button>
               </div>
-              <button v-if="agentPane === 'skills'" class="btn btn-primary btn-sm ml-auto" @click="startAddSkill">
-                <Plus :size="13" /> {{ t('settings.skills.add') }}
-              </button>
-            </div>
-
-            <!-- Prompt 面板（子 tab 作为卡片头，与卡片同宽对齐） -->
-            <div v-if="agentPane === 'prompt'" class="card agent-card">
-              <div class="agent-pane-tabs">
-                <div class="agent-pane-tabs-nav">
-                  <button :class="['agent-pane-tab', { active: agentPane === 'prompt' }]" @click="agentPane = 'prompt'">System Prompt</button>
-                  <button :class="['agent-pane-tab', { active: agentPane === 'skills' }]" @click="agentPane = 'skills'">
-                    Skills<template v-if="agentSkillCount(selectedAgent) > 0"> ({{ agentSkillCount(selectedAgent) }})</template>
-                  </button>
-                </div>
-                <span class="agent-lang-follow dim">
-                  {{ t('settings.agents.followContentLang', { lang: contentLangLabel }) }}
-                </span>
-              </div>
-              <div class="agent-card-body">
-                <label class="field">
-                  <span class="field-label">System Prompt <span class="dim">({{ t('settings.agents.promptHint', { file: promptFileName }) }})</span>
-                    <span v-if="agentPromptFallback" class="tag agent-fallback-tag">{{ t('settings.agents.langFallback') }}</span>
-                  </span>
-                  <textarea v-model="agentForm.system_prompt" class="textarea agent-prompt-input" rows="16" :placeholder="t('settings.agents.promptPlaceholder')" />
-                </label>
-                <div class="agent-card-foot">
-                  <button class="btn btn-ghost btn-sm" @click="resetAgentPrompt(selectedAgent)">{{ t('settings.agents.reset') }}</button>
-                  <span v-if="agentSaved === selectedAgent" class="tag tag-success" style="margin-left:8px">
-                    <Check :size="10" /> {{ t('common.saved') }}
-                  </span>
-                  <button class="btn btn-primary btn-sm ml-auto" :disabled="agentSaving" @click="saveAgentCfg(selectedAgent)">
-                    <Loader2 v-if="agentSaving" :size="12" class="animate-spin" />
-                    {{ t('common.save') }}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Skills 面板（子 tab 同为卡片头） -->
-            <template v-else>
-              <div class="agent-pane-tabs-wrap card">
-                <div class="agent-pane-tabs">
-                  <div class="agent-pane-tabs-nav">
-                    <button :class="['agent-pane-tab', { active: agentPane === 'prompt' }]" @click="agentPane = 'prompt'">System Prompt</button>
-                    <button :class="['agent-pane-tab', { active: agentPane === 'skills' }]" @click="agentPane = 'skills'">
-                      Skills<template v-if="agentSkillCount(selectedAgent) > 0"> ({{ agentSkillCount(selectedAgent) }})</template>
-                    </button>
+              <div class="card agent-toggle-list">
+                <div v-for="item in agentToggleDefs" :key="item.key" class="agent-toggle-row">
+                  <div class="agent-toggle-copy">
+                    <div class="agent-toggle-label">{{ item.label }}</div>
+                    <div class="field-hint">{{ item.hint }}</div>
                   </div>
-                  <span class="agent-lang-follow dim">
-                    {{ t('settings.agents.followContentLang', { lang: contentLangLabel }) }}
-                  </span>
+                  <input v-model="agentToggles[item.key]" type="checkbox" class="agent-switch" :disabled="agentForcedKeys.includes(item.key)" />
                 </div>
               </div>
-              <p class="settings-desc" style="margin-top:0">{{ t('settings.skills.desc') }}</p>
+              <p class="field-hint">{{ t('settings.agentCenter.overview.effectHint') }}</p>
+              <p v-if="agentForcedFlags.length" class="field-hint gw-error">
+                {{ t('settings.agentCenter.overview.forcedHint', { flags: agentForcedFlags.join(', ') }) }}
+              </p>
+            </template>
 
-              <!-- 无 skill 提示 -->
-              <div v-if="!currentSkills.length" class="card skills-empty">
-                <div class="skills-empty-icon">
-                  <FileText :size="24" />
+            <!-- 2. 页面绑定（骨架） -->
+            <template v-else-if="agentCenterSection === 'pages'">
+              <div class="settings-head agent-center-head">
+                <div class="skills-head-copy">
+                  <h2 class="settings-title">{{ t('settings.agentCenter.pages.title') }}</h2>
+                  <p class="settings-desc">{{ t('settings.agentCenter.pages.desc') }}</p>
                 </div>
-                <div class="skills-empty-title">{{ t('settings.skills.emptyTitle') }}</div>
-                <div class="skills-empty-desc">{{ t('settings.skills.emptyDesc') }}</div>
+                <span class="tag ml-auto">{{ t('settings.agentCenter.pages.source') }}</span>
+              </div>
+              <div v-if="pageBindingRoutes.length" class="card agent-binding-card">
+                <div class="agent-binding-head">
+                  <span>{{ t('settings.agentCenter.pages.bindings') }}</span>
+                  <span class="skill-count-badge">{{ pageBindingRoutes.length }}</span>
+                </div>
+                <div class="agent-binding-list">
+                  <code v-for="route in pageBindingRoutes" :key="route" class="agent-binding-route">{{ route }}</code>
+                </div>
+              </div>
+              <div v-else class="card agent-empty">
+                <div class="agent-empty-title">{{ t('settings.agentCenter.futureTitle') }}</div>
+                <div class="agent-empty-desc">{{ t('settings.agentCenter.futureHint') }}</div>
+              </div>
+              <p class="field-hint">{{ t('settings.agentCenter.futureNote') }}</p>
+            </template>
+
+            <!-- 3/4. 生产智能体与两个预设 -->
+            <template v-else-if="agentCenterSection === 'production' || agentCenterSection === 'presets'">
+              <div class="settings-head agent-center-head">
+                <div class="skills-head-copy">
+                  <h2 class="settings-title">{{ agentCenterSectionTitle }}</h2>
+                  <p class="settings-desc">{{ agentCenterSectionDesc }}</p>
+                </div>
+                <button v-if="agentPane === 'skills'" class="btn btn-primary btn-sm ml-auto" @click="startAddSkill">
+                  <Plus :size="13" /> {{ t('settings.skills.add') }}
+                </button>
+              </div>
+              <div class="agent-chip-row">
+                <button
+                  v-for="a in agentCenterAgents"
+                  :key="a.type"
+                  :class="['agent-chip', { active: selectedAgent === a.type }]"
+                  @click="selectAgent(a.type)"
+                >
+                  <span class="agent-type-badge">{{ a.icon }}</span>
+                  <span class="agent-chip-label">{{ a.label }}</span>
+                  <span v-if="agentSkillCount(a.type) > 0" class="skill-count-badge">{{ agentSkillCount(a.type) }}</span>
+                </button>
               </div>
 
-              <!-- Skill 列表 -->
-              <div class="skill-list" v-else>
-                <div v-for="s in currentSkills" :key="s.id" class="card skill-card">
-                  <div class="skill-card-head" @click="toggleSkillEdit(s.id)">
-                    <FileText :size="14" style="color:var(--accent);flex-shrink:0" />
-                    <div style="flex:1;min-width:0">
-                      <div style="font-weight:600;font-size:13px">{{ s.name }}</div>
-                      <div class="dim" style="font-size:11px">{{ s.description }}</div>
+              <template v-if="selectedAgentInSection">
+                <div class="settings-head skills-head">
+                  <span class="agent-type-badge skills-head-badge">{{ selectedAgentIcon }}</span>
+                  <div class="skills-head-copy">
+                    <h2 class="settings-title">{{ selectedAgentLabel }}</h2>
+                    <div class="dim" style="font-size:12px;margin-top:2px;display:flex;align-items:center;gap:6px">
+                      {{ selectedAgentType }}
+                      <span v-if="getAgentCfg(selectedAgent) && !getAgentCfg(selectedAgent).is_default" class="tag tag-success">{{ t('settings.common.custom') }}</span>
+                      <span v-else class="tag">{{ t('common.default') }}</span>
                     </div>
-                    <button class="btn btn-danger btn-icon btn-sm" style="margin-right:4px" @click.stop="skillToDelete = s.id">
-                      <Trash2 :size="13" />
-                    </button>
-                    <ChevronDown :size="14" :style="{ transform: editingSkill === s.id ? 'rotate(180deg)' : '', transition: '0.2s' }" />
                   </div>
-                  <div v-if="editingSkill === s.id" class="skill-card-body">
-                    <textarea
-                      v-model="skillContent"
-                      class="textarea mono skill-content-input"
-                      rows="20"
-                      style="font-size:12px;line-height:1.6"
-                      :placeholder="t('settings.skills.contentPlaceholder')"
-                    />
-                    <div class="skill-card-foot">
-                      <span class="dim" style="font-size:11px">skills/{{ s.id }}/{{ skillFileName }}</span>
-                      <span v-if="skillContentFallback" class="tag agent-fallback-tag">{{ t('settings.agents.langFallback') }}</span>
-                      <span v-if="skillSaved === s.id" class="tag tag-success" style="margin-left:8px">
+                </div>
+
+                <!-- Prompt 面板（子 tab 作为卡片头，与卡片同宽对齐） -->
+                <div v-if="agentPane === 'prompt'" class="card agent-card">
+                  <div class="agent-pane-tabs">
+                    <div class="agent-pane-tabs-nav">
+                      <button :class="['agent-pane-tab', { active: agentPane === 'prompt' }]" @click="agentPane = 'prompt'">System Prompt</button>
+                      <button :class="['agent-pane-tab', { active: agentPane === 'skills' }]" @click="agentPane = 'skills'">
+                        Skills<template v-if="agentSkillCount(selectedAgent) > 0"> ({{ agentSkillCount(selectedAgent) }})</template>
+                      </button>
+                    </div>
+                    <span class="agent-lang-follow dim">
+                      {{ t('settings.agents.followContentLang', { lang: contentLangLabel }) }}
+                    </span>
+                  </div>
+                  <div class="agent-card-body">
+                    <label class="field">
+                      <span class="field-label">System Prompt <span class="dim">({{ t('settings.agents.promptHint', { file: promptFileName }) }})</span>
+                        <span v-if="agentPromptFallback" class="tag agent-fallback-tag">{{ t('settings.agents.langFallback') }}</span>
+                      </span>
+                      <textarea v-model="agentForm.system_prompt" class="textarea agent-prompt-input" rows="16" :placeholder="t('settings.agents.promptPlaceholder')" />
+                    </label>
+                    <label v-if="agentCenterSection === 'production' && editLang === 'zh'" class="field">
+                      <span class="field-label">{{ t('settings.agents.modelLabel') }}</span>
+                      <input v-model="agentForm.model" class="input" :placeholder="t('settings.agents.modelPlaceholder')" />
+                      <span class="field-hint">{{ t('settings.agents.modelHint') }}</span>
+                    </label>
+                    <p v-else-if="agentCenterSection === 'production'" class="field-hint">{{ t('settings.agents.modelNonZh') }}</p>
+                    <div class="agent-card-foot">
+                      <button class="btn btn-ghost btn-sm" @click="resetAgentPrompt(selectedAgent)">{{ t('settings.agents.reset') }}</button>
+                      <span v-if="agentSaved === selectedAgent" class="tag tag-success" style="margin-left:8px">
                         <Check :size="10" /> {{ t('common.saved') }}
                       </span>
-                      <button class="btn btn-primary btn-sm ml-auto" :disabled="skillSaving" @click="saveSkill(s.id)">
-                        <Loader2 v-if="skillSaving" :size="12" class="animate-spin" />
+                      <button class="btn btn-primary btn-sm ml-auto" :disabled="agentSaving" @click="saveAgentCfg(selectedAgent)">
+                        <Loader2 v-if="agentSaving" :size="12" class="animate-spin" />
                         {{ t('common.save') }}
                       </button>
                     </div>
                   </div>
                 </div>
+
+                <!-- Skills 面板（子 tab 同为卡片头） -->
+                <template v-else>
+                  <div class="agent-pane-tabs-wrap card">
+                    <div class="agent-pane-tabs">
+                      <div class="agent-pane-tabs-nav">
+                        <button :class="['agent-pane-tab', { active: agentPane === 'prompt' }]" @click="agentPane = 'prompt'">System Prompt</button>
+                        <button :class="['agent-pane-tab', { active: agentPane === 'skills' }]" @click="agentPane = 'skills'">
+                          Skills<template v-if="agentSkillCount(selectedAgent) > 0"> ({{ agentSkillCount(selectedAgent) }})</template>
+                        </button>
+                      </div>
+                      <span class="agent-lang-follow dim">
+                        {{ t('settings.agents.followContentLang', { lang: contentLangLabel }) }}
+                      </span>
+                    </div>
+                  </div>
+                  <p class="settings-desc" style="margin-top:0">{{ t('settings.skills.desc') }}</p>
+
+                  <!-- 无 skill 提示 -->
+                  <div v-if="!currentSkills.length" class="card skills-empty">
+                    <div class="skills-empty-icon">
+                      <FileText :size="24" />
+                    </div>
+                    <div class="skills-empty-title">{{ t('settings.skills.emptyTitle') }}</div>
+                    <div class="skills-empty-desc">{{ t('settings.skills.emptyDesc') }}</div>
+                  </div>
+
+                  <!-- Skill 列表 -->
+                  <div class="skill-list" v-else>
+                    <div v-for="s in currentSkills" :key="s.id" class="card skill-card">
+                      <div class="skill-card-head" @click="toggleSkillEdit(s.id)">
+                        <FileText :size="14" style="color:var(--accent);flex-shrink:0" />
+                        <div style="flex:1;min-width:0">
+                          <div style="font-weight:600;font-size:13px">{{ s.name }}</div>
+                          <div class="dim" style="font-size:11px">{{ s.description }}</div>
+                        </div>
+                        <button class="btn btn-danger btn-icon btn-sm" style="margin-right:4px" @click.stop="skillToDelete = s.id">
+                          <Trash2 :size="13" />
+                        </button>
+                        <ChevronDown :size="14" :style="{ transform: editingSkill === s.id ? 'rotate(180deg)' : '', transition: '0.2s' }" />
+                      </div>
+                      <div v-if="editingSkill === s.id" class="skill-card-body">
+                        <textarea
+                          v-model="skillContent"
+                          class="textarea mono skill-content-input"
+                          rows="20"
+                          style="font-size:12px;line-height:1.6"
+                          :placeholder="t('settings.skills.contentPlaceholder')"
+                        />
+                        <div class="skill-card-foot">
+                          <span class="dim" style="font-size:11px">skills/{{ s.id }}/{{ skillFileName }}</span>
+                          <span v-if="skillContentFallback" class="tag agent-fallback-tag">{{ t('settings.agents.langFallback') }}</span>
+                          <span v-if="skillSaved === s.id" class="tag tag-success" style="margin-left:8px">
+                            <Check :size="10" /> {{ t('common.saved') }}
+                          </span>
+                          <button class="btn btn-primary btn-sm ml-auto" :disabled="skillSaving" @click="saveSkill(s.id)">
+                            <Loader2 v-if="skillSaving" :size="12" class="animate-spin" />
+                            {{ t('common.save') }}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </template>
+              <div v-else class="card agent-empty">
+                <div class="agent-empty-title">{{ t('settings.agentCenter.selectAgentTitle') }}</div>
+                <div class="agent-empty-desc">{{ t('settings.agentCenter.selectAgentHint') }}</div>
               </div>
+            </template>
+
+            <!-- 5–8. 工具与权限 / 模型与预算 / 会话与审计 / 诊断 -->
+            <template v-else>
+              <div class="settings-head agent-center-head">
+                <div class="skills-head-copy">
+                  <h2 class="settings-title">{{ agentCenterSectionTitle }}</h2>
+                  <p class="settings-desc">{{ agentCenterSectionDesc }}</p>
+                </div>
+                <span class="tag ml-auto">{{ t('settings.agentCenter.dataSourcePrefix') }}{{ agentCenterSectionSource }}</span>
+              </div>
+
+              <div v-if="agentCenterSection === 'models'" class="card agent-model-card">
+                <template v-if="editLang === 'zh'">
+                  <label class="field">
+                    <span class="field-label">{{ t('settings.agentCenter.models.assistantModel') }}</span>
+                    <input v-model="agentModels.model" class="input" :placeholder="t('settings.agentCenter.models.modelPlaceholder')" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">{{ t('settings.agentCenter.models.directorModel') }}</span>
+                    <input v-model="agentModels.directorModel" class="input" :placeholder="t('settings.agentCenter.models.modelPlaceholder')" />
+                  </label>
+                  <p class="field-hint">{{ t('settings.agentCenter.models.modelHint') }}</p>
+                  <p class="field-hint">{{ agentBudgetHint }}</p>
+                  <div class="agent-card-foot">
+                    <span v-if="agentModelsSaved" class="tag tag-success"><Check :size="10" /> {{ t('common.saved') }}</span>
+                    <button class="btn btn-primary btn-sm ml-auto" :disabled="agentModelsSaving" @click="saveAgentModels">
+                      <Loader2 v-if="agentModelsSaving" :size="12" class="animate-spin" />
+                      {{ t('common.save') }}
+                    </button>
+                  </div>
+                </template>
+                <div v-else class="agent-empty">
+                  <div class="agent-empty-title">{{ t('settings.agentCenter.models.nonZhTitle') }}</div>
+                  <div class="agent-empty-desc">{{ t('settings.agentCenter.models.nonZhHint') }}</div>
+                </div>
+              </div>
+
+              <div v-else class="card agent-empty">
+                <div class="agent-empty-title">{{ t('settings.agentCenter.futureTitle') }}</div>
+                <div class="agent-empty-desc">{{ t('settings.agentCenter.futureHint') }}</div>
+              </div>
+              <p v-if="agentCenterSection !== 'models'" class="field-hint">{{ t('settings.agentCenter.futureNote') }}</p>
             </template>
           </div>
         </div>
@@ -1748,7 +1902,7 @@
 </template>
 
 <script setup>
-import { Plus, Pencil, Trash2, FileText, ChevronDown, Check, Loader2, Bot, Cpu, Sparkles, Palette, ExternalLink, Star, HardDrive, Database, RefreshCw, Download, Languages, SunMoon, X, Plug, KeyRound, Copy, ListOrdered, Mic, Music, BookOpen } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, FileText, ChevronDown, Check, Loader2, Bot, Cpu, Sparkles, Palette, ExternalLink, Star, HardDrive, Database, RefreshCw, Download, Languages, SunMoon, X, Plug, KeyRound, Copy, ListOrdered, Mic, Music, BookOpen, LayoutDashboard, Wrench, MessagesSquare, Activity } from 'lucide-vue-next'
 import BaseSelect from '~/components/BaseSelect.vue'
 import QueuePanel from '~/components/QueuePanel.vue'
 import { toast } from 'vue-sonner'
@@ -1756,6 +1910,7 @@ import { toastError } from '~/composables/useToast'
 import { useI18n } from 'vue-i18n'
 import { aiConfigAPI, promptAPI, skillsAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, bgmAPI } from '~/composables/useApi'
 import { useDesktopBridge } from '~/composables/useDesktopBridge'
+import { useAgentSettings, applyAgentSettings } from '~/composables/useAgentSettings'
 import { useMigrateState } from '~/composables/useMigrateState'
 import { useTheme } from '~/composables/useTheme'
 import { providerIconUrl } from '~/composables/useProviderIcon'
@@ -2366,14 +2521,164 @@ const agentCfgs = ref([])
 const agentPane = ref('prompt')   // 右侧子 tab：prompt | skills
 const agentSaving = ref(false)
 const agentSaved = ref(null)
-const agentForm = reactive({ system_prompt: '' })
+const agentForm = reactive({ system_prompt: '', model: '' })
 
-const agentDefs = computed(() => [
+// ===== 智能体中心（八区骨架） =====
+const AGENT_CENTER_SECTIONS = ['overview', 'pages', 'production', 'presets', 'tools', 'models', 'sessions', 'diagnostics']
+const PRODUCTION_AGENT_TYPES = ['script_rewriter', 'extractor', 'storyboard_breaker', 'prompt_generator', 'voice_designer']
+const PRESET_AGENT_TYPES = ['assistant', 'director']
+
+const productionAgentDefs = computed(() => [
   { type: 'script_rewriter', label: t('settings.agents.scriptRewriter'), icon: '📝' },
   { type: 'extractor', label: t('settings.agents.extractor'), icon: '🔍' },
   { type: 'storyboard_breaker', label: t('settings.agents.storyboardBreaker'), icon: '🎬' },
   { type: 'prompt_generator', label: t('settings.agents.promptGenerator'), icon: '🖼' },
+  { type: 'voice_designer', label: t('settings.agents.voiceDesigner'), icon: '🎙' },
 ])
+const presetAgentDefs = computed(() => [
+  { type: 'assistant', label: t('settings.agents.presetAssistant'), icon: '💬' },
+  { type: 'director', label: t('settings.agents.presetDirector'), icon: '🎥' },
+])
+const agentDefs = computed(() => [...productionAgentDefs.value, ...presetAgentDefs.value])
+
+const agentCenterSection = ref('overview')
+const agentCenterSearch = ref('')
+const agentCenterMeta = {
+  overview: { icon: LayoutDashboard, keywords: 'dock director stream proposals suggestions autoDetect 悬浮 开关 流式 提案 建议 作用域' },
+  pages: { icon: FileText, keywords: 'pages bindings route entries preset 页面 绑定 路由' },
+  production: { icon: Sparkles, keywords: 'script rewriter extractor storyboard prompt voice 生产 智能体' },
+  presets: { icon: Bot, keywords: 'assistant director 助手 导演 预设' },
+  tools: { icon: Wrench, keywords: 'tools permissions read-only 工具 权限 只读' },
+  models: { icon: Cpu, keywords: 'model context message history retention 模型 预算 上下文 历史' },
+  sessions: { icon: MessagesSquare, keywords: 'sessions audit threads messages 会话 审计 消息' },
+  diagnostics: { icon: Activity, keywords: 'diagnostics errors status 诊断 错误 状态' },
+}
+const agentCenterSections = computed(() => {
+  const query = agentCenterSearch.value.trim().toLowerCase()
+  return AGENT_CENTER_SECTIONS.map((id) => {
+    const meta = agentCenterMeta[id]
+    return { id, icon: meta.icon, keywords: meta.keywords, label: t(`settings.agentCenter.sections.${id}`) }
+  }).filter((section) => !query || `${section.label} ${section.keywords}`.toLowerCase().includes(query))
+})
+const agentCenterAgents = computed(() =>
+  agentCenterSection.value === 'presets' ? presetAgentDefs.value : productionAgentDefs.value)
+const selectedAgentInSection = computed(() =>
+  agentCenterAgents.value.some((agent) => agent.type === selectedAgent.value))
+const agentCenterSectionTitle = computed(() => t(`settings.agentCenter.${agentCenterSection.value}.title`))
+const agentCenterSectionDesc = computed(() => t(`settings.agentCenter.${agentCenterSection.value}.desc`))
+const agentCenterSectionSource = computed(() => t(`settings.agentCenter.${agentCenterSection.value}.source`))
+
+const { loadAgentSettings } = useAgentSettings()
+const agentSettingsForm = ref(null)
+const agentTogglesSaving = ref(false)
+const agentModelsSaving = ref(false)
+const agentModelsSaved = ref(false)
+const agentForcedFlags = ref([])
+const agentForcedKeys = ref([])
+const agentToggles = reactive({ dock: true, director: true, stream: true, proposals: true, suggestions: true, autoDetect: true })
+const agentModels = reactive({ model: '', directorModel: '' })
+
+const agentToggleDefs = computed(() => [
+  { key: 'dock', label: t('settings.agentCenter.overview.switches.dock'), hint: t('settings.agentCenter.overview.switches.dockHint') },
+  { key: 'director', label: t('settings.agentCenter.overview.switches.director'), hint: t('settings.agentCenter.overview.switches.directorHint') },
+  { key: 'stream', label: t('settings.agentCenter.overview.switches.stream'), hint: t('settings.agentCenter.overview.switches.streamHint') },
+  { key: 'proposals', label: t('settings.agentCenter.overview.switches.proposals'), hint: t('settings.agentCenter.overview.switches.proposalsHint') },
+  { key: 'suggestions', label: t('settings.agentCenter.overview.switches.suggestions'), hint: t('settings.agentCenter.overview.switches.suggestionsHint') },
+  { key: 'autoDetect', label: t('settings.agentCenter.overview.switches.autoDetect'), hint: t('settings.agentCenter.overview.switches.autoDetectHint') },
+])
+const pageBindingRoutes = computed(() =>
+  (agentSettingsForm.value?.pages?.bindings ?? []).map((binding) =>
+    binding.stage ? `${binding.route} · ${binding.stage}` : binding.route))
+const agentBudgetHint = computed(() => t('settings.agentCenter.models.budgetHint', {
+  context: agentSettingsForm.value?.context?.maxChars ?? 12000,
+  message: agentSettingsForm.value?.message?.maxChars ?? 4000,
+  tools: agentSettingsForm.value?.tools?.maxResultChars ?? 6000,
+  history: agentSettingsForm.value?.history?.maxMessages ?? 20,
+  retention: agentSettingsForm.value?.session?.retentionDays ?? 30,
+}))
+
+function applyAgentToggles(settings) {
+  agentToggles.dock = settings.dock.enabled !== false
+  agentToggles.director = settings.director.enabled !== false
+  agentToggles.stream = settings.stream.enabled !== false
+  agentToggles.proposals = settings.proposals.enabled !== false
+  agentToggles.suggestions = settings.suggestions.enabled !== false
+  agentToggles.autoDetect = settings.scope.autoDetect !== false
+}
+
+async function loadAgentCenter(force = false) {
+  const settings = await loadAgentSettings(force)
+  if (!settings) return
+  agentSettingsForm.value = settings
+  agentModels.model = settings.model || ''
+  agentModels.directorModel = settings.director.model || ''
+  applyAgentToggles(settings)
+}
+
+async function saveAgentToggles() {
+  agentTogglesSaving.value = true
+  agentForcedFlags.value = []
+  agentForcedKeys.value = []
+  const requested = {
+    dock: agentToggles.dock,
+    director: agentToggles.director,
+    stream: agentToggles.stream,
+    proposals: agentToggles.proposals,
+    suggestions: agentToggles.suggestions,
+  }
+  try {
+    const res = await settingsAPI.saveAgent({
+      dock: { enabled: requested.dock },
+      director: { enabled: requested.director },
+      stream: { enabled: requested.stream },
+      proposals: { enabled: requested.proposals },
+      suggestions: { enabled: requested.suggestions },
+      scope: { autoDetect: agentToggles.autoDetect },
+    })
+    applyAgentSettings(res.settings)
+    agentSettingsForm.value = res.settings
+    applyAgentToggles(res.settings)
+    const forced = []
+    if (requested.dock && res.settings.dock.enabled === false) forced.push(['dock', 'AGENT_DOCK'])
+    if (requested.director && res.settings.director.enabled === false) forced.push(['director', 'AGENT_DIRECTOR'])
+    if (requested.stream && res.settings.stream.enabled === false) forced.push(['stream', 'AGENT_STREAM'])
+    if (requested.proposals && res.settings.proposals.enabled === false) forced.push(['proposals', 'AGENT_PROPOSALS'])
+    if (requested.suggestions && res.settings.suggestions.enabled === false) forced.push(['suggestions', 'AGENT_SUGGESTIONS'])
+    agentForcedKeys.value = forced.map(([key]) => key)
+    agentForcedFlags.value = forced.map(([, flag]) => flag)
+    toast.success(t('settings.agentCenter.overview.saved'))
+  } catch (e) {
+    toastError(e)
+  } finally {
+    agentTogglesSaving.value = false
+  }
+}
+
+async function saveAgentModels() {
+  if (editLang.value !== 'zh') return
+  agentModelsSaving.value = true
+  agentModelsSaved.value = false
+  try {
+    const res = await settingsAPI.saveAgent({ model: agentModels.model, director: { model: agentModels.directorModel } })
+    applyAgentSettings(res.settings)
+    agentSettingsForm.value = res.settings
+    agentModels.model = res.settings.model || ''
+    agentModels.directorModel = res.settings.director.model || ''
+    agentModelsSaved.value = true
+    toast.success(t('settings.agentCenter.models.saved'))
+    setTimeout(() => { agentModelsSaved.value = false }, 3000)
+  } catch (e) {
+    toastError(e)
+  } finally {
+    agentModelsSaving.value = false
+  }
+}
+
+function openAgentCenterSection(sectionId) {
+  agentCenterSection.value = sectionId
+  if (sectionId === 'production') selectAgent(productionAgentDefs.value[0].type)
+  else if (sectionId === 'presets') selectAgent(presetAgentDefs.value[0].type)
+}
 
 function getAgentCfg(type) {
   return agentCfgs.value.find(a => a.agent_type === type)
@@ -2390,6 +2695,7 @@ async function loadAgentPrompt(type) {
     const cfg = await promptAPI.get(type, editLang.value)
     if (selectedAgent.value === type) {
       agentForm.system_prompt = cfg.system_prompt || ''
+      agentForm.model = cfg.model || ''
       agentPromptFallback.value = editLang.value !== 'zh' && !!cfg.is_default
     }
     agentSaved.value = null
@@ -2402,6 +2708,7 @@ async function resetAgentPrompt(type) {
     await loadAgents()
     const cfg = await promptAPI.get(type, editLang.value)
     agentForm.system_prompt = cfg.system_prompt || ''
+    agentForm.model = cfg.model || ''
     agentPromptFallback.value = editLang.value !== 'zh' && !!cfg.is_default
     toast.success(t('settings.agents.promptReset'))
   } catch (e) { toastError(e) }
@@ -2411,10 +2718,13 @@ async function saveAgentCfg(type) {
   agentSaving.value = true
   agentSaved.value = null
   try {
-    await promptAPI.update(type, {
+    const payload = {
       name: agentDefs.value.find(a => a.type === type)?.label || type,
       system_prompt: agentForm.system_prompt,
-    }, editLang.value)
+    }
+    // 模型只随中文提示词提交；其他语言沿用中文模型，不改写基础版
+    if (editLang.value === 'zh' && PRODUCTION_AGENT_TYPES.includes(type)) payload.model = agentForm.model
+    await promptAPI.update(type, payload, editLang.value)
     await loadAgents()
     agentPromptFallback.value = false
     agentSaved.value = type
@@ -2984,6 +3294,7 @@ async function resetPipelineRuleItem(rule) {
 onMounted(() => {
   loadCfgs()
   loadAgents()
+  loadAgentCenter()
   loadAllSkills()
   loadAgentPrompt(selectedAgent.value)
   loadStylePresets()
@@ -3218,6 +3529,8 @@ watch(tab, (t) => {
   if (t === 'rules') loadPipelineRules()
   // 进入 Agent 页总是按当前内容语言重载（幂等）：兜住「先切语言、后进 Agent」的时序
   if (t === 'agents') {
+    loadAgents()
+    loadAgentCenter()
     loadAgentPrompt(selectedAgent.value)
     loadAllSkills()
   }
@@ -3782,4 +4095,53 @@ onBeforeUnmount(stopUsagePoll)
 .dub-number { width: 90px; text-align: right; }
 .dub-value { min-width: 48px; text-align: right; font-size: 12px; color: var(--text-2); }
 .dub-unit { font-size: 11px; color: var(--text-3); }
+
+/* 智能体中心（八区骨架） */
+.agent-center { display: flex; height: 100%; overflow: hidden; }
+.agent-center-nav {
+  width: 220px; flex-shrink: 0; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 4px;
+  overflow-y: auto; padding: 20px 10px 16px;
+}
+.agent-center-search { margin: 2px 4px 8px; font-size: 12px; }
+.agent-center-nav-icon { flex-shrink: 0; color: var(--text-3); }
+.skills-agent-item.active .agent-center-nav-icon { color: var(--accent-text); }
+.agent-center-no-match { padding: 8px 10px; }
+.agent-center-main { flex: 1; min-width: 0; }
+.agent-center-head { display: flex; align-items: flex-start; gap: 12px; }
+.agent-toggle-list { display: flex; flex-direction: column; }
+.agent-toggle-row {
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 16px; border-top: 1px solid var(--border);
+}
+.agent-toggle-row:first-child { border-top: none; }
+.agent-toggle-copy { flex: 1; min-width: 0; }
+.agent-toggle-label { font-size: 13px; font-weight: 600; color: var(--text-0); }
+.agent-switch {
+  width: 18px; height: 18px; flex-shrink: 0;
+  accent-color: var(--accent); cursor: pointer;
+}
+.agent-chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.agent-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-pill);
+  background: var(--bg-input); color: var(--text-1); cursor: pointer;
+  font-size: 12px; font-weight: 600; transition: all 0.16s var(--ease-out);
+}
+.agent-chip:hover { border-color: var(--border-strong); color: var(--text-0); }
+.agent-chip.active { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-text); }
+.agent-chip .agent-type-badge { width: 22px; height: 22px; border-radius: 7px; font-size: 11px; }
+.agent-chip-label { white-space: nowrap; }
+.agent-chip.active .skill-count-badge { background: var(--accent-bg); color: var(--accent-text); }
+.agent-empty { padding: 48px 24px; text-align: center; }
+.agent-empty-title { font-size: 14px; font-weight: 650; color: var(--text-0); }
+.agent-empty-desc { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+.agent-binding-card { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.agent-binding-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text-0); }
+.agent-binding-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.agent-binding-route {
+  font-family: var(--font-mono); font-size: 11px; padding: 4px 8px;
+  border-radius: 6px; background: var(--bg-sunken); color: var(--text-2);
+}
+.agent-model-card { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 </style>

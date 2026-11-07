@@ -80,6 +80,32 @@
           <span v-if="form.backgroundMode === 'ai'" class="import-hint">{{ t('novels.import.backgroundAiHint') }}</span>
         </label>
 
+        <section v-if="contextPackEnabled" class="import-section">
+          <div class="import-section-head">
+            <label class="import-inline-check">
+              <input v-model="form.includeContextPack" type="checkbox" />
+              {{ t('novels.import.contextPack') }}
+            </label>
+            <div v-if="form.includeContextPack" class="import-context-actions">
+              <label class="import-budget">
+                <span>{{ t('novels.import.contextPackBudget') }}</span>
+                <input v-model.number="form.contextPackMaxChars" class="input" type="number" min="500" max="20000" step="100" />
+              </label>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                :disabled="contextPackLoading || !selectedChapters.length"
+                @click="previewContextPack"
+              >
+                <Loader2 v-if="contextPackLoading" :size="13" class="animate-spin" />
+                {{ contextPackLoading ? t('novels.import.contextPackPreviewing') : t('novels.import.contextPackPreview') }}
+              </button>
+            </div>
+          </div>
+          <p class="import-hint">{{ t('novels.import.contextPackHint') }}</p>
+          <p v-if="contextPackError" class="form-error">{{ contextPackError }}</p>
+        </section>
+
         <section class="import-section import-actions">
           <label class="import-inline-check">
             <input v-model="form.autoExtract" type="checkbox" />
@@ -116,6 +142,39 @@
       </form>
     </div>
   </div>
+
+  <div v-if="open && contextPackOpen" class="overlay" @click.self="contextPackOpen = false">
+    <div class="dialog" style="width: min(720px, calc(100vw - 40px))" role="dialog" aria-modal="true" :aria-label="t('novels.import.contextPackPreviewTitle')">
+      <div class="dialog-head">
+        <div>
+          <h3 class="dialog-title">{{ t('novels.import.contextPackPreviewTitle') }}</h3>
+          <p class="dialog-sub">
+            {{ t('novels.import.contextPackPreviewMeta', {
+              chars: contextPackPreview?.chars || 0,
+              chapters: contextPackPreview?.included?.chapters || 0,
+              annotations: contextPackPreview?.included?.annotations || 0,
+              foreshadows: contextPackPreview?.included?.foreshadows || 0,
+            }) }}
+            <span v-if="contextPackPreview?.truncated"> · {{ t('novels.import.contextPackTruncated') }}</span>
+          </p>
+        </div>
+        <button type="button" class="btn btn-icon btn-sm ml-auto" :aria-label="t('common.close')" @click="contextPackOpen = false">
+          <X :size="16" :stroke-width="1.8" />
+        </button>
+      </div>
+      <div class="dialog-body">
+        <p v-if="contextPackError" class="form-error">{{ contextPackError }}</p>
+        <p v-if="!contextPackPreview?.text" class="import-hint">{{ t('novels.import.contextPackEmpty') }}</p>
+        <pre v-else class="context-pack-text">{{ contextPackPreview.text }}</pre>
+      </div>
+      <div class="dialog-foot">
+        <button type="button" class="btn" @click="contextPackOpen = false">{{ t('common.close') }}</button>
+        <button type="button" class="btn btn-primary" :disabled="!contextPackPreview?.text" @click="copyContextPack">
+          {{ contextPackCopied ? t('novels.import.contextPackCopied') : t('novels.import.contextPackCopy') }}
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -144,6 +203,13 @@ const selectedChapters = ref<number[]>([])
 const textReady = ref(false)
 const imageReady = ref(false)
 const videoReady = ref(false)
+const contextPackEnabled = ref(true)
+const contextPackOpen = ref(false)
+const contextPackLoading = ref(false)
+const contextPackCopied = ref(false)
+const contextPackError = ref('')
+const contextPackPreview = ref<any>(null)
+let copyTimer: ReturnType<typeof setTimeout> | null = null
 let previewTimer: ReturnType<typeof setTimeout> | null = null
 let previewSeq = 0
 
@@ -157,6 +223,8 @@ const form = reactive({
   backgroundMode: 'rule' as 'rule' | 'ai' | 'none',
   autoExtract: false,
   autoPipeline: false,
+  includeContextPack: false,
+  contextPackMaxChars: 4000,
 })
 
 const chapters = computed<any[]>(() => Array.isArray(props.novel?.chapters) ? props.novel.chapters : [])
@@ -234,9 +302,10 @@ async function loadPreview() {
 }
 
 async function loadResources() {
-  const [presets, configs] = await Promise.all([
+  const [presets, configs, settings] = await Promise.all([
     stylePresetAPI.list().catch(() => []),
     aiConfigAPI.list().catch(() => []),
+    novelAPI.settings().catch(() => null),
   ])
   stylePresets.value = Array.isArray(presets) ? presets : []
   const active = (type: string) => (configs || []).some(
@@ -248,6 +317,13 @@ async function loadResources() {
   if (stylePresets.value.length && !stylePresets.value.some((preset) => preset.value === form.style)) {
     form.style = stylePresets.value[0].value
   }
+  const contextPack = (settings as any)?.settings?.contextPack
+  contextPackEnabled.value = contextPack?.enabled !== false
+  form.includeContextPack = contextPackEnabled.value
+  const maxChars = Number(contextPack?.maxChars)
+  form.contextPackMaxChars = Number.isFinite(maxChars)
+    ? Math.min(20000, Math.max(500, Math.round(maxChars)))
+    : 4000
 }
 
 async function init() {
@@ -260,8 +336,14 @@ async function init() {
   form.backgroundMode = 'rule'
   form.autoExtract = false
   form.autoPipeline = false
+  form.includeContextPack = false
+  form.contextPackMaxChars = 4000
   preview.value = null
   errorText.value = ''
+  contextPackOpen.value = false
+  contextPackPreview.value = null
+  contextPackError.value = ''
+  contextPackCopied.value = false
   requestId.value = newRequestId()
   selectedChapters.value = eligibleChapters.value.map((chapter) => chapter.chapterNo)
   await Promise.all([loadResources(), nextTick()])
@@ -284,10 +366,50 @@ watch(selectedChapters, schedulePreview, { deep: true })
 watch(canAutoPipeline, (ready) => {
   if (!ready) form.autoPipeline = false
 })
+watch(contextPackEnabled, (enabled) => {
+  if (!enabled) {
+    form.includeContextPack = false
+    contextPackOpen.value = false
+    contextPackPreview.value = null
+  }
+})
 
 onBeforeUnmount(() => {
   if (previewTimer) clearTimeout(previewTimer)
+  if (copyTimer) clearTimeout(copyTimer)
 })
+
+async function previewContextPack() {
+  if (!selectedChapters.value.length || contextPackLoading.value) return
+  contextPackError.value = ''
+  contextPackLoading.value = true
+  try {
+    const data: any = await novelAPI.contextPackPreview(props.novel.id, {
+      chapter_nos: [...selectedChapters.value].sort((a, b) => a - b),
+      max_chars: form.contextPackMaxChars,
+    })
+    contextPackPreview.value = data
+    contextPackOpen.value = true
+  } catch (error: any) {
+    contextPackError.value = error?.message || t('novels.import.contextPackFailed')
+  } finally {
+    contextPackLoading.value = false
+  }
+}
+
+async function copyContextPack() {
+  const text = String(contextPackPreview.value?.text || '')
+  if (!text) return
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+    await navigator.clipboard.writeText(text)
+    contextPackCopied.value = true
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { contextPackCopied.value = false }, 1600)
+  } catch {
+    contextPackError.value = t('novels.import.contextPackCopyFailed')
+  }
+}
 
 async function submit() {
   errorText.value = ''
@@ -309,8 +431,24 @@ async function submit() {
       background_mode: form.backgroundMode,
       auto_extract: form.autoExtract,
       auto_pipeline: canAutoPipeline.value && form.autoPipeline,
+      include_context_pack: contextPackEnabled.value && form.includeContextPack,
+      context_pack_max_chars: contextPackEnabled.value && form.includeContextPack
+        ? form.contextPackMaxChars
+        : undefined,
     })
-    toast.success(t('novels.import.success', { episodes: result.episode_count }))
+    const pack = result.context_pack
+    toast.success(pack
+      ? t('novels.import.successWithContextPack', {
+        episodes: result.episode_count,
+        chars: pack.chars,
+        chapters: pack.included?.chapters ?? 0,
+        annotations: pack.included?.annotations ?? 0,
+        foreshadows: pack.included?.foreshadows ?? 0,
+      })
+      : t('novels.import.success', { episodes: result.episode_count }))
+    if (Array.isArray(result.warnings) && result.warnings.length) {
+      toast.warning(result.warnings.join('；'))
+    }
     emit('imported', {
       importId: result.import_id,
       dramaId: result.drama_id,
@@ -360,6 +498,38 @@ async function submit() {
 .import-inline-check.disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+.import-context-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.import-budget {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-1);
+}
+.import-budget .input {
+  width: 96px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.context-pack-text {
+  margin: 0;
+  max-height: 52vh;
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-base);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .import-link {
   border: none;

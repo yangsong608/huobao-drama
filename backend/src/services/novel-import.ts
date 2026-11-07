@@ -11,6 +11,7 @@ import { now } from '../utils/response.js'
 import { contentHash, countWords } from '../utils/text-hash.js'
 import { normalizeBackground } from './drama-background.js'
 import { buildStoryBible } from './drama-story-bible.js'
+import { buildNovelContextPack, type ContextPackIncluded } from './novel-context-pack.js'
 import { parseGenre } from './novels.js'
 import { importSplitOptions, mappingNeedsUpdate, normalizeTargetWords, planContentHashes } from './novel-sync-status.js'
 import { planEpisodes, type EpisodePlan, type ParsedChapter, type SplitMode } from './script-import.js'
@@ -47,6 +48,8 @@ export interface NovelImportInput {
   target_words?: number
   include_draft?: boolean
   background_mode?: string
+  include_context_pack?: boolean
+  context_pack_max_chars?: number
 }
 
 export interface NovelImportEpisodePreview {
@@ -68,13 +71,24 @@ export interface NovelImportPreview {
   existing_imports: number
 }
 
+export interface NovelImportContextPackSummary {
+  max_chars: number
+  chars: number
+  truncated: boolean
+  included: ContextPackIncluded
+}
+
 export interface NovelImportResult {
   import_id: number
   drama_id: number
   episode_count: number
   episode_ids: number[]
   existing: boolean
+  warnings: string[]
+  context_pack: NovelImportContextPackSummary | null
 }
+
+export const CONTEXT_PACK_SKIPPED_WARNING = '上下文包生成失败，已跳过注入'
 
 interface ImportPlan {
   novel: NovelRow
@@ -215,12 +229,35 @@ function existingImportResult(existing: typeof schema.novelImports.$inferSelect)
   const mappings = db.select().from(schema.novelImportEpisodes)
     .where(eq(schema.novelImportEpisodes.importId, existing.id))
     .all()
+  let contextPack: NovelImportContextPackSummary | null = null
+  const warnings: string[] = []
+  try {
+    const summary = JSON.parse(existing.lastSyncSummary || '{}')
+    const stored = summary?.context_pack
+    if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+      const included = stored.included && typeof stored.included === 'object' ? stored.included : {}
+      contextPack = {
+        max_chars: Number(stored.max_chars) || 0,
+        chars: Number(stored.chars) || 0,
+        truncated: stored.truncated === true,
+        included: {
+          chapters: Number(included.chapters) || 0,
+          annotations: Number(included.annotations) || 0,
+          foreshadows: Number(included.foreshadows) || 0,
+        },
+      }
+    } else if (stored === 'skipped') {
+      warnings.push(CONTEXT_PACK_SKIPPED_WARNING)
+    }
+  } catch { /* 旧摘要或坏 JSON 视为未启用上下文包 */ }
   return {
     import_id: existing.id,
     drama_id: existing.dramaId,
     episode_count: mappings.length,
     episode_ids: mappings.map((row) => row.episodeId),
     existing: true,
+    warnings,
+    context_pack: contextPack,
   }
 }
 
@@ -362,6 +399,29 @@ export async function commitNovelImport(novelId: number, input: NovelImportInput
   const aspectRatio = input.aspect_ratio === '9:16' ? '9:16' : DEFAULT_ASPECT_RATIO
   const genres = parseGenre(novel.genre)
   const bible = buildStoryBible(novel)
+  let contextPackSummary: NovelImportContextPackSummary | null = null
+  let contextPackState: NovelImportContextPackSummary | 'skipped' | 'off' = 'off'
+  const warnings: string[] = []
+  if (input.include_context_pack === true) {
+    try {
+      const pack = buildNovelContextPack(novelId, {
+        chapter_nos: rows.map((row) => row.chapterNo),
+        max_chars: input.context_pack_max_chars,
+      })
+      if (pack.text) bible.adaptationNotes = pack.text
+      contextPackSummary = {
+        max_chars: pack.max_chars,
+        chars: pack.chars,
+        truncated: pack.truncated,
+        included: pack.included,
+      }
+      contextPackState = contextPackSummary
+    } catch (error) {
+      console.error('[novel-import] 上下文包生成失败', error instanceof Error ? error.message : error)
+      warnings.push(CONTEXT_PACK_SKIPPED_WARNING)
+      contextPackState = 'skipped'
+    }
+  }
   const storyBible = Object.keys(bible).length ? JSON.stringify(bible) : ''
   const description = truncateChars([novel.topic, novel.coreSeed].filter(Boolean).join(' '), MAX_DESCRIPTION_CHARS)
   const chapterByNo = new Map(rows.map((row) => [row.chapterNo, row]))
@@ -396,7 +456,11 @@ export async function commitNovelImport(novelId: number, input: NovelImportInput
       status: 'active',
       sourceUpdatedAt: novel.contentUpdatedAt || novel.updatedAt,
       lastSyncedAt: ts,
-      lastSyncSummary: JSON.stringify({ split_mode: splitMode, target_words: targetWords }),
+      lastSyncSummary: JSON.stringify({
+        split_mode: splitMode,
+        target_words: targetWords,
+        context_pack: contextPackState,
+      }),
       createdAt: ts,
       updatedAt: ts,
     }).run()
@@ -449,7 +513,15 @@ export async function commitNovelImport(novelId: number, input: NovelImportInput
     tx.update(schema.dramas).set({ metadata }).where(eq(schema.dramas.id, dramaId)).run()
   })
 
-  return { import_id: importId, drama_id: dramaId, episode_count: plans.length, episode_ids: episodeIds, existing: false }
+  return {
+    import_id: importId,
+    drama_id: dramaId,
+    episode_count: plans.length,
+    episode_ids: episodeIds,
+    existing: false,
+    warnings,
+    context_pack: contextPackSummary,
+  }
 }
 
 /* ------------------------------------------------------------------ */

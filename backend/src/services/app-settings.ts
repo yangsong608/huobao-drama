@@ -319,11 +319,35 @@ export const NOVEL_STAGE_KEYS = ['architecture', 'blueprint', 'chapter', 'finali
 export type NovelStageKey = typeof NOVEL_STAGE_KEYS[number]
 export const NOVEL_ASPECT_RATIOS = ['16:9', '9:16'] as const
 export type NovelAspectRatio = typeof NOVEL_ASPECT_RATIOS[number]
+export const NOVEL_WORKBENCH_LAYOUTS = ['tabs', 'split'] as const
+export type NovelWorkbenchLayout = typeof NOVEL_WORKBENCH_LAYOUTS[number]
 
 export interface NovelWritingStylePreset {
   key: string
   name: string
   prompt: string
+}
+
+export interface NovelWorkbenchSettings {
+  layout: NovelWorkbenchLayout
+  tree: boolean
+}
+
+export interface NovelAnnotationSettings {
+  enabled: boolean
+  anchorWindow: number
+}
+
+export interface NovelForeshadowSettings {
+  enabled: boolean
+  autoExtract: boolean
+}
+
+export interface NovelContextPackSettings {
+  enabled: boolean
+  includeAnnotations: boolean
+  includeUnresolved: boolean
+  maxChars: number
 }
 
 export interface NovelSettings {
@@ -340,6 +364,10 @@ export interface NovelSettings {
   promptVersion: string
   writingStyles: NovelWritingStylePreset[]
   defaultWritingStyleKey: string
+  workbench: NovelWorkbenchSettings
+  annotations: NovelAnnotationSettings
+  foreshadow: NovelForeshadowSettings
+  contextPack: NovelContextPackSettings
 }
 
 export class NovelSettingsValidationError extends Error {}
@@ -438,6 +466,10 @@ export const NOVEL_SETTINGS_DEFAULTS: NovelSettings = {
   promptVersion: '1.0.0',
   writingStyles: NOVEL_WRITING_STYLE_DEFAULTS,
   defaultWritingStyleKey: '',
+  workbench: { layout: 'split', tree: true },
+  annotations: { enabled: true, anchorWindow: 200 },
+  foreshadow: { enabled: true, autoExtract: false },
+  contextPack: { enabled: true, includeAnnotations: true, includeUnresolved: true, maxChars: 4000 },
 }
 
 function novelNumber(value: unknown, min: number, max: number, fallback: number, integer = true): number {
@@ -453,6 +485,18 @@ function novelFlag(value: unknown, fallback: boolean): boolean {
   if (value === 1 || value === '1' || value === 'true') return true
   if (value === 0 || value === '0' || value === 'false') return false
   return fallback
+}
+
+/** 分组键同时兼容嵌套对象与落库后的 `group.key` 扁平键，嵌套优先 */
+function novelGroupInput(input: Record<string, unknown>, group: string): Record<string, unknown> {
+  const dotted: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(input)) {
+    if (key.startsWith(`${group}.`)) dotted[key.slice(group.length + 1)] = value
+  }
+  const nested = input[group]
+  return nested && typeof nested === 'object' && !Array.isArray(nested)
+    ? { ...dotted, ...nested as Record<string, unknown> }
+    : dotted
 }
 
 function novelTextConfigId(value: unknown): number | null {
@@ -480,6 +524,10 @@ export function sanitizeNovelSettings(raw: unknown): NovelSettings {
   const stageModels = parseNovelStageModels(input.stageModels)
   const promptVersion = typeof input.promptVersion === 'string' ? input.promptVersion.trim().slice(0, 40) : ''
   const writingStyles = parseWritingStyles(input.writingStyles)
+  const workbench = novelGroupInput(input, 'workbench')
+  const annotations = novelGroupInput(input, 'annotations')
+  const foreshadow = novelGroupInput(input, 'foreshadow')
+  const contextPack = novelGroupInput(input, 'contextPack')
   return {
     textConfigId: novelTextConfigId(input.textConfigId),
     stageModels: stageModels ?? {},
@@ -496,6 +544,26 @@ export function sanitizeNovelSettings(raw: unknown): NovelSettings {
     promptVersion: promptVersion || NOVEL_SETTINGS_DEFAULTS.promptVersion,
     writingStyles,
     defaultWritingStyleKey: parseDefaultWritingStyleKey(input.defaultWritingStyleKey, writingStyles),
+    workbench: {
+      layout: (NOVEL_WORKBENCH_LAYOUTS as readonly string[]).includes(String(workbench.layout))
+        ? workbench.layout as NovelWorkbenchLayout
+        : NOVEL_SETTINGS_DEFAULTS.workbench.layout,
+      tree: novelFlag(workbench.tree, NOVEL_SETTINGS_DEFAULTS.workbench.tree),
+    },
+    annotations: {
+      enabled: novelFlag(annotations.enabled, NOVEL_SETTINGS_DEFAULTS.annotations.enabled),
+      anchorWindow: novelNumber(annotations.anchorWindow, 20, 1000, NOVEL_SETTINGS_DEFAULTS.annotations.anchorWindow),
+    },
+    foreshadow: {
+      enabled: novelFlag(foreshadow.enabled, NOVEL_SETTINGS_DEFAULTS.foreshadow.enabled),
+      autoExtract: novelFlag(foreshadow.autoExtract, NOVEL_SETTINGS_DEFAULTS.foreshadow.autoExtract),
+    },
+    contextPack: {
+      enabled: novelFlag(contextPack.enabled, NOVEL_SETTINGS_DEFAULTS.contextPack.enabled),
+      includeAnnotations: novelFlag(contextPack.includeAnnotations, NOVEL_SETTINGS_DEFAULTS.contextPack.includeAnnotations),
+      includeUnresolved: novelFlag(contextPack.includeUnresolved, NOVEL_SETTINGS_DEFAULTS.contextPack.includeUnresolved),
+      maxChars: novelNumber(contextPack.maxChars, 500, 20000, NOVEL_SETTINGS_DEFAULTS.contextPack.maxChars),
+    },
   }
 }
 
@@ -509,7 +577,8 @@ function readNovelSettingsRaw(): Record<string, unknown> {
   return raw
 }
 
-export function getNovelSettings(): NovelSettings {
+/** 只读落库值，不含环境变量覆盖；作为部分更新的合并基线，避免把覆盖值写回库里 */
+function readPersistedNovelSettings(): NovelSettings {
   const raw = readNovelSettingsRaw()
   if (raw.stageModels) {
     try { raw.stageModels = JSON.parse(String(raw.stageModels)) } catch { raw.stageModels = {} }
@@ -517,13 +586,28 @@ export function getNovelSettings(): NovelSettings {
   return sanitizeNovelSettings(raw)
 }
 
-/** 部分更新：stageModels 递归合并，其余字段覆盖；非法类型抛 NovelSettingsValidationError */
+export function getNovelSettings(): NovelSettings {
+  const persisted = readPersistedNovelSettings()
+  const envLayout = envEnum('NOVEL_WORKBENCH_LAYOUT', NOVEL_WORKBENCH_LAYOUTS)
+  const annotationsOff = envBoolOff('NOVEL_ANNOTATIONS')
+  const foreshadowOff = envBoolOff('NOVEL_FORESHADOW')
+  const contextPackOff = envBoolOff('NOVEL_CONTEXT_PACK')
+  return {
+    ...persisted,
+    workbench: { ...persisted.workbench, ...(envLayout ? { layout: envLayout } : {}) },
+    annotations: { ...persisted.annotations, ...(annotationsOff === false ? { enabled: false } : {}) },
+    foreshadow: { ...persisted.foreshadow, ...(foreshadowOff === false ? { enabled: false } : {}) },
+    contextPack: { ...persisted.contextPack, ...(contextPackOff === false ? { enabled: false } : {}) },
+  }
+}
+
+/** 部分更新：stageModels 与四个分组对象按层合并，其余字段覆盖；非法类型抛 NovelSettingsValidationError */
 export function setNovelSettings(patch: unknown): NovelSettings {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
     throw new NovelSettingsValidationError('请求体必须是对象')
   }
   const input = patch as Record<string, unknown>
-  const current = getNovelSettings()
+  const current = readPersistedNovelSettings()
 
   let stageModels = current.stageModels
   if ('stageModels' in input) {
@@ -536,6 +620,10 @@ export function setNovelSettings(patch: unknown): NovelSettings {
     ...current,
     ...input,
     stageModels,
+    workbench: { ...current.workbench, ...sub(input.workbench) },
+    annotations: { ...current.annotations, ...sub(input.annotations) },
+    foreshadow: { ...current.foreshadow, ...sub(input.foreshadow) },
+    contextPack: { ...current.contextPack, ...sub(input.contextPack) },
   })
 
   const serialized: Record<string, string> = {
@@ -552,6 +640,16 @@ export function setNovelSettings(patch: unknown): NovelSettings {
     promptVersion: next.promptVersion,
     writingStyles: JSON.stringify(next.writingStyles),
     defaultWritingStyleKey: next.defaultWritingStyleKey,
+    'workbench.layout': next.workbench.layout,
+    'workbench.tree': next.workbench.tree ? '1' : '0',
+    'annotations.enabled': next.annotations.enabled ? '1' : '0',
+    'annotations.anchorWindow': String(next.annotations.anchorWindow),
+    'foreshadow.enabled': next.foreshadow.enabled ? '1' : '0',
+    'foreshadow.autoExtract': next.foreshadow.autoExtract ? '1' : '0',
+    'contextPack.enabled': next.contextPack.enabled ? '1' : '0',
+    'contextPack.includeAnnotations': next.contextPack.includeAnnotations ? '1' : '0',
+    'contextPack.includeUnresolved': next.contextPack.includeUnresolved ? '1' : '0',
+    'contextPack.maxChars': String(next.contextPack.maxChars),
   }
   const ts = now()
   for (const [field, value] of Object.entries(serialized)) {
@@ -600,4 +698,659 @@ export function setMediaSettings(patch: unknown): MediaSettings {
     })
     .run()
   return { ffmpegDir }
+}
+
+// ---------------------------------------------------------------------------
+// B0 基础层四命名空间（ui / director / edit / agent）
+// 每个命名空间整体存为一个 JSON 值；读取时叠加环境变量覆盖，环境变量值永不落库。
+// ---------------------------------------------------------------------------
+
+export class FoundationSettingsValidationError extends Error {}
+
+/** 布尔：接受 true/false/1/0/on/off，其余回退默认 */
+function foundationBool(value: unknown, fallback: boolean): boolean {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') {
+    if (value === 1) return true
+    if (value === 0) return false
+    return fallback
+  }
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase()
+    if (['true', '1', 'on'].includes(v)) return true
+    if (['false', '0', 'off'].includes(v)) return false
+  }
+  return fallback
+}
+
+function foundationNumber(value: unknown, min: number, max: number, fallback: number): number {
+  if (value === null || value === undefined || value === '') return fallback
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(min, Math.min(max, Math.round(n)))
+}
+
+function foundationEnum<T extends string>(value: unknown, list: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (list as readonly string[]).includes(value) ? value as T : fallback
+}
+
+function envBoolOff(name: string): boolean | null {
+  const v = String(process.env[name] || '').trim().toLowerCase()
+  if (v === 'off' || v === '0' || v === 'false') return false
+  if (v === 'on' || v === '1' || v === 'true') return true
+  return null
+}
+
+function envEnum<T extends string>(name: string, list: readonly T[]): T | null {
+  const v = String(process.env[name] || '').trim()
+  return (list as readonly string[]).includes(v) ? v as T : null
+}
+
+function readNamespaceJson(key: string): Record<string, unknown> {
+  const row = db.select().from(schema.appSettings)
+    .where(eq(schema.appSettings.key, key))
+    .get()
+  if (!row?.value) return {}
+  try {
+    const parsed = JSON.parse(row.value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeNamespaceJson(key: string, value: unknown): void {
+  db.insert(schema.appSettings)
+    .values({ key, value: JSON.stringify(value), updatedAt: now() })
+    .onConflictDoUpdate({
+      target: schema.appSettings.key,
+      set: { value: JSON.stringify(value), updatedAt: now() },
+    })
+    .run()
+}
+
+function assertObjectBody(patch: unknown): Record<string, unknown> {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new FoundationSettingsValidationError('请求体必须是对象')
+  }
+  return patch as Record<string, unknown>
+}
+
+// --- ui.*（6 键，页面视觉规格 §7） ---
+
+export const UI_DENSITY_MODES = ['compact', 'comfortable'] as const
+export const UI_MOTION_MODES = ['system', 'full', 'reduced'] as const
+export const UI_READING_FONTS = ['serif', 'sans'] as const
+
+export interface UiSettings {
+  defaults: {
+    density: typeof UI_DENSITY_MODES[number]
+    motion: typeof UI_MOTION_MODES[number]
+    readingFont: typeof UI_READING_FONTS[number]
+    readingSize: number
+    actionLabels: boolean
+  }
+  allowUserOverride: boolean
+}
+
+export const UI_SETTINGS_DEFAULTS: UiSettings = {
+  defaults: {
+    density: 'compact',
+    motion: 'system',
+    readingFont: 'serif',
+    readingSize: 16,
+    actionLabels: true,
+  },
+  allowUserOverride: true,
+}
+
+const UI_SETTINGS_KEY = 'ui.settings'
+
+export function sanitizeUiSettings(raw: unknown): UiSettings {
+  const input = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {}
+  const defaults = (input.defaults && typeof input.defaults === 'object' && !Array.isArray(input.defaults)
+    ? input.defaults
+    : {}) as Record<string, unknown>
+  return {
+    defaults: {
+      density: foundationEnum(defaults.density, UI_DENSITY_MODES, UI_SETTINGS_DEFAULTS.defaults.density),
+      motion: foundationEnum(defaults.motion, UI_MOTION_MODES, UI_SETTINGS_DEFAULTS.defaults.motion),
+      readingFont: foundationEnum(defaults.readingFont, UI_READING_FONTS, UI_SETTINGS_DEFAULTS.defaults.readingFont),
+      readingSize: foundationNumber(defaults.readingSize, 15, 18, UI_SETTINGS_DEFAULTS.defaults.readingSize),
+      actionLabels: foundationBool(defaults.actionLabels, UI_SETTINGS_DEFAULTS.defaults.actionLabels),
+    },
+    allowUserOverride: foundationBool(input.allowUserOverride, UI_SETTINGS_DEFAULTS.allowUserOverride),
+  }
+}
+
+export function getUiSettings(): UiSettings {
+  const next = sanitizeUiSettings(readNamespaceJson(UI_SETTINGS_KEY))
+  const envDensity = envEnum('UI_DEFAULTS_DENSITY', UI_DENSITY_MODES)
+  const envMotion = envEnum('UI_DEFAULTS_MOTION', UI_MOTION_MODES)
+  const envFont = envEnum('UI_DEFAULTS_READING_FONT', UI_READING_FONTS)
+  const envSizeRaw = Number(process.env.UI_DEFAULTS_READING_SIZE)
+  const envLabels = envBoolOff('UI_DEFAULTS_ACTION_LABELS')
+  const envOverride = envBoolOff('UI_ALLOW_USER_OVERRIDE')
+  return {
+    defaults: {
+      density: envDensity ?? next.defaults.density,
+      motion: envMotion ?? next.defaults.motion,
+      readingFont: envFont ?? next.defaults.readingFont,
+      readingSize: Number.isFinite(envSizeRaw) && envSizeRaw >= 15 && envSizeRaw <= 18
+        ? Math.round(envSizeRaw)
+        : next.defaults.readingSize,
+      actionLabels: envLabels ?? next.defaults.actionLabels,
+    },
+    allowUserOverride: envOverride ?? next.allowUserOverride,
+  }
+}
+
+export function setUiSettings(patch: unknown): UiSettings {
+  const input = assertObjectBody(patch)
+  // 合并基线用落库态（不含环境变量覆盖），避免环境变量值经保存写入数据库
+  const current = sanitizeUiSettings(readNamespaceJson(UI_SETTINGS_KEY))
+  const next = sanitizeUiSettings({
+    allowUserOverride: 'allowUserOverride' in input ? input.allowUserOverride : current.allowUserOverride,
+    defaults: {
+      ...current.defaults,
+      ...(input.defaults && typeof input.defaults === 'object' && !Array.isArray(input.defaults)
+        ? input.defaults
+        : {}),
+    },
+  })
+  writeNamespaceJson(UI_SETTINGS_KEY, next)
+  return getUiSettings()
+}
+
+// --- director.*（11 键，导演台规格 §7） ---
+
+export const DIRECTOR_MODES = ['off', 'readonly', 'on'] as const
+export const DIRECTOR_VIEW_DEFAULTS = ['2d', '3d'] as const
+export const DIRECTOR_APPLY_FIELDS = ['shot_type', 'angle', 'movement', 'duration'] as const
+export const DIRECTOR_FPS_VALUES = ['24', '25', '30'] as const
+
+export interface DirectorSettings {
+  mode: typeof DIRECTOR_MODES[number]
+  view: { default: typeof DIRECTOR_VIEW_DEFAULTS[number] }
+  view3d: { enabled: boolean }
+  apply: {
+    fields: (typeof DIRECTOR_APPLY_FIELDS)[number][]
+    promptAppend: boolean
+    subshotSync: boolean
+  }
+  duration: { min: number; max: number; fps: string }
+  stage: { maxShots: number }
+  previs: { maxAssets: number }
+}
+
+export const DIRECTOR_SETTINGS_DEFAULTS: DirectorSettings = {
+  mode: 'off',
+  view: { default: '2d' },
+  view3d: { enabled: true },
+  apply: { fields: [...DIRECTOR_APPLY_FIELDS], promptAppend: false, subshotSync: false },
+  duration: { min: 8, max: 15, fps: '24' },
+  stage: { maxShots: 200 },
+  previs: { maxAssets: 20 },
+}
+
+const DIRECTOR_SETTINGS_KEY = 'director.settings'
+
+export class DirectorSettingsValidationError extends FoundationSettingsValidationError {}
+
+function sanitizeApplyFields(value: unknown): (typeof DIRECTOR_APPLY_FIELDS)[number][] {
+  if (!Array.isArray(value)) return [...DIRECTOR_SETTINGS_DEFAULTS.apply.fields]
+  const filtered = value.filter((v): v is typeof DIRECTOR_APPLY_FIELDS[number] =>
+    typeof v === 'string' && (DIRECTOR_APPLY_FIELDS as readonly string[]).includes(v))
+  // 白名单子集；去重并保持规格顺序
+  return DIRECTOR_APPLY_FIELDS.filter(f => filtered.includes(f))
+}
+
+export function sanitizeDirectorSettings(raw: unknown): DirectorSettings {
+  const input = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {}
+  const view = (input.view && typeof input.view === 'object' && !Array.isArray(input.view)
+    ? input.view
+    : {}) as Record<string, unknown>
+  const view3d = (input.view3d && typeof input.view3d === 'object' && !Array.isArray(input.view3d)
+    ? input.view3d
+    : {}) as Record<string, unknown>
+  const apply = (input.apply && typeof input.apply === 'object' && !Array.isArray(input.apply)
+    ? input.apply
+    : {}) as Record<string, unknown>
+  const duration = (input.duration && typeof input.duration === 'object' && !Array.isArray(input.duration)
+    ? input.duration
+    : {}) as Record<string, unknown>
+  const stage = (input.stage && typeof input.stage === 'object' && !Array.isArray(input.stage)
+    ? input.stage
+    : {}) as Record<string, unknown>
+  const previs = (input.previs && typeof input.previs === 'object' && !Array.isArray(input.previs)
+    ? input.previs
+    : {}) as Record<string, unknown>
+  return {
+    mode: foundationEnum(input.mode, DIRECTOR_MODES, DIRECTOR_SETTINGS_DEFAULTS.mode),
+    view: { default: foundationEnum(view.default, DIRECTOR_VIEW_DEFAULTS, DIRECTOR_SETTINGS_DEFAULTS.view.default) },
+    view3d: { enabled: foundationBool(view3d.enabled, DIRECTOR_SETTINGS_DEFAULTS.view3d.enabled) },
+    apply: {
+      fields: sanitizeApplyFields(apply.fields),
+      promptAppend: foundationBool(apply.promptAppend, DIRECTOR_SETTINGS_DEFAULTS.apply.promptAppend),
+      subshotSync: foundationBool(apply.subshotSync, DIRECTOR_SETTINGS_DEFAULTS.apply.subshotSync),
+    },
+    duration: {
+      min: foundationNumber(duration.min, 6, 12, DIRECTOR_SETTINGS_DEFAULTS.duration.min),
+      max: foundationNumber(duration.max, 12, 20, DIRECTOR_SETTINGS_DEFAULTS.duration.max),
+      fps: foundationEnum(duration.fps, DIRECTOR_FPS_VALUES, DIRECTOR_SETTINGS_DEFAULTS.duration.fps),
+    },
+    stage: { maxShots: foundationNumber(stage.maxShots, 50, 500, DIRECTOR_SETTINGS_DEFAULTS.stage.maxShots) },
+    previs: { maxAssets: foundationNumber(previs.maxAssets, 5, 50, DIRECTOR_SETTINGS_DEFAULTS.previs.maxAssets) },
+  }
+}
+
+export function getDirectorSettings(): DirectorSettings {
+  const next = sanitizeDirectorSettings(readNamespaceJson(DIRECTOR_SETTINGS_KEY))
+  const envMode = envEnum('DIRECTOR_MODE', DIRECTOR_MODES)
+  const env3d = envBoolOff('DIRECTOR_3D')
+  return {
+    ...next,
+    mode: envMode ?? next.mode,
+    view3d: { enabled: env3d === false ? false : next.view3d.enabled },
+  }
+}
+
+export function setDirectorSettings(patch: unknown): DirectorSettings {
+  const input = assertObjectBody(patch)
+  const current = sanitizeDirectorSettings(readNamespaceJson(DIRECTOR_SETTINGS_KEY))
+  // 子对象按键合并，避免部分更新把未提交的兄弟键重置回默认
+  const next = sanitizeDirectorSettings({
+    ...current,
+    ...input,
+    view: { ...current.view, ...sub(input.view) },
+    view3d: { ...current.view3d, ...sub(input.view3d) },
+    apply: { ...current.apply, ...sub(input.apply) },
+    duration: { ...current.duration, ...sub(input.duration) },
+    stage: { ...current.stage, ...sub(input.stage) },
+    previs: { ...current.previs, ...sub(input.previs) },
+  })
+  // 跨字段校验基于钳制前的原始入值：min∈[6,12]、max∈[12,20] 钳制后会掩盖 min>max 的矛盾
+  const rawDuration = input.duration && typeof input.duration === 'object' ? input.duration as Record<string, unknown> : {}
+  const rawMin = Number(rawDuration.min)
+  const rawMax = Number(rawDuration.max)
+  const effMin = Number.isFinite(rawMin) ? rawMin : next.duration.min
+  const effMax = Number.isFinite(rawMax) ? rawMax : next.duration.max
+  if (effMin > effMax) {
+    throw new DirectorSettingsValidationError('director.duration.min 不能大于 director.duration.max')
+  }
+  writeNamespaceJson(DIRECTOR_SETTINGS_KEY, next)
+  return getDirectorSettings()
+}
+
+// --- edit.*（11 键，剪辑工作台规格 §7） ---
+
+export const EDIT_EXPORT_PRESETS = ['auto', 'vertical-hd', 'horizontal-hd', 'square-hd'] as const
+export const EDIT_SUBTITLE_MODES = ['soft', 'burn', 'none'] as const
+export const EDIT_AUDIO_SOURCES = ['auto', 'mix', 'clip', 'silent'] as const
+
+export interface EditSettings {
+  export: {
+    enabled: boolean
+    defaultPreset: typeof EDIT_EXPORT_PRESETS[number]
+    subtitleMode: typeof EDIT_SUBTITLE_MODES[number]
+    audioSource: typeof EDIT_AUDIO_SOURCES[number]
+    requireAlignedMix: boolean
+    maxDurationSec: number
+    concurrency: number
+  }
+  ux: {
+    contextMenu: boolean
+    markers: boolean
+    subtitleStyles: boolean
+  }
+  filmSources: { enabled: boolean }
+}
+
+export const EDIT_SETTINGS_DEFAULTS: EditSettings = {
+  export: {
+    enabled: true,
+    defaultPreset: 'auto',
+    subtitleMode: 'soft',
+    audioSource: 'auto',
+    requireAlignedMix: false,
+    maxDurationSec: 1800,
+    concurrency: 1,
+  },
+  ux: { contextMenu: true, markers: true, subtitleStyles: true },
+  filmSources: { enabled: false },
+}
+
+const EDIT_SETTINGS_KEY = 'edit.settings'
+
+export function sanitizeEditSettings(raw: unknown): EditSettings {
+  const input = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {}
+  const exp = (input.export && typeof input.export === 'object' && !Array.isArray(input.export)
+    ? input.export
+    : {}) as Record<string, unknown>
+  const ux = (input.ux && typeof input.ux === 'object' && !Array.isArray(input.ux)
+    ? input.ux
+    : {}) as Record<string, unknown>
+  const filmSources = (input.filmSources && typeof input.filmSources === 'object' && !Array.isArray(input.filmSources)
+    ? input.filmSources
+    : {}) as Record<string, unknown>
+  return {
+    export: {
+      enabled: foundationBool(exp.enabled, EDIT_SETTINGS_DEFAULTS.export.enabled),
+      defaultPreset: foundationEnum(exp.defaultPreset, EDIT_EXPORT_PRESETS, EDIT_SETTINGS_DEFAULTS.export.defaultPreset),
+      subtitleMode: foundationEnum(exp.subtitleMode, EDIT_SUBTITLE_MODES, EDIT_SETTINGS_DEFAULTS.export.subtitleMode),
+      audioSource: foundationEnum(exp.audioSource, EDIT_AUDIO_SOURCES, EDIT_SETTINGS_DEFAULTS.export.audioSource),
+      requireAlignedMix: foundationBool(exp.requireAlignedMix, EDIT_SETTINGS_DEFAULTS.export.requireAlignedMix),
+      maxDurationSec: foundationNumber(exp.maxDurationSec, 60, 7200, EDIT_SETTINGS_DEFAULTS.export.maxDurationSec),
+      concurrency: foundationNumber(exp.concurrency, 1, 2, EDIT_SETTINGS_DEFAULTS.export.concurrency),
+    },
+    ux: {
+      contextMenu: foundationBool(ux.contextMenu, EDIT_SETTINGS_DEFAULTS.ux.contextMenu),
+      markers: foundationBool(ux.markers, EDIT_SETTINGS_DEFAULTS.ux.markers),
+      subtitleStyles: foundationBool(ux.subtitleStyles, EDIT_SETTINGS_DEFAULTS.ux.subtitleStyles),
+    },
+    filmSources: { enabled: foundationBool(filmSources.enabled, EDIT_SETTINGS_DEFAULTS.filmSources.enabled) },
+  }
+}
+
+export function getEditSettings(): EditSettings {
+  const next = sanitizeEditSettings(readNamespaceJson(EDIT_SETTINGS_KEY))
+  const envExport = envBoolOff('EDIT_EXPORT')
+  const envFilmSources = envBoolOff('EDIT_FILM_SOURCES')
+  return {
+    export: { ...next.export, enabled: envExport === false ? false : next.export.enabled },
+    ux: next.ux,
+    filmSources: { enabled: envFilmSources === true ? true : next.filmSources.enabled },
+  }
+}
+
+export function setEditSettings(patch: unknown): EditSettings {
+  const input = assertObjectBody(patch)
+  const current = sanitizeEditSettings(readNamespaceJson(EDIT_SETTINGS_KEY))
+  // 子对象按键合并，避免部分更新把未提交的兄弟键重置回默认
+  const next = sanitizeEditSettings({
+    ...current,
+    ...input,
+    export: { ...current.export, ...sub(input.export) },
+    ux: { ...current.ux, ...sub(input.ux) },
+    filmSources: { ...current.filmSources, ...sub(input.filmSources) },
+  })
+  writeNamespaceJson(EDIT_SETTINGS_KEY, next)
+  return getEditSettings()
+}
+
+// --- agent.*（18 键，智能体规格 §9） ---
+
+export const AGENT_SCOPES = ['home', 'novel-library', 'novel', 'drama', 'episode', 'director', 'edit', 'mix', 'delivery'] as const
+export const AGENT_PROPOSAL_TYPES = ['storyboard.update', 'asset.prompt.update', 'line.update'] as const
+export const AGENT_SUGGESTION_ACTIONS = ['agent.run', 'page.open'] as const
+export const AGENT_PAGE_ENTRIES = ['floating', 'topbar', 'stage'] as const
+export const AGENT_PAGE_STAGES = ['script', 'assets', 'videos', 'dubbing', 'mix', 'delivery'] as const
+export const AGENT_PRESETS = ['assistant', 'director'] as const
+/** 只读工具白名单（智能体规格 §7.1） */
+export const AGENT_READ_TOOLS = [
+  'read_project_list',
+  'read_project_overview',
+  'read_episode_context',
+  'read_script',
+  'read_assets',
+  'read_asset_detail',
+  'read_storyboards',
+  'read_storyboard_detail',
+  'read_dubbing_status',
+  'read_edit_state',
+  'read_edit_clips',
+  'read_mix_state',
+  'read_mix_tracks',
+  'read_delivery_status',
+  'read_export_history',
+  'read_novel_list',
+  'read_novel_context',
+  'read_novel_chapters',
+  'read_novel_chapter_content',
+  'read_novel_atlas',
+  'read_director_plan',
+] as const
+
+export interface AgentPageBinding {
+  route: string
+  stage?: (typeof AGENT_PAGE_STAGES)[number]
+  entries: (typeof AGENT_PAGE_ENTRIES)[number][]
+  defaultPreset: (typeof AGENT_PRESETS)[number]
+  quickPrompts: string[]
+  allowedScopes?: (typeof AGENT_SCOPES)[number][]
+  allowedTools?: string[]
+}
+
+export interface AgentPagesConfig {
+  version: 1
+  bindings: AgentPageBinding[]
+}
+
+export interface AgentSettings {
+  dock: { enabled: boolean }
+  pages: AgentPagesConfig
+  director: { enabled: boolean; model: string }
+  stream: { enabled: boolean }
+  proposals: { enabled: boolean; types: (typeof AGENT_PROPOSAL_TYPES)[number][] }
+  suggestions: { enabled: boolean; actions: (typeof AGENT_SUGGESTION_ACTIONS)[number][] }
+  scope: { autoDetect: boolean }
+  maxSteps: number
+  timeoutSec: number
+  context: { maxChars: number }
+  message: { maxChars: number }
+  tools: { maxResultChars: number }
+  history: { maxMessages: number }
+  session: { retentionDays: number }
+  model: string
+}
+
+/** 内置页面嵌入矩阵（智能体规格 §4.4；导演台页签的 director 预设由页面适配器按 panel=director 判定，不走 stage 绑定） */
+export const AGENT_PAGES_DEFAULTS: AgentPagesConfig = {
+  version: 1,
+  bindings: [
+    { route: '/', entries: ['floating'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['home'] },
+    { route: '/novels', entries: ['floating'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['novel-library'] },
+    { route: '/novels/:id', entries: ['topbar', 'floating'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['novel'] },
+    { route: '/drama/:id', entries: ['topbar', 'floating'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['drama'] },
+    { route: '/drama/:id/episode/:episodeNumber', entries: ['floating', 'stage'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['episode'] },
+    { route: '/drama/:id/episode/:episodeNumber', stage: 'mix', entries: ['stage'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['mix'] },
+    { route: '/drama/:id/episode/:episodeNumber', stage: 'delivery', entries: ['stage'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['delivery'] },
+    { route: '/drama/:id/episode/:episodeNumber/edit', entries: ['topbar', 'floating'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['edit'] },
+  ],
+}
+
+export const AGENT_SETTINGS_DEFAULTS: AgentSettings = {
+  dock: { enabled: true },
+  pages: AGENT_PAGES_DEFAULTS,
+  director: { enabled: true, model: '' },
+  stream: { enabled: true },
+  proposals: { enabled: true, types: [...AGENT_PROPOSAL_TYPES] },
+  suggestions: { enabled: true, actions: [...AGENT_SUGGESTION_ACTIONS] },
+  scope: { autoDetect: true },
+  maxSteps: 8,
+  timeoutSec: 120,
+  context: { maxChars: 12000 },
+  message: { maxChars: 4000 },
+  tools: { maxResultChars: 6000 },
+  history: { maxMessages: 20 },
+  session: { retentionDays: 30 },
+  model: '',
+}
+
+const AGENT_SETTINGS_KEY = 'agent.settings'
+
+export class AgentSettingsValidationError extends FoundationSettingsValidationError {}
+
+function whitelistSubset<T extends string>(value: unknown, list: readonly T[]): T[] | null {
+  if (!Array.isArray(value)) return null
+  const filtered = value.filter((v): v is T => typeof v === 'string' && (list as readonly string[]).includes(v))
+  return [...new Set(filtered)]
+}
+
+/** allowedScopes/allowedTools：空数组非法，绑定作废；allowedTools 限只读工具白名单（提案/建议由作用域工具集注册，不走绑定） */
+function sanitizeAllowedList(value: unknown, min: 1): string[] | null | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!Array.isArray(value)) return null
+  if (value.length < min) return null
+  const filtered = value.filter((v): v is string => typeof v === 'string' && v.length > 0 && v.length <= 64)
+  return filtered.length === value.length && filtered.length > 0 ? [...new Set(filtered)] : null
+}
+
+function sanitizeAgentPages(raw: unknown): AgentPagesConfig {
+  if (raw === undefined || raw === null) return AGENT_PAGES_DEFAULTS
+  const input = raw as Record<string, unknown>
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return AGENT_PAGES_DEFAULTS
+  if (Number(input.version) !== 1 || !Array.isArray(input.bindings)) return AGENT_PAGES_DEFAULTS
+  const bindings: AgentPageBinding[] = []
+  const seen = new Set<string>()
+  for (const item of input.bindings) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return AGENT_PAGES_DEFAULTS
+    const b = item as Record<string, unknown>
+    if (typeof b.route !== 'string' || b.route.length === 0 || b.route.length > 200 || !b.route.startsWith('/')) {
+      return AGENT_PAGES_DEFAULTS
+    }
+    if (b.stage !== undefined && b.stage !== null && (typeof b.stage !== 'string' || !(AGENT_PAGE_STAGES as readonly string[]).includes(b.stage))) {
+      return AGENT_PAGES_DEFAULTS
+    }
+    const stage = (typeof b.stage === 'string' && (AGENT_PAGE_STAGES as readonly string[]).includes(b.stage))
+      ? b.stage as (typeof AGENT_PAGE_STAGES)[number]
+      : undefined
+    const key = `${b.route}|${stage ?? ''}`
+    if (seen.has(key)) return AGENT_PAGES_DEFAULTS
+    seen.add(key)
+    const entries = whitelistSubset(b.entries, AGENT_PAGE_ENTRIES)
+    if (!entries || entries.length === 0) return AGENT_PAGES_DEFAULTS
+    const preset = foundationEnum(b.defaultPreset, AGENT_PRESETS, 'assistant')
+    if (typeof b.defaultPreset === 'string' && !(AGENT_PRESETS as readonly string[]).includes(b.defaultPreset)) {
+      return AGENT_PAGES_DEFAULTS
+    }
+    const quickPrompts = Array.isArray(b.quickPrompts)
+      ? b.quickPrompts.filter((v): v is string => typeof v === 'string' && v.length > 0 && v.length <= 100).slice(0, 6)
+      : []
+    const allowedScopes = sanitizeAllowedList(b.allowedScopes, 1)
+    if (allowedScopes === null) return AGENT_PAGES_DEFAULTS
+    if (allowedScopes !== undefined) {
+      const valid = allowedScopes.every(s => (AGENT_SCOPES as readonly string[]).includes(s))
+      if (!valid) return AGENT_PAGES_DEFAULTS
+    }
+    const allowedTools = sanitizeAllowedList(b.allowedTools, 1)
+    if (allowedTools === null) return AGENT_PAGES_DEFAULTS
+    // 绑定只能从只读工具白名单中收窄；含未知或提案/建议工具视为非法结构
+    if (allowedTools && !allowedTools.every(t => (AGENT_READ_TOOLS as readonly string[]).includes(t))) {
+      return AGENT_PAGES_DEFAULTS
+    }
+    bindings.push({
+      route: b.route,
+      ...(stage ? { stage } : {}),
+      entries: entries as AgentPageBinding['entries'],
+      defaultPreset: preset,
+      quickPrompts,
+      ...(allowedScopes ? { allowedScopes: allowedScopes as AgentPageBinding['allowedScopes'] } : {}),
+      ...(allowedTools ? { allowedTools } : {}),
+    })
+  }
+  return { version: 1, bindings }
+}
+
+export function sanitizeAgentSettings(raw: unknown): AgentSettings {
+  const input = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {}
+  const dock = sub(input.dock)
+  const director = sub(input.director)
+  const stream = sub(input.stream)
+  const proposals = sub(input.proposals)
+  const suggestions = sub(input.suggestions)
+  const scope = sub(input.scope)
+  const context = sub(input.context)
+  const message = sub(input.message)
+  const tools = sub(input.tools)
+  const history = sub(input.history)
+  const session = sub(input.session)
+  const typesRaw = proposals.types === undefined ? undefined : whitelistSubset(proposals.types, AGENT_PROPOSAL_TYPES)
+  const actionsRaw = suggestions.actions === undefined ? undefined : whitelistSubset(suggestions.actions, AGENT_SUGGESTION_ACTIONS)
+  const types = typesRaw ?? [...AGENT_PROPOSAL_TYPES]
+  const actions = actionsRaw ?? [...AGENT_SUGGESTION_ACTIONS]
+  return {
+    dock: { enabled: dock.enabled === undefined ? AGENT_SETTINGS_DEFAULTS.dock.enabled : foundationBool(dock.enabled, AGENT_SETTINGS_DEFAULTS.dock.enabled) },
+    pages: sanitizeAgentPages(input.pages),
+    director: {
+      enabled: director.enabled === undefined ? AGENT_SETTINGS_DEFAULTS.director.enabled : foundationBool(director.enabled, AGENT_SETTINGS_DEFAULTS.director.enabled),
+      model: typeof director.model === 'string' ? director.model.trim().slice(0, 200) : AGENT_SETTINGS_DEFAULTS.director.model,
+    },
+    stream: { enabled: stream.enabled === undefined ? AGENT_SETTINGS_DEFAULTS.stream.enabled : foundationBool(stream.enabled, AGENT_SETTINGS_DEFAULTS.stream.enabled) },
+    proposals: {
+      enabled: proposals.enabled === undefined ? AGENT_SETTINGS_DEFAULTS.proposals.enabled : foundationBool(proposals.enabled, AGENT_SETTINGS_DEFAULTS.proposals.enabled),
+      types,
+    },
+    suggestions: {
+      enabled: suggestions.enabled === undefined ? AGENT_SETTINGS_DEFAULTS.suggestions.enabled : foundationBool(suggestions.enabled, AGENT_SETTINGS_DEFAULTS.suggestions.enabled),
+      actions,
+    },
+    scope: { autoDetect: scope.autoDetect === undefined ? AGENT_SETTINGS_DEFAULTS.scope.autoDetect : foundationBool(scope.autoDetect, AGENT_SETTINGS_DEFAULTS.scope.autoDetect) },
+    maxSteps: foundationNumber(input.maxSteps, 4, 16, AGENT_SETTINGS_DEFAULTS.maxSteps),
+    timeoutSec: foundationNumber(input.timeoutSec, 30, 600, AGENT_SETTINGS_DEFAULTS.timeoutSec),
+    context: { maxChars: foundationNumber(context.maxChars, 4000, 32000, AGENT_SETTINGS_DEFAULTS.context.maxChars) },
+    message: { maxChars: foundationNumber(message.maxChars, 500, 12000, AGENT_SETTINGS_DEFAULTS.message.maxChars) },
+    tools: { maxResultChars: foundationNumber(tools.maxResultChars, 1000, 12000, AGENT_SETTINGS_DEFAULTS.tools.maxResultChars) },
+    history: { maxMessages: foundationNumber(history.maxMessages, 5, 50, AGENT_SETTINGS_DEFAULTS.history.maxMessages) },
+    session: { retentionDays: foundationNumber(session.retentionDays, 7, 365, AGENT_SETTINGS_DEFAULTS.session.retentionDays) },
+    model: typeof input.model === 'string' ? input.model.trim().slice(0, 200) : AGENT_SETTINGS_DEFAULTS.model,
+  }
+}
+
+function sub(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+export function getAgentSettings(): AgentSettings {
+  const next = sanitizeAgentSettings(readNamespaceJson(AGENT_SETTINGS_KEY))
+  const envOff = (name: string): boolean | null => {
+    const v = envBoolOff(name)
+    return v === false ? false : null
+  }
+  return {
+    ...next,
+    dock: { enabled: envOff('AGENT_DOCK') ?? next.dock.enabled },
+    director: { ...next.director, enabled: envOff('AGENT_DIRECTOR') ?? next.director.enabled },
+    stream: { enabled: envOff('AGENT_STREAM') ?? next.stream.enabled },
+    proposals: { ...next.proposals, enabled: envOff('AGENT_PROPOSALS') ?? next.proposals.enabled },
+    suggestions: { ...next.suggestions, enabled: envOff('AGENT_SUGGESTIONS') ?? next.suggestions.enabled },
+  }
+}
+
+export function setAgentSettings(patch: unknown): AgentSettings {
+  const input = assertObjectBody(patch)
+  const current = sanitizeAgentSettings(readNamespaceJson(AGENT_SETTINGS_KEY))
+  const next = sanitizeAgentSettings({
+    ...current,
+    ...input,
+    dock: { ...current.dock, ...sub(input.dock) },
+    director: { ...current.director, ...sub(input.director) },
+    stream: { ...current.stream, ...sub(input.stream) },
+    proposals: { ...current.proposals, ...sub(input.proposals) },
+    suggestions: { ...current.suggestions, ...sub(input.suggestions) },
+    scope: { ...current.scope, ...sub(input.scope) },
+    context: { ...current.context, ...sub(input.context) },
+    message: { ...current.message, ...sub(input.message) },
+    tools: { ...current.tools, ...sub(input.tools) },
+    history: { ...current.history, ...sub(input.history) },
+    session: { ...current.session, ...sub(input.session) },
+  })
+  // 跨字段校验基于钳制前的原始入值，避免钳制掩盖 message > context 的矛盾
+  const rawMsg = Number(sub(input.message).maxChars)
+  const rawCtx = Number(sub(input.context).maxChars)
+  const effMsg = Number.isFinite(rawMsg) ? rawMsg : next.message.maxChars
+  const effCtx = Number.isFinite(rawCtx) ? rawCtx : next.context.maxChars
+  if (effMsg > effCtx) {
+    throw new AgentSettingsValidationError('agent.message.maxChars 不能大于 agent.context.maxChars')
+  }
+  writeNamespaceJson(AGENT_SETTINGS_KEY, next)
+  return getAgentSettings()
 }

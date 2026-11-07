@@ -2,6 +2,7 @@
   <NuxtLayout>
     <NuxtPage />
   </NuxtLayout>
+  <AgentDock />
   <Toaster position="top-right" :duration="3000" :theme="resolvedTheme" />
   <MigrateOverlay />
 </template>
@@ -10,6 +11,7 @@
 import { onMounted } from 'vue'
 import { Toaster, toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
+import AgentDock from '~/components/agent/AgentDock.vue'
 import MigrateOverlay from '~/components/MigrateOverlay.vue'
 import { useDesktopBridge } from '~/composables/useDesktopBridge'
 import { useMigrateState } from '~/composables/useMigrateState'

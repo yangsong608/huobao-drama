@@ -1,3 +1,13 @@
+import type { AgentSettings } from './useAgentSettings'
+import type {
+  AssistantMessage,
+  AssistantMessagePage,
+  AssistantResolvePayload,
+  AssistantSendResult,
+  AssistantThreadListPayload,
+} from './useAssistant'
+import type { AgentPreset } from './useAgentPageAdapter'
+
 export const API_BASE = '/api/v1'
 const BASE = API_BASE
 
@@ -18,10 +28,12 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
       const error = new Error(json.message || `${resp.status}`) as Error & {
         status?: number
         code?: string
+        errorCode?: string
         data?: any
       }
       error.status = resp.status || json.code
       error.code = json.code
+      error.errorCode = typeof json.error_code === 'string' ? json.error_code : undefined
       error.data = json.data
       throw error
     }
@@ -1343,6 +1355,35 @@ export const storageAPI = {
   info: () => api.get('/storage'),
 }
 
+export const assistantAPI = {
+  resolve: (workspaceKey: string, preset: AgentPreset = 'assistant') =>
+    api.post<AssistantResolvePayload>('/assistant/sessions/resolve', { workspace_key: workspaceKey, preset }),
+  create: (workspaceKey: string, preset: AgentPreset = 'assistant') =>
+    api.post<AssistantResolvePayload>('/assistant/sessions', { workspace_key: workspaceKey, preset }),
+  list: (params: { workspaceKey: string; status?: 'active' | 'archived' | 'all'; limit?: number; offset?: number }) => {
+    const search = new URLSearchParams({
+      workspace_key: params.workspaceKey,
+      status: params.status ?? 'all',
+      limit: String(params.limit ?? 20),
+      offset: String(params.offset ?? 0),
+    })
+    return api.get<AssistantThreadListPayload>(`/assistant/sessions?${search.toString()}`)
+  },
+  get: (sessionId: number, beforeId?: number, limit = 50) => {
+    const search = new URLSearchParams({ limit: String(limit) })
+    if (beforeId) search.set('before_id', String(beforeId))
+    return api.get<AssistantMessagePage>(`/assistant/sessions/${sessionId}?${search.toString()}`)
+  },
+  send: (
+    sessionId: number,
+    payload: { message: string; preset: AgentPreset; scope: Record<string, unknown> },
+  ) => api.post<AssistantSendResult>(`/assistant/sessions/${sessionId}/messages`, payload),
+  cancel: (sessionId: number) =>
+    api.post<{ message: AssistantMessage }>(`/assistant/sessions/${sessionId}/cancel`),
+  streamUrl: (sessionId: number, messageId: number, afterSeq = 0) =>
+    `/assistant/sessions/${sessionId}/stream?message_id=${messageId}&after_seq=${afterSeq}`,
+}
+
 export const settingsAPI = {
   contentLanguage: () => api.get<{ language: string }>('/settings/content-language'),
   setContentLanguage: (language: string) => api.put('/settings/content-language', { language }),
@@ -1352,6 +1393,8 @@ export const settingsAPI = {
   saveNovel: (patch: Partial<NovelSettings>) => api.put<{ settings: NovelSettings }>('/settings/novel', patch),
   media: () => api.get<MediaSettingsPayload>('/settings/media'),
   saveMedia: (ffmpegDir: string) => api.put<MediaSettingsPayload>('/settings/media', { ffmpegDir }),
+  agent: () => api.get<{ settings: AgentSettings }>('/settings/agent'),
+  saveAgent: (patch: Partial<AgentSettings>) => api.put<{ settings: AgentSettings }>('/settings/agent', patch),
 }
 
 // MCP 服务：开关、端口、访问 token

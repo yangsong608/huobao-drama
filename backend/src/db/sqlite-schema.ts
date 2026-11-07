@@ -947,6 +947,124 @@ export const sqliteSchemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_status ON pipeline_jobs (status, resource, priority)`,
   `CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_episode ON pipeline_jobs (episode_id)`,
   `CREATE INDEX IF NOT EXISTS idx_script_chapters_import ON script_chapters (import_id, chapter_index)`,
+
+  // ===== B0 基础层：小说工作台 / 导演台 / 智能体（逻辑关联，不级联删除） =====
+
+  `CREATE TABLE IF NOT EXISTS novel_annotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    novel_id INTEGER NOT NULL,
+    chapter_no INTEGER NOT NULL,
+    quote TEXT,
+    start_offset INTEGER,
+    end_offset INTEGER,
+    prefix TEXT,
+    suffix TEXT,
+    note TEXT,
+    kind TEXT DEFAULT 'note',
+    status TEXT DEFAULT 'open',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS novel_foreshadows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    novel_id INTEGER NOT NULL,
+    title TEXT,
+    setup_chapter INTEGER,
+    payoff_chapter INTEGER,
+    status TEXT DEFAULT 'planned',
+    evidence_quote TEXT,
+    note TEXT,
+    source TEXT DEFAULT 'manual',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS director_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    doc_json TEXT,
+    doc_version INTEGER DEFAULT 1,
+    version INTEGER DEFAULT 1,
+    based_on_hash TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS director_plan_revisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL,
+    revision_no INTEGER NOT NULL,
+    doc_json TEXT,
+    note TEXT,
+    is_current INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS agent_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_key TEXT NOT NULL,
+    preset TEXT DEFAULT 'assistant',
+    title TEXT,
+    status TEXT DEFAULT 'active',
+    last_message_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS agent_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT,
+    status TEXT DEFAULT 'completed',
+    scope_json TEXT,
+    preset TEXT,
+    tool_calls_json TEXT,
+    tool_results_json TEXT,
+    suggestions_json TEXT,
+    model TEXT,
+    text_config_id INTEGER,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    finished_at TEXT
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS agent_proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    message_id INTEGER,
+    kind TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id INTEGER NOT NULL,
+    drama_id INTEGER,
+    episode_id INTEGER,
+    before_json TEXT,
+    after_json TEXT,
+    target_hash TEXT,
+    rationale TEXT,
+    status TEXT DEFAULT 'proposed',
+    proposed_by TEXT DEFAULT 'agent',
+    applied_by TEXT,
+    applied_at TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+
+  `CREATE INDEX IF NOT EXISTS idx_novel_annotations_chapter ON novel_annotations (novel_id, chapter_no, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_novel_foreshadows_status ON novel_foreshadows (novel_id, status, setup_chapter)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_director_plans_episode ON director_plans (episode_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_director_plan_revisions_no ON director_plan_revisions (plan_id, revision_no)`,
+  `CREATE INDEX IF NOT EXISTS idx_director_plan_revisions_current ON director_plan_revisions (plan_id, is_current)`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_sessions_workspace ON agent_sessions (workspace_key, status, last_message_at)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_active ON agent_sessions (workspace_key) WHERE status = 'active'`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_messages_session ON agent_messages (session_id, id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_messages_running ON agent_messages (session_id) WHERE status = 'running' AND role = 'assistant'`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_proposals_session ON agent_proposals (session_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_proposals_status ON agent_proposals (status, updated_at)`,
 ]
 
 /**

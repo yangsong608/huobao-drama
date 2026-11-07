@@ -1057,3 +1057,109 @@ export const pipelineJobs = sqliteTable('pipeline_jobs', {
   startedAt: text('started_at'),
   finishedAt: text('finished_at'),
 })
+
+// ===== B0 基础层：小说工作台 / 导演台 / 智能体（逻辑关联，不级联删除；JSON 存文本） =====
+
+export const novelAnnotations = sqliteTable('novel_annotations', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull(),
+  chapterNo: integer('chapter_no').notNull(),
+  quote: text('quote'),
+  startOffset: integer('start_offset'),
+  endOffset: integer('end_offset'),
+  prefix: text('prefix'),
+  suffix: text('suffix'),
+  note: text('note'),
+  kind: text('kind').default('note'),
+  status: text('status').default('open'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const novelForeshadows = sqliteTable('novel_foreshadows', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull(),
+  title: text('title'),
+  setupChapter: integer('setup_chapter'),
+  payoffChapter: integer('payoff_chapter'),
+  status: text('status').default('planned'),
+  evidenceQuote: text('evidence_quote'),
+  note: text('note'),
+  source: text('source').default('manual'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const directorPlans = sqliteTable('director_plans', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull().unique(),
+  dramaId: integer('drama_id').notNull(),
+  docJson: text('doc_json'),
+  docVersion: integer('doc_version').default(1),
+  version: integer('version').default(1),
+  basedOnHash: text('based_on_hash'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const directorPlanRevisions = sqliteTable('director_plan_revisions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  planId: integer('plan_id').notNull(),
+  revisionNo: integer('revision_no').notNull(),
+  docJson: text('doc_json'),
+  note: text('note'),
+  isCurrent: integer('is_current').default(0),
+  createdAt: text('created_at').notNull(),
+})
+
+export const agentSessions = sqliteTable('agent_sessions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  workspaceKey: text('workspace_key').notNull(),
+  preset: text('preset').default('assistant'),
+  title: text('title'),
+  status: text('status').default('active'),
+  lastMessageAt: text('last_message_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+export const agentMessages = sqliteTable('agent_messages', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sessionId: integer('session_id').notNull(),
+  role: text('role').notNull(),
+  content: text('content'),
+  status: text('status').default('completed'),
+  scopeJson: text('scope_json'),
+  preset: text('preset'),
+  toolCallsJson: text('tool_calls_json'),
+  toolResultsJson: text('tool_results_json'),
+  suggestionsJson: text('suggestions_json'),
+  model: text('model'),
+  textConfigId: integer('text_config_id'),
+  error: text('error'),
+  createdAt: text('created_at').notNull(),
+  finishedAt: text('finished_at'),
+})
+
+export const agentProposals = sqliteTable('agent_proposals', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sessionId: integer('session_id').notNull(),
+  messageId: integer('message_id'),
+  kind: text('kind').notNull(),
+  targetType: text('target_type').notNull(),
+  targetId: integer('target_id').notNull(),
+  dramaId: integer('drama_id'),
+  episodeId: integer('episode_id'),
+  beforeJson: text('before_json'),
+  afterJson: text('after_json'),
+  targetHash: text('target_hash'),
+  rationale: text('rationale'),
+  status: text('status').default('proposed'),
+  proposedBy: text('proposed_by').default('agent'),
+  appliedBy: text('applied_by'),
+  appliedAt: text('applied_at'),
+  error: text('error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})

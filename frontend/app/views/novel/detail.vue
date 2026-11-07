@@ -33,10 +33,40 @@
             <span v-for="tag in novel.genre" :key="tag" class="tag">{{ tag }}</span>
           </div>
         </div>
-        <button type="button" class="btn btn-ghost btn-sm ml-auto" @click="settingsOpen = true">
-          <Settings2 :size="14" :stroke-width="1.8" />
-          {{ t('novels.settingsDialog.open') }}
-        </button>
+        <div class="head-actions">
+          <div
+            v-if="activeTab === 'writer' && workbenchLayoutReady"
+            class="layout-switch"
+            :title="t('settings.novel.workbenchLayout')"
+          >
+            <button
+              type="button"
+              :class="['layout-switch-btn', { on: workbenchLayout === 'split' }]"
+              :disabled="layoutSwitching"
+              @click="switchWorkbenchLayout('split')"
+            >{{ t('settings.novel.layoutSplit') }}</button>
+            <button
+              type="button"
+              :class="['layout-switch-btn', { on: workbenchLayout === 'tabs' }]"
+              :disabled="layoutSwitching"
+              @click="switchWorkbenchLayout('tabs')"
+            >{{ t('settings.novel.layoutTabs') }}</button>
+          </div>
+          <button
+            v-if="showHeaderAssistant"
+            type="button"
+            class="btn btn-ghost btn-sm"
+            :title="t('assistant.title')"
+            @click="openAgentDock"
+          >
+            <Sparkles :size="14" :stroke-width="1.8" />
+            {{ t('assistant.trigger') }}
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" @click="settingsOpen = true">
+            <Settings2 :size="14" :stroke-width="1.8" />
+            {{ t('novels.settingsDialog.open') }}
+          </button>
+        </div>
       </header>
 
       <nav class="page-tabs">
@@ -64,12 +94,66 @@
         @refresh="load"
         @write-chapter="goWrite"
       />
-      <NovelChapterWriterPanel
-        v-else-if="activeTab === 'writer'"
-        :novel="novel"
-        :initial-chapter-no="writerChapter || undefined"
-        @refresh="load"
-      />
+      <template v-else-if="activeTab === 'writer'">
+        <div v-if="!workbenchLayoutReady" class="page-loading">{{ t('common.loading') }}</div>
+        <NovelWorkbenchShell v-else-if="workbenchLayout === 'split'" :tree-visible="workbenchTree">
+          <NovelChapterWriterPanel
+            ref="writerRef"
+            :novel="novel"
+            :initial-chapter-no="writerChapter || undefined"
+            :annotations="chapterAnnotations"
+            :foreshadows="workbenchForeshadows"
+            :annotations-enabled="annotationsEnabled"
+            :foreshadow-enabled="foreshadowEnabled"
+            @refresh="refreshAll"
+            @chapter-change="onWriterChapterChange"
+            @selection="onSelection"
+            @annotate="requestAnnotation"
+            @active-annotation="activeAnnotationId = $event"
+            @open-foreshadows="openForeshadows"
+            @chapter-jump="jumpToChapter"
+          />
+          <template #tree>
+            <NovelChapterTree
+              :chapters="workbenchChapters"
+              :current-chapter="writerChapter || 1"
+              :loading="workbenchLoading"
+              @select="onWriterChapterChange"
+            />
+          </template>
+          <template #inspector>
+            <NovelInspector
+              :novel-id="Number(novel.id)"
+              :chapter-no="writerChapter || 1"
+              :chapter-count="Number(novel.numberOfChapters) || 0"
+              :annotations="workbenchAnnotations"
+              :foreshadows="workbenchForeshadows"
+              :characters="workbenchCharacters"
+              :selection="annotationSelection"
+              :active-id="activeAnnotationId"
+              :active-foreshadow-id="activeForeshadowId"
+              :draft-nonce="annotationDraftNonce"
+              :annotations-enabled="annotationsEnabled"
+              :foreshadow-enabled="foreshadowEnabled"
+              :auto-extract="foreshadowAutoExtract"
+              :section="inspectorSection"
+              @changed="refreshWorkbench"
+              @locate="locateAnnotation"
+              @active="activeAnnotationId = $event"
+              @foreshadow-active="activeForeshadowId = $event"
+              @jump="jumpToChapter"
+              @edit-architecture="setTab('architecture')"
+              @update:section="inspectorSection = $event"
+            />
+          </template>
+        </NovelWorkbenchShell>
+        <NovelChapterWriterPanel
+          v-else-if="workbenchLayout === 'tabs'"
+          :novel="novel"
+          :initial-chapter-no="writerChapter || undefined"
+          @refresh="load"
+        />
+      </template>
       <InspirationCompass
         v-else-if="activeTab === 'compass'"
         :novel="novel"
@@ -218,10 +302,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, BookOpen, PenLine, Settings2 } from 'lucide-vue-next'
+import { ArrowLeft, BookOpen, PenLine, Settings2, Sparkles } from 'lucide-vue-next'
 import { useNovelStore } from '~/stores/novel'
 import { novelAPI } from '~/composables/useNovelApi'
+import { openAgentDock, useAgentPageAdapter } from '~/composables/useAgentPageAdapter'
+import { useAgentSettings } from '~/composables/useAgentSettings'
 import InspirationCompass from '~/components/novel/compass/InspirationCompass.vue'
+import NovelWorkbenchShell from '~/components/novel/workspace/NovelWorkbenchShell.vue'
+import NovelChapterTree from '~/components/novel/workspace/NovelChapterTree.vue'
+import NovelInspector from '~/components/novel/workspace/NovelInspector.vue'
+import { useNovelWorkbench } from '~/composables/useNovelWorkbench'
+import type { NovelSelection, WorkbenchAnnotation } from '~/composables/useNovelWorkbench'
+import { toastError } from '~/composables/useToast'
 
 definePageMeta({ layout: 'novel' })
 
@@ -231,10 +323,56 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const store = useNovelStore()
+const { agentSettings, agentSettingsError, dockEnabled, loadAgentSettings } = useAgentSettings()
+const showHeaderAssistant = computed(() =>
+  dockEnabled.value && (agentSettings.value !== null || Boolean(agentSettingsError.value)),
+)
+const layoutSwitching = ref(false)
+
+useAgentPageAdapter({
+  id: 'novel-detail',
+  match: { name: 'novel-detail', pattern: /^\/novels\/\d+$/ },
+  scope: () => {
+    const id = Number(route.params.id)
+    if (!Number.isSafeInteger(id) || id <= 0) return null
+    return { workspace_key: `novel:${id}`, kind: 'novel', novel_id: id }
+  },
+  entries: ['floating', 'topbar'],
+  quickPrompts: () => [t('assistant.prompts.novel1'), t('assistant.prompts.novel2')],
+  supportedScopes: ['novel'],
+})
+
 const novel = ref<any | null>(null)
 const tabs: NovelTab[] = ['overview', 'architecture', 'blueprint', 'writer', 'compass', 'export']
 const activeTab = ref<NovelTab>('overview')
-const writerChapter = ref<number | null>(null)
+const writerChapter = ref<number | null>(1)
+const writerRef = ref<any>(null)
+const annotationSelection = ref<NovelSelection | null>(null)
+const annotationDraftNonce = ref(0)
+const activeAnnotationId = ref<number | null>(null)
+const activeForeshadowId = ref<number | null>(null)
+const inspectorSection = ref<'annotations' | 'foreshadows' | 'characters'>('annotations')
+const {
+  loading: workbenchLoading,
+  chapters: workbenchChapters,
+  annotations: workbenchAnnotations,
+  settings: workbenchSettings,
+  data: workbenchData,
+  layout: workbenchLayout,
+  layoutReady: workbenchLayoutReady,
+  treeVisible: workbenchTree,
+  load: loadWorkbench,
+  setLayout: setWorkbenchLayout,
+} = useNovelWorkbench(Number(route.params.id))
+
+const chapterAnnotations = computed(() =>
+  workbenchAnnotations.value.filter((annotation) => annotation.chapter_no === (writerChapter.value || 1)),
+)
+const workbenchForeshadows = computed<any[]>(() => workbenchData.value?.foreshadows || [])
+const workbenchCharacters = computed<any[]>(() => workbenchData.value?.characters || [])
+const annotationsEnabled = computed(() => workbenchSettings.value.annotations_enabled !== false)
+const foreshadowEnabled = computed(() => workbenchSettings.value.foreshadow_enabled !== false)
+const foreshadowAutoExtract = computed(() => workbenchSettings.value.foreshadow_auto_extract === true)
 
 const ARCHITECTURE_FIELDS = [
   'coreSeed', 'characterDynamics', 'characterState', 'worldBuilding', 'plotArchitecture', 'worldMap', 'timeline',
@@ -284,8 +422,70 @@ function setTab(tab: NovelTab) {
 }
 
 function goWrite(chapterNo: number) {
-  writerChapter.value = Number(chapterNo) || null
+  writerChapter.value = Number(chapterNo) || 1
+  annotationSelection.value = null
+  activeAnnotationId.value = null
+  activeForeshadowId.value = null
   setTab('writer')
+}
+
+function onWriterChapterChange(chapterNo: number) {
+  const next = Number(chapterNo)
+  if (!Number.isSafeInteger(next) || next < 1) return
+  if (next !== writerChapter.value) {
+    annotationSelection.value = null
+    activeAnnotationId.value = null
+    activeForeshadowId.value = null
+  }
+  writerChapter.value = next
+}
+
+function jumpToChapter(chapterNo: number) {
+  onWriterChapterChange(chapterNo)
+}
+
+function onSelection(selection: NovelSelection | null) {
+  annotationSelection.value = selection
+}
+
+function requestAnnotation() {
+  if (!annotationSelection.value) return
+  inspectorSection.value = 'annotations'
+  annotationDraftNonce.value += 1
+}
+
+function openForeshadows(foreshadowId: number) {
+  inspectorSection.value = 'foreshadows'
+  activeForeshadowId.value = foreshadowId
+}
+
+function locateAnnotation(annotation: WorkbenchAnnotation) {
+  inspectorSection.value = 'annotations'
+  activeAnnotationId.value = annotation.id
+  writerRef.value?.locateRange?.(annotation)
+}
+
+function refreshWorkbench() {
+  void loadWorkbench()
+}
+
+function refreshAll() {
+  void load()
+  void loadWorkbench()
+}
+
+async function switchWorkbenchLayout(next: 'split' | 'tabs') {
+  if (layoutSwitching.value || workbenchLayout.value === next) return
+  layoutSwitching.value = true
+  try {
+    await novelAPI.saveSettings({ workbench: { layout: next } })
+    setWorkbenchLayout(next)
+    if (next === 'split') await loadWorkbench()
+  } catch (err: any) {
+    toastError(err, { fallback: 'errors.unknown' })
+  } finally {
+    layoutSwitching.value = false
+  }
 }
 
 async function regenerateArchitecture() {
@@ -339,7 +539,11 @@ async function load() {
   } catch { /* store.error 已记录 */ }
 }
 
-onMounted(load)
+onMounted(async () => {
+  void loadAgentSettings()
+  await load()
+  void loadWorkbench()
+})
 </script>
 
 <style scoped>
@@ -412,6 +616,36 @@ onMounted(load)
   gap: 10px;
   flex-wrap: wrap;
 }
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.layout-switch {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--surface-outline);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken, var(--bg-sunken, var(--bg-base)));
+}
+.layout-switch-btn {
+  padding: 3px 10px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--text-meta);
+  cursor: pointer;
+}
+.layout-switch-btn:hover { color: var(--text-0); }
+.layout-switch-btn.on {
+  background: var(--surface-raised);
+  color: var(--text-0);
+  box-shadow: var(--shadow-sm, none);
+}
+.layout-switch-btn:disabled { cursor: progress; opacity: 0.7; }
 .page-title {
   margin: 0;
   max-width: 100%;

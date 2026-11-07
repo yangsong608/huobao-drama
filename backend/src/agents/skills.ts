@@ -47,6 +47,9 @@ const AGENT_SKILL_MAP: Record<string, string[]> = {
     'prompt-generator/video-prompt',
   ],
   voice_designer: ['voice-designer'],
+  // 两个预设的技能目录可选；目录不存在时 loadAgentSkills 返回空串
+  assistant: ['assistant'],
+  director: ['director'],
 }
 
 /** 每个 Agent 的 Workspace（filesystem 工作目录 + 原生技能注册）

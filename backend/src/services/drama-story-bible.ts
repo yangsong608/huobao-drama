@@ -11,6 +11,7 @@ export const STORY_BIBLE_KEYS = [
   'worldBuilding',
   'plotArchitecture',
   'characterState',
+  'adaptationNotes',
 ] as const
 
 export type StoryBibleKey = typeof STORY_BIBLE_KEYS[number]
@@ -41,12 +42,13 @@ export function getStoryBible(dramaId: number | null | undefined): StoryBible {
   }
 }
 
-const SECTION_LABELS: Record<StoryBibleKey, string> = {
+export const SECTION_LABELS: Record<StoryBibleKey, string> = {
   coreSeed: '核心种子',
   characterDynamics: '人物关系',
   worldBuilding: '世界观设定',
   plotArchitecture: '剧情架构',
   characterState: '人物状态',
+  adaptationNotes: '改编备注',
 }
 
 export const STORY_BIBLE_HEADER = '【故事圣经】'

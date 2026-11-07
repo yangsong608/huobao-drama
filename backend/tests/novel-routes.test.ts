@@ -178,6 +178,97 @@ test('novel settings flat keys clamp and never expose api keys', async () => {
   assert.equal(applied.promptVersion, '1.2.0')
 })
 
+test('novel workbench settings: defaults, clamps, nested partial merge and env overlay not persisted', async () => {
+  const defaults = await json(await app.request('/api/v1/settings/novel'))
+  assert.deepEqual(defaults.data.settings.workbench, { layout: 'split', tree: true })
+  assert.deepEqual(defaults.data.settings.annotations, { enabled: true, anchorWindow: 200 })
+  assert.deepEqual(defaults.data.settings.foreshadow, { enabled: true, autoExtract: false })
+  assert.deepEqual(defaults.data.settings.contextPack, {
+    enabled: true, includeAnnotations: true, includeUnresolved: true, maxChars: 4000,
+  })
+
+  const put = (body: unknown) => app.request('/api/v1/settings/novel', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  const updated = await json(await put({
+    workbench: { layout: 'tabs' },
+    annotations: { anchorWindow: 9999 },
+    foreshadow: { autoExtract: true },
+    contextPack: { maxChars: 100 },
+  }))
+  assert.equal(updated.data.settings.workbench.layout, 'tabs')
+  assert.equal(updated.data.settings.workbench.tree, true)
+  assert.equal(updated.data.settings.annotations.anchorWindow, 1000)
+  assert.equal(updated.data.settings.annotations.enabled, true)
+  assert.equal(updated.data.settings.foreshadow.autoExtract, true)
+  assert.equal(updated.data.settings.foreshadow.enabled, true)
+  assert.equal(updated.data.settings.contextPack.maxChars, 500)
+  assert.equal(updated.data.settings.contextPack.includeAnnotations, true)
+
+  const invalidEnum = await json(await put({ workbench: { layout: 'bogus' } }))
+  assert.equal(invalidEnum.data.settings.workbench.layout, 'split')
+  assert.equal(invalidEnum.data.settings.workbench.tree, true)
+
+  process.env.NOVEL_WORKBENCH_LAYOUT = 'tabs'
+  process.env.NOVEL_ANNOTATIONS = 'off'
+  process.env.NOVEL_FORESHADOW = 'off'
+  process.env.NOVEL_CONTEXT_PACK = 'off'
+  try {
+    const overlaid = getNovelSettings()
+    assert.equal(overlaid.workbench.layout, 'tabs')
+    assert.equal(overlaid.annotations.enabled, false)
+    assert.equal(overlaid.foreshadow.enabled, false)
+    assert.equal(overlaid.contextPack.enabled, false)
+    // 部分更新以落库值为基线，环境变量覆盖值不得写回
+    setNovelSettings({ workbench: { tree: false } })
+  } finally {
+    delete process.env.NOVEL_WORKBENCH_LAYOUT
+    delete process.env.NOVEL_ANNOTATIONS
+    delete process.env.NOVEL_FORESHADOW
+    delete process.env.NOVEL_CONTEXT_PACK
+  }
+  const persisted = getNovelSettings()
+  assert.equal(persisted.workbench.layout, 'split')
+  assert.equal(persisted.workbench.tree, false)
+  assert.equal(persisted.annotations.enabled, true)
+  assert.equal(persisted.foreshadow.enabled, true)
+  assert.equal(persisted.contextPack.enabled, true)
+})
+
+test('workbench aggregate returns layout, chapter tree metadata and counts without chapter text', async () => {
+  setNovelSettings({ workbench: { layout: 'split', tree: true } })
+  const novel = await createNovel('工作台聚合')
+  const saved = await app.request(`/api/v1/novels/${novel.id}/chapters/1`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title: '雨夜', content: '夜雨敲窗，他翻开旧信。' }),
+  })
+  assert.equal(saved.status, 200)
+
+  const res = await json(await app.request(`/api/v1/novels/${novel.id}/workbench`))
+  assert.equal(res.data.layout, 'split')
+  assert.equal(res.data.tree, true)
+  assert.equal(res.data.chapters.length, 3)
+  assert.equal(res.data.chapters[0].chapter_no, 1)
+  assert.equal(res.data.chapters[0].title, '雨夜')
+  assert.equal(res.data.chapters[0].has_content, true)
+  assert.ok(res.data.chapters[0].word_count > 0)
+  assert.equal(res.data.chapters[1].chapter_no, 2)
+  assert.equal(res.data.chapters[1].has_content, false)
+  assert.equal('content' in res.data.chapters[0], false)
+  assert.ok(Array.isArray(res.data.annotations))
+  assert.ok(Array.isArray(res.data.foreshadows))
+  assert.ok(Array.isArray(res.data.characters))
+  assert.deepEqual(res.data.counts, { open_annotations: 0, unresolved_foreshadows: 0 })
+
+  assert.equal((await app.request(`/api/v1/novels/${novel.id}`, { method: 'DELETE' })).status, 200)
+  assert.equal((await app.request(`/api/v1/novels/${novel.id}/workbench`)).status, 404)
+  assert.equal((await app.request('/api/v1/novels/abc/workbench')).status, 400)
+})
+
 test('graph routes return empty graph, save manual graph and reject invalid input', async () => {
   const novel = await createNovel('罗盘路由')
 

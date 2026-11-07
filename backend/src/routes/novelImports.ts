@@ -27,6 +27,11 @@ import {
 import { startAutomation } from '../services/automation.js'
 import { startExtraction } from '../services/extraction.js'
 import { isQueueEnabled } from '../services/app-settings.js'
+import {
+  NovelContextPackNotFoundError,
+  buildNovelContextPack,
+  type ContextPackOptions,
+} from '../services/novel-context-pack.js'
 
 const app = new Hono()
 
@@ -70,6 +75,11 @@ function parseInput(raw: unknown): NovelImportInput & { auto_extract?: boolean; 
     targetWords = Number(body.target_words)
     if (!Number.isFinite(targetWords)) throw new NovelImportError('target_words 必须是数字')
   }
+  let contextPackMax: number | undefined
+  if (body.context_pack_max_chars !== undefined && body.context_pack_max_chars !== null) {
+    contextPackMax = Number(body.context_pack_max_chars)
+    if (!Number.isFinite(contextPackMax)) throw new NovelImportError('context_pack_max_chars 必须是数字')
+  }
 
   return {
     request_id: requestId,
@@ -83,6 +93,36 @@ function parseInput(raw: unknown): NovelImportInput & { auto_extract?: boolean; 
     background_mode: optionalString(body, 'background_mode', 20),
     auto_extract: optionalBoolean(body, 'auto_extract'),
     auto_pipeline: optionalBoolean(body, 'auto_pipeline'),
+    include_context_pack: optionalBoolean(body, 'include_context_pack'),
+    context_pack_max_chars: contextPackMax,
+  }
+}
+
+function parseContextPackInput(raw: unknown): ContextPackOptions {
+  if (raw === null || raw === undefined) return {}
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new NovelImportError('请求体必须是对象')
+  }
+  const body = raw as Record<string, unknown>
+  let chapterNos: number[] | undefined
+  if (body.chapter_nos !== undefined && body.chapter_nos !== null) {
+    if (!Array.isArray(body.chapter_nos)) throw new NovelImportError('chapter_nos 必须是数组')
+    for (const item of body.chapter_nos) {
+      const n = Number(item)
+      if (!Number.isSafeInteger(n) || n <= 0) throw new NovelImportError('chapter_nos 只能包含正整数')
+    }
+    chapterNos = body.chapter_nos.map(Number)
+  }
+  let maxChars: number | undefined
+  if (body.max_chars !== undefined && body.max_chars !== null) {
+    maxChars = Number(body.max_chars)
+    if (!Number.isFinite(maxChars)) throw new NovelImportError('max_chars 必须是数字')
+  }
+  return {
+    chapter_nos: chapterNos,
+    include_annotations: optionalBoolean(body, 'include_annotations'),
+    include_unresolved_foreshadows: optionalBoolean(body, 'include_unresolved_foreshadows'),
+    max_chars: maxChars,
   }
 }
 
@@ -119,6 +159,25 @@ function importFailure(c: Context, error: unknown): Response {
   }
   throw error
 }
+
+app.post('/:id/context-pack/preview', async (c) => {
+  const novelId = parseId(c.req.param('id'))
+  if (!novelId) return badRequest(c, '小说编号无效')
+  const raw = await c.req.json().catch(() => null)
+  try {
+    const result = buildNovelContextPack(novelId, parseContextPackInput(raw))
+    return success(c, {
+      text: result.text,
+      chars: result.chars,
+      truncated: result.truncated,
+      included: result.included,
+    })
+  } catch (error) {
+    if (error instanceof NovelImportError) return badRequest(c, error.message)
+    if (error instanceof NovelContextPackNotFoundError) return notFound(c, error.message)
+    throw error
+  }
+})
 
 app.post('/:id/imports/preview', async (c) => {
   const novelId = parseId(c.req.param('id'))
@@ -173,6 +232,8 @@ app.post('/:id/imports', async (c) => {
       drama_id: result.drama_id,
       episode_count: result.episode_count,
       existing: result.existing,
+      warnings: result.warnings,
+      context_pack: result.context_pack,
     })
   } catch (error) {
     if (error instanceof NovelImportError) {

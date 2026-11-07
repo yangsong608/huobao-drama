@@ -4,6 +4,7 @@
  */
 import { RequestContext } from '@mastra/core/request-context'
 import { getContentLanguage, type ContentLanguage } from '../services/app-settings.js'
+import type { AgentScope } from './agent-scope.js'
 
 export interface AgentRequestContextValues {
   episodeId: number
@@ -12,6 +13,48 @@ export interface AgentRequestContextValues {
   textConfigId?: number
   /** AI 内容语言；缺省时读全局设置（app_settings.content_language） */
   language?: ContentLanguage
+}
+
+/** 助手上下文与生产上下文并列：不要求 episodeId/dramaId，按作用域写入可选 ID */
+export interface AssistantRequestContextValues {
+  sessionId: number
+  messageId: number
+  workspaceKey: string
+  scope: AgentScope
+  preset: 'assistant' | 'director'
+  dramaId?: number
+  episodeId?: number
+  modelOverride?: string
+  textConfigId?: number
+  language?: ContentLanguage
+}
+
+export function buildAssistantRequestContext(values: AssistantRequestContextValues): RequestContext<AssistantRequestContextValues> {
+  const rc = new RequestContext<AssistantRequestContextValues>()
+  const loose = rc as unknown as RequestContext<Record<string, unknown>>
+  loose.set('agentScope', values.scope)
+  loose.set('agentPreset', values.preset)
+  rc.set('sessionId', values.sessionId)
+  rc.set('messageId', values.messageId)
+  rc.set('workspaceKey', values.workspaceKey)
+  if (values.dramaId) rc.set('dramaId', values.dramaId)
+  if (values.episodeId) rc.set('episodeId', values.episodeId)
+  if (values.modelOverride) rc.set('modelOverride', values.modelOverride)
+  if (values.textConfigId) rc.set('textConfigId', values.textConfigId)
+  rc.set('language', values.language ?? getContentLanguage())
+  return rc
+}
+
+export function getAssistantScope(requestContext: RequestContext | undefined): AgentScope | null {
+  const value = requestContext?.get('agentScope' as never) as AgentScope | undefined
+  return value && typeof value === 'object' && typeof (value as AgentScope).kind === 'string'
+    ? value
+    : null
+}
+
+export function getAgentPreset(requestContext: RequestContext | undefined): 'assistant' | 'director' | null {
+  const value = requestContext?.get('agentPreset' as never)
+  return value === 'assistant' || value === 'director' ? value : null
 }
 
 export function buildAgentRequestContext(values: AgentRequestContextValues): RequestContext<AgentRequestContextValues> {

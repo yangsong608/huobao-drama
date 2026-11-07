@@ -17,6 +17,7 @@ import aiConfigs, { aiProviders } from './routes/aiConfigs.js'
 import stylePresets from './routes/stylePresets.js'
 import prompts from './routes/prompts.js'
 import agent from './routes/agent.js'
+import assistant from './routes/assistant.js'
 import merge from './routes/merge.js'
 import skills from './routes/skills.js'
 import props from './routes/props.js'
@@ -49,6 +50,7 @@ import { resumeInterruptedTasks } from './services/generation.js'
 import { initMcp, setMcpMainApp } from './services/mcp.js'
 import { markInterruptedAutomations, setAutomationApp } from './services/automation.js'
 import { markInterruptedNovelJobs } from './services/novel-job-runner.js'
+import { recoverInterruptedMessages } from './services/agent-sessions.js'
 import { migrateUploadedVoices } from './services/voice-profile.js'
 import { startQueueWorker } from './services/queue-worker.js'
 import { refreshFfmpegConfig } from './utils/ffmpeg.js'
@@ -88,6 +90,7 @@ api.route('/ai-providers', aiProviders)
 api.route('/style-presets', stylePresets)
 api.route('/prompts', prompts)
 api.route('/agent', agent)
+api.route('/assistant', assistant)
 api.route('/merge', merge)
 api.route('/skills', skills)
 api.route('/props', props)
@@ -166,6 +169,8 @@ await resumeInterruptedTasks()
 await markInterruptedAutomations()
 // V3 小说任务：进程重启后 running 一律标为 interrupted，可从前端续跑
 markInterruptedNovelJobs()
+// 助手：残留 running 回答置 interrupted，本轮提案过期、建议清空
+recoverInterruptedMessages()
 // V1 已上传的角色音色迁移为 character_voices（幂等，失败不影响启动）
 migrateUploadedVoices()
 
