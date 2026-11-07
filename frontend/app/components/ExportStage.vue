@@ -100,7 +100,7 @@
             <h3>{{ t('export.progressTitle') }}</h3>
             <p class="ex-hint">{{ kindLabel(active.kind) }} · {{ presetLabel(active.preset) }}</p>
           </div>
-          <span :class="['ex-chip', `is-${active.status || 'pending'}`]">{{ statusLabel(active.status) }}</span>
+          <span :class="['ex-chip', `is-${active.status || 'pending'}`]"><span class="ex-chip-icon" aria-hidden="true">{{ statusIcon(active.status) }}</span>{{ statusLabel(active.status) }}</span>
         </header>
         <div class="ex-progress">
           <div class="ex-bar"><span :style="{ width: `${active.progress || 0}%` }" /></div>
@@ -151,10 +151,7 @@
       </header>
       <p class="ex-hint">{{ t('export.recordsHint') }}</p>
 
-      <div v-if="!exports.length" class="ex-empty-side">
-        <FileOutput :size="22" />
-        <span>{{ t('export.emptyRecords') }}</span>
-      </div>
+      <StudioEmptyState v-if="!exports.length" compact class="ex-empty-side" :title="t('export.emptyRecords')" />
 
       <article
         v-for="record in exports"
@@ -164,7 +161,7 @@
       >
         <header class="ex-record-head">
           <span class="ex-kind">{{ kindLabel(record.kind) }}</span>
-          <span :class="['ex-chip', `is-${record.status || 'pending'}`]">{{ statusLabel(record.status) }}</span>
+          <span :class="['ex-chip', `is-${record.status || 'pending'}`]"><span class="ex-chip-icon" aria-hidden="true">{{ statusIcon(record.status) }}</span>{{ statusLabel(record.status) }}</span>
           <span class="ex-record-time">{{ formatTime(record.createdAt) }}</span>
         </header>
         <div class="ex-record-meta">
@@ -255,6 +252,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import type { ExportKind, ExportRecord, ExportStatus } from '~/composables/useApi'
 import BaseSelect from '~/components/BaseSelect.vue'
+import StudioEmptyState from '~/components/studio/StudioEmptyState.vue'
 
 const props = defineProps<{
   episodeId: number | null
@@ -438,6 +436,13 @@ function statusLabel(status: ExportStatus | null) {
   return t(`export.status.${status || 'pending'}`)
 }
 
+function statusIcon(status: ExportStatus | null) {
+  if (status === 'failed') return '!'
+  if (status === 'cancelled') return '–'
+  if (status === 'completed') return '✓'
+  return '·'
+}
+
 function formatDuration(ms: number | null) {
   if (ms == null || ms <= 0) return '—'
   const total = Math.round(ms / 1000)
@@ -515,22 +520,27 @@ async function remove(id: number) {
 }
 .ex-card.is-active { border-color: var(--accent-glow); }
 .ex-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.ex-card-head h3 { margin: 0; font-size: 12.5px; font-weight: 700; color: var(--text-0); }
-.ex-hint { margin: 0; font-size: 10.5px; line-height: 1.6; color: var(--text-3); }
-.ex-alert { margin: 0; padding: 7px 9px; border-radius: 7px; background: var(--warning-bg); color: var(--action-danger); font-size: 10.5px; line-height: 1.55; word-break: break-word; }
+.ex-card-head h3 { margin: 0; font-size: 15px; font-weight: 700; color: var(--text-0); }
+.ex-hint { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-2); }
+.ex-alert { margin: 0; padding: 7px 9px; border-radius: 7px; background: var(--warning-bg); color: var(--action-danger); font-size: 12px; line-height: 1.55; word-break: break-word; }
 .ex-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg-0); color: var(--text-1); font: inherit; font-size: 10.5px; font-weight: 600;
+  background: var(--bg-0); color: var(--text-1); font: inherit; font-size: 12px; font-weight: 600;
   cursor: pointer; text-decoration: none; white-space: nowrap;
 }
 .ex-btn:hover { border-color: var(--accent); color: var(--accent-text); }
 .ex-btn.is-primary { border-color: var(--accent); background: var(--accent); color: var(--action-primary-text); }
 .ex-btn.is-primary:hover { background: var(--action-primary-hover); color: #fff; }
-.ex-btn.is-ghost { border-color: transparent; background: transparent; color: var(--text-3); }
-.ex-btn.is-tiny { height: 22px; padding: 0 7px; font-size: 10px; }
+.ex-btn.is-ghost { border-color: transparent; background: transparent; color: var(--text-2); }
+.ex-btn.is-tiny { height: 22px; padding: 0 7px; font-size: 11px; }
 .ex-btn.is-danger:hover { border-color: var(--action-danger); color: var(--action-danger); background: var(--action-danger-bg); }
 .ex-btn:disabled { opacity: .45; cursor: default; }
+.ex-btn:focus-visible,
+.ex-start:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
 .ex-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .ex-check {
   display: flex; align-items: center; gap: 8px;
@@ -541,12 +551,12 @@ async function remove(id: number) {
 .ex-check-icon.is-ok { color: var(--success); }
 .ex-check-icon.is-bad { color: var(--warning); }
 .ex-check-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; flex: 1; }
-.ex-check-label { font-size: 11px; font-weight: 650; color: var(--text-1); }
-.ex-check-msg { font-size: 10px; color: var(--text-3); line-height: 1.45; word-break: break-word; }
-.ex-loading { display: flex; align-items: center; gap: 7px; padding: 10px 0; font-size: 11px; color: var(--text-3); }
+.ex-check-label { font-size: 12px; font-weight: 650; color: var(--text-1); }
+.ex-check-msg { font-size: 12px; color: var(--text-2); line-height: 1.45; word-break: break-word; }
+.ex-loading { display: flex; align-items: center; gap: 7px; padding: 10px 0; font-size: 12px; color: var(--text-2); }
 .ex-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 9px; }
 .ex-field { display: flex; flex-direction: column; gap: 4px; }
-.ex-field-label { font-size: 10.5px; color: var(--text-2); }
+.ex-field-label { font-size: 12px; color: var(--text-2); }
 .ex-start-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
 .ex-start {
   display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
@@ -555,33 +565,35 @@ async function remove(id: number) {
 }
 .ex-start:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-bg); }
 .ex-start svg { color: var(--accent-text); }
-.ex-start b { font-size: 11.5px; color: var(--text-0); }
-.ex-start span { font-size: 10px; line-height: 1.45; color: var(--text-3); }
+.ex-start b { font-size: 13.5px; color: var(--text-0); }
+.ex-start span { font-size: 12px; line-height: 1.45; color: var(--text-2); }
 .ex-start.is-primary { border-color: var(--accent); background: var(--accent-bg); }
 .ex-start:disabled { opacity: .5; cursor: default; }
 .ex-progress { display: flex; align-items: center; gap: 8px; }
 .ex-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--overlay-track); overflow: hidden; }
 .ex-bar span { display: block; height: 100%; background: var(--accent); transition: width .3s; }
-.ex-progress-val { font-size: 10.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.ex-progress-val { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .ex-output { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ex-output-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ex-output-main b { font-size: 11.5px; color: var(--text-0); }
-.ex-output-meta { font-size: 10px; color: var(--text-3); }
+.ex-output-main b { font-size: 13.5px; color: var(--text-0); }
+.ex-output-meta { font-size: 12px; color: var(--text-2); }
 .ex-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ex-chip {
+  display: inline-flex; align-items: center; gap: 4px;
   padding: 0 6px; border: 1px solid var(--border); border-radius: 999px;
-  font-size: 9px; line-height: 16px; color: var(--text-2); white-space: nowrap;
+  font-size: 11px; line-height: 16px; color: var(--text-2); white-space: nowrap;
 }
-.ex-chip.is-pending, .ex-chip.is-running { border-color: var(--accent-glow); background: var(--accent-bg); color: var(--accent-text); }
-.ex-chip.is-completed { border-color: transparent; background: var(--accent-bg); color: var(--success); }
+.ex-chip-icon { font-size: 11px; line-height: 1; }
+.ex-chip.is-pending, .ex-chip.is-running { border-color: var(--accent-glow); background: var(--accent-bg); color: var(--accent-text-strong); }
+.ex-chip.is-completed { border-color: transparent; background: var(--accent-bg); color: var(--text-0); }
 .ex-chip.is-failed, .ex-chip.is-cancelled { border-color: transparent; background: var(--warning-bg); color: var(--action-danger); }
 .ex-chip.is-current { border-color: var(--accent); background: var(--accent); color: var(--action-primary-text); }
 .ex-side-head { display: flex; align-items: center; gap: 7px; }
-.ex-side-head h3 { margin: 0; font-size: 12px; font-weight: 700; color: var(--text-0); }
-.ex-count { padding: 0 6px; border-radius: 999px; background: var(--bg-2); color: var(--text-3); font-size: 9.5px; line-height: 16px; }
+.ex-side-head h3 { margin: 0; font-size: 15px; font-weight: 700; color: var(--text-0); }
+.ex-count { padding: 0 6px; border-radius: 999px; background: var(--bg-2); color: var(--text-2); font-size: 11px; line-height: 16px; }
 .ex-empty-side {
   flex: 1; min-height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 6px; color: var(--text-3); font-size: 10.5px; text-align: center;
+  gap: 6px; color: var(--text-2); font-size: 12px; text-align: center;
 }
 .ex-record {
   display: flex; flex-direction: column; gap: 6px;
@@ -591,14 +603,14 @@ async function remove(id: number) {
 .ex-record.is-focused { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
 .ex-record.is-dead { opacity: .82; }
 .ex-record-head { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-.ex-kind { font-size: 10.5px; font-weight: 700; color: var(--text-1); }
-.ex-record-time { margin-left: auto; font-size: 9.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.ex-record-meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 9.5px; color: var(--text-3); }
+.ex-kind { font-size: 12px; font-weight: 700; color: var(--text-1); }
+.ex-record-time { margin-left: auto; font-size: 12px; color: var(--text-2); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.ex-record-meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); font-family: var(--font-mono); }
 .ex-record-actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .ex-audio { width: 100%; height: 32px; }
 .ex-empty {
   flex: 1; min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 8px; color: var(--text-3); font-size: 12px;
+  gap: 8px; color: var(--text-2); font-size: 12px;
 }
 @media (max-width: 1080px) {
   .ex-stage { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }

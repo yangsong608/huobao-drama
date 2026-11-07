@@ -1,26 +1,26 @@
 <template>
   <div v-if="open" class="overlay" @click.self="close">
-    <div class="dialog delivery-dialog">
+    <div class="dialog delivery-dialog" role="dialog" aria-modal="true" aria-labelledby="delivery-dialog-title">
       <div class="dialog-head">
         <div class="dialog-head-copy">
-          <div class="dialog-title">{{ t('delivery.title') }}</div>
+          <div id="delivery-dialog-title" class="dialog-title">{{ t('delivery.title') }}</div>
           <div class="dialog-desc">{{ t('delivery.desc') }}</div>
         </div>
-        <button class="btn btn-icon btn-sm btn-ghost ml-auto dialog-close" @click="close">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <button type="button" class="btn btn-icon btn-sm btn-ghost ml-auto dialog-close" :title="t('common.close')" :aria-label="t('common.close')" @click="close">
+          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
 
       <div class="dialog-body">
         <div class="delivery-toolbar">
-          <button class="btn" :disabled="loading" @click="load">{{ loading ? t('common.loading') : t('delivery.refresh') }}</button>
-          <button class="btn btn-primary" :disabled="rendering" @click="renderMotion">
+          <button type="button" class="btn" :disabled="loading" @click="load">{{ loading ? t('common.loading') : t('delivery.refresh') }}</button>
+          <button type="button" class="btn btn-primary" :disabled="rendering" @click="renderMotion">
             {{ rendering ? t('delivery.rendering') : t('delivery.renderMotion') }}
           </button>
           <span class="field-hint">{{ t('delivery.renderHint') }}</span>
         </div>
 
-        <p v-if="!loading && !versions.length" class="delivery-empty">{{ t('delivery.empty') }}</p>
+        <StudioEmptyState v-if="!loading && !versions.length" class="delivery-empty" :title="t('delivery.empty')" />
 
         <div v-else class="delivery-list">
           <article v-for="v in versions" :key="v.id" :class="['delivery-item', { 'is-current': isCurrent(v) }]">
@@ -28,7 +28,10 @@
               <span :class="['tag', kindClass(v.kind)]">{{ kindLabel(v.kind) }}</span>
               <span class="delivery-name">{{ versionName(v) }}</span>
               <span v-if="isCurrent(v)" class="tag tag-accent">{{ t('delivery.current') }}</span>
-              <span v-if="v.status && v.status !== 'completed'" class="tag">{{ v.status }}</span>
+              <span v-if="v.status && v.status !== 'completed'" :class="['tag', statusClass(v.status)]">
+                <span class="delivery-status-icon" aria-hidden="true">{{ statusIcon(v.status) }}</span>
+                {{ statusLabel(v.status) }}
+              </span>
             </div>
             <div class="delivery-item-meta mono">
               <span v-if="v.duration">{{ v.duration }}s</span>
@@ -40,7 +43,7 @@
               <a v-if="v.mergedUrl || v.merged_url" class="btn btn-sm" :href="urlOf(v.mergedUrl || v.merged_url)" :download="downloadName(v)">{{ t('delivery.download') }}</a>
               <a v-if="v.subtitleUrl || v.subtitle_url" class="btn btn-sm" :href="urlOf(v.subtitleUrl || v.subtitle_url)" target="_blank" rel="noreferrer">SRT</a>
               <a v-if="assUrlOf(v)" class="btn btn-sm" :href="urlOf(assUrlOf(v))" target="_blank" rel="noreferrer">ASS</a>
-              <button v-if="!isCurrent(v)" class="btn btn-sm" :disabled="switching === v.id" @click="setCurrent(v)">
+              <button v-if="!isCurrent(v)" type="button" class="btn btn-sm" :disabled="switching === v.id" @click="setCurrent(v)">
                 {{ switching === v.id ? t('delivery.switching') : t('delivery.setCurrent') }}
               </button>
             </div>
@@ -50,7 +53,7 @@
 
       <div class="dialog-foot">
         <span class="dialog-foot-copy">{{ t('delivery.foot') }}</span>
-        <button class="btn" @click="close">{{ t('common.close') }}</button>
+        <button type="button" class="btn" @click="close">{{ t('common.close') }}</button>
       </div>
     </div>
   </div>
@@ -61,6 +64,7 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { mergeAPI, dubbingAPI } from '~/composables/useApi'
 import { toastError } from '~/composables/useToast'
+import StudioEmptyState from '~/components/studio/StudioEmptyState.vue'
 
 const props = defineProps<{
   open: boolean
@@ -103,7 +107,30 @@ function kindLabel(kind: string) {
   return map[kind] || t('delivery.kindConcat')
 }
 function kindClass(kind: string) {
-  return kind === 'mix' ? 'tag-accent' : kind === 'motion' ? 'tag-warn' : ''
+  return kind === 'mix' ? 'tag-accent' : kind === 'motion' ? 'tag-warning' : ''
+}
+function statusClass(status: string) {
+  const value = String(status || '').toLowerCase()
+  if (['failed', 'error'].includes(value)) return 'tag-error'
+  if (['canceled', 'cancelled'].includes(value)) return 'tag-warning'
+  if (['pending', 'queued'].includes(value)) return 'tag-info'
+  if (['rendering', 'running', 'processing'].includes(value)) return 'tag-info'
+  return 'tag-info'
+}
+function statusLabel(status: string) {
+  const value = String(status || '').toLowerCase()
+  if (['failed', 'error'].includes(value)) return t('delivery.statusFailed')
+  if (['canceled', 'cancelled'].includes(value)) return t('delivery.statusCanceled')
+  if (['pending', 'queued'].includes(value)) return t('delivery.statusQueued')
+  if (['rendering', 'running', 'processing'].includes(value)) return t('delivery.statusRendering')
+  return status
+}
+function statusIcon(status: string) {
+  const value = String(status || '').toLowerCase()
+  if (['failed', 'error'].includes(value)) return '!'
+  if (['canceled', 'cancelled'].includes(value)) return '–'
+  if (['pending', 'queued'].includes(value)) return '·'
+  return '◐'
 }
 function versionName(v: any) {
   const raw = v.createdAt || v.created_at || ''
@@ -171,14 +198,15 @@ function close() { emit('close') }
 </script>
 
 <style scoped>
-.delivery-dialog { width: min(860px, 94vw); max-height: 88vh; }
+.delivery-dialog { width: min(880px, 94vw); max-height: 88vh; }
 .delivery-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
-.delivery-empty { color: var(--text-3); font-size: 12px; padding: 24px; text-align: center; }
+.delivery-empty { min-height: 200px; justify-content: center; }
 .delivery-list { display: flex; flex-direction: column; gap: 10px; }
 .delivery-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 .delivery-item.is-current { border-color: var(--action-primary); background: color-mix(in srgb, var(--action-primary) 5%, transparent); }
 .delivery-item-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.delivery-name { font-size: 12px; font-weight: 600; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.delivery-item-meta { display: flex; gap: 12px; font-size: 11px; color: var(--text-3); }
+.delivery-name { font-size: 13.5px; font-weight: 600; color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.delivery-status-icon { font-size: 11px; line-height: 1; }
+.delivery-item-meta { display: flex; gap: 12px; font-size: 12px; color: var(--text-2); }
 .delivery-item-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 </style>

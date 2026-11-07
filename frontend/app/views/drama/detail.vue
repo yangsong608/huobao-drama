@@ -274,15 +274,19 @@
       </div>
 
       <!-- 全部素材为空 -->
-      <div v-if="!materials.length" class="empty-state">
-        <div class="empty-icon">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
-          </svg>
-        </div>
-        <p class="empty-title">{{ t('detail.assets.emptyTitle') }}</p>
-        <p class="empty-desc">{{ t('detail.assets.emptyDesc') }}</p>
-      </div>
+      <StudioEmptyState
+        v-if="!materials.length"
+        :title="t('detail.assets.emptyTitle')"
+        :description="t('detail.assets.emptyDesc')"
+      >
+        <template #icon>
+          <span class="empty-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+            </svg>
+          </span>
+        </template>
+      </StudioEmptyState>
 
       <div v-else-if="materials.length" class="asset-groups">
         <template v-for="g in assetGroups" :key="g.kindKey">
@@ -408,15 +412,19 @@
         </template>
 
         <!-- 筛选某一类但该类暂无素材 -->
-        <div v-if="assetTab !== 'all' && !visibleAssets.length" class="empty-state">
-          <div class="empty-icon">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
-            </svg>
-          </div>
-          <p class="empty-title">{{ t('detail.assets.emptyKindTitle', { kind: tabLabel(assetTab) }) }}</p>
-          <p class="empty-desc">{{ t('detail.assets.emptyKindDesc', { kind: tabLabel(assetTab) }) }}</p>
-        </div>
+        <StudioEmptyState
+          v-if="assetTab !== 'all' && !visibleAssets.length"
+          :title="t('detail.assets.emptyKindTitle', { kind: tabLabel(assetTab) })"
+          :description="t('detail.assets.emptyKindDesc', { kind: tabLabel(assetTab) })"
+        >
+          <template #icon>
+            <span class="empty-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+              </svg>
+            </span>
+          </template>
+        </StudioEmptyState>
       </div>
 
       <!-- 素材详情 / 编辑对话框（与工作台资产卡片同款布局） -->
@@ -431,7 +439,7 @@
               <span v-if="editTarget.kindKey === 'character'" class="tag">{{ editTarget.role || t('common.role') }}</span>
               <span v-else-if="editTarget.kindKey === 'prop'" class="tag">{{ editTarget.type || t('common.prop') }}</span>
               <span v-else class="tag">{{ editTarget.time || t('episode.asset.noTime') }}</span>
-              <button class="btn btn-ghost btn-icon" @click="closeEdit">
+              <button class="btn btn-ghost btn-icon" :title="t('common.close')" :aria-label="t('common.close')" @click="closeEdit">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>
@@ -452,6 +460,7 @@
                   type="button"
                   class="mat-detail-media-frame"
                   :disabled="!matHasImage(editTarget)"
+                  :aria-label="t('episode.asset.visualPreview')"
                   @click.stop="openAssetViewer(editTarget)"
                 >
                   <img v-if="matHasImage(editTarget)" :src="thumbOf(assetSrc(editTarget))" @error="thumbFallback($event, assetSrc(editTarget))" />
@@ -620,7 +629,7 @@
         <div class="dialog viewer-dialog">
           <div class="viewer-head">
             <span class="viewer-title">{{ assetViewer.title }}</span>
-            <button class="btn btn-icon btn-sm btn-ghost" @click="closeAssetViewer">
+            <button class="btn btn-icon btn-sm btn-ghost" :title="t('common.close')" :aria-label="t('common.close')" @click="closeAssetViewer">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
@@ -636,7 +645,7 @@
             <div class="dialog-title">{{ t('detail.storage.title') }}</div>
             <div class="dialog-desc">{{ t('detail.storage.desc') }}</div>
           </div>
-          <button class="btn btn-icon btn-sm btn-ghost ml-auto dialog-close" @click="closeStorage">
+          <button class="btn btn-icon btn-sm btn-ghost ml-auto dialog-close" :title="t('common.close')" :aria-label="t('common.close')" @click="closeStorage">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
@@ -698,7 +707,7 @@
             <div class="dialog-title">{{ t('detail.background.title') }}</div>
             <div class="dialog-desc">{{ t('detail.background.desc') }}</div>
           </div>
-          <button class="btn btn-icon btn-sm btn-ghost ml-auto dialog-close" @click="closeBackground">
+          <button class="btn btn-icon btn-sm btn-ghost ml-auto dialog-close" :title="t('common.close')" :aria-label="t('common.close')" @click="closeBackground">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
@@ -743,7 +752,7 @@
       <div class="dialog ep-dialog">
         <div class="dialog-head">
           <div class="dialog-title">{{ t('detail.epCreate.title') }}</div>
-          <button class="btn btn-icon btn-sm btn-ghost ml-auto dialog-close" @click="addDialog = false">
+          <button class="btn btn-icon btn-sm btn-ghost ml-auto dialog-close" :title="t('common.close')" :aria-label="t('common.close')" @click="addDialog = false">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
@@ -844,6 +853,7 @@ import { toastError } from '~/composables/useToast'
 import { useI18n } from 'vue-i18n'
 import { dramaAPI, episodeAPI, characterAPI, sceneAPI, propAPI, uploadAPI, aiConfigAPI, automationAPI, settingsAPI } from '~/composables/useApi'
 import BaseSelect from '~/components/BaseSelect.vue'
+import StudioEmptyState from '~/components/studio/StudioEmptyState.vue'
 import GridSheetDialog from '~/components/GridSheetDialog.vue'
 import ScriptImportDialog from '~/components/ScriptImportDialog.vue'
 import NarratorVoiceDialog from '~/components/NarratorVoiceDialog.vue'
@@ -1581,11 +1591,11 @@ onMounted(() => {
 .back-btn:hover { background: var(--bg-active); color: var(--text-0); }
 .back-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3.5px var(--button-focus);
+  box-shadow: var(--focus-ring);
 }
 
 .page-title {
-  font-size: 17px; font-weight: 700;
+  font-size: 18px; font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.2;
   white-space: nowrap;
@@ -1600,7 +1610,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
 }
 .source-link {
@@ -1608,8 +1618,8 @@ onMounted(() => {
   padding: 0;
   border: none;
   background: none;
-  color: var(--accent);
-  font-size: 11.5px;
+  color: var(--accent-text-strong);
+  font-size: 12px;
   cursor: pointer;
 }
 .source-link:hover { text-decoration: underline; }
@@ -1641,13 +1651,13 @@ onMounted(() => {
   width: 100%; min-width: 0;
   margin: 0; padding: 0;
   border: none; background: none; cursor: pointer;
-  font-size: 11.5px; color: var(--text-2); text-align: left;
+  font-size: 12px; color: var(--text-2); text-align: left;
 }
 .bg-line:hover .bg-line-text { color: var(--text-1); }
 .bg-line-label {
   flex-shrink: 0; padding: 0 5px;
   border-radius: 4px; background: var(--overlay-track);
-  font-size: 10.5px; color: var(--text-2);
+  font-size: 11px; color: var(--text-2);
 }
 .bg-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bg-line-text.empty { opacity: 0.72; }
@@ -1766,7 +1776,7 @@ onMounted(() => {
 }
 .ep-meta {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; color: var(--text-3);
+  font-size: 12px; color: var(--text-2);
   white-space: nowrap; flex-shrink: 0;
 }
 .ep-meta svg { opacity: 0.7; flex-shrink: 0; }
@@ -1852,7 +1862,7 @@ onMounted(() => {
 .ep-empty {
   display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 8px;
   min-height: 104px;
-  padding: 8px; text-align: center; color: var(--text-3); font-size: 12.5px;
+  padding: 8px; text-align: center; color: var(--text-2); font-size: 12.5px;
   border-style: dashed;
   cursor: pointer;
   transition: border-color 0.2s, color 0.2s, background 0.2s;
@@ -1873,13 +1883,13 @@ onMounted(() => {
 
 .field { display: flex; flex-direction: column; gap: 8px; }
 .field-label { font-size: 12.5px; font-weight: 600; color: var(--text-1); }
-.field-hint { font-size: 12px; color: var(--text-3); }
+.field-hint { font-size: 12px; color: var(--text-2); }
 
 .dialog-foot-copy {
   margin-right: auto;
   font-size: 12px;
   line-height: 1.6;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 /* ===== 素材库 ===== */
@@ -1913,7 +1923,7 @@ onMounted(() => {
   margin-left: auto;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--text-3);
+  color: var(--text-2);
   background: var(--bg-2);
   border-radius: 99px;
   padding: 1px 9px;
@@ -1937,7 +1947,7 @@ onMounted(() => {
 .character-asset-card:focus-visible {
   outline: none;
   border-color: var(--accent-glow);
-  box-shadow: 0 0 0 3px var(--button-focus), var(--shadow-panel);
+  box-shadow: var(--focus-ring), var(--shadow-panel);
 }
 .character-asset-card {
   display: flex;
@@ -2021,14 +2031,14 @@ onMounted(() => {
   gap: 2px;
   padding-top: 7px;
   border-top: 1px solid var(--border);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.5;
 }
 .afp-label {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .afp-text {
   display: -webkit-box;
@@ -2053,8 +2063,8 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   overflow: hidden;
-  color: var(--text-3);
-  font-size: 10.5px;
+  color: var(--text-2);
+  font-size: 11px;
   line-height: 1.45;
   white-space: nowrap;
 }
@@ -2081,7 +2091,7 @@ onMounted(() => {
   -webkit-backdrop-filter: blur(10px);
   box-shadow: var(--shadow-xs);
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
 }
 .asset-cover-badge.is-ready {
@@ -2109,7 +2119,7 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.asset-meta { font-size: 11px; line-height: 1.5; }
+.asset-meta { font-size: 12px; line-height: 1.5; }
 .asset-desc {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -2143,26 +2153,12 @@ onMounted(() => {
 .ring-spinner.sm { width: 13px; height: 13px; border-width: 2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.empty-state {
-  min-height: 280px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-lg);
-  background: var(--surface-raised);
-  text-align: center;
-}
 .empty-icon {
   width: 56px; height: 56px; border-radius: var(--radius-lg);
   background: var(--bg-2); color: var(--text-3);
   display: flex; align-items: center; justify-content: center;
   margin-bottom: 4px;
 }
-.empty-title { font-size: 14px; font-weight: 600; color: var(--text-1); }
-.empty-desc { font-size: 12px; color: var(--text-3); max-width: 260px; line-height: 1.6; }
 
 .viewer-overlay { align-items: center; }
 .viewer-dialog { width: min(960px, calc(100vw - 48px)); padding: 14px; }
@@ -2183,7 +2179,7 @@ onMounted(() => {
 }
 .mat-detail-title-block { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .mat-detail-kicker {
-  color: var(--text-3); font-size: 10px; font-weight: 800;
+  color: var(--text-2); font-size: 11px; font-weight: 800;
   letter-spacing: 0.12em; text-transform: uppercase;
 }
 .mat-detail-title {
@@ -2241,15 +2237,15 @@ onMounted(() => {
   min-height: 112px;
   font-family: inherit;
 }
-.mat-detail-prompt-text:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.mat-detail-prompt-text:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
 .mat-detail-prompt-text::placeholder { color: var(--text-3); }
 
 /* 状态标签 */
 .mat-detail-state {
   min-height: 20px; display: inline-flex; align-items: center;
   padding: 0 7px; border-radius: 999px;
-  background: var(--overlay-track); color: var(--text-3);
-  font-size: 10px; font-weight: 760; white-space: nowrap;
+  background: var(--overlay-track); color: var(--text-2);
+  font-size: 11px; font-weight: 760; white-space: nowrap;
 }
 .mat-detail-state.is-ready { color: var(--success); background: var(--success-bg); }
 
@@ -2264,7 +2260,7 @@ onMounted(() => {
 .mat-detail-media-frame:disabled { cursor: default; opacity: 1; }
 .mat-detail-media-frame:focus-visible {
   outline: none; border-color: var(--action-primary);
-  box-shadow: 0 0 0 3px var(--button-focus);
+  box-shadow: var(--focus-ring);
 }
 .mat-detail-media-frame img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .mat-detail-media-empty {
@@ -2283,8 +2279,8 @@ onMounted(() => {
   border-radius: var(--radius); background: var(--surface-muted);
 }
 .mat-detail-meta-item span {
-  display: block; color: var(--text-3);
-  font-size: 10px; font-weight: 780; letter-spacing: 0.04em;
+  display: block; color: var(--text-2);
+  font-size: 11px; font-weight: 780; letter-spacing: 0.04em;
 }
 .mat-detail-meta-item strong {
   display: block; margin-top: 4px; min-width: 0;
@@ -2312,7 +2308,7 @@ onMounted(() => {
 .mat-detail-edit-field > span,
 .mat-detail-edit-field > input::placeholder,
 .mat-detail-textarea::placeholder {
-  color: var(--text-3); font-size: 10px; font-weight: 780; letter-spacing: 0.04em;
+  color: var(--text-2); font-size: 11px; font-weight: 780; letter-spacing: 0.04em;
 }
 .mat-detail-textarea { min-height: 138px; resize: vertical; }
 .mat-detail-edit-grid--character .mat-detail-textarea,
@@ -2330,7 +2326,7 @@ onMounted(() => {
 /* 项目存储目录 */
 .storage-dialog { width: 580px; max-width: calc(100vw - 32px); }
 .dialog-head-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.dialog-desc { font-size: 12.5px; color: var(--text-3); }
+.dialog-desc { font-size: 12.5px; color: var(--text-2); }
 .storage-current {
   display: flex; flex-direction: column; gap: 8px;
   padding: 12px;
@@ -2452,7 +2448,7 @@ onMounted(() => {
 }
 .ep-auto-switch .switch.on { background: var(--accent); }
 .ep-auto-switch .switch.on::after { transform: translateX(14px); }
-.ep-auto-switch input:focus-visible + .switch { box-shadow: 0 0 0 3.5px var(--button-focus); }
+.ep-auto-switch input:focus-visible + .switch { box-shadow: var(--focus-ring); }
 
 @media (max-width: 860px) {
   .page { padding: 16px 16px 32px; }

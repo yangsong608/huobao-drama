@@ -7,9 +7,11 @@ import type {
   AssistantProposalStatus,
   AssistantResolvePayload,
   AssistantSendResult,
+  AssistantSession,
   AssistantThreadListPayload,
 } from './useAssistant'
 import type { AgentPreset } from './useAgentPageAdapter'
+import type { UiDefaultsPayload } from './useUiPrefs'
 
 export const API_BASE = '/api/v1'
 const BASE = API_BASE
@@ -1492,18 +1494,82 @@ export const storageAPI = {
   info: () => api.get('/storage'),
 }
 
+export interface AssistantDiagnosticToolInfo {
+  name: string
+  description: string
+  read_only: boolean
+  scopes: string[]
+}
+
+export interface AssistantDiagnosticRouteResult {
+  route: string
+  matched: boolean
+  path: string
+  binding_route: string | null
+  binding_stage: string | null
+  adapter_id: string | null
+  visible: boolean
+  scope: Record<string, unknown> | null
+  scope_valid: boolean
+  entries: string[]
+  default_preset: string | null
+  allowed_scopes: string[] | null
+  allowed_tools: string[] | null
+  tools: string[]
+  notes: string[]
+}
+
+export interface AssistantDiagnosticModelConfig {
+  id: number
+  provider: string
+  model: string
+  model_count: number
+}
+
+export interface AssistantDiagnosticsPayload {
+  tools: {
+    tools: AssistantDiagnosticToolInfo[]
+    scope_matrix: Record<string, string[]>
+    read_only_count: number
+    policies: Record<string, unknown>
+  }
+  models: {
+    available: boolean
+    active: AssistantDiagnosticModelConfig | null
+    configured: AssistantDiagnosticModelConfig[]
+    preset_models: { assistant: string; director: string }
+    hint: string
+  }
+  errors: {
+    items: { source: string; at: string; message: string }[]
+    total: number
+  }
+  route: AssistantDiagnosticRouteResult | null
+  generated_at: string
+}
+
+export interface AssistantDiagnosticToolResult {
+  tool: string
+  scope: Record<string, unknown>
+  duration_ms: number
+  truncated: boolean
+  result?: unknown
+  preview?: string
+  hint?: string
+}
+
 export const assistantAPI = {
   resolve: (workspaceKey: string, preset: AgentPreset = 'assistant') =>
     api.post<AssistantResolvePayload>('/assistant/sessions/resolve', { workspace_key: workspaceKey, preset }),
   create: (workspaceKey: string, preset: AgentPreset = 'assistant') =>
     api.post<AssistantResolvePayload>('/assistant/sessions', { workspace_key: workspaceKey, preset }),
-  list: (params: { workspaceKey: string; status?: 'active' | 'archived' | 'all'; limit?: number; offset?: number }) => {
+  list: (params: { workspaceKey?: string; status?: 'active' | 'archived' | 'all'; limit?: number; offset?: number }) => {
     const search = new URLSearchParams({
-      workspace_key: params.workspaceKey,
       status: params.status ?? 'all',
       limit: String(params.limit ?? 20),
       offset: String(params.offset ?? 0),
     })
+    if (params.workspaceKey) search.set('workspace_key', params.workspaceKey)
     return api.get<AssistantThreadListPayload>(`/assistant/sessions?${search.toString()}`)
   },
   get: (sessionId: number, beforeId?: number, limit = 50) => {
@@ -1517,6 +1583,14 @@ export const assistantAPI = {
   ) => api.post<AssistantSendResult>(`/assistant/sessions/${sessionId}/messages`, payload),
   cancel: (sessionId: number) =>
     api.post<{ message: AssistantMessage }>(`/assistant/sessions/${sessionId}/cancel`),
+  archive: (sessionId: number) =>
+    api.post<{ session: AssistantSession }>(`/assistant/sessions/${sessionId}/archive`),
+  del: (sessionId: number) =>
+    api.del<{ session: AssistantSession }>(`/assistant/sessions/${sessionId}`),
+  diagnostics: (route?: string) =>
+    api.get<AssistantDiagnosticsPayload>(`/assistant/diagnostics${route ? `?route=${encodeURIComponent(route)}` : ''}`),
+  runDiagnosticTool: (payload: { tool: string; args?: Record<string, unknown>; scope: Record<string, unknown> }) =>
+    api.post<AssistantDiagnosticToolResult>('/assistant/diagnostics/tool', payload),
   streamUrl: (sessionId: number, messageId: number, afterSeq = 0) =>
     `/assistant/sessions/${sessionId}/stream?message_id=${messageId}&after_seq=${afterSeq}`,
   proposals: (sessionId?: number, status?: AssistantProposalStatus) => {
@@ -1566,6 +1640,7 @@ export const settingsAPI = {
   setContentLanguage: (language: string) => api.put('/settings/content-language', { language }),
   dubbing: () => api.get<{ defaults: DubbingDefaults }>('/settings/dubbing'),
   saveDubbing: (patch: Partial<DubbingDefaults>) => api.put<{ defaults: DubbingDefaults }>('/settings/dubbing', patch),
+  ui: () => api.get<{ settings: UiDefaultsPayload }>('/settings/ui'),
   novel: () => api.get<{ settings: NovelSettings }>('/settings/novel'),
   saveNovel: (patch: Partial<NovelSettings>) => api.put<{ settings: NovelSettings }>('/settings/novel', patch),
   media: () => api.get<MediaSettingsPayload>('/settings/media'),

@@ -188,7 +188,10 @@ test('导演台作用域注册六个只读工具与提案工具，不注册建�
 
   const episodeTools = getPresetTools(requestContext('assistant', episodeScope))
   assert.equal(episodeTools.read_director_plan, undefined)
-  assert.equal(episodeTools.read_assets, undefined)
+  assert.ok(episodeTools.read_assets)
+  assert.ok(episodeTools.read_episode_context)
+  assert.ok(episodeTools.read_script)
+  assert.ok(episodeTools.read_dubbing_status)
 })
 
 test('六个只读工具返回当前集上下文，读取前后业务表与导演计划不变', async () => {

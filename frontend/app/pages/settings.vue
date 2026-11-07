@@ -338,8 +338,8 @@
                   <input type="checkbox" class="sr-only" :checked="c.is_active" @change="toggleCfg(c)">
                   <span class="switch" :class="{ on: c.is_active }"></span>
                 </label>
-                <button class="btn btn-ghost btn-icon btn-sm" @click="startEditCfg(c)"><Pencil :size="13" /></button>
-                <button class="btn btn-danger btn-icon btn-sm" @click="delCfg(c.id)"><Trash2 :size="13" /></button>
+                <button class="btn btn-ghost btn-icon btn-sm" :title="t('common.edit')" :aria-label="t('common.edit')" @click="startEditCfg(c)"><Pencil :size="13" /></button>
+                <button class="btn btn-danger btn-icon btn-sm" :title="t('common.delete')" :aria-label="t('common.delete')" @click="delCfg(c.id)"><Trash2 :size="13" /></button>
               </div>
               <p v-if="!byType(st.type).length" class="config-empty">{{ t('settings.common.empty') }}</p>
             </section>
@@ -668,7 +668,7 @@
                 <div class="config-line"><span class="config-name">{{ item.name }}</span></div>
                 <div class="config-sub mono">{{ formatBytes(item.size) }}</div>
               </div>
-              <button class="btn btn-danger btn-icon btn-sm" :title="t('common.delete')" @click="bgmToDelete = item"><Trash2 :size="13" /></button>
+              <button class="btn btn-danger btn-icon btn-sm" :title="t('common.delete')" :aria-label="t('common.delete')" @click="bgmToDelete = item"><Trash2 :size="13" /></button>
             </div>
             <p v-if="!bgmItems.length" class="config-empty">{{ t('settings.dubbing.bgmEmpty') }}</p>
           </section>
@@ -907,8 +907,8 @@
                 <input type="checkbox" class="sr-only" :checked="p.is_active" @change="toggleStyle(p)">
                 <span class="switch" :class="{ on: p.is_active }"></span>
               </label>
-              <button class="btn btn-ghost btn-icon btn-sm" @click="startEditStyle(p)"><Pencil :size="13" /></button>
-              <button class="btn btn-danger btn-icon btn-sm" @click="styleToDelete = p"><Trash2 :size="13" /></button>
+              <button class="btn btn-ghost btn-icon btn-sm" :title="t('common.edit')" :aria-label="t('common.edit')" @click="startEditStyle(p)"><Pencil :size="13" /></button>
+              <button class="btn btn-danger btn-icon btn-sm" :title="t('common.delete')" :aria-label="t('common.delete')" @click="styleToDelete = p"><Trash2 :size="13" /></button>
             </div>
             <p v-if="!stylePresets.length" class="config-empty">{{ t('settings.styles.empty') }}</p>
           </section>
@@ -1101,6 +1101,161 @@
           </section>
         </div>
 
+        <!-- ===== 界面（偏好与阅读） ===== -->
+        <div v-else-if="tab === 'ui'" class="settings-scroll">
+          <div class="settings-head">
+            <h2 class="settings-title">{{ t('settings.ui.title') }}</h2>
+            <p class="settings-desc">{{ t('settings.ui.desc') }}</p>
+          </div>
+
+          <p v-if="uiError" class="config-empty ui-prefs-error">
+            <span>{{ t('settings.ui.loadFailed') }}</span>
+            <button class="btn btn-ghost btn-sm" :disabled="uiLoading" @click="loadUiSettings(true)">
+              {{ t('settings.ui.retry') }}
+            </button>
+          </p>
+
+          <section v-if="!allowUserOverride" class="card svc-group">
+            <div class="config-row">
+              <div class="provider-badge" style="background:var(--accent-bg);color:var(--accent)"><Palette :size="15" /></div>
+              <div class="config-main">
+                <div class="config-line"><span class="config-name">{{ t('settings.ui.lockedTitle') }}</span></div>
+                <div class="config-sub">{{ t('settings.ui.lockedNote') }}</div>
+              </div>
+            </div>
+          </section>
+
+          <template v-else>
+            <section class="card svc-group">
+              <div class="svc-group-head">
+                <div class="svc-group-heading">
+                  <span class="svc-group-title">{{ t('settings.ui.appearance') }}</span>
+                  <div class="svc-group-sub">{{ t('settings.ui.appearanceSub') }}</div>
+                </div>
+              </div>
+              <div class="config-row">
+                <div class="provider-badge" style="background:var(--accent-bg);color:var(--accent)"><SunMoon :size="15" /></div>
+                <div class="config-main">
+                  <div class="config-line"><span class="config-name">{{ t('settings.ui.densityLabel') }}</span></div>
+                  <div class="config-sub">{{ t('settings.ui.densityNote') }}</div>
+                </div>
+                <div class="lang-picker">
+                  <button
+                    v-for="o in uiDensityOptions"
+                    :key="o.value"
+                    type="button"
+                    :class="['lang-option', { on: uiEffective.density === o.value }]"
+                    @click="setUiPrefs({ density: o.value })"
+                  >{{ o.label }}</button>
+                </div>
+              </div>
+              <div class="config-row">
+                <div class="provider-badge" style="background:var(--accent-bg);color:var(--accent)"><Activity :size="15" /></div>
+                <div class="config-main">
+                  <div class="config-line"><span class="config-name">{{ t('settings.ui.motionLabel') }}</span></div>
+                  <div class="config-sub">{{ t('settings.ui.motionNote') }}</div>
+                </div>
+                <div class="lang-picker">
+                  <button
+                    v-for="o in uiMotionOptions"
+                    :key="o.value"
+                    type="button"
+                    :class="['lang-option', { on: uiEffective.motion === o.value }]"
+                    @click="setUiPrefs({ motion: o.value })"
+                  >{{ o.label }}</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="card svc-group">
+              <div class="svc-group-head">
+                <div class="svc-group-heading">
+                  <span class="svc-group-title">{{ t('settings.ui.reading') }}</span>
+                  <div class="svc-group-sub">{{ t('settings.ui.readingSub') }}</div>
+                </div>
+              </div>
+              <div class="config-row">
+                <div class="provider-badge" style="background:var(--accent-bg);color:var(--accent)"><BookOpen :size="15" /></div>
+                <div class="config-main">
+                  <div class="config-line"><span class="config-name">{{ t('settings.ui.readingFontLabel') }}</span></div>
+                  <div class="config-sub">{{ t('settings.ui.readingFontNote') }}</div>
+                </div>
+                <div class="lang-picker">
+                  <button
+                    v-for="o in uiReadingFontOptions"
+                    :key="o.value"
+                    type="button"
+                    :class="['lang-option', { on: uiEffective.readingFont === o.value }]"
+                    @click="setUiPrefs({ readingFont: o.value })"
+                  >{{ o.label }}</button>
+                </div>
+              </div>
+              <div class="config-row">
+                <div class="provider-badge" style="background:var(--accent-bg);color:var(--accent)"><BookOpen :size="15" /></div>
+                <div class="config-main">
+                  <div class="config-line"><span class="config-name">{{ t('settings.ui.readingSizeLabel') }}</span></div>
+                  <div class="config-sub">{{ t('settings.ui.readingSizeNote') }}</div>
+                </div>
+                <div class="lang-picker">
+                  <button
+                    v-for="o in uiReadingSizeOptions"
+                    :key="o.value"
+                    type="button"
+                    :class="['lang-option', { on: uiEffective.readingSize === o.value }]"
+                    @click="setUiPrefs({ readingSize: o.value })"
+                  >{{ o.label }}</button>
+                </div>
+              </div>
+              <div class="config-row">
+                <div class="provider-badge" style="background:var(--accent-bg);color:var(--accent)"><BookOpen :size="15" /></div>
+                <div class="config-main">
+                  <div class="config-line"><span class="config-name">{{ t('settings.ui.readingWidthLabel') }}</span></div>
+                  <div class="config-sub">{{ t('settings.ui.readingWidthNote') }}</div>
+                </div>
+                <div class="lang-picker">
+                  <button
+                    v-for="o in uiReadingWidthOptions"
+                    :key="o.value"
+                    type="button"
+                    :class="['lang-option', { on: uiEffective.readingWidth === o.value }]"
+                    @click="setUiPrefs({ readingWidth: o.value })"
+                  >{{ o.label }}</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="card svc-group">
+              <div class="svc-group-head">
+                <div class="svc-group-heading">
+                  <span class="svc-group-title">{{ t('settings.ui.action') }}</span>
+                  <div class="svc-group-sub">{{ t('settings.ui.actionSub') }}</div>
+                </div>
+              </div>
+              <div class="config-row">
+                <div class="provider-badge" style="background:var(--accent-bg);color:var(--accent)"><Wrench :size="15" /></div>
+                <div class="config-main">
+                  <div class="config-line"><span class="config-name">{{ t('settings.ui.actionLabelsLabel') }}</span></div>
+                  <div class="config-sub">{{ t('settings.ui.actionLabelsNote') }}</div>
+                </div>
+                <div class="lang-picker">
+                  <button
+                    v-for="o in uiActionLabelOptions"
+                    :key="String(o.value)"
+                    type="button"
+                    :class="['lang-option', { on: uiEffective.actionLabels === o.value }]"
+                    @click="setUiPrefs({ actionLabels: o.value })"
+                  >{{ o.label }}</button>
+                </div>
+              </div>
+            </section>
+
+            <div class="ui-prefs-actions">
+              <button type="button" class="btn btn-ghost" @click="resetUiPrefs">{{ t('settings.ui.reset') }}</button>
+              <span class="config-empty">{{ t('settings.ui.resetHint') }}</span>
+            </div>
+          </template>
+        </div>
+
         <!-- ===== 关于更新 ===== -->
         <div v-else-if="tab === 'about'" class="settings-scroll">
           <div class="settings-head">
@@ -1228,6 +1383,14 @@
               <p v-if="agentForcedFlags.length" class="field-hint gw-error">
                 {{ t('settings.agentCenter.overview.forcedHint', { flags: agentForcedFlags.join(', ') }) }}
               </p>
+              <div class="agent-empty-actions agent-center-config-links">
+                <button class="btn btn-ghost btn-sm" @click="goToAiConfig">
+                  <Cpu :size="12" /> {{ t('settings.agentCenter.overview.goAiConfig') }}
+                </button>
+                <button class="btn btn-ghost btn-sm" @click="goToRules">
+                  <FileText :size="12" /> {{ t('settings.agentCenter.overview.goRules') }}
+                </button>
+              </div>
             </template>
 
             <!-- 2. 页面绑定 -->
@@ -1430,7 +1593,7 @@
                           <div style="font-weight:600;font-size:13px">{{ s.name }}</div>
                           <div class="dim" style="font-size:11px">{{ s.description }}</div>
                         </div>
-                        <button class="btn btn-danger btn-icon btn-sm" style="margin-right:4px" @click.stop="skillToDelete = s.id">
+                        <button class="btn btn-danger btn-icon btn-sm" style="margin-right:4px" :title="t('common.delete')" :aria-label="t('common.delete')" @click.stop="skillToDelete = s.id">
                           <Trash2 :size="13" />
                         </button>
                         <ChevronDown :size="14" :style="{ transform: editingSkill === s.id ? 'rotate(180deg)' : '', transition: '0.2s' }" />
@@ -1597,16 +1760,433 @@
                 </div>
               </div>
 
+              <template v-else-if="agentCenterSection === 'sessions'">
+                <div class="card agent-model-card">
+                  <div class="agent-binding-head">{{ t('settings.agentCenter.sessions.retentionTitle') }}</div>
+                  <div class="agent-binding-grid">
+                    <label class="field">
+                      <span class="field-label">{{ t('settings.agentCenter.sessions.retentionDays') }}</span>
+                      <input v-model.number="agentRetentionDays" class="input" type="number" min="7" max="365" />
+                    </label>
+                  </div>
+                  <p class="field-hint">{{ t('settings.agentCenter.sessions.retentionHint') }}</p>
+                  <div class="agent-card-foot">
+                    <span v-if="agentRetentionSaved" class="tag tag-success"><Check :size="10" /> {{ t('common.saved') }}</span>
+                    <button class="btn btn-primary btn-sm ml-auto" :disabled="agentRetentionSaving" @click="saveAgentRetention">
+                      <Loader2 v-if="agentRetentionSaving" :size="12" class="animate-spin" />
+                      {{ t('common.save') }}
+                    </button>
+                  </div>
+                </div>
+
+                <div class="card agent-model-card">
+                  <div class="agent-binding-grid">
+                    <label class="field">
+                      <span class="field-label">{{ t('settings.agentCenter.sessions.filters.workspace') }}</span>
+                      <input
+                        v-model="agentSessionFilters.workspaceKey"
+                        class="input"
+                        :placeholder="t('settings.agentCenter.sessions.filters.workspacePlaceholder')"
+                        @keyup.enter="loadAgentSessions(true)"
+                      />
+                    </label>
+                    <label class="field">
+                      <span class="field-label">{{ t('settings.agentCenter.sessions.filters.status') }}</span>
+                      <select v-model="agentSessionFilters.status" class="input" @change="loadAgentSessions(true)">
+                        <option value="all">{{ t('settings.agentCenter.sessions.filters.statusAll') }}</option>
+                        <option value="active">{{ t('settings.agentCenter.sessions.filters.statusActive') }}</option>
+                        <option value="archived">{{ t('settings.agentCenter.sessions.filters.statusArchived') }}</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="agent-card-foot">
+                    <span class="field-hint">{{ t('settings.agentCenter.sessions.filters.hint') }}</span>
+                    <button class="btn btn-ghost btn-sm ml-auto" :disabled="agentSessionsLoading" @click="loadAgentSessions(true)">
+                      <RefreshCw :size="12" :class="{ 'animate-spin': agentSessionsLoading }" />
+                      {{ t('settings.agentCenter.sessions.filters.refresh') }}
+                    </button>
+                  </div>
+                </div>
+
+                <div v-if="agentSessionsError" class="card agent-empty">
+                  <div class="agent-empty-title">{{ t('settings.agentCenter.sessions.errorTitle') }}</div>
+                  <div class="agent-empty-desc">{{ agentSessionsError }}</div>
+                  <button class="btn btn-sm agent-empty-action" @click="loadAgentSessions(true)">{{ t('settings.agentCenter.sessions.retry') }}</button>
+                </div>
+                <div v-else-if="agentSessionsLoading && !agentSessionItems.length" class="card agent-empty">
+                  <div class="agent-empty-desc"><Loader2 :size="14" class="animate-spin" /> {{ t('settings.agentCenter.sessions.loading') }}</div>
+                </div>
+                <div v-else-if="!agentSessionItems.length" class="card agent-empty">
+                  <template v-if="agentSessionHasActiveFilters">
+                    <div class="agent-empty-title">{{ t('settings.agentCenter.sessions.emptyFilteredTitle') }}</div>
+                    <div class="agent-empty-desc">{{ t('settings.agentCenter.sessions.emptyFilteredHint') }}</div>
+                    <button class="btn btn-sm agent-empty-action" @click="clearAgentSessionFilters">
+                      {{ t('settings.agentCenter.sessions.clearFilters') }}
+                    </button>
+                  </template>
+                  <template v-else>
+                    <div class="agent-empty-title">{{ t('settings.agentCenter.sessions.emptyTitle') }}</div>
+                    <div class="agent-empty-desc">{{ t('settings.agentCenter.sessions.emptyHint') }}</div>
+                    <div class="agent-empty-actions">
+                      <button class="btn btn-sm" @click="goToNovels">{{ t('settings.agentCenter.sessions.goNovels') }}</button>
+                      <button class="btn btn-sm" @click="goToAiConfig">{{ t('settings.agentCenter.sessions.checkModels') }}</button>
+                    </div>
+                  </template>
+                </div>
+                <div v-else class="card agent-model-card">
+                  <div class="agent-table-scroll">
+                    <table class="agent-matrix agent-session-table">
+                    <thead>
+                      <tr>
+                        <th>{{ t('settings.agentCenter.sessions.columns.thread') }}</th>
+                        <th>{{ t('settings.agentCenter.sessions.columns.preset') }}</th>
+                        <th>{{ t('settings.agentCenter.sessions.columns.workspace') }}</th>
+                        <th>{{ t('settings.agentCenter.sessions.columns.messages') }}</th>
+                        <th>{{ t('settings.agentCenter.sessions.columns.proposals') }}</th>
+                        <th>{{ t('settings.agentCenter.sessions.columns.status') }}</th>
+                        <th>{{ t('settings.agentCenter.sessions.columns.actions') }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="session in agentSessionItems" :key="session.id">
+                        <td>
+                          <button class="agent-session-title" @click="openAgentSession(session.id)">
+                            {{ session.title || t('settings.agentCenter.sessions.untitled') }}
+                          </button>
+                          <div class="field-hint">{{ formatAgentTime(session.last_message_at || session.created_at) }}</div>
+                        </td>
+                        <td>{{ agentPresetLabel(session.preset) }}</td>
+                        <td>
+                          <div class="agent-session-scope">
+                            <span v-if="agentSessionScopeKind(session)" class="tag">{{ agentScopeLabel(agentSessionScopeKind(session)) }}</span>
+                            <code class="agent-session-workspace">{{ session.workspace_key }}</code>
+                          </div>
+                        </td>
+                        <td>{{ session.message_count ?? 0 }}</td>
+                        <td>{{ session.proposal_count ?? 0 }}</td>
+                        <td><span class="tag">{{ t(`settings.agentCenter.sessions.statusLabels.${session.status}`) }}</span></td>
+                        <td>
+                          <div class="agent-session-actions">
+                            <button class="btn btn-ghost btn-sm" @click="openAgentSession(session.id)">{{ t('settings.agentCenter.sessions.view') }}</button>
+                            <button
+                              v-if="session.status !== 'archived'"
+                              class="btn btn-ghost btn-sm"
+                              :disabled="agentSessionActionId === session.id"
+                              @click="requestArchiveSession(session)"
+                            >{{ t('settings.agentCenter.sessions.archive') }}</button>
+                            <button
+                              class="btn btn-ghost btn-sm gw-error"
+                              :disabled="agentSessionActionId === session.id"
+                              @click="requestDeleteSession(session)"
+                            >{{ t('settings.agentCenter.sessions.delete') }}</button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  </div>
+                  <div v-if="agentSessionHasMore" class="agent-card-foot">
+                    <button class="btn btn-ghost btn-sm ml-auto" :disabled="agentSessionsLoading" @click="loadMoreAgentSessions">
+                      <Loader2 v-if="agentSessionsLoading" :size="12" class="animate-spin" />
+                      {{ t('settings.agentCenter.sessions.loadMore') }}
+                    </button>
+                  </div>
+                </div>
+              </template>
+
+              <template v-else-if="agentCenterSection === 'diagnostics'">
+                <div v-if="agentDiagnosticsError" class="card agent-empty">
+                  <div class="agent-empty-title">{{ t('settings.agentCenter.diagnostics.loadFailed') }}</div>
+                  <div class="agent-empty-desc">{{ agentDiagnosticsError }}</div>
+                  <button class="btn btn-sm agent-empty-action" @click="loadAgentDiagnostics">{{ t('settings.agentCenter.diagnostics.retry') }}</button>
+                </div>
+                <div v-else-if="agentDiagnosticsLoading && !agentDiagnostics" class="card agent-empty">
+                  <div class="agent-empty-desc"><Loader2 :size="14" class="animate-spin" /> {{ t('settings.agentCenter.diagnostics.loading') }}</div>
+                </div>
+                <template v-else>
+                  <div class="card agent-model-card">
+                    <div class="agent-binding-head">{{ t('settings.agentCenter.diagnostics.routeTitle') }}</div>
+                    <label class="field">
+                      <input
+                        v-model="agentDiagnosticRoute"
+                        class="input"
+                        :placeholder="t('settings.agentCenter.diagnostics.routePlaceholder')"
+                        @keyup.enter="loadAgentDiagnostics"
+                      />
+                    </label>
+                    <p class="field-hint">{{ t('settings.agentCenter.diagnostics.routeHint') }}</p>
+                    <div class="agent-card-foot">
+                      <button class="btn btn-primary btn-sm ml-auto" :disabled="agentDiagnosticsLoading" @click="loadAgentDiagnostics">
+                        <Loader2 v-if="agentDiagnosticsLoading" :size="12" class="animate-spin" />
+                        {{ t('settings.agentCenter.diagnostics.simulate') }}
+                      </button>
+                    </div>
+                    <div v-if="agentDiagnostics?.route" class="agent-diagnostic-route">
+                      <div class="agent-binding-head">
+                        <span class="tag" :class="agentDiagnostics.route.matched ? 'tag-success' : 'tag-error'">
+                          {{ agentDiagnostics.route.matched ? t('settings.agentCenter.diagnostics.matched') : t('settings.agentCenter.diagnostics.unmatched') }}
+                        </span>
+                        <code>{{ agentDiagnostics.route.path }}</code>
+                      </div>
+                      <table class="agent-matrix">
+                        <tbody>
+                          <tr><th>{{ t('settings.agentCenter.diagnostics.adapter') }}</th><td>{{ agentDiagnostics.route.adapter_id || '—' }}</td></tr>
+                          <tr><th>{{ t('settings.agentCenter.diagnostics.scope') }}</th><td><code>{{ agentDiagnostics.route.scope ? JSON.stringify(agentDiagnostics.route.scope) : '—' }}</code></td></tr>
+                          <tr><th>{{ t('settings.agentCenter.diagnostics.bindingStage') }}</th><td>{{ agentDiagnostics.route.binding_stage || '—' }}</td></tr>
+                          <tr><th>{{ t('settings.agentCenter.diagnostics.visible') }}</th><td>{{ agentDiagnostics.route.visible ? t('settings.agentCenter.diagnostics.yes') : t('settings.agentCenter.diagnostics.no') }}</td></tr>
+                          <tr><th>{{ t('settings.agentCenter.diagnostics.defaultPreset') }}</th><td>{{ agentDiagnostics.route.default_preset || '—' }}</td></tr>
+                          <tr>
+                            <th>{{ t('settings.agentCenter.diagnostics.allowedTools') }}</th>
+                            <td>
+                              <span v-if="agentDiagnostics.route.tools.length" class="agent-matrix-tools">
+                                <code v-for="tool in agentDiagnostics.route.tools" :key="tool">{{ tool }}</code>
+                              </span>
+                              <span v-else class="dim">—</span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <p v-if="!agentDiagnostics.route.matched" class="field-hint">{{ t('settings.agentCenter.diagnostics.unmatchedHint') }}</p>
+                    </div>
+                  </div>
+
+                  <div class="card agent-model-card">
+                    <div class="agent-binding-head">
+                      {{ t('settings.agentCenter.diagnostics.modelsTitle') }}
+                      <span v-if="agentDiagnostics" class="tag" :class="agentDiagnostics.models.available ? 'tag-success' : 'tag-error'">
+                        {{ agentDiagnostics.models.available ? t('settings.agentCenter.diagnostics.modelsAvailable') : t('settings.agentCenter.diagnostics.modelsUnavailable') }}
+                      </span>
+                    </div>
+                    <p v-if="agentDiagnostics?.models.active" class="field-hint">
+                      {{ t('settings.agentCenter.diagnostics.activeConfig') }}: {{ agentDiagnostics.models.active.provider }} · {{ agentDiagnostics.models.active.model }}
+                    </p>
+                    <template v-else>
+                      <p class="field-hint gw-error">{{ t('settings.agentCenter.diagnostics.modelConfigMissing') }}</p>
+                      <button class="btn btn-secondary btn-sm" @click="goToAiConfig">{{ t('settings.agentCenter.diagnostics.goAiConfig') }}</button>
+                    </template>
+                    <p v-if="agentDiagnostics" class="field-hint">
+                      {{ t('settings.agentCenter.diagnostics.presetModels') }}:
+                      {{ agentDiagnostics.models.preset_models.assistant || t('settings.agentCenter.diagnostics.modelFallback') }} /
+                      {{ agentDiagnostics.models.preset_models.director || t('settings.agentCenter.diagnostics.modelFallback') }}
+                    </p>
+                  </div>
+
+                  <div class="card agent-model-card">
+                    <div class="agent-binding-head">
+                      {{ t('settings.agentCenter.diagnostics.toolsTitle') }}
+                      <span class="skill-count-badge">{{ agentDiagnostics?.tools.read_only_count ?? 0 }}</span>
+                    </div>
+                    <div class="agent-tool-chips">
+                      <code v-for="tool in agentDiagnostics?.tools.tools ?? []" :key="tool.name">{{ tool.name }}</code>
+                    </div>
+                  </div>
+
+                  <div class="card agent-model-card">
+                    <div class="agent-binding-head">{{ t('settings.agentCenter.diagnostics.errorsTitle') }}</div>
+                    <div v-if="agentDiagnostics?.errors.items.length" class="agent-diagnostic-errors">
+                      <div v-for="(item, index) in agentDiagnostics.errors.items" :key="`${item.at}-${index}`" class="agent-diagnostic-error">
+                        <div class="agent-session-message-head">
+                          <span class="tag">{{ item.source }}</span>
+                          <span class="field-hint">{{ formatAgentTime(item.at) }}</span>
+                        </div>
+                        <p class="field-hint">{{ item.message }}</p>
+                      </div>
+                    </div>
+                    <p v-else class="field-hint">{{ t('settings.agentCenter.diagnostics.noErrors') }}</p>
+                  </div>
+
+                  <div class="card agent-model-card">
+                    <div class="agent-binding-head">{{ t('settings.agentCenter.diagnostics.trialTitle') }}</div>
+                    <p class="field-hint">{{ t('settings.agentCenter.diagnostics.trialHint') }}</p>
+                    <div class="agent-binding-grid">
+                      <label class="field">
+                        <span class="field-label">{{ t('settings.agentCenter.diagnostics.scopeSelect') }}</span>
+                        <select v-model="agentDiagnosticScope" class="input" @change="resetDiagnosticTool">
+                          <option v-for="kind in AGENT_SCOPES" :key="kind" :value="kind">{{ agentScopeLabel(kind) }}</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span class="field-label">{{ t('settings.agentCenter.diagnostics.toolSelect') }}</span>
+                        <select v-model="agentDiagnosticTool" class="input">
+                          <option value="">{{ t('settings.agentCenter.diagnostics.toolPlaceholder') }}</option>
+                          <option v-for="tool in agentDiagnosticTools" :key="tool.name" :value="tool.name">{{ tool.name }}</option>
+                        </select>
+                      </label>
+                      <label v-if="agentDiagnosticScope === 'novel'" class="field">
+                        <span class="field-label">{{ t('settings.agentCenter.diagnostics.novel') }}</span>
+                        <select v-model.number="agentDiagnosticNovelId" class="input">
+                          <option :value="0">{{ t('settings.agentCenter.diagnostics.novelPlaceholder') }}</option>
+                          <option v-for="item in agentDiagnosticNovels" :key="item.id" :value="item.id">{{ item.title }}</option>
+                        </select>
+                      </label>
+                      <template v-if="agentDiagnosticNeedsDrama">
+                        <label class="field">
+                          <span class="field-label">{{ t('settings.agentCenter.diagnostics.drama') }}</span>
+                          <select v-model.number="agentDiagnosticDramaId" class="input" @change="loadAgentDiagnosticEpisodes">
+                            <option :value="0">{{ t('settings.agentCenter.diagnostics.dramaPlaceholder') }}</option>
+                            <option v-for="item in agentDiagnosticDramas" :key="item.id" :value="item.id">{{ item.title }}</option>
+                          </select>
+                        </label>
+                        <label class="field">
+                          <span class="field-label">{{ t('settings.agentCenter.diagnostics.episode') }}</span>
+                          <select v-model.number="agentDiagnosticEpisodeId" class="input">
+                            <option :value="0">{{ t('settings.agentCenter.diagnostics.episodePlaceholder') }}</option>
+                            <option v-for="item in agentDiagnosticEpisodes" :key="item.id" :value="item.id">{{ item.episode_number }} · {{ item.title }}</option>
+                          </select>
+                        </label>
+                      </template>
+                      <label v-if="agentDiagnosticScope === 'edit'" class="field">
+                        <span class="field-label">{{ t('settings.agentCenter.diagnostics.editProject') }}</span>
+                        <input v-model.number="agentDiagnosticEditProjectId" class="input" type="number" min="1" />
+                      </label>
+                      <label class="field agent-binding-span-2">
+                        <span class="field-label">{{ t('settings.agentCenter.diagnostics.args') }}</span>
+                        <textarea v-model="agentDiagnosticArgsText" class="input agent-diagnostic-args" rows="4" spellcheck="false"></textarea>
+                      </label>
+                    </div>
+                    <p class="field-hint">{{ t('settings.agentCenter.diagnostics.argsHint') }}</p>
+                    <div class="agent-card-foot">
+                      <button class="btn btn-primary btn-sm ml-auto" :disabled="agentDiagnosticRunning || !agentDiagnosticTool" @click="runAgentDiagnosticTool">
+                        <Loader2 v-if="agentDiagnosticRunning" :size="12" class="animate-spin" />
+                        {{ t('settings.agentCenter.diagnostics.run') }}
+                      </button>
+                    </div>
+                    <p v-if="agentDiagnosticToolError" class="field-hint gw-error">{{ agentDiagnosticToolError }}</p>
+                    <div v-if="agentDiagnosticToolResult" class="agent-diagnostic-result">
+                      <div class="agent-binding-head">
+                        {{ t('settings.agentCenter.diagnostics.result') }}
+                        <span class="tag">{{ agentDiagnosticToolResult.duration_ms }} ms</span>
+                        <span v-if="agentDiagnosticToolResult.truncated" class="tag">{{ t('settings.agentCenter.diagnostics.truncated') }}</span>
+                      </div>
+                      <pre>{{ formatDiagnosticResult(agentDiagnosticToolResult) }}</pre>
+                    </div>
+                    <p v-else class="field-hint">{{ t('settings.agentCenter.diagnostics.emptyResult') }}</p>
+                  </div>
+                </template>
+              </template>
+
               <div v-else class="card agent-empty">
                 <div class="agent-empty-title">{{ t('settings.agentCenter.futureTitle') }}</div>
                 <div class="agent-empty-desc">{{ t('settings.agentCenter.futureHint') }}</div>
               </div>
-              <p v-if="agentCenterSection === 'sessions' || agentCenterSection === 'diagnostics'" class="field-hint">{{ t('settings.agentCenter.futureNote') }}</p>
             </template>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- 会话详情（只读审计） -->
+    <div v-if="agentSessionDetail" class="overlay" @click.self="closeAgentSession">
+      <div class="dialog agent-session-dialog" role="dialog" aria-modal="true" :aria-label="t('settings.agentCenter.sessions.detailTitle')">
+        <div class="dialog-head">
+          <div>
+            <div class="dialog-title">{{ agentSessionDetail.title || t('settings.agentCenter.sessions.untitled') }}</div>
+            <div class="dialog-sub">
+              <code>{{ agentSessionDetail.workspace_key }}</code> · {{ agentPresetLabel(agentSessionDetail.preset) }} ·
+              {{ formatAgentTime(agentSessionDetail.created_at) }}
+              <span v-if="agentSessionDetailScope" class="tag agent-session-scope-tag">{{ agentScopeTagText(agentSessionDetailScope) }}</span>
+            </div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" :aria-label="t('settings.agentCenter.sessions.close')" @click="closeAgentSession">
+            <X :size="14" />
+          </button>
+        </div>
+        <div class="dialog-body agent-session-dialog-body">
+          <div v-if="agentSessionDetailError" class="agent-empty-desc gw-error">{{ agentSessionDetailError }}</div>
+          <div v-else-if="agentSessionDetailLoading" class="agent-empty-desc">
+            <Loader2 :size="14" class="animate-spin" /> {{ t('settings.agentCenter.sessions.detailLoading') }}
+          </div>
+          <template v-else>
+            <div class="agent-session-meta">
+              <span class="tag">{{ t(`settings.agentCenter.sessions.statusLabels.${agentSessionDetail.status}`) }}</span>
+              <span class="tag">{{ t('settings.agentCenter.sessions.messageCount') }} {{ agentSessionDetail.message_count ?? agentSessionMessages.length }}</span>
+              <span class="tag">{{ t('settings.agentCenter.sessions.proposalCount') }} {{ agentSessionDetail.proposal_count ?? agentSessionProposals.length }}</span>
+              <button
+                v-if="agentSessionRunningMessage"
+                class="btn btn-sm ml-auto"
+                :disabled="agentSessionActionBusy"
+                @click="cancelAgentSession"
+              >
+                <Loader2 v-if="agentSessionActionBusy" :size="12" class="animate-spin" />
+                {{ t('settings.agentCenter.sessions.cancel') }}
+              </button>
+            </div>
+
+            <div class="agent-binding-head">{{ t('settings.agentCenter.sessions.messagesTitle') }}</div>
+            <div class="agent-session-messages">
+              <button
+                v-if="agentSessionMessagesHasMore"
+                class="btn btn-ghost btn-sm agent-session-older"
+                :disabled="agentSessionMessagesLoading"
+                @click="loadOlderAgentMessages"
+              >
+                <Loader2 v-if="agentSessionMessagesLoading" :size="12" class="animate-spin" />
+                {{ t('settings.agentCenter.sessions.loadOlder') }}
+              </button>
+              <div v-for="message in agentSessionMessages" :key="message.id" class="agent-session-message">
+                <div class="agent-session-message-head">
+                  <span class="tag">{{ message.role === 'user' ? t('settings.agentCenter.sessions.roles.user') : t('settings.agentCenter.sessions.roles.assistant') }}</span>
+                  <span class="tag">{{ agentMessageStatusLabel(message.status) }}</span>
+                  <span v-if="message.scope" class="tag">{{ agentScopeTagText(message.scope) }}</span>
+                  <span class="field-hint">{{ formatAgentTime(message.created_at) }}</span>
+                </div>
+                <p v-if="message.content_cleared" class="field-hint">{{ t('settings.agentCenter.sessions.contentCleared') }}</p>
+                <p v-else class="agent-session-message-content">{{ message.content }}</p>
+                <p v-if="message.error" class="field-hint gw-error">{{ message.error }}</p>
+                <p v-if="message.tool_calls?.length || message.suggestions?.length" class="field-hint">
+                  {{ t('settings.agentCenter.sessions.messageExtras', {
+                    tools: message.tool_calls?.length ?? 0,
+                    suggestions: message.suggestions?.length ?? 0,
+                  }) }}
+                </p>
+              </div>
+              <p v-if="!agentSessionMessages.length" class="field-hint">{{ t('settings.agentCenter.sessions.noMessages') }}</p>
+            </div>
+
+            <div class="agent-binding-head">{{ t('settings.agentCenter.sessions.proposalsTitle') }}</div>
+            <table v-if="agentSessionProposals.length" class="agent-matrix">
+              <thead>
+                <tr>
+                  <th>{{ t('settings.agentCenter.sessions.proposalColumns.kind') }}</th>
+                  <th>{{ t('settings.agentCenter.sessions.proposalColumns.target') }}</th>
+                  <th>{{ t('settings.agentCenter.sessions.proposalColumns.status') }}</th>
+                  <th>{{ t('settings.agentCenter.sessions.proposalColumns.appliedBy') }}</th>
+                  <th>{{ t('settings.agentCenter.sessions.proposalColumns.updatedAt') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="proposal in agentSessionProposals" :key="proposal.id">
+                  <td><code>{{ proposal.kind }}</code></td>
+                  <td>{{ proposal.target_type }} #{{ proposal.target_id }}</td>
+                  <td><span class="tag">{{ agentProposalStatusLabel(proposal.status) }}</span></td>
+                  <td>{{ proposal.applied_by || '—' }}</td>
+                  <td>{{ formatAgentTime(proposal.applied_at || proposal.updated_at) }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-else class="field-hint">{{ t('settings.agentCenter.sessions.noProposals') }}</p>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <ConfirmDialog
+      :open="!!agentSessionArchiveTarget"
+      :title="t('settings.agentCenter.sessions.archiveTitle')"
+      :message="t('settings.agentCenter.sessions.archiveMessage')"
+      :confirm-text="t('settings.agentCenter.sessions.archive')"
+      :loading="agentSessionActionBusy"
+      @confirm="confirmArchiveSession"
+      @cancel="agentSessionArchiveTarget = null"
+    />
+    <ConfirmDialog
+      :open="!!agentSessionDeleteTarget"
+      :title="t('settings.agentCenter.sessions.deleteTitle')"
+      :message="t('settings.agentCenter.sessions.deleteMessage')"
+      :loading="agentSessionActionBusy"
+      @confirm="confirmDeleteSession"
+      @cancel="agentSessionDeleteTarget = null"
+    />
 
     <!-- AI Config Dialog -->
     <div v-if="cfgDialog" class="overlay" @click.self="cfgDialog = false">
@@ -1654,7 +2234,7 @@
                 @click="pinModelTop(i)"
               >
                 {{ m }}<em v-if="i === 0">{{ t('common.default') }}</em>
-                <button type="button" class="model-chip-x" :title="t('common.delete')" @click.stop="removeModel(i)"><X :size="11" /></button>
+                <button type="button" class="model-chip-x" :title="t('common.delete')" :aria-label="t('common.delete')" @click.stop="removeModel(i)"><X :size="11" /></button>
               </span>
             </div>
             <div class="model-add-row">
@@ -2069,13 +2649,15 @@
           <div class="style-ref-grid">
             <div v-for="(item, index) in styleRefImages" :key="item.path" class="style-ref-item">
               <img :src="item.url" alt="" />
-              <button type="button" class="style-ref-remove" @click="removeStyleRefImage(index)"><X :size="10" /></button>
+              <button type="button" class="style-ref-remove" :title="t('common.delete')" :aria-label="t('common.delete')" @click="removeStyleRefImage(index)"><X :size="10" /></button>
             </div>
             <button
               v-if="styleRefImages.length < 4"
               type="button"
               class="style-ref-add"
               :disabled="styleRefUploading"
+              :title="t('common.add')"
+              :aria-label="t('common.add')"
               @click="pickStyleRefImages"
             >
               <Loader2 v-if="styleRefUploading" :size="15" class="animate-spin" />
@@ -2163,7 +2745,8 @@ import QueuePanel from '~/components/QueuePanel.vue'
 import { toast } from 'vue-sonner'
 import { toastError } from '~/composables/useToast'
 import { useI18n } from 'vue-i18n'
-import { aiConfigAPI, promptAPI, skillsAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, bgmAPI } from '~/composables/useApi'
+import { aiConfigAPI, promptAPI, skillsAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, bgmAPI, assistantAPI, dramaAPI } from '~/composables/useApi'
+import { novelAPI } from '~/composables/useNovelApi'
 import { useDesktopBridge } from '~/composables/useDesktopBridge'
 import { useAgentSettings, applyAgentSettings } from '~/composables/useAgentSettings'
 import {
@@ -2177,15 +2760,23 @@ import {
 } from '~/utils/agent-page-bindings'
 import { useMigrateState } from '~/composables/useMigrateState'
 import { useTheme } from '~/composables/useTheme'
+import {
+  useUiPrefs,
+  UI_DENSITIES,
+  UI_MOTIONS,
+  UI_READING_FONTS,
+  UI_READING_SIZES,
+  UI_READING_WIDTHS,
+} from '~/composables/useUiPrefs'
 import { providerIconUrl } from '~/composables/useProviderIcon'
 import { startTour, autoTour } from '~/composables/useTour'
 import { confirmUnifiedLanguage } from '~/composables/useUnifiedLanguage'
 
-const { t, locale } = useI18n()
+const { t, tm, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
-const SETTINGS_TABS = ['ai', 'dubbing', 'novel', 'general', 'styles', 'rules', 'agents', 'queue', 'storage', 'mcp', 'about']
+const SETTINGS_TABS = ['ai', 'ui', 'dubbing', 'novel', 'general', 'styles', 'rules', 'agents', 'queue', 'storage', 'mcp', 'about']
 const requestedTab = typeof route.query.tab === 'string' ? route.query.tab : ''
 const showBrandImage = ref(true)
 const tab = ref(SETTINGS_TABS.includes(requestedTab) ? requestedTab : 'ai')
@@ -2198,6 +2789,7 @@ watch(() => route.query.tab, (value) => {
 })
 const baseTabs = computed(() => [
   { id: 'ai', label: t('settings.tabs.ai'), icon: Cpu },
+  { id: 'ui', label: t('settings.tabs.ui'), icon: Palette },
   { id: 'dubbing', label: t('settings.tabs.dubbing'), icon: Mic },
   { id: 'novel', label: t('settings.tabs.novel'), icon: BookOpen },
   { id: 'general', label: t('settings.tabs.general'), icon: Languages },
@@ -2208,6 +2800,37 @@ const baseTabs = computed(() => [
   { id: 'storage', label: t('settings.tabs.storage'), icon: HardDrive },
   { id: 'mcp', label: t('settings.tabs.mcp'), icon: Plug },
   { id: 'about', label: t('settings.tabs.about'), icon: RefreshCw },
+])
+
+// ===== 界面偏好（仅本机，不写项目数据） =====
+const {
+  effective: uiEffective,
+  allowUserOverride,
+  loading: uiLoading,
+  error: uiError,
+  load: loadUiSettings,
+  setPrefs: setUiPrefs,
+  resetPrefs: resetUiPrefs,
+} = useUiPrefs()
+
+const uiDensityOptions = computed(() =>
+  UI_DENSITIES.map(value => ({ value, label: t(`settings.ui.density.${value}`) })),
+)
+const uiMotionOptions = computed(() =>
+  UI_MOTIONS.map(value => ({ value, label: t(`settings.ui.motion.${value}`) })),
+)
+const uiReadingFontOptions = computed(() =>
+  UI_READING_FONTS.map(value => ({ value, label: t(`settings.ui.font.${value}`) })),
+)
+const uiReadingSizeOptions = computed(() =>
+  UI_READING_SIZES.map(value => ({ value, label: `${value}px` })),
+)
+const uiReadingWidthOptions = computed(() =>
+  UI_READING_WIDTHS.map(value => ({ value, label: t(`settings.ui.width.${value}`) })),
+)
+const uiActionLabelOptions = computed(() => [
+  { value: true, label: t('settings.ui.actionLabels.on') },
+  { value: false, label: t('settings.ui.actionLabels.off') },
 ])
 
 // ===== MCP 服务 =====
@@ -2817,12 +3440,22 @@ const agentCenterMeta = {
   sessions: { icon: MessagesSquare, keywords: 'sessions audit threads messages 会话 审计 消息' },
   diagnostics: { icon: Activity, keywords: 'diagnostics errors status 诊断 错误 状态' },
 }
+function i18nTextValues(value, out = []) {
+  if (typeof value === 'string') out.push(value)
+  else if (Array.isArray(value)) value.forEach(item => i18nTextValues(item, out))
+  else if (value && typeof value === 'object') Object.values(value).forEach(item => i18nTextValues(item, out))
+  return out
+}
 const agentCenterSections = computed(() => {
   const query = agentCenterSearch.value.trim().toLowerCase()
   return AGENT_CENTER_SECTIONS.map((id) => {
     const meta = agentCenterMeta[id]
     return { id, icon: meta.icon, keywords: meta.keywords, label: t(`settings.agentCenter.sections.${id}`) }
-  }).filter((section) => !query || `${section.label} ${section.keywords}`.toLowerCase().includes(query))
+  }).filter((section) => {
+    if (!query) return true
+    const itemText = i18nTextValues(tm(`settings.agentCenter.${section.id}`)).join(' ')
+    return `${section.label} ${section.keywords} ${itemText}`.toLowerCase().includes(query)
+  })
 })
 const agentCenterAgents = computed(() =>
   agentCenterSection.value === 'presets' ? presetAgentDefs.value : productionAgentDefs.value)
@@ -2857,6 +3490,53 @@ const agentBindingsNotice = ref('')
 const agentPolicy = reactive({ proposals: [], suggestions: [] })
 const agentPolicySaving = ref(false)
 
+// ===== 智能体中心：会话与审计 =====
+const agentRetentionDays = ref(30)
+const agentRetentionSaving = ref(false)
+const agentRetentionSaved = ref(false)
+const agentSessionFilters = reactive({ workspaceKey: '', status: 'all' })
+const agentSessionItems = ref([])
+const agentSessionHasMore = ref(false)
+const agentSessionsLoading = ref(false)
+const agentSessionsError = ref('')
+const agentSessionDetail = ref(null)
+const agentSessionMessages = ref([])
+const agentSessionMessagesHasMore = ref(false)
+const agentSessionMessagesLoading = ref(false)
+const agentSessionProposals = ref([])
+const agentSessionDetailLoading = ref(false)
+const agentSessionDetailError = ref('')
+const agentSessionActionId = ref(null)
+const agentSessionActionBusy = ref(false)
+const agentSessionArchiveTarget = ref(null)
+const agentSessionDeleteTarget = ref(null)
+const agentSessionRunningMessage = computed(() =>
+  agentSessionMessages.value.find(message => message.status === 'running') ?? null)
+
+// ===== 智能体中心：诊断 =====
+const agentDiagnostics = ref(null)
+const agentDiagnosticsLoading = ref(false)
+const agentDiagnosticsError = ref('')
+const agentDiagnosticRoute = ref('')
+const agentDiagnosticScope = ref('novel-library')
+const agentDiagnosticTool = ref('')
+const agentDiagnosticArgsText = ref('{}')
+const agentDiagnosticRunning = ref(false)
+const agentDiagnosticToolError = ref('')
+const agentDiagnosticToolResult = ref(null)
+const agentDiagnosticNovels = ref([])
+const agentDiagnosticDramas = ref([])
+const agentDiagnosticEpisodes = ref([])
+const agentDiagnosticNovelId = ref(0)
+const agentDiagnosticDramaId = ref(0)
+const agentDiagnosticEpisodeId = ref(0)
+const agentDiagnosticEditProjectId = ref(0)
+const agentDiagnosticNeedsDrama = computed(() =>
+  ['drama', 'episode', 'director', 'edit', 'mix', 'delivery'].includes(agentDiagnosticScope.value))
+const agentDiagnosticTools = computed(() =>
+  (agentDiagnostics.value?.tools.tools ?? []).filter(tool =>
+    tool.read_only && tool.scopes.includes(agentDiagnosticScope.value)))
+
 const agentToggleDefs = computed(() => [
   { key: 'dock', label: t('settings.agentCenter.overview.switches.dock'), hint: t('settings.agentCenter.overview.switches.dockHint') },
   { key: 'director', label: t('settings.agentCenter.overview.switches.director'), hint: t('settings.agentCenter.overview.switches.directorHint') },
@@ -2878,15 +3558,15 @@ const AGENT_SCOPE_LABEL_KEYS = {
   delivery: 'delivery',
 }
 const AGENT_SCOPE_TOOLS = {
-  home: [],
+  home: ['read_project_list'],
   'novel-library': ['read_novel_list'],
   novel: ['read_novel_context', 'read_novel_chapters', 'read_novel_chapter_content', 'read_novel_atlas'],
-  drama: [],
-  episode: [],
+  drama: ['read_project_overview', 'read_assets', 'read_asset_detail', 'read_delivery_status'],
+  episode: ['read_episode_context', 'read_script', 'read_assets', 'read_asset_detail', 'read_storyboards', 'read_storyboard_detail', 'read_dubbing_status'],
   director: ['read_director_plan', 'read_episode_context', 'read_assets', 'read_asset_detail', 'read_storyboards', 'read_storyboard_detail'],
-  edit: ['read_edit_state', 'read_edit_clips'],
-  mix: ['read_mix_state', 'read_mix_tracks'],
-  delivery: ['read_export_history'],
+  edit: ['read_edit_state', 'read_edit_clips', 'read_episode_context', 'read_assets', 'read_asset_detail', 'read_storyboards', 'read_storyboard_detail'],
+  mix: ['read_mix_state', 'read_mix_tracks', 'read_episode_context', 'read_assets', 'read_asset_detail', 'read_storyboards', 'read_storyboard_detail'],
+  delivery: ['read_delivery_status', 'read_export_history', 'read_episode_context', 'read_assets', 'read_asset_detail', 'read_storyboards', 'read_storyboard_detail'],
 }
 const agentScopeMatrix = computed(() => AGENT_SCOPES.map(kind => ({
   kind,
@@ -3005,6 +3685,7 @@ async function loadAgentCenter(force = false) {
   agentModels.messageMaxChars = settings.message?.maxChars ?? 4000
   agentModels.toolsMaxResultChars = settings.tools?.maxResultChars ?? 6000
   agentModels.historyMaxMessages = settings.history?.maxMessages ?? 20
+  agentRetentionDays.value = settings.session?.retentionDays ?? 30
   agentBindings.value = cloneAgentBindings(settings.pages?.bindings)
   agentBindingsNotice.value = ''
   agentPolicy.proposals = [...(settings.proposals?.types ?? [])]
@@ -3158,8 +3839,357 @@ async function saveAgentModels() {
 
 function openAgentCenterSection(sectionId) {
   agentCenterSection.value = sectionId
+  if (sectionId === 'sessions') loadAgentSessions(true)
+  else if (sectionId === 'diagnostics') {
+    loadAgentDiagnosticContext()
+    loadAgentDiagnostics()
+  }
   if (sectionId === 'production') selectAgent(productionAgentDefs.value[0].type)
   else if (sectionId === 'presets') selectAgent(presetAgentDefs.value[0].type)
+}
+
+function formatAgentTime(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString(locale.value, { hour12: false })
+}
+
+function agentPresetLabel(preset) {
+  if (preset === 'director') return t('settings.agents.presetDirector')
+  if (preset === 'assistant') return t('settings.agents.presetAssistant')
+  return preset || '—'
+}
+
+function agentScopeLabel(kind) {
+  return agentScopeOptions.value.find(option => option.value === kind)?.label ?? kind
+}
+
+const AGENT_MESSAGE_STATUSES = ['pending', 'running', 'completed', 'failed', 'interrupted', 'cancelled']
+const AGENT_PROPOSAL_STATUSES = ['proposed', 'applied', 'rejected', 'conflict', 'expired']
+
+function agentMessageStatusLabel(status) {
+  const key = AGENT_MESSAGE_STATUSES.includes(status) ? status : 'completed'
+  return t(`settings.agentCenter.sessions.messageStatus.${key}`)
+}
+
+function agentProposalStatusLabel(status) {
+  const key = AGENT_PROPOSAL_STATUSES.includes(status) ? status : 'proposed'
+  return t(`settings.agentCenter.sessions.proposalStatus.${key}`)
+}
+
+const agentSessionHasActiveFilters = computed(() =>
+  Boolean(agentSessionFilters.workspaceKey.trim()) || agentSessionFilters.status !== 'all')
+
+function clearAgentSessionFilters() {
+  agentSessionFilters.workspaceKey = ''
+  agentSessionFilters.status = 'all'
+  loadAgentSessions(true)
+}
+
+function agentWorkspaceKind(workspaceKey) {
+  const key = String(workspaceKey || '')
+  if (key === 'home') return 'home'
+  if (key === 'novel-library') return 'novel-library'
+  if (/^novel:\d+$/.test(key)) return 'novel'
+  if (/^drama:\d+$/.test(key)) return 'drama'
+  return null
+}
+
+function agentSessionScopeKind(session) {
+  return session?.scope?.kind ?? agentWorkspaceKind(session?.workspace_key)
+}
+
+function agentScopeTagText(scope) {
+  if (!scope || typeof scope !== 'object' || !scope.kind) return ''
+  const label = agentScopeLabel(scope.kind)
+  const target = scope.episode_id
+    ? `#${scope.episode_id}`
+    : scope.drama_id
+      ? `#${scope.drama_id}`
+      : scope.novel_id
+        ? `#${scope.novel_id}`
+        : ''
+  return target ? `${label} ${target}` : label
+}
+
+const agentSessionDetailScope = computed(() => {
+  if (agentSessionDetail.value?.scope) return agentSessionDetail.value.scope
+  return [...agentSessionMessages.value].reverse().find(message => message.scope)?.scope ?? null
+})
+
+async function loadAgentSessions(reset = true) {
+  if (agentSessionsLoading.value) return
+  agentSessionsLoading.value = true
+  agentSessionsError.value = ''
+  try {
+    const page = await assistantAPI.list({
+      workspaceKey: agentSessionFilters.workspaceKey.trim() || undefined,
+      status: agentSessionFilters.status,
+      limit: 20,
+      offset: reset ? 0 : agentSessionItems.value.length,
+    })
+    agentSessionItems.value = reset ? page.items : [...agentSessionItems.value, ...page.items]
+    agentSessionHasMore.value = page.has_more
+  } catch (error) {
+    agentSessionsError.value = String(error?.message || error)
+  } finally {
+    agentSessionsLoading.value = false
+  }
+}
+
+function loadMoreAgentSessions() {
+  if (!agentSessionsLoading.value && agentSessionHasMore.value) loadAgentSessions(false)
+}
+
+async function openAgentSession(sessionId) {
+  const target = agentSessionItems.value.find(item => item.id === sessionId)
+  if (!target) return
+  agentSessionDetail.value = target
+  agentSessionMessages.value = []
+  agentSessionProposals.value = []
+  agentSessionMessagesHasMore.value = false
+  agentSessionDetailError.value = ''
+  agentSessionDetailLoading.value = true
+  try {
+    const [page, proposalPage] = await Promise.all([
+      assistantAPI.get(sessionId, undefined, 50),
+      assistantAPI.proposals(sessionId),
+    ])
+    agentSessionDetail.value = {
+      ...page.session,
+      message_count: target.message_count,
+      proposal_count: target.proposal_count,
+    }
+    agentSessionMessages.value = page.messages
+    agentSessionMessagesHasMore.value = page.has_more
+    agentSessionProposals.value = proposalPage.items
+  } catch (error) {
+    agentSessionDetailError.value = String(error?.message || error)
+  } finally {
+    agentSessionDetailLoading.value = false
+  }
+}
+
+function closeAgentSession() {
+  agentSessionDetail.value = null
+  agentSessionMessages.value = []
+  agentSessionProposals.value = []
+  agentSessionMessagesHasMore.value = false
+  agentSessionDetailError.value = ''
+}
+
+async function loadOlderAgentMessages() {
+  const sessionId = agentSessionDetail.value?.id
+  const oldest = agentSessionMessages.value[0]?.id
+  if (!sessionId || !oldest || agentSessionMessagesLoading.value) return
+  agentSessionMessagesLoading.value = true
+  try {
+    const page = await assistantAPI.get(sessionId, oldest, 50)
+    agentSessionMessages.value = [...page.messages, ...agentSessionMessages.value]
+    agentSessionMessagesHasMore.value = page.has_more
+  } catch (error) {
+    toastError(error)
+  } finally {
+    agentSessionMessagesLoading.value = false
+  }
+}
+
+async function cancelAgentSession() {
+  const sessionId = agentSessionDetail.value?.id
+  if (!sessionId || agentSessionActionBusy.value) return
+  agentSessionActionBusy.value = true
+  try {
+    const result = await assistantAPI.cancel(sessionId)
+    const index = agentSessionMessages.value.findIndex(message => message.id === result.message.id)
+    if (index >= 0) agentSessionMessages.value[index] = result.message
+    toast.success(t('settings.agentCenter.sessions.cancelled'))
+    loadAgentSessions(true)
+  } catch (error) {
+    toastError(error)
+  } finally {
+    agentSessionActionBusy.value = false
+  }
+}
+
+function requestArchiveSession(session) {
+  agentSessionArchiveTarget.value = session
+}
+
+function requestDeleteSession(session) {
+  agentSessionDeleteTarget.value = session
+}
+
+async function confirmArchiveSession() {
+  const target = agentSessionArchiveTarget.value
+  if (!target || agentSessionActionBusy.value) return
+  agentSessionActionBusy.value = true
+  agentSessionActionId.value = target.id
+  try {
+    await assistantAPI.archive(target.id)
+    agentSessionArchiveTarget.value = null
+    if (agentSessionDetail.value?.id === target.id) closeAgentSession()
+    toast.success(t('settings.agentCenter.sessions.archived'))
+    await loadAgentSessions(true)
+  } catch (error) {
+    toastError(error)
+  } finally {
+    agentSessionActionBusy.value = false
+    agentSessionActionId.value = null
+  }
+}
+
+async function confirmDeleteSession() {
+  const target = agentSessionDeleteTarget.value
+  if (!target || agentSessionActionBusy.value) return
+  agentSessionActionBusy.value = true
+  agentSessionActionId.value = target.id
+  try {
+    await assistantAPI.del(target.id)
+    agentSessionDeleteTarget.value = null
+    if (agentSessionDetail.value?.id === target.id) closeAgentSession()
+    toast.success(t('settings.agentCenter.sessions.deleted'))
+    await loadAgentSessions(true)
+  } catch (error) {
+    toastError(error)
+  } finally {
+    agentSessionActionBusy.value = false
+    agentSessionActionId.value = null
+  }
+}
+
+async function saveAgentRetention() {
+  const days = Number(agentRetentionDays.value)
+  if (!Number.isFinite(days) || days < 7 || days > 365) {
+    toast.warning(t('settings.agentCenter.sessions.retentionInvalid'))
+    return
+  }
+  agentRetentionSaving.value = true
+  agentRetentionSaved.value = false
+  try {
+    const result = await settingsAPI.saveAgent({ session: { retentionDays: Math.floor(days) } })
+    agentRetentionDays.value = result.settings.session.retentionDays
+    agentSettingsForm.value = result.settings
+    applyAgentSettings(result.settings)
+    agentRetentionSaved.value = true
+    toast.success(t('settings.agentCenter.sessions.retentionSaved'))
+  } catch (error) {
+    toastError(error)
+  } finally {
+    agentRetentionSaving.value = false
+  }
+}
+
+function goToNovels() {
+  router.push('/novels')
+}
+
+function goToAiConfig() {
+  tab.value = 'ai'
+}
+
+function goToRules() {
+  tab.value = 'rules'
+}
+
+async function loadAgentDiagnostics() {
+  if (agentDiagnosticsLoading.value) return
+  agentDiagnosticsLoading.value = true
+  agentDiagnosticsError.value = ''
+  try {
+    agentDiagnostics.value = await assistantAPI.diagnostics(agentDiagnosticRoute.value.trim() || undefined)
+    if (!agentDiagnosticTool.value) resetDiagnosticTool()
+  } catch (error) {
+    agentDiagnosticsError.value = String(error?.message || error)
+  } finally {
+    agentDiagnosticsLoading.value = false
+  }
+}
+
+async function loadAgentDiagnosticContext() {
+  if (!agentDiagnosticNovels.value.length) {
+    try {
+      const result = await novelAPI.list({ pageSize: 50 })
+      agentDiagnosticNovels.value = result.items ?? []
+    } catch {
+      // 选择列表不可用不影响手工填写参数试跑
+    }
+  }
+  if (!agentDiagnosticDramas.value.length) {
+    try {
+      const result = await dramaAPI.list()
+      agentDiagnosticDramas.value = result.items ?? []
+    } catch {
+      // 选择列表不可用不影响手工填写参数试跑
+    }
+  }
+}
+
+async function loadAgentDiagnosticEpisodes() {
+  agentDiagnosticEpisodeId.value = 0
+  agentDiagnosticEpisodes.value = []
+  const dramaId = Number(agentDiagnosticDramaId.value)
+  if (!dramaId) return
+  try {
+    const detail = await dramaAPI.get(dramaId)
+    agentDiagnosticEpisodes.value = detail.episodes ?? []
+    if (agentDiagnosticEpisodes.value.length) agentDiagnosticEpisodeId.value = agentDiagnosticEpisodes.value[0].id
+  } catch (error) {
+    toastError(error)
+  }
+}
+
+function resetDiagnosticTool() {
+  agentDiagnosticTool.value = agentDiagnosticTools.value[0]?.name ?? ''
+}
+
+function agentDiagnosticScopePayload() {
+  const kind = agentDiagnosticScope.value
+  const scope = { kind }
+  if (kind === 'novel') scope.novel_id = Number(agentDiagnosticNovelId.value) || undefined
+  if (agentDiagnosticNeedsDrama.value) scope.drama_id = Number(agentDiagnosticDramaId.value) || undefined
+  if (['episode', 'director', 'edit', 'mix', 'delivery'].includes(kind)) {
+    scope.episode_id = Number(agentDiagnosticEpisodeId.value) || undefined
+  }
+  if (kind === 'edit') scope.edit_project_id = Number(agentDiagnosticEditProjectId.value) || undefined
+  return scope
+}
+
+async function runAgentDiagnosticTool() {
+  if (!agentDiagnosticTool.value || agentDiagnosticRunning.value) return
+  agentDiagnosticToolError.value = ''
+  agentDiagnosticToolResult.value = null
+  let args
+  try {
+    args = JSON.parse(agentDiagnosticArgsText.value || '{}')
+    if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('invalid')
+  } catch {
+    agentDiagnosticToolError.value = t('settings.agentCenter.diagnostics.argsInvalid')
+    return
+  }
+  agentDiagnosticRunning.value = true
+  try {
+    agentDiagnosticToolResult.value = await assistantAPI.runDiagnosticTool({
+      tool: agentDiagnosticTool.value,
+      args,
+      scope: agentDiagnosticScopePayload(),
+    })
+  } catch (error) {
+    agentDiagnosticToolError.value = String(error?.message || error)
+  } finally {
+    agentDiagnosticRunning.value = false
+  }
+}
+
+function formatDiagnosticResult(result) {
+  if (!result) return ''
+  if (result.result !== undefined) {
+    try {
+      return JSON.stringify(result.result, null, 2)
+    } catch {
+      return String(result.result)
+    }
+  }
+  return result.preview || ''
 }
 
 function getAgentCfg(type) {
@@ -3784,6 +4814,7 @@ onMounted(() => {
   loadPipelineRules()
   loadMediaSettings()
   loadEditSettings()
+  loadUiSettings()
   if (tab.value === 'dubbing') loadDubbing()
   if (tab.value === 'novel') loadNovel()
 })
@@ -4101,7 +5132,7 @@ onBeforeUnmount(stopUsagePoll)
 .rule-item:first-of-type { border-top: none; }
 .rule-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rule-name { font-size: 13px; font-weight: 600; color: var(--text-0); }
-.rule-ph { font-size: 10.5px; color: var(--text-2); background: var(--overlay-track); padding: 1px 6px; border-radius: 5px; }
+.rule-ph { font-size: 11px; color: var(--text-2); background: var(--overlay-track); padding: 1px 6px; border-radius: 5px; }
 .rule-input { font-size: 12px; line-height: 1.6; }
 
 /* ===== 风格参考图 ===== */
@@ -4154,18 +5185,24 @@ onBeforeUnmount(stopUsagePoll)
 }
 .nav-group { display: flex; flex-direction: column; gap: 2px; }
 .nav-group-label {
-  font-size: 11px; font-weight: 650; color: var(--text-3);
+  font-size: 11px; font-weight: 650; color: var(--text-2);
   letter-spacing: 0.06em; padding: 8px 12px 4px;
 }
 .nav-item {
+  position: relative;
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; font-size: 13px; font-weight: 550;
+  padding: 8px 12px; font-size: 13.5px; font-weight: 550;
   border: none; border-radius: var(--radius); background: transparent; color: var(--text-1);
   cursor: pointer; transition: all 0.16s var(--ease-out); text-align: left; width: 100%;
 }
 .nav-item:hover { background: var(--bg-hover); color: var(--text-0); }
 .nav-item.active { background: var(--accent-bg); color: var(--accent-text); font-weight: 650; }
-.nav-item:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--button-focus); }
+.nav-item.active::before {
+  content: '';
+  position: absolute; left: 2px; top: 8px; bottom: 8px;
+  width: 3px; border-radius: 999px; background: var(--accent);
+}
+.nav-item:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .settings-content { flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 .settings-scroll { height: 100%; overflow-y: auto; padding: 20px 28px 48px; animation: fadeUp 0.3s var(--ease-out); }
@@ -4174,8 +5211,11 @@ onBeforeUnmount(stopUsagePoll)
 /* 宽屏下内容列限宽居中，两侧留出呼吸空间 */
 .settings-scroll > * { max-width: 1080px; margin-left: auto; margin-right: auto; }
 .settings-head { margin-bottom: 20px; }
-.settings-title { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
-.settings-desc { font-size: 13px; color: var(--text-2); margin-top: 6px; }
+.settings-title { font-size: var(--text-h1); font-weight: 800; letter-spacing: -0.02em; }
+.ui-prefs-error { display: flex; align-items: center; gap: 12px; }
+.ui-prefs-actions { display: flex; align-items: center; gap: 12px; max-width: 1080px; margin: 16px auto 0; }
+.ui-prefs-actions .config-empty { margin: 0; }
+.settings-desc { font-size: 13.5px; color: var(--text-2); margin-top: 6px; }
 
 /* 火宝快捷配置 */
 .quick-card {
@@ -4210,7 +5250,7 @@ onBeforeUnmount(stopUsagePoll)
   display: flex;
   align-items: baseline;
   gap: 10px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
 .hqm-label {
@@ -4227,8 +5267,8 @@ onBeforeUnmount(stopUsagePoll)
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--accent-bg);
-  color: var(--accent);
-  font-size: 9px;
+  color: var(--accent-text-strong);
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -4238,7 +5278,7 @@ onBeforeUnmount(stopUsagePoll)
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .hqm-model.is-default { color: var(--text-1); font-weight: 600; }
 .hqm-model em {
@@ -4246,9 +5286,9 @@ onBeforeUnmount(stopUsagePoll)
   margin-left: 4px;
   padding: 0 5px;
   border-radius: 5px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--accent-text);
+  color: var(--accent-text-strong);
   background: var(--accent-bg);
 }
 
@@ -4279,9 +5319,9 @@ onBeforeUnmount(stopUsagePoll)
   font-style: normal;
   padding: 0 5px;
   border-radius: 5px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--accent-text);
+  color: var(--accent-text-strong);
   background: var(--accent-bg);
 }
 .model-chip-x {
@@ -4323,7 +5363,7 @@ onBeforeUnmount(stopUsagePoll)
   transition: all 0.16s var(--ease-out);
 }
 .template-type-chip:hover { background: var(--button-bg-hover); color: var(--text-0); }
-.template-type-chip:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--button-focus); }
+.template-type-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 /* ===== 内容语言选择器（通用 tab） ===== */
 .lang-picker { display: flex; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--overlay-track); }
@@ -4343,7 +5383,7 @@ onBeforeUnmount(stopUsagePoll)
 }
 .lang-option:hover { color: var(--text-0); }
 .lang-option.on { background: var(--seg-active-bg); color: var(--text-0); box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
-.lang-option:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--button-focus); }
+.lang-option:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 /* ===== FFmpeg 目录（通用 tab） ===== */
 .media-dir-actions { display: flex; align-items: center; gap: 8px; flex: 1 1 360px; min-width: 0; }
@@ -4361,8 +5401,8 @@ onBeforeUnmount(stopUsagePoll)
   border-bottom: 1px solid var(--border);
 }
 .svc-group-heading { min-width: 0; }
-.svc-group-title { font-size: 14px; font-weight: 700; color: var(--text-0); }
-.svc-group-sub { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+.svc-group-title { font-size: 15px; font-weight: 700; color: var(--text-0); }
+.svc-group-sub { font-size: 12px; color: var(--text-2); margin-top: 2px; }
 .config-row { display: flex; align-items: center; gap: 12px; padding: 12px 20px; }
 .config-row + .config-row { border-top: 1px solid var(--border); }
 .provider-badge {
@@ -4381,7 +5421,7 @@ onBeforeUnmount(stopUsagePoll)
 .config-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .config-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .config-name { font-size: 13.5px; font-weight: 650; color: var(--text-0); }
-.config-sub { font-size: 11.5px; color: var(--text-3); }
+.config-sub { font-size: 12px; color: var(--text-2); }
 .config-models { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 0; }
 .cfg-model-chip {
   display: inline-flex;
@@ -4392,7 +5432,7 @@ onBeforeUnmount(stopUsagePoll)
   border-radius: 999px;
   background: transparent;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: 11px;
   cursor: pointer;
   transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
@@ -4405,9 +5445,9 @@ onBeforeUnmount(stopUsagePoll)
   cursor: default;
 }
 .cfg-model-star { fill: currentColor; }
-.config-empty { font-size: 12px; color: var(--text-3); padding: 14px 20px; }
+.config-empty { font-size: 12px; color: var(--text-2); padding: 14px 20px; }
 .config-switch { display: inline-flex; flex-shrink: 0; cursor: pointer; }
-.config-switch input:focus-visible + .switch { box-shadow: 0 0 0 3.5px var(--button-focus); }
+.config-switch input:focus-visible + .switch { box-shadow: var(--focus-ring); }
 .btn-icon.btn-sm { width: 30px; min-width: 30px; height: 30px; min-height: 30px; }
 
 /* Agent */
@@ -4445,13 +5485,13 @@ onBeforeUnmount(stopUsagePoll)
 .agent-pane-tab.active { background: var(--accent-bg); color: var(--accent-text); }
 
 /* Agent 编辑语言跟随提示（卡片头右侧只读说明，切换请到「通用」页） */
-.agent-lang-follow { font-size: 11px; }
+.agent-lang-follow { font-size: 12px; }
 
 /* 「跟随中文」回退提示 */
 .agent-fallback-tag {
   margin-left: 6px;
-  background: var(--bg-2); color: var(--text-3);
-  font-size: 10px; font-weight: 500;
+  background: var(--bg-2); color: var(--text-2);
+  font-size: 11px; font-weight: 500;
 }
 
 /* 编辑器尽量占满剩余视口高度，仍可手动拖拽 */
@@ -4467,7 +5507,7 @@ onBeforeUnmount(stopUsagePoll)
 }
 .skills-agent-title {
   font-size: 11px; font-weight: 650; letter-spacing: 0.06em;
-  color: var(--text-3); padding: 8px 10px 4px;
+  color: var(--text-2); padding: 8px 10px 4px;
 }
 .skills-agent-item {
   display: flex; align-items: center; gap: 8px;
@@ -4477,11 +5517,11 @@ onBeforeUnmount(stopUsagePoll)
 }
 .skills-agent-item:hover { background: var(--bg-hover); color: var(--text-0); }
 .skills-agent-item.active { background: var(--accent-bg); color: var(--accent-text); font-weight: 650; }
-.skills-agent-item:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--button-focus); }
+.skills-agent-item:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .skills-agent-item .agent-type-badge { width: 26px; height: 26px; border-radius: 8px; font-size: 13px; }
 .skills-agent-label { flex: 1; min-width: 0; }
 .skill-count-badge {
-  font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+  font-size: 11px; font-weight: 700; font-family: var(--font-mono);
   background: var(--bg-active); color: var(--text-2);
   padding: 1px 6px; border-radius: 99px;
 }
@@ -4503,7 +5543,7 @@ onBeforeUnmount(stopUsagePoll)
   display: flex; align-items: center; justify-content: center;
 }
 .skills-empty-title { font-size: 14px; font-weight: 650; color: var(--text-0); }
-.skills-empty-desc { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+.skills-empty-desc { font-size: 12px; color: var(--text-2); margin-top: 4px; }
 
 /* Skill */
 .skill-list { display: flex; flex-direction: column; gap: 10px; }
@@ -4515,8 +5555,8 @@ onBeforeUnmount(stopUsagePoll)
 
 /* Shared */
 .field { display: flex; flex-direction: column; gap: 5px; }
-.field-label { font-size: 12px; font-weight: 550; color: var(--text-1); }
-.field-hint { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.field-label { font-size: 12.5px; font-weight: 550; color: var(--text-1); }
+.field-hint { font-size: 12px; color: var(--text-2); margin-top: 2px; }
 .required { color: var(--error); }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
@@ -4552,7 +5592,7 @@ onBeforeUnmount(stopUsagePoll)
 .gateway-workflow-row > :first-child { flex: 1; min-width: 0; }
 .gw-error { color: var(--error); }
 .cfg-setting-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.cfg-workflow { min-height: 160px; resize: vertical; font-size: 11px; line-height: 1.5; }
+.cfg-workflow { min-height: 160px; resize: vertical; font-size: 12px; line-height: 1.5; }
 .cfg-check { flex-direction: row; align-items: center; gap: 8px; font-size: 12px; color: var(--text-1); }
 .cfg-check input { width: 15px; height: 15px; accent-color: var(--accent); }
 .skill-dialog { width: 440px; }
@@ -4574,7 +5614,7 @@ onBeforeUnmount(stopUsagePoll)
   transition: all 0.16s var(--ease-out);
 }
 .preset-pill:hover { background: var(--button-bg-hover); color: var(--text-0); }
-.preset-pill:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--button-focus); }
+.preset-pill:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .test-result {
   display: flex;
   flex-direction: column;
@@ -4595,7 +5635,7 @@ onBeforeUnmount(stopUsagePoll)
 }
 .test-result-url,
 .test-result-preview {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-2);
   word-break: break-all;
 }
@@ -4647,7 +5687,7 @@ onBeforeUnmount(stopUsagePoll)
 .novel-stage-row .config-name { white-space: nowrap; }
 .dub-number { width: 90px; text-align: right; }
 .dub-value { min-width: 48px; text-align: right; font-size: 12px; color: var(--text-2); }
-.dub-unit { font-size: 11px; color: var(--text-3); }
+.dub-unit { font-size: 12px; color: var(--text-2); }
 
 /* 智能体中心（八区骨架） */
 .agent-center { display: flex; height: 100%; overflow: hidden; }
@@ -4688,7 +5728,7 @@ onBeforeUnmount(stopUsagePoll)
 .agent-chip.active .skill-count-badge { background: var(--accent-bg); color: var(--accent-text); }
 .agent-empty { padding: 48px 24px; text-align: center; }
 .agent-empty-title { font-size: 14px; font-weight: 650; color: var(--text-0); }
-.agent-empty-desc { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+.agent-empty-desc { font-size: 12px; color: var(--text-2); margin-top: 4px; }
 .agent-binding-card { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .agent-binding-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text-0); }
 .agent-binding-list { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -4701,7 +5741,7 @@ onBeforeUnmount(stopUsagePoll)
 .agent-binding-row:first-of-type { border-top: 0; padding-top: 0; }
 .agent-binding-row-head { display: flex; align-items: center; gap: 8px; }
 .agent-binding-stage { width: 140px; }
-.agent-binding-scope-note { font-size: 11px; }
+.agent-binding-scope-note { font-size: 12px; }
 .agent-binding-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .agent-binding-span-2 { grid-column: 1 / -1; }
 .agent-check-row { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 6px; }
@@ -4715,8 +5755,55 @@ onBeforeUnmount(stopUsagePoll)
 }
 .agent-matrix { width: 100%; border-collapse: collapse; font-size: 12px; }
 .agent-matrix th, .agent-matrix td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
-.agent-matrix th { color: var(--text-3); font-weight: 600; }
+.agent-matrix th { color: var(--text-2); font-weight: 600; }
 .agent-matrix td:first-child { color: var(--text-0); font-weight: 600; white-space: nowrap; }
 .agent-matrix-tools { display: flex; flex-wrap: wrap; gap: 4px; }
 .agent-model-card { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.agent-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; }
+.agent-empty-action { margin-top: 14px; }
+.agent-session-table td:first-child { white-space: normal; font-weight: 400; }
+.agent-session-title {
+  padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+  font-size: 12px; font-weight: 600; color: var(--accent);
+}
+.agent-session-title:hover { text-decoration: underline; }
+.agent-session-workspace {
+  font-family: var(--font-mono); font-size: 11px; padding: 2px 6px;
+  border-radius: 5px; background: var(--bg-sunken); color: var(--text-2);
+}
+.agent-session-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; white-space: nowrap; }
+.agent-table-scroll { width: 100%; overflow-x: auto; }
+.agent-table-scroll .agent-session-table { min-width: 760px; }
+.agent-session-scope { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.agent-session-scope-tag { margin-left: 6px; }
+.agent-center-config-links { justify-content: flex-start; margin-top: 4px; }
+.agent-session-dialog { width: 760px; max-width: calc(100vw - 48px); }
+.agent-session-dialog-body {
+  display: flex; flex-direction: column; gap: 12px;
+  max-height: calc(100vh - 200px); overflow: auto;
+}
+.agent-session-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.agent-session-messages {
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: 34vh; overflow: auto; padding-right: 4px;
+}
+.agent-session-older { align-self: flex-start; }
+.agent-session-message {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
+}
+.agent-session-message-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.agent-session-message-content {
+  margin: 0; font-size: 12px; line-height: 1.65; color: var(--text-1);
+  white-space: pre-wrap; word-break: break-word;
+}
+.agent-diagnostic-route { display: flex; flex-direction: column; gap: 10px; }
+.agent-diagnostic-errors { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow: auto; }
+.agent-diagnostic-error { border-left: 2px solid var(--border); padding-left: 10px; display: flex; flex-direction: column; gap: 2px; }
+.agent-diagnostic-args { font-family: var(--font-mono); font-size: 12px; resize: vertical; }
+.agent-diagnostic-result pre {
+  margin: 0; padding: 10px; border-radius: 8px; background: var(--bg-sunken);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.55;
+  color: var(--text-1); max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+}
 </style>

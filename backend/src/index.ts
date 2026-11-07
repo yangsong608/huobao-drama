@@ -51,7 +51,7 @@ import { resumeInterruptedTasks } from './services/generation.js'
 import { initMcp, setMcpMainApp } from './services/mcp.js'
 import { markInterruptedAutomations, setAutomationApp } from './services/automation.js'
 import { markInterruptedNovelJobs } from './services/novel-job-runner.js'
-import { recoverInterruptedMessages } from './services/agent-sessions.js'
+import { recoverInterruptedMessages, scheduleAgentRetentionCleanup } from './services/agent-sessions.js'
 import { migrateUploadedVoices } from './services/voice-profile.js'
 import { startQueueWorker } from './services/queue-worker.js'
 import { refreshFfmpegConfig } from './utils/ffmpeg.js'
@@ -174,6 +174,8 @@ await markInterruptedAutomations()
 markInterruptedNovelJobs()
 // 助手：残留 running 回答置 interrupted，本轮提案过期、建议清空
 recoverInterruptedMessages()
+// 助手会话保留清理：启动后异步调度，不阻塞启动，也不影响上面的恢复
+scheduleAgentRetentionCleanup()
 // V1 已上传的角色音色迁移为 character_voices（幂等，失败不影响启动）
 migrateUploadedVoices()
 

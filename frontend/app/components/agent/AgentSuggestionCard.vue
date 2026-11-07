@@ -97,7 +97,7 @@ const targetLabel = computed(() => {
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
   border-radius: var(--radius-md, 10px);
   background: var(--surface);
-  font-size: 12.5px;
+  font-size: var(--text-label);
 }
 .suggestion-head {
   display: flex;
@@ -150,4 +150,5 @@ const targetLabel = computed(() => {
   font-size: 11px;
   color: var(--text-2);
 }
+.suggestion-card :is(button):focus-visible { outline: none; box-shadow: var(--focus-ring); }
 </style>

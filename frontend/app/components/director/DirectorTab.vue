@@ -566,7 +566,7 @@ onBeforeUnmount(() => {
               {{ t('director.revisions.count', { count: revisions.length }) }}
             </span>
           </div>
-          <button type="button" class="director-icon-btn" :aria-label="t('director.revisions.close')" @click="revisionsOpen = false">
+          <button type="button" class="director-icon-btn" :title="t('director.revisions.close')" :aria-label="t('director.revisions.close')" @click="revisionsOpen = false">
             <X :size="13" />
           </button>
         </header>
@@ -718,7 +718,7 @@ onBeforeUnmount(() => {
 .director-revisions-mask {
   position: absolute;
   inset: 0;
-  z-index: 40;
+  z-index: 100;
   display: flex;
   justify-content: flex-end;
   background: rgba(0, 0, 0, 0.28);
@@ -742,7 +742,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--border);
 }
 .director-revisions-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--text-label); color: var(--text-0); }
-.director-revisions-count { font-size: var(--text-meta); color: var(--text-3); }
+.director-revisions-count { font-size: var(--text-meta); color: var(--text-2); }
 .director-revisions-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 0 12px; }
 .director-revisions-state {
   display: flex;
@@ -750,7 +750,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   gap: 6px;
   padding: 24px 12px;
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: var(--text-meta);
   text-align: center;
 }
@@ -766,15 +766,16 @@ onBeforeUnmount(() => {
 }
 .director-revision.is-current { background: var(--accent-soft, rgba(88, 166, 255, 0.08)); }
 .director-revision-head { display: flex; align-items: center; gap: 6px; width: 100%; font-size: var(--text-label); color: var(--text-0); }
-.director-revision-head time { margin-left: auto; font-size: var(--text-meta); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.director-revision-head time { margin-left: auto; font-size: var(--text-meta); color: var(--text-2); font-variant-numeric: tabular-nums; }
 .director-revision-badge {
   padding: 0 6px;
   border-radius: var(--radius-pill);
   background: var(--accent);
   color: var(--accent-contrast, #fff);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.6;
 }
 .director-revision-note { margin: 0; width: 100%; font-size: var(--text-meta); line-height: 1.5; color: var(--text-2); word-break: break-word; }
-.director-revision-note-label { color: var(--text-3); }
+.director-revision-note-label { color: var(--text-2); }
+.director-tab :is(button, input, select, textarea):focus-visible { outline: none; box-shadow: var(--focus-ring); }
 </style>

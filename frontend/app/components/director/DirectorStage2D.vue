@@ -343,14 +343,14 @@ function cancelDrag() {
         {{ props.canEdit ? t('director.stage.dragHint') : t('director.stage.readonlyHint') }}
       </span>
       <div class="director-stage-zoom">
-        <button type="button" class="director-icon-btn" :aria-label="t('director.stage.zoomOut')" @click="zoomBy(-0.1)">
+        <button type="button" class="director-icon-btn" :title="t('director.stage.zoomOut')" :aria-label="t('director.stage.zoomOut')" @click="zoomBy(-0.1)">
           <Minus :size="12" />
         </button>
         <span class="director-zoom-value">{{ Math.round(zoom * 100) }}%</span>
-        <button type="button" class="director-icon-btn" :aria-label="t('director.stage.zoomIn')" @click="zoomBy(0.1)">
+        <button type="button" class="director-icon-btn" :title="t('director.stage.zoomIn')" :aria-label="t('director.stage.zoomIn')" @click="zoomBy(0.1)">
           <Plus :size="12" />
         </button>
-        <button type="button" class="director-icon-btn" :aria-label="t('director.stage.zoomReset')" @click="resetZoom">
+        <button type="button" class="director-icon-btn" :title="t('director.stage.zoomReset')" :aria-label="t('director.stage.zoomReset')" @click="resetZoom">
           <RotateCcw :size="12" />
         </button>
       </div>
@@ -497,13 +497,13 @@ function cancelDrag() {
   padding: 0 6px;
   border-radius: var(--radius-pill);
   background: var(--bg-1);
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .director-stage-hint {
   flex: 1;
   min-width: 0;
   font-size: var(--text-meta);
-  color: var(--text-3);
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -629,7 +629,7 @@ function cancelDrag() {
   padding: 0 4px;
   border-radius: var(--radius-sm);
   background: var(--panel-bg);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.4;
   color: var(--text-1);
   overflow: hidden;
@@ -680,7 +680,7 @@ function cancelDrag() {
   padding: 0 4px;
   border-radius: var(--radius-sm);
   background: var(--panel-bg);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-2);
   white-space: nowrap;
 }
@@ -703,4 +703,5 @@ function cancelDrag() {
 }
 .director-camera-target.is-editable { cursor: move; }
 .director-camera-target.is-editable:hover { background: var(--accent-soft, rgba(88, 166, 255, 0.18)); }
+.director-stage :is(button, input, select):focus-visible { outline: none; box-shadow: var(--focus-ring); }
 </style>

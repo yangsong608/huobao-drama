@@ -19,6 +19,9 @@ export interface AssistantSession {
   last_message_at: string | null
   created_at: string
   updated_at: string
+  message_count?: number
+  proposal_count?: number
+  scope?: AgentScope | null
 }
 
 export interface AssistantToolCall {
@@ -41,6 +44,7 @@ export interface AssistantMessage {
   session_id: number
   role: 'user' | 'assistant'
   content: string
+  content_cleared?: boolean
   status: AssistantMessageStatus
   scope?: AgentScope | null
   preset?: AgentPreset

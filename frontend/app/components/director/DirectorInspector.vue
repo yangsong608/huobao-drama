@@ -508,10 +508,10 @@ function removeSubshot(index: number) {
 .director-static-value { font-size: var(--text-label); color: var(--text-0); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .director-inline-fields { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .director-inline-fields label { display: flex; align-items: center; gap: 3px; min-width: 0; flex: 1; }
-.director-inline-fields label span { flex-shrink: 0; font-size: 10px; color: var(--text-3); }
+.director-inline-fields label span { flex-shrink: 0; font-size: 11px; color: var(--text-2); }
 .director-inline-fields input { width: 100%; height: 24px; }
-.director-form-hint { margin: 3px 0 6px; padding-left: 82px; font-size: 10px; line-height: 1.45; color: var(--text-3); }
-.director-muted { margin: 0; font-size: var(--text-meta); color: var(--text-3); }
+.director-form-hint { margin: 3px 0 6px; padding-left: 82px; font-size: 11px; line-height: 1.45; color: var(--text-2); }
+.director-muted { margin: 0; font-size: var(--text-meta); color: var(--text-2); }
 .director-stale-banner {
   display: flex;
   flex-direction: column;
@@ -549,7 +549,7 @@ function removeSubshot(index: number) {
   border-radius: var(--radius-sm);
   background: var(--bg-1);
   color: var(--text-2);
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
 }
 .director-subshot-remove:hover:not(:disabled),
@@ -557,7 +557,8 @@ function removeSubshot(index: number) {
 .director-subshot-remove:disabled,
 .director-subshot-add:disabled { opacity: 0.45; cursor: not-allowed; }
 .director-subshot-add { margin-top: 8px; }
-.director-validation { margin: 2px 0 0; font-size: 10px; line-height: 1.5; }
+.director-validation { margin: 2px 0 0; font-size: 11px; line-height: 1.5; }
 .director-validation.is-ok { color: var(--success, #1a9d5a); }
 .director-validation.is-error { color: var(--warning, #b7791f); }
+.studio-inspector :is(button, input, select, textarea, summary):focus-visible { outline: none; box-shadow: var(--focus-ring); }
 </style>

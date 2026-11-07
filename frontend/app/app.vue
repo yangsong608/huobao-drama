@@ -16,9 +16,12 @@ import MigrateOverlay from '~/components/MigrateOverlay.vue'
 import { useDesktopBridge } from '~/composables/useDesktopBridge'
 import { useMigrateState } from '~/composables/useMigrateState'
 import { useTheme } from '~/composables/useTheme'
+import { useUiPrefs } from '~/composables/useUiPrefs'
 
 const { t } = useI18n()
 const { resolvedTheme } = useTheme()
+const { load: loadUiSettings } = useUiPrefs()
+loadUiSettings()
 
 // 响应式文档标题（nuxt.config.ts 的静态 title 仅作 SSR/兜底）
 useHead(() => ({ title: t('app.title') }))

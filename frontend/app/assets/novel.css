@@ -114,3 +114,20 @@
 @media (max-width: 640px) {
   .novel-scope .field-row { grid-template-columns: 1fr; }
 }
+
+/* === U2 阅读模式：批注锚点只改底色与下划线，不改变字号、字重与行高 === */
+.novel-scope .chapter-reader mark,
+.novel-scope .chapter-reader [data-annotation-id] {
+  font: inherit;
+  font-weight: inherit;
+  background: var(--accent-bg);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+/* 专注阅读：正文保持 68ch 上限，窄屏自动收窄，不出现横向滚动 */
+.novel-scope .page[data-reading="on"] .chapter-reader {
+  padding-left: clamp(20px, 4vw, 48px);
+  padding-right: clamp(20px, 4vw, 48px);
+}

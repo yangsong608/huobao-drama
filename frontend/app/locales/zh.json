@@ -585,7 +585,8 @@
       "mcp": "MCP",
       "rules": "流程规则",
       "queue": "任务队列",
-      "novel": "小说"
+      "novel": "小说",
+      "ui": "界面"
     },
     "novel": {
       "title": "小说生成",
@@ -925,7 +926,9 @@
           "suggestionsHint": "在回答后给出可执行的下一步建议。",
           "autoDetect": "自动识别作用域",
           "autoDetectHint": "按当前页面锁定作用域；关闭后需手动选择。"
-        }
+        },
+        "goAiConfig": "前往 AI 配置",
+        "goRules": "前往规则页"
       },
       "pages": {
         "title": "页面绑定",
@@ -1018,12 +1021,149 @@
       "sessions": {
         "title": "会话与审计",
         "desc": "查看智能体会话、消息与运行记录。",
-        "source": "agent_sessions / agent_messages"
+        "source": "agent_sessions / agent_messages",
+        "retentionTitle": "保留与清理",
+        "retentionDays": "内容保留天数",
+        "retentionHint": "仅清理超过保留期的已归档或软删除会话：消息正文、工具调用/结果与建议会被清空；会话、消息行与提案审计保留。范围 7–365 天。",
+        "retentionInvalid": "保留天数需在 7–365 之间",
+        "retentionSaved": "保留天数已保存",
+        "filters": {
+          "workspace": "工作区键",
+          "workspacePlaceholder": "例如 novel:12 或 drama:3，留空查看全部",
+          "status": "状态",
+          "statusAll": "全部",
+          "statusActive": "进行中",
+          "statusArchived": "已归档",
+          "hint": "软删除的会话不在列表中；会话详情为只读审计。",
+          "refresh": "刷新"
+        },
+        "loading": "正在加载会话…",
+        "errorTitle": "会话加载失败",
+        "retry": "重试",
+        "emptyTitle": "暂无会话",
+        "emptyHint": "在小说或分集页面打开智能体抽屉提问后，这里会出现会话记录。",
+        "goNovels": "前往小说库",
+        "checkModels": "检查模型配置",
+        "untitled": "未命名会话",
+        "view": "查看",
+        "archive": "归档",
+        "delete": "删除",
+        "archived": "会话已归档",
+        "deleted": "会话已删除",
+        "cancelled": "已取消进行中的回答",
+        "loadMore": "加载更多",
+        "columns": {
+          "thread": "线程",
+          "preset": "预设",
+          "workspace": "作用域 / 工作区键",
+          "messages": "消息",
+          "proposals": "提案",
+          "status": "状态",
+          "actions": "操作"
+        },
+        "statusLabels": {
+          "active": "进行中",
+          "archived": "已归档"
+        },
+        "archiveTitle": "归档会话",
+        "archiveMessage": "归档后会话不再出现在进行中列表，未处理提案不会过期。",
+        "deleteTitle": "删除会话",
+        "deleteMessage": "删除为软删除：会话与消息保留，未处理提案标记为已过期，之后不再出现在列表中。",
+        "detailTitle": "会话详情",
+        "detailLoading": "正在加载详情…",
+        "close": "关闭",
+        "messageCount": "消息数",
+        "proposalCount": "提案数",
+        "cancel": "取消回答",
+        "messagesTitle": "消息记录",
+        "loadOlder": "加载更早消息",
+        "noMessages": "该会话没有消息",
+        "contentCleared": "内容已清理（超过保留期）",
+        "messageExtras": "工具调用 {tools} 次 · 建议 {suggestions} 条",
+        "roles": {
+          "user": "用户",
+          "assistant": "助手"
+        },
+        "messageStatus": {
+          "pending": "等待中",
+          "running": "生成中",
+          "completed": "已完成",
+          "failed": "失败",
+          "cancelled": "已取消",
+          "interrupted": "已中断"
+        },
+        "proposalsTitle": "提案记录",
+        "noProposals": "该会话没有提案",
+        "proposalColumns": {
+          "kind": "类型",
+          "target": "目标",
+          "status": "状态",
+          "appliedBy": "应用人",
+          "updatedAt": "时间"
+        },
+        "proposalStatus": {
+          "proposed": "待处理",
+          "applied": "已应用",
+          "rejected": "已拒绝",
+          "conflict": "冲突",
+          "expired": "已过期"
+        },
+        "emptyFilteredTitle": "没有匹配的会话",
+        "emptyFilteredHint": "当前工作区键或状态筛选下没有会话；可清除筛选查看全部。",
+        "clearFilters": "清除筛选"
       },
       "diagnostics": {
         "title": "诊断",
         "desc": "检查模型、工具与流式连接状态。",
-        "source": "运行时状态与最近错误"
+        "source": "运行时状态与最近错误",
+        "loading": "正在加载诊断…",
+        "loadFailed": "诊断加载失败",
+        "retry": "重试",
+        "routeTitle": "页面路由解析",
+        "routePlaceholder": "/drama/1/episode/1?panel=dubbing&step=3",
+        "routeHint": "输入前端页面路径，服务端按与页面相同的适配器规则模拟解析，不会打开页面。",
+        "simulate": "解析路由",
+        "matched": "已匹配",
+        "unmatched": "未匹配",
+        "unmatchedHint": "该路由没有页面绑定或适配器；请检查“页面绑定”子区，或换一个具体分集路由。",
+        "adapter": "适配器",
+        "scope": "作用域",
+        "bindingStage": "页面阶段",
+        "visible": "入口可见",
+        "yes": "是",
+        "no": "否",
+        "defaultPreset": "默认预设",
+        "allowedTools": "允许工具",
+        "modelsTitle": "模型可用性",
+        "modelsAvailable": "可用",
+        "modelsUnavailable": "不可用",
+        "activeConfig": "当前文本模型",
+        "modelConfigMissing": "未找到启用的文本模型配置，请先在“AI 配置”页启用文本模型。",
+        "presetModels": "预设模型（留空时使用默认）",
+        "modelFallback": "默认",
+        "goAiConfig": "前往 AI 配置",
+        "toolsTitle": "工具清单",
+        "errorsTitle": "最近错误",
+        "noErrors": "暂无最近错误",
+        "trialTitle": "只读工具试跑",
+        "trialHint": "仅执行服务端已注册的只读工具；写工具、未知工具与越界作用域会被拒绝，试跑不写库。",
+        "scopeSelect": "作用域",
+        "toolSelect": "工具",
+        "toolPlaceholder": "选择只读工具",
+        "novel": "小说",
+        "novelPlaceholder": "选择小说",
+        "drama": "项目",
+        "dramaPlaceholder": "选择项目",
+        "episode": "集",
+        "episodePlaceholder": "选择集",
+        "editProject": "剪辑工程 ID",
+        "args": "参数 JSON",
+        "argsHint": "参数按 JSON 对象填写；项目/集与小说编号由上方选择自动带入作用域。",
+        "argsInvalid": "参数必须是 JSON 对象",
+        "run": "试跑",
+        "result": "试跑结果",
+        "truncated": "已截断",
+        "emptyResult": "选择工具并试跑后，结果显示在这里。"
       }
     },
     "skills": {
@@ -1241,6 +1381,56 @@
       "analyzing": "分析中…",
       "done": "已生成风格「{name}」",
       "failed": "风格分析失败"
+    },
+    "ui": {
+      "title": "界面",
+      "desc": "控制当前设备的显示密度、动效与阅读排版；这些偏好只保存在本机，不会修改项目数据。",
+      "appearance": "外观",
+      "appearanceSub": "密度与动效只影响本机显示",
+      "densityLabel": "显示密度",
+      "densityNote": "舒适模式增大列表、表单与卡片的行高；时间线保持紧凑",
+      "density": {
+        "compact": "紧凑",
+        "comfortable": "舒适"
+      },
+      "motionLabel": "动效",
+      "motionNote": "跟随系统时会尊重操作系统的减少动态效果设置",
+      "motion": {
+        "system": "跟随系统",
+        "full": "完整",
+        "reduced": "减少"
+      },
+      "reading": "阅读",
+      "readingSub": "小说阅读视图的字体、字号与行宽",
+      "readingFontLabel": "阅读字体",
+      "readingFontNote": "衬线字体更适合长文阅读；缺字时自动回退",
+      "font": {
+        "serif": "衬线",
+        "sans": "无衬线"
+      },
+      "readingSizeLabel": "阅读字号",
+      "readingSizeNote": "仅影响阅读视图，不改变编辑器字号",
+      "readingWidthLabel": "阅读行宽",
+      "readingWidthNote": "控制正文最大行宽，窄屏会自动收窄",
+      "width": {
+        "60": "窄",
+        "68": "标准",
+        "76": "宽"
+      },
+      "action": "操作",
+      "actionSub": "主操作是否显示文字标签",
+      "actionLabelsLabel": "主操作显示文字",
+      "actionLabelsNote": "关闭后低频操作可能只显示图标，但保留悬停说明",
+      "actionLabels": {
+        "on": "显示",
+        "off": "仅图标"
+      },
+      "reset": "恢复默认",
+      "resetHint": "清除本机偏好，回到部署默认值",
+      "lockedTitle": "使用部署默认值",
+      "lockedNote": "管理员已关闭用户覆盖，当前显示与阅读设置由部署默认值决定；本机偏好已保留，恢复开关后可继续使用。",
+      "loadFailed": "读取部署默认值失败，当前使用本机缓存或内置默认值。",
+      "retry": "重试"
     }
   },
   "episode": {
@@ -1414,6 +1604,8 @@
       "saved": "修改已保存",
       "saveFailed": "保存失败",
       "saveChanges": "保存修改",
+      "savingChanges": "正在保存修改",
+      "uploadingImage": "上传中…",
       "unnamedChar": "未命名角色",
       "unnamedProp": "未命名道具",
       "unnamedScene": "未命名场景",
@@ -1448,7 +1640,9 @@
       "appearanceOnlyPlaceholder": "只描述物品的外观，与其他无关",
       "locationRequired": "请填写场景地点",
       "nameRequired": "请填写名称",
-      "created": "已新增{type}"
+      "created": "已新增{type}",
+      "submit": "新增{type}",
+      "saving": "保存中…"
     },
     "delete": {
       "title": "删除{type}",
@@ -1735,6 +1929,7 @@
         "deleted": "过渡镜头已删除",
         "deleteFailed": "删除过渡镜头失败",
         "processingHint": "生成中，暂不能删除",
+        "busyHint": "当前正在处理，请稍候再试",
         "loadFailed": "过渡状态加载失败",
         "actionFailed": "过渡操作失败",
         "partialFailed": "有 {n} 个断点提交失败：{message}",
@@ -2361,6 +2556,10 @@
     "kindMotion": "图文",
     "current": "当前使用",
     "withSubtitle": "含字幕",
+    "statusRendering": "生成中",
+    "statusFailed": "失败",
+    "statusCanceled": "已取消",
+    "statusQueued": "排队中",
     "play": "播放",
     "download": "下载",
     "setCurrent": "设为当前版本",
@@ -2791,7 +2990,9 @@
         "mapTitle": "世界地图",
         "refinalize": "重试时间线",
         "timelineFailed": "时间线更新失败，可重试定稿或手动编辑。"
-      }
+      },
+      "focusReading": "专注阅读",
+      "exitFocusReading": "退出专注"
     },
     "compass": {
       "title": "灵感罗盘",
@@ -3885,6 +4086,9 @@
     "exportWarnOverlay": "叠加轨（画中画/文字）将被忽略",
     "exportWarnSpeed": "变速超出 0.5–2×，将夹取到支持范围",
     "exportAck": "我已知晓并确认导出",
+    "exportDisabledReadonly": "只读视图不可导出",
+    "exportDisabledBlocked": "存在阻断项，请先处理上方问题",
+    "exportDisabledAck": "请先勾选确认降级项",
     "exportBlocked": {
       "title": "以下内容暂不支持导出",
       "overlay": "叠加轨（画中画/文字）暂不支持导出，请先移除或隐藏",

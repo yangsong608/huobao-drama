@@ -25,6 +25,17 @@
             {{ hasSavedContent ? t('novels.writer.regenerate') : t('novels.writer.generate') }}
           </button>
         </template>
+        <button
+          type="button"
+          class="btn btn-ghost"
+          :aria-pressed="focusReading ? 'true' : 'false'"
+          :title="focusReading ? t('novels.writer.exitFocusReading') : t('novels.writer.focusReading')"
+          @click="emit('toggle-focus-reading')"
+        >
+          <Minimize2 v-if="focusReading" :size="14" :stroke-width="1.8" />
+          <Maximize2 v-else :size="14" :stroke-width="1.8" />
+          {{ focusReading ? t('novels.writer.exitFocusReading') : t('novels.writer.focusReading') }}
+        </button>
       </div>
     </header>
 
@@ -221,6 +232,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Maximize2, Minimize2 } from 'lucide-vue-next'
 import { camelizeKeys, useNovelStore } from '~/stores/novel'
 import { novelAPI } from '~/composables/useNovelApi'
 import { novelErrorText, useNovelJobStream } from '~/composables/useNovelJobStream'
@@ -237,9 +249,11 @@ const props = defineProps<{
   annotationsEnabled?: boolean
   foreshadows?: any[]
   foreshadowEnabled?: boolean
+  focusReading?: boolean
 }>()
 const emit = defineEmits<{
   (event: 'refresh'): void
+  (event: 'toggle-focus-reading'): void
   (event: 'chapter-change', chapterNo: number): void
   (event: 'selection', selection: NovelSelection | null): void
   (event: 'annotate'): void
@@ -931,14 +945,14 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 .word-count {
-  color: var(--text-3);
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 .lock-hint {
   color: var(--novel-accent);
 }
 .save-state {
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .save-state.is-dirty {
   color: #e0a43c;
@@ -977,7 +991,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   padding-top: 2px;
   font-size: 11px;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .foreshadow-strip-label.warn {
   color: #e0a43c;
@@ -996,7 +1010,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--bg-1);
-  font-size: 10.5px;
+  font-size: 11px;
 }
 .foreshadow-chip-title {
   max-width: 130px;
@@ -1006,7 +1020,7 @@ onBeforeUnmount(() => {
   border: none;
   background: transparent;
   color: var(--text-1);
-  font-size: 10.5px;
+  font-size: 11px;
   cursor: pointer;
 }
 .foreshadow-chip-title:hover {
@@ -1018,7 +1032,7 @@ onBeforeUnmount(() => {
   border-left: 1px solid var(--border);
   background: transparent;
   color: var(--accent);
-  font-size: 9.5px;
+  font-size: 11px;
   cursor: pointer;
 }
 .annotation-quick {
@@ -1047,7 +1061,7 @@ onBeforeUnmount(() => {
   font-size: 11.5px;
 }
 .annotation-markers-label {
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .annotation-pin {
   display: inline-flex;
@@ -1082,7 +1096,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: var(--accent-bg);
   color: var(--accent-text);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 .annotation-pin-quote {
@@ -1108,21 +1122,26 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 .chapter-reader {
+  width: 100%;
+  max-width: var(--reading-measure, 68ch);
   min-height: 520px;
-  padding: 26px 30px;
+  margin: 0 auto;
+  padding: var(--reading-pad, 32px);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-1);
   color: var(--text-0);
-  font-size: 14px;
-  line-height: 1.95;
+  font-family: var(--font-reading);
+  font-size: var(--text-reading);
+  line-height: var(--leading-reading);
+  text-align: left;
   overflow-wrap: break-word;
 }
 .chapter-reader p {
-  margin: 0 0 0.9em;
+  margin: 0 0 0.8em;
   text-indent: 2em;
   border-radius: 6px;
-  transition: background 0.25s var(--ease-out);
+  transition: background var(--motion-base, 180ms) var(--ease-out);
 }
 .chapter-reader p.flashed {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
@@ -1134,7 +1153,7 @@ onBeforeUnmount(() => {
   padding: 40px 0;
   text-align: center;
   text-indent: 0;
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: 12.5px;
 }
 .chapter-graph-section {

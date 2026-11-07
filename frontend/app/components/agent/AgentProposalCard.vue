@@ -10,78 +10,84 @@
       <span class="proposal-target">{{ targetLabel }}</span>
     </header>
 
-    <div v-if="proposal.rationale" class="proposal-block">
-      <div class="proposal-label">{{ t('assistant.proposal.rationale') }}</div>
-      <p class="proposal-text">{{ proposal.rationale }}</p>
-    </div>
-
-    <div class="proposal-block">
-      <div class="proposal-label">{{ t('assistant.proposal.diff') }}</div>
-      <div v-for="row in diffs" :key="row.field" class="proposal-diff">
-        <div class="proposal-field">
-          <span>{{ fieldLabel(row.field) }}</span>
-          <code>{{ row.field }}</code>
-        </div>
-        <div class="proposal-values">
-          <div class="proposal-value">
-            <span class="proposal-value-label">{{ t('assistant.proposal.before') }}</span>
-            <p class="proposal-text" :class="{ clamp: !isExpanded(row.field) }">{{ shownValue(row, 'before') }}</p>
-          </div>
-          <div class="proposal-value">
-            <span class="proposal-value-label">{{ t('assistant.proposal.after') }}</span>
-            <p class="proposal-text" :class="{ clamp: !isExpanded(row.field) }">{{ shownValue(row, 'after') }}</p>
-          </div>
-        </div>
-        <button v-if="isLongDiff(row)" type="button" class="btn btn-ghost btn-sm proposal-expand" @click="toggleField(row.field)">
-          {{ isExpanded(row.field) ? t('assistant.proposal.collapse') : t('assistant.proposal.expand') }}
-        </button>
+    <div class="proposal-body">
+      <div v-if="proposal.rationale" class="proposal-block">
+        <div class="proposal-label">{{ t('assistant.proposal.rationale') }}</div>
+        <p class="proposal-text">{{ proposal.rationale }}</p>
       </div>
-      <div v-if="!diffs.length" class="proposal-hint dim">{{ t('assistant.proposal.noDiff') }}</div>
-    </div>
 
-    <div v-if="conflictCurrent" class="proposal-alert proposal-alert-warning">
-      <div class="proposal-alert-title">
-        <AlertTriangle :size="13" />
-        {{ t('assistant.proposal.conflictTitle') }}
-      </div>
-      <div class="proposal-label">{{ t('assistant.proposal.current') }}</div>
-      <pre class="proposal-raw">{{ pretty(conflictCurrent) }}</pre>
-      <p class="proposal-hint">{{ t('assistant.proposal.conflictHint') }}</p>
-    </div>
-
-    <div v-else-if="proposal.status === 'conflict'" class="proposal-alert proposal-alert-warning">
-      <div class="proposal-alert-title">
-        <AlertTriangle :size="13" />
-        {{ t('assistant.proposal.conflictTitle') }}
-      </div>
-      <p class="proposal-hint">{{ t('assistant.proposal.conflictHint') }}</p>
-    </div>
-
-    <div v-if="proposal.status === 'expired'" class="proposal-alert proposal-alert-warning">
-      <div class="proposal-alert-title">
-        <AlertTriangle :size="13" />
-        {{ t('assistant.proposal.expiredTitle') }}
-      </div>
-      <p class="proposal-hint">{{ expiredReason }}</p>
-      <p class="proposal-hint">{{ t('assistant.proposal.expiredHint') }}</p>
-    </div>
-
-    <div v-if="proposal.status === 'applied'" class="proposal-audit dim">
-      <Check :size="12" />
-      <span>{{ appliedMeta }}</span>
-    </div>
-
-    <div v-if="errorText" class="proposal-alert proposal-alert-error">{{ errorText }}</div>
-
-    <div v-if="showRaw" class="proposal-raw-wrap">
       <div class="proposal-block">
-        <div class="proposal-label">before_json</div>
-        <pre class="proposal-raw">{{ pretty(proposal.before) }}</pre>
+        <div class="proposal-label">{{ t('assistant.proposal.diff') }}</div>
+        <div v-for="row in diffs" :key="row.field" class="proposal-diff">
+          <div class="proposal-field">
+            <span>{{ fieldLabel(row.field) }}</span>
+            <code>{{ row.field }}</code>
+          </div>
+          <div class="proposal-values">
+            <div class="proposal-value">
+              <span class="proposal-value-label">{{ t('assistant.proposal.before') }}</span>
+              <p class="proposal-text" :class="{ clamp: !isExpanded(row.field) }">{{ shownValue(row, 'before') }}</p>
+            </div>
+            <div class="proposal-value">
+              <span class="proposal-value-label">{{ t('assistant.proposal.after') }}</span>
+              <p class="proposal-text" :class="{ clamp: !isExpanded(row.field) }">{{ shownValue(row, 'after') }}</p>
+            </div>
+          </div>
+          <button v-if="isLongDiff(row)" type="button" class="btn btn-ghost btn-sm proposal-expand" @click="toggleField(row.field)">
+            {{ isExpanded(row.field) ? t('assistant.proposal.collapse') : t('assistant.proposal.expand') }}
+          </button>
+        </div>
+        <div v-if="!diffs.length" class="proposal-hint dim">{{ t('assistant.proposal.noDiff') }}</div>
       </div>
-      <div class="proposal-block">
-        <div class="proposal-label">after_json</div>
-        <pre class="proposal-raw">{{ pretty(proposal.after) }}</pre>
+
+      <div v-if="conflictCurrent" class="proposal-alert proposal-alert-warning">
+        <div class="proposal-alert-title">
+          <AlertTriangle :size="13" />
+          {{ t('assistant.proposal.conflictTitle') }}
+        </div>
+        <div class="proposal-label">{{ t('assistant.proposal.current') }}</div>
+        <pre class="proposal-raw">{{ pretty(conflictCurrent) }}</pre>
+        <p class="proposal-hint">{{ t('assistant.proposal.conflictHint') }}</p>
       </div>
+
+      <div v-else-if="proposal.status === 'conflict'" class="proposal-alert proposal-alert-warning">
+        <div class="proposal-alert-title">
+          <AlertTriangle :size="13" />
+          {{ t('assistant.proposal.conflictTitle') }}
+        </div>
+        <p class="proposal-hint">{{ t('assistant.proposal.conflictHint') }}</p>
+      </div>
+
+      <div v-if="proposal.status === 'expired'" class="proposal-alert proposal-alert-warning">
+        <div class="proposal-alert-title">
+          <AlertTriangle :size="13" />
+          {{ t('assistant.proposal.expiredTitle') }}
+        </div>
+        <p class="proposal-hint">{{ expiredReason }}</p>
+        <p class="proposal-hint">{{ t('assistant.proposal.expiredHint') }}</p>
+      </div>
+
+      <div v-if="proposal.status === 'applied'" class="proposal-audit dim">
+        <Check :size="12" />
+        <span>{{ appliedMeta }}</span>
+      </div>
+
+      <div v-if="errorText" class="proposal-alert proposal-alert-error">{{ errorText }}</div>
+
+      <div v-if="showRaw" class="proposal-raw-wrap">
+        <div class="proposal-block">
+          <div class="proposal-label">before_json</div>
+          <pre class="proposal-raw">{{ pretty(proposal.before) }}</pre>
+        </div>
+        <div class="proposal-block">
+          <div class="proposal-label">after_json</div>
+          <pre class="proposal-raw">{{ pretty(proposal.after) }}</pre>
+        </div>
+      </div>
+
+      <p v-if="proposal.status === 'proposed' && disabled" class="proposal-hint dim">
+        {{ t('assistant.proposal.disabledRunning') }}
+      </p>
     </div>
 
     <footer class="proposal-actions">
@@ -111,10 +117,6 @@
         </template>
       </template>
     </footer>
-
-    <p v-if="proposal.status === 'proposed' && disabled" class="proposal-hint dim">
-      {{ t('assistant.proposal.disabledRunning') }}
-    </p>
   </section>
 </template>
 
@@ -323,7 +325,7 @@ async function reject(): Promise<void> {
   border: 1px solid var(--border);
   border-radius: var(--radius-md, 10px);
   background: var(--surface);
-  font-size: 12.5px;
+  font-size: var(--text-label);
 }
 .proposal-card-applied { border-color: color-mix(in srgb, var(--success) 45%, var(--border)); }
 .proposal-card-conflict,
@@ -335,6 +337,7 @@ async function reject(): Promise<void> {
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+  min-height: 40px;
 }
 .proposal-head-main {
   display: inline-flex;
@@ -348,6 +351,13 @@ async function reject(): Promise<void> {
   font-size: 11.5px;
   color: var(--text-2);
   font-family: var(--font-mono, monospace);
+}
+
+.proposal-body {
+  max-height: min(52vh, 460px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
 }
 
 .proposal-block { margin-top: 10px; }
@@ -385,8 +395,8 @@ async function reject(): Promise<void> {
   color: var(--text-1);
 }
 .proposal-field code {
-  font-size: 10.5px;
-  color: var(--text-3, var(--text-2));
+  font-size: 11px;
+  color: var(--text-2);
   font-weight: 400;
 }
 .proposal-values {
@@ -403,7 +413,7 @@ async function reject(): Promise<void> {
 }
 .proposal-value-label {
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-2);
   margin-bottom: 2px;
 }
@@ -463,4 +473,6 @@ async function reject(): Promise<void> {
   margin-top: 10px;
   flex-wrap: wrap;
 }
+.proposal-actions .btn { min-height: 36px; }
+.proposal-card :is(button):focus-visible { outline: none; box-shadow: var(--focus-ring); }
 </style>

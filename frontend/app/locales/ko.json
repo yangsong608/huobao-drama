@@ -585,7 +585,8 @@
       "mcp": "MCP",
       "rules": "흐름 규칙",
       "queue": "작업 큐",
-      "novel": "소설"
+      "novel": "소설",
+      "ui": "인터페이스"
     },
     "novel": {
       "title": "소설 생성",
@@ -925,7 +926,9 @@
           "suggestionsHint": "답변 후 실행 가능한 다음 단계를 제안합니다.",
           "autoDetect": "범위 자동 감지",
           "autoDetectHint": "현재 페이지에 범위를 고정합니다. 끄면 수동으로 선택해야 합니다."
-        }
+        },
+        "goAiConfig": "AI 설정으로",
+        "goRules": "규칙 페이지로"
       },
       "pages": {
         "title": "페이지 바인딩",
@@ -1018,12 +1021,149 @@
       "sessions": {
         "title": "세션 및 감사",
         "desc": "에이전트 세션, 메시지, 실행 기록을 확인합니다.",
-        "source": "agent_sessions / agent_messages"
+        "source": "agent_sessions / agent_messages",
+        "retentionTitle": "보존 및 정리",
+        "retentionDays": "콘텐츠 보존 일수",
+        "retentionHint": "보존 기간을 초과한 보관 또는 소프트 삭제된 세션만 정리합니다. 메시지 본문, 도구 호출/결과, 제안 내용이 비워지며 세션, 메시지 행, 제안 감사 기록은 유지됩니다. 범위 7–365일.",
+        "retentionInvalid": "보존 일수는 7–365 사이여야 합니다",
+        "retentionSaved": "보존 일수를 저장했습니다",
+        "filters": {
+          "workspace": "워크스페이스 키",
+          "workspacePlaceholder": "예: novel:12 또는 drama:3, 비우면 전체",
+          "status": "상태",
+          "statusAll": "전체",
+          "statusActive": "진행 중",
+          "statusArchived": "보관됨",
+          "hint": "소프트 삭제된 세션은 목록에 표시되지 않습니다. 세션 상세는 읽기 전용 감사입니다.",
+          "refresh": "새로고침"
+        },
+        "loading": "세션 불러오는 중…",
+        "errorTitle": "세션 불러오기 실패",
+        "retry": "다시 시도",
+        "emptyTitle": "세션이 없습니다",
+        "emptyHint": "소설 또는 에피소드 페이지에서 에이전트 드로어를 열고 질문하면 세션 기록이 여기에 표시됩니다.",
+        "goNovels": "소설 라이브러리로",
+        "checkModels": "모델 설정 확인",
+        "untitled": "제목 없는 세션",
+        "view": "보기",
+        "archive": "보관",
+        "delete": "삭제",
+        "archived": "세션을 보관했습니다",
+        "deleted": "세션을 삭제했습니다",
+        "cancelled": "진행 중인 응답을 취소했습니다",
+        "loadMore": "더 불러오기",
+        "columns": {
+          "thread": "스레드",
+          "preset": "프리셋",
+          "workspace": "범위 / 워크스페이스 키",
+          "messages": "메시지",
+          "proposals": "제안",
+          "status": "상태",
+          "actions": "작업"
+        },
+        "statusLabels": {
+          "active": "진행 중",
+          "archived": "보관됨"
+        },
+        "archiveTitle": "세션 보관",
+        "archiveMessage": "보관하면 세션이 진행 중 목록에서 사라집니다. 처리되지 않은 제안은 만료되지 않습니다.",
+        "deleteTitle": "세션 삭제",
+        "deleteMessage": "삭제는 소프트 삭제입니다. 세션과 메시지는 유지되고 처리되지 않은 제안은 만료로 표시되며 이후 목록에 표시되지 않습니다.",
+        "detailTitle": "세션 상세",
+        "detailLoading": "상세 불러오는 중…",
+        "close": "닫기",
+        "messageCount": "메시지 수",
+        "proposalCount": "제안 수",
+        "cancel": "응답 취소",
+        "messagesTitle": "메시지 기록",
+        "loadOlder": "이전 메시지 불러오기",
+        "noMessages": "이 세션에는 메시지가 없습니다",
+        "contentCleared": "내용이 정리되었습니다(보존 기간 초과)",
+        "messageExtras": "도구 호출 {tools}회 · 제안 {suggestions}건",
+        "roles": {
+          "user": "사용자",
+          "assistant": "어시스턴트"
+        },
+        "messageStatus": {
+          "pending": "대기 중",
+          "running": "생성 중",
+          "completed": "완료",
+          "failed": "실패",
+          "cancelled": "취소됨",
+          "interrupted": "중단됨"
+        },
+        "proposalsTitle": "제안 기록",
+        "noProposals": "이 세션에는 제안이 없습니다",
+        "proposalColumns": {
+          "kind": "유형",
+          "target": "대상",
+          "status": "상태",
+          "appliedBy": "적용자",
+          "updatedAt": "시간"
+        },
+        "proposalStatus": {
+          "proposed": "대기",
+          "applied": "적용됨",
+          "rejected": "거부됨",
+          "conflict": "충돌",
+          "expired": "만료됨"
+        },
+        "emptyFilteredTitle": "일치하는 세션이 없습니다",
+        "emptyFilteredHint": "현재 워크스페이스 키 또는 상태 필터와 일치하는 세션이 없습니다. 필터를 지우면 전체 세션이 표시됩니다.",
+        "clearFilters": "필터 지우기"
       },
       "diagnostics": {
         "title": "진단",
         "desc": "모델, 도구, 스트리밍 연결 상태를 확인합니다.",
-        "source": "런타임 상태 및 최근 오류"
+        "source": "런타임 상태 및 최근 오류",
+        "loading": "진단 불러오는 중…",
+        "loadFailed": "진단 불러오기 실패",
+        "retry": "다시 시도",
+        "routeTitle": "페이지 라우트 해석",
+        "routePlaceholder": "/drama/1/episode/1?panel=dubbing&step=3",
+        "routeHint": "프런트엔드 페이지 경로를 입력하면 서버가 페이지와 동일한 어댑터 규칙으로 해석을 시뮬레이션합니다. 페이지를 열지는 않습니다.",
+        "simulate": "라우트 해석",
+        "matched": "일치",
+        "unmatched": "불일치",
+        "unmatchedHint": "이 라우트에는 페이지 바인딩이나 어댑터가 없습니다. '페이지 바인딩' 하위 구역을 확인하거나 구체적인 에피소드 라우트로 바꾸세요.",
+        "adapter": "어댑터",
+        "scope": "범위",
+        "bindingStage": "페이지 단계",
+        "visible": "진입점 표시",
+        "yes": "예",
+        "no": "아니오",
+        "defaultPreset": "기본 프리셋",
+        "allowedTools": "허용 도구",
+        "modelsTitle": "모델 가용성",
+        "modelsAvailable": "사용 가능",
+        "modelsUnavailable": "사용 불가",
+        "activeConfig": "현재 텍스트 모델",
+        "modelConfigMissing": "활성화된 텍스트 모델 구성을 찾을 수 없습니다. 'AI 구성' 페이지에서 텍스트 모델을 활성화하세요.",
+        "presetModels": "프리셋 모델(비우면 기본값 사용)",
+        "modelFallback": "기본",
+        "goAiConfig": "AI 구성으로",
+        "toolsTitle": "도구 목록",
+        "errorsTitle": "최근 오류",
+        "noErrors": "최근 오류가 없습니다",
+        "trialTitle": "읽기 전용 도구 시험 실행",
+        "trialHint": "서버에 등록된 읽기 전용 도구만 실행합니다. 쓰기 도구, 알 수 없는 도구, 범위를 벗어난 스코프는 거부되며 시험 실행은 DB에 쓰지 않습니다.",
+        "scopeSelect": "범위",
+        "toolSelect": "도구",
+        "toolPlaceholder": "읽기 전용 도구 선택",
+        "novel": "소설",
+        "novelPlaceholder": "소설 선택",
+        "drama": "프로젝트",
+        "dramaPlaceholder": "프로젝트 선택",
+        "episode": "에피소드",
+        "episodePlaceholder": "에피소드 선택",
+        "editProject": "편집 프로젝트 ID",
+        "args": "매개변수 JSON",
+        "argsHint": "매개변수는 JSON 객체로 입력하세요. 프로젝트/에피소드와 소설 번호는 위 선택에서 범위로 자동 입력됩니다.",
+        "argsInvalid": "매개변수는 JSON 객체여야 합니다",
+        "run": "시험 실행",
+        "result": "시험 결과",
+        "truncated": "잘림",
+        "emptyResult": "도구를 선택하고 시험 실행하면 결과가 여기에 표시됩니다."
       }
     },
     "skills": {
@@ -1241,6 +1381,56 @@
       "analyzing": "분석 중…",
       "done": "스타일 {name} 생성 완료",
       "failed": "스타일 분석 실패"
+    },
+    "ui": {
+      "title": "인터페이스",
+      "desc": "이 기기의 표시 밀도, 모션, 읽기 레이아웃을 설정합니다. 설정은 이 기기에만 저장되며 프로젝트 데이터는 변경하지 않습니다.",
+      "appearance": "모양",
+      "appearanceSub": "밀도와 모션은 이 기기의 표시에만 영향을 줍니다",
+      "densityLabel": "표시 밀도",
+      "densityNote": "편안함은 목록·양식·카드의 행 높이를 늘리며 타임라인은 촘촘하게 유지합니다",
+      "density": {
+        "compact": "촘촘하게",
+        "comfortable": "편안하게"
+      },
+      "motionLabel": "모션",
+      "motionNote": "시스템을 따르면 운영체제의 동작 줄이기 설정을 존중합니다",
+      "motion": {
+        "system": "시스템 따름",
+        "full": "전체",
+        "reduced": "줄이기"
+      },
+      "reading": "읽기",
+      "readingSub": "소설 읽기 보기의 글꼴, 크기, 줄 너비",
+      "readingFontLabel": "읽기 글꼴",
+      "readingFontNote": "긴 글에는 세리프가 적합하며 글리프가 없으면 자동으로 대체됩니다",
+      "font": {
+        "serif": "세리프",
+        "sans": "산세리프"
+      },
+      "readingSizeLabel": "읽기 크기",
+      "readingSizeNote": "읽기 보기에만 적용되며 편집기 크기는 바뀌지 않습니다",
+      "readingWidthLabel": "읽기 줄 너비",
+      "readingWidthNote": "본문의 최대 줄 너비를 설정하며 좁은 화면에서는 자동으로 줄어듭니다",
+      "width": {
+        "60": "좁게",
+        "68": "표준",
+        "76": "넓게"
+      },
+      "action": "작업",
+      "actionSub": "주요 작업에 텍스트 라벨을 표시할지 여부",
+      "actionLabelsLabel": "주요 작업에 텍스트 표시",
+      "actionLabelsNote": "끄면 빈도가 낮은 작업은 아이콘만 표시되지만 툴팁은 유지됩니다",
+      "actionLabels": {
+        "on": "표시",
+        "off": "아이콘만"
+      },
+      "reset": "기본값 복원",
+      "resetHint": "이 기기의 설정을 지우고 배포 기본값으로 돌아갑니다",
+      "lockedTitle": "배포 기본값 사용 중",
+      "lockedNote": "관리자가 사용자 재정의를 비활성화했습니다. 표시 및 읽기 설정은 배포 기본값을 따릅니다. 기기 설정은 유지되며 다시 활성화하면 복원됩니다.",
+      "loadFailed": "배포 기본값을 불러오지 못했습니다. 캐시 또는 내장 기본값을 사용합니다.",
+      "retry": "다시 시도"
     }
   },
   "episode": {
@@ -1414,6 +1604,8 @@
       "saved": "변경 사항이 저장되었습니다",
       "saveFailed": "저장에 실패했습니다",
       "saveChanges": "변경 사항 저장",
+      "savingChanges": "변경 사항 저장 중",
+      "uploadingImage": "업로드 중…",
       "unnamedChar": "이름 없는 캐릭터",
       "unnamedProp": "이름 없는 소품",
       "unnamedScene": "이름 없는 장면",
@@ -1448,7 +1640,9 @@
       "appearanceOnlyPlaceholder": "물품의 외형만 기술(다른 요소는 불필요)",
       "locationRequired": "장면 장소를 입력하세요",
       "nameRequired": "이름을 입력하세요",
-      "created": "{type}이(가) 추가되었습니다"
+      "created": "{type}이(가) 추가되었습니다",
+      "submit": "{type} 추가",
+      "saving": "저장 중…"
     },
     "delete": {
       "title": "{type} 삭제",
@@ -1735,6 +1929,7 @@
         "deleted": "전환 클립을 삭제했습니다",
         "deleteFailed": "전환 클립 삭제에 실패했습니다",
         "processingHint": "생성 중이라 삭제할 수 없습니다",
+        "busyHint": "처리 중입니다. 잠시 후 다시 시도하세요.",
         "loadFailed": "전환 상태를 불러오지 못했습니다",
         "actionFailed": "전환 작업에 실패했습니다",
         "partialFailed": "{n}개 트랜지션 제출 실패: {message}",
@@ -2361,6 +2556,10 @@
     "kindMotion": "이미지 애니",
     "current": "사용 중",
     "withSubtitle": "자막 포함",
+    "statusRendering": "생성 중",
+    "statusFailed": "실패",
+    "statusCanceled": "취소됨",
+    "statusQueued": "대기 중",
     "play": "재생",
     "download": "다운로드",
     "setCurrent": "이 버전 사용",
@@ -2791,7 +2990,9 @@
         "mapTitle": "세계 지도",
         "refinalize": "타임라인 재시도",
         "timelineFailed": "타임라인 업데이트에 실패했습니다. 확정을 다시 시도하거나 수동으로 편집하세요."
-      }
+      },
+      "focusReading": "집중 읽기",
+      "exitFocusReading": "집중 읽기 종료"
     },
     "compass": {
       "title": "영감 나침반",
@@ -3885,6 +4086,9 @@
     "exportWarnOverlay": "오버레이 트랙(PIP/텍스트)은 무시됩니다",
     "exportWarnSpeed": "0.5–2× 범위를 벗어난 속도는 지원 범위로 조정됩니다",
     "exportAck": "내용을 이해했으며 내보내기에 동의합니다",
+    "exportDisabledReadonly": "읽기 전용 보기에서는 내보낼 수 없습니다",
+    "exportDisabledBlocked": "위의 차단 항목을 먼저 해결하세요",
+    "exportDisabledAck": "내보내기 경고를 먼저 확인하세요",
     "exportBlocked": {
       "title": "다음 항목은 아직 내보낼 수 없습니다",
       "overlay": "오버레이(화면 속 화면/텍스트)는 아직 지원되지 않습니다. 먼저 제거하거나 숨기세요",

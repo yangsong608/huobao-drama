@@ -37,14 +37,16 @@ test('顶栏布局切换持久化并立即生效', () => {
   assert.match(source, /if \(next === 'split'\) await loadWorkbench\(\)/)
 })
 
-test('三栏宽度与断点符合计划：240 可拖 200–320、右栏 320 可收 40、960/720', () => {
+test('三栏宽度与断点符合计划：240 可拖 200–320、右栏 320 可收 40、1180/860 抽屉', () => {
   const source = read('app/components/novel/workspace/NovelWorkbenchShell.vue')
   assert.match(source, /const railWidth = ref\(240\)/)
   assert.match(source, /Math\.max\(200, Math\.min\(320,/)
+  assert.match(source, /var\(--rail-w, 240px\)/)
   assert.match(source, /var\(--inspector-w, 320px\)/)
   assert.match(source, /minmax\(0, 1fr\) 40px/)
-  assert.match(source, /@media \(max-width: 960px\)/)
-  assert.match(source, /@media \(max-width: 720px\)/)
+  assert.match(source, /@media \(max-width: 1180px\)/)
+  assert.match(source, /@media \(max-width: 860px\)/)
   assert.match(source, /grid-template-columns: minmax\(0, 1fr\)/)
   assert.match(source, /transform: translateX\(100%\)/)
+  assert.match(source, /\.novel-workbench\.focus-reading/)
 })

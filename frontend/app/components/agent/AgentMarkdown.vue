@@ -38,8 +38,8 @@ const blocks = computed(() => parseAgentMarkdown(props.content))
 
 <style scoped>
 .agent-md {
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
   color: var(--text-1);
   overflow-wrap: anywhere;
 }

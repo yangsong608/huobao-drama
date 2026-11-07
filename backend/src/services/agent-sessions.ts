@@ -2,9 +2,10 @@
  * 智能体会话与消息服务
  * 只读写 agent_sessions / agent_messages（软删会话时同步处理 agent_proposals 过期），不写业务表。
  */
-import { and, asc, desc, eq, isNull, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
+import { getAgentSettings } from './app-settings.js'
 import { expireProposalsForMessage, expireProposalsForSession } from './agent-proposals.js'
 
 export class AgentSessionError extends Error {
@@ -146,6 +147,15 @@ export function createSession(input: { workspaceKey: string; preset?: string; ti
   })
 }
 
+function parseScopeJson(raw: string | null): unknown {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
 export function listSessions(options: { workspaceKey?: string; status?: 'active' | 'archived' | 'all'; limit?: number; offset?: number } = {}) {
   const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 20)))
   const offset = Math.max(0, Math.floor(options.offset ?? 0))
@@ -159,7 +169,50 @@ export function listSessions(options: { workspaceKey?: string; status?: 'active'
     .limit(limit + 1)
     .offset(offset)
     .all()
-  return { items: rows.slice(0, limit), has_more: rows.length > limit }
+  const items = rows.slice(0, limit)
+  const ids = items.map(row => row.id)
+  const messageCounts = new Map<number, number>()
+  const proposalCounts = new Map<number, number>()
+  const latestScopes = new Map<number, unknown>()
+  if (ids.length) {
+    for (const row of db.select({ sessionId: schema.agentMessages.sessionId, value: sql<number>`count(*)` })
+      .from(schema.agentMessages)
+      .where(inArray(schema.agentMessages.sessionId, ids))
+      .groupBy(schema.agentMessages.sessionId)
+      .all()) {
+      messageCounts.set(row.sessionId, Number(row.value) || 0)
+    }
+    for (const row of db.select({ sessionId: schema.agentProposals.sessionId, value: sql<number>`count(*)` })
+      .from(schema.agentProposals)
+      .where(inArray(schema.agentProposals.sessionId, ids))
+      .groupBy(schema.agentProposals.sessionId)
+      .all()) {
+      proposalCounts.set(row.sessionId, Number(row.value) || 0)
+    }
+    for (const row of db.select({
+      sessionId: schema.agentMessages.sessionId,
+      scopeJson: schema.agentMessages.scopeJson,
+      value: sql<number>`max(${schema.agentMessages.id})`,
+    })
+      .from(schema.agentMessages)
+      .where(and(
+        inArray(schema.agentMessages.sessionId, ids),
+        isNotNull(schema.agentMessages.scopeJson),
+      ))
+      .groupBy(schema.agentMessages.sessionId)
+      .all()) {
+      latestScopes.set(row.sessionId, parseScopeJson(row.scopeJson))
+    }
+  }
+  return {
+    items: items.map(row => ({
+      ...row,
+      messageCount: messageCounts.get(row.id) ?? 0,
+      proposalCount: proposalCounts.get(row.id) ?? 0,
+      scope: latestScopes.get(row.id) ?? null,
+    })),
+    has_more: rows.length > limit,
+  }
 }
 
 export function getSessionById(sessionId: number): AgentSessionRow {
@@ -432,8 +485,7 @@ export function getRunningAssistantMessage(sessionId: number): AgentMessageRow |
 }
 
 /** 启动恢复：残留 running 助手消息置 interrupted，本轮提案过期、建议清空 */
-export function recoverInterruptedMessages(): number {
-  const ts = now()
+export function recoverInterruptedMessages(): number {  const ts = now()
   const rows = db.select().from(schema.agentMessages)
     .where(and(eq(schema.agentMessages.role, 'assistant'), eq(schema.agentMessages.status, 'running')))
     .all()
@@ -462,4 +514,93 @@ export function listMessages(sessionId: number, options: { beforeId?: number; li
     .all()
   const hasMore = rows.length > limit
   return { items: rows.slice(0, limit).reverse(), has_more: hasMore }
+}
+
+/**
+ * 保留清理（A4-2）：只处理归档/软删除且最后消息早于保留期的会话。
+ * 只清消息内容字段，保留会话壳、消息行与提案审计；不修改状态与时间。
+ */
+export function cleanupExpiredAgentSessions(options: {
+  retentionDays?: number
+  now?: Date
+  batchSize?: number
+} = {}): { sessions: number; messages: number } {
+  const retentionDays = Math.max(7, Math.min(365, Math.floor(
+    options.retentionDays ?? getAgentSettings().session.retentionDays,
+  )))
+  const reference = options.now ?? new Date()
+  const cutoff = new Date(reference.getTime() - retentionDays * 24 * 60 * 60 * 1000).toISOString()
+  const batchSize = Math.max(1, Math.min(200, Math.floor(options.batchSize ?? 50)))
+  const expiredAt = sql`coalesce(${schema.agentSessions.lastMessageAt}, ${schema.agentSessions.createdAt})`
+  const hasContent = or(
+    isNotNull(schema.agentMessages.content),
+    isNotNull(schema.agentMessages.toolCallsJson),
+    isNotNull(schema.agentMessages.toolResultsJson),
+    isNotNull(schema.agentMessages.suggestionsJson),
+  )
+
+  let sessions = 0
+  let messages = 0
+  for (let round = 0; round < 50; round += 1) {
+    const candidates = db.select({ sessionId: schema.agentMessages.sessionId })
+      .from(schema.agentMessages)
+      .innerJoin(schema.agentSessions, eq(schema.agentMessages.sessionId, schema.agentSessions.id))
+      .where(and(
+        or(eq(schema.agentSessions.status, 'archived'), isNotNull(schema.agentSessions.deletedAt)),
+        lt(expiredAt, cutoff),
+        hasContent,
+      ))
+      .groupBy(schema.agentMessages.sessionId)
+      .limit(batchSize)
+      .all()
+    if (!candidates.length) break
+
+    for (const candidate of candidates) {
+      try {
+        const changed = db.transaction((tx) => tx.update(schema.agentMessages)
+          .set({
+            content: null,
+            toolCallsJson: null,
+            toolResultsJson: null,
+            suggestionsJson: null,
+          })
+          .where(and(
+            eq(schema.agentMessages.sessionId, candidate.sessionId),
+            or(
+              isNotNull(schema.agentMessages.content),
+              isNotNull(schema.agentMessages.toolCallsJson),
+              isNotNull(schema.agentMessages.toolResultsJson),
+              isNotNull(schema.agentMessages.suggestionsJson),
+            ),
+          ))
+          .run().changes)
+        sessions += 1
+        messages += Number(changed) || 0
+      } catch (error) {
+        console.error(
+          '[agent-retention] cleanup failed:',
+          error instanceof Error ? error.message : error,
+        )
+      }
+    }
+  }
+  return { sessions, messages }
+}
+
+/** 启动后调度保留清理：不阻塞启动；每日重复一次，失败只记录日志 */
+export function scheduleAgentRetentionCleanup(delayMs = 10_000): void {
+  const run = () => {
+    try {
+      const result = cleanupExpiredAgentSessions()
+      if (result.sessions || result.messages) {
+        console.log(`[agent-retention] cleaned ${result.sessions} sessions / ${result.messages} messages`)
+      }
+    } catch (error) {
+      console.error('[agent-retention] cleanup failed:', error instanceof Error ? error.message : error)
+    }
+  }
+  const initial = setTimeout(run, delayMs)
+  initial.unref?.()
+  const daily = setInterval(run, 24 * 60 * 60 * 1000)
+  daily.unref?.()
 }

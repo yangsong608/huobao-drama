@@ -3,10 +3,11 @@
     <template v-if="visible">
       <button
         v-if="showFloatingEntry && !open"
+        ref="triggerEl"
         type="button"
         class="agent-dock-trigger"
         :aria-label="t('assistant.title')"
-        @click="openAgentDock()"
+        @click="openDockFromTrigger"
       >
         <Sparkles :size="16" />
         <span>{{ t('assistant.trigger') }}</span>
@@ -14,6 +15,7 @@
 
       <aside
         v-if="open"
+        ref="dockEl"
         class="agent-dock"
         :class="{ resizing }"
         :style="{ width: `${dockWidth}px` }"
@@ -520,7 +522,16 @@ const historyOpen = ref(false)
 const resizing = ref(false)
 const listEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
+const triggerEl = ref<HTMLButtonElement | null>(null)
+const dockEl = ref<HTMLElement | null>(null)
 let stickToBottom = true
+let restoreFocusEl: HTMLElement | null = null
+let focusOnOpen = false
+
+function openDockFromTrigger(): void {
+  focusOnOpen = true
+  openAgentDock()
+}
 
 onMounted(() => {
   void loadAgentSettings()
@@ -541,10 +552,24 @@ watch(
 )
 
 watch(open, async (isOpen) => {
-  if (!isOpen) return
+  if (!isOpen) {
+    const active = document.activeElement
+    const focusWasInside = active === document.body || Boolean(dockEl.value?.contains(active))
+    await nextTick()
+    if (!focusWasInside) return
+    if (restoreFocusEl?.isConnected) restoreFocusEl.focus()
+    else triggerEl.value?.focus()
+    restoreFocusEl = null
+    return
+  }
+  restoreFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null
   stickToBottom = true
   await nextTick()
   scrollToBottom(true)
+  if (focusOnOpen) {
+    inputEl.value?.focus()
+    focusOnOpen = false
+  }
 })
 
 watch(
@@ -684,7 +709,7 @@ function beginResize(event: PointerEvent): void {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 900;
+  z-index: 80;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -693,10 +718,10 @@ function beginResize(event: PointerEvent): void {
   border-radius: var(--radius-pill, 999px);
   background: var(--surface-raised);
   color: var(--text-0);
-  font: 600 12.5px var(--font-body);
+  font: 600 var(--text-label) var(--font-body);
   box-shadow: var(--shadow-elevated);
   cursor: pointer;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  transition: transform var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out);
 }
 .agent-dock-trigger:hover {
   transform: translateY(-1px);
@@ -708,8 +733,8 @@ function beginResize(event: PointerEvent): void {
   position: fixed;
   top: 72px;
   right: 16px;
-  bottom: 16px;
-  z-index: 910;
+  bottom: 24px;
+  z-index: 90;
   min-width: 360px;
   max-width: 520px;
   display: flex;
@@ -816,7 +841,7 @@ function beginResize(event: PointerEvent): void {
 .agent-history-item:hover { background: var(--surface-hover, rgba(127, 127, 127, 0.08)); }
 .agent-history-item.active { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .agent-history-item-title {
-  font-size: 12.5px;
+  font-size: var(--text-label);
   font-weight: 600;
   color: var(--text-0);
   white-space: nowrap;
@@ -837,7 +862,7 @@ function beginResize(event: PointerEvent): void {
   background: var(--bg-sunken, var(--bg-base));
 }
 .agent-scope-kind { font-weight: 600; color: var(--text-1); }
-.agent-scope-key { font-size: 10.5px; padding: 1px 5px; border-radius: 4px; background: var(--surface-raised); }
+.agent-scope-key { font-size: 11px; padding: 1px 5px; border-radius: 4px; background: var(--surface-raised); }
 .agent-scope-auto { margin-left: auto; }
 .agent-scope-select {
   margin-left: auto;
@@ -910,9 +935,9 @@ function beginResize(event: PointerEvent): void {
 .agent-quick-prompt:hover { border-color: var(--accent); color: var(--text-0); }
 
 .agent-message { display: flex; flex-direction: column; gap: 4px; }
-.agent-message-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); }
+.agent-message-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); }
 .agent-message-author { font-weight: 600; color: var(--text-2); }
-.agent-message-model { margin-left: auto; font-size: 10px; }
+.agent-message-model { margin-left: auto; font-size: 11px; }
 .agent-user-bubble {
   align-self: flex-end;
   max-width: 88%;
@@ -920,7 +945,7 @@ function beginResize(event: PointerEvent): void {
   border-radius: 12px 12px 4px 12px;
   background: var(--accent-gradient);
   color: var(--on-accent);
-  font-size: 12.5px;
+  font-size: var(--text-label);
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -958,8 +983,8 @@ function beginResize(event: PointerEvent): void {
   padding: 5px 7px;
   border-radius: 6px;
   background: var(--surface-raised);
-  color: var(--text-3);
-  font-size: 10.5px;
+  color: var(--text-2);
+  font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -972,7 +997,7 @@ function beginResize(event: PointerEvent): void {
   border-radius: 6px;
   background: var(--surface-raised);
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -997,11 +1022,11 @@ function beginResize(event: PointerEvent): void {
 .agent-input {
   width: 100%;
   resize: none;
-  font-size: 12.5px;
+  font-size: var(--text-label);
   line-height: 1.6;
 }
 .agent-foot-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.agent-char-count { font-size: 10.5px; }
+.agent-char-count { font-size: 11px; }
 .agent-foot-row .btn:last-child { margin-left: auto; }
 
 @media (max-width: 640px) {
@@ -1015,4 +1040,6 @@ function beginResize(event: PointerEvent): void {
   }
   .agent-dock-trigger { right: 16px; bottom: 16px; }
 }
+.agent-dock-trigger:focus-visible,
+.agent-dock :is(button, input, textarea, select, summary):focus-visible { outline: none; box-shadow: var(--focus-ring); }
 </style>

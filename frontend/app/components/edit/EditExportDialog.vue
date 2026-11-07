@@ -1,11 +1,23 @@
 <template>
   <Teleport to="body">
-    <div v-if="open" class="ed-export-mask" @click.self="close()">
-      <section class="ed-export" role="dialog" :aria-label="t('edit.exportTitle')">
-        <header>
-          <b>{{ t('edit.exportTitle') }}</b>
-          <button type="button" class="ed-close" @click="close()">×</button>
+    <div v-if="open" class="overlay" @click.self="close()">
+      <section class="dialog ed-export" role="dialog" aria-modal="true" aria-labelledby="ed-export-title">
+        <header class="dialog-head">
+          <h2 id="ed-export-title" class="dialog-title">{{ t('edit.exportTitle') }}</h2>
+          <button
+            type="button"
+            class="btn btn-icon btn-sm btn-ghost ml-auto ed-close"
+            :title="t('common.close')"
+            :aria-label="t('common.close')"
+            @click="close()"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         </header>
+
+        <div class="dialog-body ed-export-body">
 
         <section v-if="completed" class="ed-done">
           <b>{{ t('edit.exportDoneTitle') }}</b>
@@ -92,24 +104,6 @@
           <div class="ed-progress-bar"><span :style="{ width: `${progress}%` }"></span></div>
           <p class="ed-progress-phase">{{ progressStage }}</p>
         </section>
-
-        <footer v-if="!reused">
-          <button v-if="busy" type="button" class="ed-secondary" @click="cancelExport">
-            {{ cancelling ? t('edit.exportCancelling') : t('edit.exportCancel') }}
-          </button>
-          <button v-else-if="retryable" type="button" class="ed-start" @click="retryExport">
-            {{ t('edit.exportRetry') }}
-          </button>
-          <button
-            v-else
-            type="button"
-            class="ed-start"
-            :disabled="!canEdit || blocking.length > 0 || !warningsAcked || startBlocked"
-            @click="startExport"
-          >
-            {{ t('edit.exportStart') }}
-          </button>
-        </footer>
         <section v-if="reused" class="ed-reused">
           <b>{{ t('edit.exportReusedTitle') }}</b>
           <p>{{ t('edit.exportReusedHint') }}</p>
@@ -127,6 +121,27 @@
         <p v-if="cancelled" class="ed-cancelled">{{ t('edit.exportCancelled') }}</p>
         <p v-if="error" class="ed-error">{{ error }}</p>
         </template>
+        </div>
+
+        <footer v-if="!completed && !reused" class="dialog-foot ed-export-foot">
+          <p v-if="startDisabledReason && !busy && !retryable" class="ed-disabled-reason">{{ startDisabledReason }}</p>
+          <button v-if="busy" type="button" class="ed-secondary" @click="cancelExport">
+            {{ cancelling ? t('edit.exportCancelling') : t('edit.exportCancel') }}
+          </button>
+          <button v-else-if="retryable" type="button" class="ed-start" @click="retryExport">
+            {{ t('edit.exportRetry') }}
+          </button>
+          <button
+            v-else
+            type="button"
+            class="ed-start"
+            :disabled="!canEdit || blocking.length > 0 || !warningsAcked || startBlocked"
+            :title="startDisabledReason || null"
+            @click="startExport"
+          >
+            {{ t('edit.exportStart') }}
+          </button>
+        </footer>
       </section>
     </div>
   </Teleport>
@@ -283,6 +298,13 @@ const audioHint = computed(() => {
   return t('edit.exportAudioHintAutoSilent')
 })
 const retryable = computed(() => !busy.value && currentExportId.value > 0 && (failed.value || cancelled.value))
+const startDisabledReason = computed(() => {
+  if (!props.canEdit) return t('edit.exportDisabledReadonly')
+  if (blocking.value.length) return t('edit.exportDisabledBlocked')
+  if (!warningsAcked.value) return t('edit.exportDisabledAck')
+  if (startBlocked.value) return audioHint.value
+  return ''
+})
 const ACTIVE_STATUSES = ['pending', 'running', 'rendering']
 
 // 打开时按配置初始化：默认预设与字幕模式来自 edit.export.*，不再硬编码
@@ -541,91 +563,100 @@ onBeforeUnmount(stopPolling)
 </script>
 
 <style scoped>
-.ed-export-mask {
-  position: fixed; inset: 0; z-index: 65; display: flex; align-items: center;
-  justify-content: center; padding: 24px; background: rgba(0, 0, 0, .5);
-}
 .ed-export {
-  width: 440px; max-width: 100%; display: flex; flex-direction: column; gap: 12px;
-  padding: 16px; border: 1px solid var(--border); border-radius: 12px;
-  background: var(--bg-1); box-shadow: 0 18px 50px rgba(0, 0, 0, .35);
+  width: min(480px, calc(100vw - 32px));
 }
-.ed-export header { display: flex; align-items: center; justify-content: space-between; }
-.ed-export header b { font-size: 13px; }
-.ed-close {
-  width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent;
-  color: var(--text-2); font-size: 18px; cursor: pointer;
+.ed-export-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.ed-close:disabled { opacity: .4; cursor: not-allowed; }
+.ed-export :is(button, select, input):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.ed-export-foot {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.ed-disabled-reason {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-meta);
+  line-height: 1.4;
+}
 .ed-warn-list,
 .ed-blocked-list {
   display: flex; flex-direction: column; gap: 4px; padding: 9px 11px; border-radius: 9px;
 }
 .ed-warn-list { background: color-mix(in srgb, var(--warning) 10%, var(--bg-1)); }
-.ed-warn-list b { font-size: 11px; color: var(--warning); }
-.ed-warn-list p { margin: 0; font-size: 11px; color: var(--text-2); }
+.ed-warn-list b { font-size: var(--text-label); color: var(--text-0); }
+.ed-warn-list p { margin: 0; font-size: var(--text-meta); color: var(--text-2); }
 .ed-blocked-list {
   background: color-mix(in srgb, var(--action-danger) 10%, var(--bg-1));
   border: 1px solid color-mix(in srgb, var(--action-danger) 35%, transparent);
 }
-.ed-blocked-list b { font-size: 11px; color: var(--action-danger); }
-.ed-blocked-list p { margin: 0; font-size: 11px; color: var(--text-1); }
-.ed-blocked-path { margin-left: 6px; color: var(--text-3); font-size: 10px; }
+.ed-blocked-list b { font-size: var(--text-label); color: var(--action-danger); }
+.ed-blocked-list p { margin: 0; font-size: var(--text-meta); color: var(--text-1); }
+.ed-blocked-path { margin-left: 6px; color: var(--text-2); font-size: var(--text-micro); }
 .ed-blocked-bottom { color: var(--text-2) !important; }
-.ed-ack { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--text-1); cursor: pointer; }
-.ed-row { display: flex; align-items: center; gap: 12px; font-size: 12px; }
+.ed-ack { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: var(--text-meta); color: var(--text-1); cursor: pointer; }
+.ed-row { display: flex; align-items: center; gap: 12px; font-size: var(--text-label); }
 .ed-row > span:first-child { flex: 0 0 88px; color: var(--text-2); }
-.ed-hint { margin: -6px 0 0 100px; color: var(--text-3); font-size: 10px; }
+.ed-hint { margin: -6px 0 0 100px; color: var(--text-2); font-size: var(--text-meta); line-height: 1.45; }
 .ed-audio-hint.is-blocked { color: var(--action-danger); }
 .ed-audio-actual { color: var(--text-2); }
 .ed-source-warnings { margin-top: 2px; }
 .ed-select {
-  flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--border);
-  border-radius: 7px; background: var(--bg-2); color: var(--text-0); font-size: 11px;
+  flex: 1; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--border);
+  border-radius: 7px; background: var(--bg-2); color: var(--text-0); font-size: var(--text-label);
 }
 .ed-radios { display: flex; gap: 14px; flex: 1; }
 .ed-radios label, .ed-row > input[type='checkbox'] { cursor: pointer; }
-.ed-radios { font-size: 11px; color: var(--text-1); }
+.ed-radios { font-size: var(--text-label); color: var(--text-1); }
 .ed-radios input { margin-right: 4px; }
-.ed-export footer { display: flex; justify-content: flex-end; }
 .ed-start {
-  height: 30px; padding: 0 16px; border: 1px solid var(--accent); border-radius: 8px;
-  background: var(--accent-bg); color: var(--accent-text); font-size: 12px; cursor: pointer;
+  height: 36px; padding: 0 18px; border: 1px solid transparent; border-radius: 8px;
+  background: var(--button-bg); color: var(--button-text); font-size: var(--text-body);
+  font-weight: 600; cursor: pointer;
 }
+.ed-start:hover:not(:disabled) { background: var(--button-bg-hover); color: var(--button-text-hover); }
 .ed-start:disabled { opacity: .45; cursor: not-allowed; }
 .ed-secondary {
-  height: 30px; padding: 0 16px; border: 1px solid var(--border); border-radius: 8px;
-  background: var(--bg-2); color: var(--text-1); font-size: 12px; cursor: pointer;
+  height: 36px; padding: 0 16px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-2); color: var(--text-1); font-size: var(--text-body); cursor: pointer;
 }
-.ed-cancelled { margin: 0; font-size: 11px; color: var(--text-2); }
+.ed-secondary:hover { color: var(--text-0); }
+.ed-cancelled { margin: 0; font-size: var(--text-meta); color: var(--text-2); }
 .ed-done {
   display: flex; flex-direction: column; gap: 8px; padding: 14px;
   border-radius: 10px; background: color-mix(in srgb, var(--accent) 10%, var(--bg-1));
 }
-.ed-done > b { font-size: 13px; color: var(--accent-text); }
+.ed-done > b { font-size: var(--text-h2); color: var(--accent-text-strong); }
 .ed-done-name {
-  margin: 0; font-size: 11px; color: var(--text-1);
+  margin: 0; font-size: var(--text-meta); color: var(--text-1);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ed-done-stats { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--text-2); }
+.ed-done-stats { display: flex; flex-wrap: wrap; gap: 10px; font-size: var(--text-meta); color: var(--text-2); }
 .ed-done-warning {
-  margin: 0; padding: 6px 9px; border-radius: 7px; font-size: 11px;
-  background: color-mix(in srgb, var(--warning) 12%, var(--bg-1)); color: var(--warning);
+  margin: 0; padding: 6px 9px; border-radius: 7px; font-size: var(--text-meta);
+  background: color-mix(in srgb, var(--warning) 12%, var(--bg-1)); color: var(--text-0);
 }
 .ed-done-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ed-done-actions button {
-  height: 26px; padding: 0 12px; border: 1px solid var(--border); border-radius: 7px;
-  background: var(--bg-2); color: var(--text-0); font-size: 11px; cursor: pointer;
+  height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--bg-2); color: var(--text-0); font-size: var(--text-meta); cursor: pointer;
 }
 .ed-done-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .ed-estimate {
-  display: flex; gap: 18px; padding-top: 4px; font-size: 11px; color: var(--text-3);
+  display: flex; gap: 18px; padding-top: 4px; font-size: var(--text-meta); color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 .ed-estimate b { margin-left: 5px; color: var(--text-1); font-weight: 600; }
 .ed-running { display: flex; flex-direction: column; gap: 5px; }
 .ed-progress-head {
-  display: flex; justify-content: space-between; font-size: 11px; color: var(--text-2);
+  display: flex; justify-content: space-between; font-size: var(--text-meta); color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 .ed-progress-bar {
@@ -635,22 +666,21 @@ onBeforeUnmount(stopPolling)
   display: block; height: 100%; border-radius: inherit; background: var(--accent);
   transition: width .3s ease;
 }
-.ed-progress-phase { margin: 0; font-size: 10px; color: var(--text-3); }
+.ed-progress-phase { margin: 0; font-size: var(--text-meta); color: var(--text-2); }
 .ed-reused {
   display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 9px;
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-1));
 }
-.ed-reused b { font-size: 12px; color: var(--accent-text); }
-.ed-reused p { margin: 0; font-size: 11px; color: var(--text-2); }
+.ed-reused b { font-size: var(--text-strong); color: var(--accent-text-strong); }
+.ed-reused p { margin: 0; font-size: var(--text-meta); color: var(--text-2); }
 .ed-reused-actions { display: flex; gap: 8px; }
 .ed-reused-actions button {
-  height: 26px; padding: 0 12px; border: 1px solid var(--border); border-radius: 7px;
-  background: var(--bg-2); color: var(--text-0); font-size: 11px; cursor: pointer;
+  height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--bg-2); color: var(--text-0); font-size: var(--text-meta); cursor: pointer;
 }
 .ed-reused-actions button:disabled { opacity: .45; cursor: not-allowed; }
-.ed-progress { margin: 0; font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .ed-error {
-  margin: 0; padding: 6px 9px; border-radius: 7px; font-size: 11px;
+  margin: 0; padding: 6px 9px; border-radius: 7px; font-size: var(--text-meta);
   background: color-mix(in srgb, var(--action-danger) 10%, var(--bg-1)); color: var(--action-danger);
 }
 </style>

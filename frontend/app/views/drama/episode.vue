@@ -1,25 +1,27 @@
 <template>
   <div class="studio" v-if="drama">
-    <header class="studio-topbar">
-      <div class="studio-topbar-main">
-        <button class="back-btn topbar-back" @click="navigateTo(`/drama/${dramaId}`)">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
-          </svg>
-          {{ t('episode.topbar.back') }}
-        </button>
-        <div class="studio-identity">
-          <h1 class="studio-title">{{ drama.title }}</h1>
-          <span class="studio-episode-chip">{{ t('episode.topbar.episodeN', { n: episodeNumber }) }}</span>
-          <div class="studio-meta-row">
-            <span class="studio-meta-pill">{{ currentSubStageLabel }}</span>
-            <span class="studio-meta-pill is-progress">{{ pipelineProgress }}/{{ pipelineTotal }}</span>
-            <span class="studio-meta-inline">{{ t('episode.topbar.meta', { roles: chars.length, shots: sbs.length }) }}</span>
+    <StudioTopBar class="episode-topbar">
+      <template #left>
+        <div class="studio-topbar-main">
+          <button type="button" class="back-btn topbar-back" :aria-label="t('episode.topbar.back')" @click="navigateTo(`/drama/${dramaId}`)">
+            <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
+            {{ t('episode.topbar.back') }}
+          </button>
+          <div class="studio-identity">
+            <h1 class="studio-title" :title="drama.title">{{ drama.title }}</h1>
+            <span class="studio-episode-chip">{{ t('episode.topbar.episodeN', { n: episodeNumber }) }}</span>
+            <div class="studio-meta-row">
+              <span class="studio-meta-pill">{{ currentSubStageLabel }}</span>
+              <span class="studio-meta-pill is-progress">{{ pipelineProgress }}/{{ pipelineTotal }}</span>
+              <span class="studio-meta-inline">{{ t('episode.topbar.meta', { roles: chars.length, shots: sbs.length }) }}</span>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
 
-      <div class="studio-topbar-side">
+      <template #center>
         <div class="studio-model-picks">
           <ModelSelect
             v-if="textModelOptions.length"
@@ -60,35 +62,38 @@
             hide-default
           />
         </div>
+      </template>
+
+      <template #right>
         <div class="studio-actions">
           <LocaleSwitcher />
-          <button class="btn btn-icon tour-help-btn" :title="t('tour.helpTitle')" @click="startTour('episode', EPISODE_TOUR, t)">
-            <CircleHelp :size="14" :stroke-width="1.8" />
+          <button type="button" class="btn btn-icon tour-help-btn" :title="t('tour.helpTitle')" :aria-label="t('tour.helpTitle')" @click="startTour('episode', EPISODE_TOUR, t)">
+            <CircleHelp :size="14" :stroke-width="1.8" aria-hidden="true" />
           </button>
-          <button v-if="dubbingEnabled" class="btn" @click="openDubbingStage">
-            <Mic :size="12" />
+          <button v-if="dubbingEnabled" type="button" class="btn" @click="openDubbingStage">
+            <Mic :size="12" aria-hidden="true" />
             {{ t('workbench.title') }}
           </button>
-          <button v-if="hasEditEntry" class="btn" @click="openEditWorkspace">
-            <Scissors :size="12" />
+          <button v-if="hasEditEntry" type="button" class="btn" @click="openEditWorkspace">
+            <Scissors :size="12" aria-hidden="true" />
             {{ t('edit.entry') }}
           </button>
-          <button class="btn" @click="deliveryOpen = true">
-            <Download :size="12" />
+          <button type="button" class="btn" @click="deliveryOpen = true">
+            <Download :size="12" aria-hidden="true" />
             {{ t('delivery.entry') }}
           </button>
-          <button class="btn" @click="refresh">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          <button type="button" class="btn" @click="refresh">
+            <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             {{ t('common.refresh') }}
           </button>
-          <button class="btn task-drawer-trigger" @click="openTaskDrawer">
-            <ListTodo :size="12" />
+          <button type="button" class="btn task-drawer-trigger" @click="openTaskDrawer">
+            <ListTodo :size="12" aria-hidden="true" />
             {{ t('episode.topbar.tasks') }}
             <span v-if="genTaskActiveCount" class="task-drawer-badge">{{ genTaskActiveCount }}</span>
           </button>
         </div>
-      </div>
-    </header>
+      </template>
+    </StudioTopBar>
 
     <div class="studio-body">
     <!-- ========== LEFT SIDEBAR ========== -->
@@ -1280,7 +1285,7 @@
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 {{ t('common.refresh') }}
               </button>
-              <button class="btn btn-ghost btn-icon" @click="closeTaskDrawer"><X :size="14" /></button>
+              <button class="btn btn-ghost btn-icon" :title="t('common.close')" :aria-label="t('common.close')" @click="closeTaskDrawer"><X :size="14" /></button>
             </div>
           </header>
           <div class="video-task-metrics task-drawer-metrics">
@@ -1360,19 +1365,25 @@
           class="dialog asset-detail-dialog"
           role="dialog"
           aria-modal="true"
-          :aria-label="t('episode.asset.detailTitle', { type: assetTypeLabel(assetDetail.type) })"
+          aria-labelledby="asset-detail-title"
         >
           <header class="dialog-head asset-detail-head">
             <div class="asset-detail-title-block">
               <span class="asset-detail-kicker">{{ assetTypeLabel(assetDetail.type) }}</span>
-              <h2 class="asset-detail-title">{{ assetDetailTitle(assetDetail.type, assetDetailItem) }}</h2>
+              <h2 id="asset-detail-title" class="asset-detail-title">{{ assetDetailTitle(assetDetail.type, assetDetailItem) }}</h2>
             </div>
             <div class="asset-detail-head-actions">
               <span class="tag" v-if="assetDetail.type === 'character'">{{ assetDetailItem.role || t('common.role') }}</span>
               <span class="tag" v-else-if="assetDetail.type === 'prop'">{{ assetDetailItem.type || t('common.prop') }}</span>
               <span class="tag" v-else>{{ assetDetailItem.time || t('episode.asset.noTime') }}</span>
-              <button class="btn btn-ghost btn-icon" @click="closeAssetDetail">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              <button
+                type="button"
+                class="btn btn-ghost btn-icon"
+                :title="t('common.close')"
+                :aria-label="t('common.close')"
+                @click="closeAssetDetail"
+              >
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>
           </header>
@@ -1391,6 +1402,7 @@
                   type="button"
                   class="asset-detail-media-frame"
                   :disabled="!assetImageSrc(assetDetailItem)"
+                  :aria-label="t('episode.asset.visualPreview')"
                   @click.stop="openImageViewer(assetImageSrc(assetDetailItem), assetDetailImageTitle(assetDetail.type, assetDetailItem))"
                 >
                   <img
@@ -1435,9 +1447,10 @@
                         type="button"
                         class="asset-ref-remove"
                         :title="t('common.delete')"
+                        :aria-label="t('common.delete')"
                         @click.stop="removeAssetReference(assetDetail.type, assetDetailItem, index)"
                       >
-                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        <svg aria-hidden="true" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                       </button>
                     </div>
                     <button
@@ -1446,6 +1459,7 @@
                       class="asset-ref-add"
                       :disabled="isUploadingAssetRef(assetDetail.type, assetDetailItem.id)"
                       :title="t('episode.asset.refAdd')"
+                      :aria-label="t('episode.asset.refAdd')"
                       @click.stop="addAssetReferences(assetDetail.type, assetDetailItem)"
                     >
                       <span v-if="isUploadingAssetRef(assetDetail.type, assetDetailItem.id)" class="asset-ref-spinner" />
@@ -1584,46 +1598,60 @@
 
           <footer class="dialog-foot asset-detail-foot">
             <div class="asset-detail-secondary-actions">
-              <button class="btn btn-danger" @click="askDeleteAsset(assetDetail.type, assetDetailItem)">{{ t('common.delete') }}</button>
-              <button class="btn" @click="closeAssetDetail">{{ t('common.close') }}</button>
+              <button type="button" class="btn btn-danger" @click="askDeleteAsset(assetDetail.type, assetDetailItem)">{{ t('common.delete') }}</button>
+              <button type="button" class="btn" @click="closeAssetDetail">{{ t('common.close') }}</button>
             </div>
             <div class="asset-detail-primary-actions">
               <button
+                type="button"
                 class="btn"
                 :disabled="isUploadingAsset(assetDetail.type, assetDetailItem.id)"
+                :title="isUploadingAsset(assetDetail.type, assetDetailItem.id) ? t('episode.asset.uploadingImage') : null"
                 @click="uploadAssetImage(assetDetail.type, assetDetailItem.id)"
               >
                 <Loader2 v-if="isUploadingAsset(assetDetail.type, assetDetailItem.id)" :size="11" class="animate-spin" />
-                <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                {{ t('episode.asset.uploadImage') }}
+                <svg v-else aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                {{ isUploadingAsset(assetDetail.type, assetDetailItem.id) ? t('episode.asset.uploadingImage') : t('episode.asset.uploadImage') }}
               </button>
               <button
                 v-if="assetDetail.type === 'character'"
+                type="button"
                 class="btn"
                 :disabled="isPendingCharImage(assetDetailItem.id)"
+                :title="isPendingCharImage(assetDetailItem.id) ? t('episode.asset.generating') : null"
                 @click="genCharImg(assetDetailItem.id)"
               >
                 {{ assetImageSrc(assetDetailItem) ? t('episode.asset.regenPortrait') : (isPendingCharImage(assetDetailItem.id) ? t('episode.asset.generating') : t('episode.asset.genPortrait')) }}
               </button>
               <button
                 v-else-if="assetDetail.type === 'scene'"
+                type="button"
                 class="btn"
                 :disabled="isPendingSceneImage(assetDetailItem.id)"
+                :title="isPendingSceneImage(assetDetailItem.id) ? t('episode.asset.generating') : null"
                 @click="genSceneImg(assetDetailItem.id)"
               >
                 {{ assetImageSrc(assetDetailItem) ? t('episode.asset.regenScene') : (isPendingSceneImage(assetDetailItem.id) ? t('episode.asset.generating') : t('episode.asset.genScene')) }}
               </button>
               <button
                 v-else-if="assetDetail.type === 'prop'"
+                type="button"
                 class="btn"
                 :disabled="isPendingPropImage(assetDetailItem.id)"
+                :title="isPendingPropImage(assetDetailItem.id) ? t('episode.asset.generating') : null"
                 @click="genPropImg(assetDetailItem.id)"
               >
                 {{ assetImageSrc(assetDetailItem) ? t('episode.asset.regenProp') : (isPendingPropImage(assetDetailItem.id) ? t('episode.asset.generating') : t('episode.asset.genProp')) }}
               </button>
-              <button class="btn btn-primary" :disabled="savingAssetDetail" @click="saveAssetDetail">
+              <button
+                type="button"
+                class="btn btn-primary"
+                :disabled="savingAssetDetail"
+                :title="savingAssetDetail ? t('episode.asset.savingChanges') : null"
+                @click="saveAssetDetail"
+              >
                 <Loader2 v-if="savingAssetDetail" :size="12" class="animate-spin" />
-                {{ t('episode.asset.saveChanges') }}
+                {{ savingAssetDetail ? t('episode.asset.savingChanges') : t('episode.asset.saveChanges') }}
               </button>
             </div>
           </footer>
@@ -1634,7 +1662,7 @@
         <div class="dialog image-viewer-dialog">
           <div class="image-viewer-head">
             <div class="image-viewer-title">{{ imageViewer.title || t('episode.viewer.imagePreview') }}</div>
-            <button class="btn btn-ghost btn-icon" @click="closeImageViewer">
+            <button class="btn btn-ghost btn-icon" :title="t('common.close')" :aria-label="t('common.close')" @click="closeImageViewer">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
@@ -1653,7 +1681,7 @@
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               {{ t('common.download') }}
             </a>
-            <button class="btn btn-ghost btn-icon" @click="previewShot = null">
+            <button class="btn btn-ghost btn-icon" :title="t('common.close')" :aria-label="t('common.close')" @click="previewShot = null">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
@@ -1671,18 +1699,30 @@
       </div>
 
       <div v-if="transitionDetailBoundary" class="overlay" @click.self="closeTransitionDetail">
-        <div class="dialog transition-detail-dialog">
+        <div
+          class="dialog transition-detail-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="transition-detail-title"
+        >
           <header class="dialog-head">
-            <div class="image-viewer-title">{{ t('episode.export.aiTransition.detailTitle') }}</div>
+            <div id="transition-detail-title" class="image-viewer-title">{{ t('episode.export.aiTransition.detailTitle') }}</div>
             <span :class="['ai-transition-status', transitionStatusClass(transitionDetailBoundary)]">
               {{ transitionStatusLabel(transitionDetailBoundary) }}
             </span>
-            <span class="dim" style="font-size:11px">{{ transitionPairLabel(transitionDetailBoundary) }}</span>
-            <span v-if="transitionDurationLabel(transitionDetailBoundary)" class="dim" style="font-size:11px">
+            <span class="dim transition-detail-meta">{{ transitionPairLabel(transitionDetailBoundary) }}</span>
+            <span v-if="transitionDurationLabel(transitionDetailBoundary)" class="dim transition-detail-meta">
               {{ transitionDurationLabel(transitionDetailBoundary) }}
             </span>
-            <button class="btn btn-ghost btn-icon" style="margin-left:auto" @click="closeTransitionDetail">
-              <X :size="14" />
+            <button
+              type="button"
+              class="btn btn-ghost btn-icon"
+              style="margin-left:auto"
+              :title="t('common.close')"
+              :aria-label="t('common.close')"
+              @click="closeTransitionDetail"
+            >
+              <X :size="14" aria-hidden="true" />
             </button>
           </header>
           <div class="dialog-body transition-detail-body">
@@ -1727,8 +1767,10 @@
                   {{ transitionPromptSourceLabel(transitionDetailBoundary) }}
                 </span>
                 <button
+                  type="button"
                   class="btn btn-sm btn-ghost"
                   :disabled="transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)]"
+                  :title="transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)] ? t('episode.export.aiTransition.processingHint') : null"
                   @click="analyzeTransitionItem(transitionDetailBoundary)"
                 >
                   {{ transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)]
@@ -1748,21 +1790,34 @@
               />
               <div class="ai-transition-prompt-actions">
                 <button
+                  type="button"
                   class="btn btn-sm"
                   :disabled="transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)]"
+                  :title="transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)] ? t('episode.export.aiTransition.busyHint') : null"
                   @click="saveTransitionPromptItem(transitionDetailBoundary)"
                 >
                   {{ t('episode.export.aiTransition.prompt.save') }}
                 </button>
                 <button
+                  type="button"
                   class="btn btn-sm btn-primary"
                   :disabled="transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)]
                     || transitionDetailBoundary.status === 'processing' || transitionDetailBoundary.status === 'pending'"
+                  :title="transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)]
+                    || transitionDetailBoundary.status === 'processing' || transitionDetailBoundary.status === 'pending'
+                    ? t('episode.export.aiTransition.busyHint') : null"
                   @click="regenerateTransitionWithPrompt(transitionDetailBoundary)"
                 >
                   {{ t('episode.export.aiTransition.prompt.regenerate') }}
                 </button>
               </div>
+              <p
+                v-if="transitionPromptBusy[transitionPromptKey(transitionDetailBoundary)]
+                  || transitionDetailBoundary.status === 'processing' || transitionDetailBoundary.status === 'pending'"
+                class="dialog-hint"
+              >
+                {{ t('episode.export.aiTransition.busyHint') }}
+              </p>
               <p v-if="transitionPromptEffectiveSource(transitionDetailBoundary) === 'fallback'" class="ai-transition-prompt-note">
                 {{ t('episode.export.aiTransition.prompt.fallbackNote') }}
               </p>
@@ -1771,15 +1826,22 @@
           </div>
           <footer class="dialog-foot">
             <button
+              type="button"
               class="btn btn-ghost transition-detail-delete"
               :disabled="transitionDetailBoundary.status === 'processing' || transitionDetailBoundary.status === 'pending'"
               :title="transitionDetailBoundary.status === 'processing' || transitionDetailBoundary.status === 'pending' ? t('episode.export.aiTransition.processingHint') : null"
               @click="askDeleteTransition(transitionDetailBoundary)"
             >
-              <Trash2 :size="12" />
+              <Trash2 :size="12" aria-hidden="true" />
               {{ t('episode.export.aiTransition.delete') }}
             </button>
-            <button class="btn" style="margin-left:auto" @click="closeTransitionDetail">{{ t('common.close') }}</button>
+            <span
+              v-if="transitionDetailBoundary.status === 'processing' || transitionDetailBoundary.status === 'pending'"
+              class="dialog-hint transition-detail-hint"
+            >
+              {{ t('episode.export.aiTransition.processingHint') }}
+            </span>
+            <button type="button" class="btn" style="margin-left:auto" @click="closeTransitionDetail">{{ t('common.close') }}</button>
           </footer>
         </div>
       </div>
@@ -1793,7 +1855,7 @@
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               {{ t('episode.viewer.downloadFilm') }}
             </a>
-            <button class="btn btn-ghost btn-icon" @click="activeMerge = null">
+            <button class="btn btn-ghost btn-icon" :title="t('common.close')" :aria-label="t('common.close')" @click="activeMerge = null">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
@@ -1811,11 +1873,17 @@
       </div>
 
       <div v-if="assetCreate.open" class="overlay" @click.self="assetCreate.open = false">
-        <div class="dialog asset-create-dialog">
+        <div class="dialog asset-create-dialog" role="dialog" aria-modal="true" aria-labelledby="asset-create-title">
           <header class="dialog-head">
-            <h2 class="dialog-title">{{ t('episode.create.title', { type: assetCreateTypeLabel }) }}</h2>
-            <button class="btn btn-ghost btn-icon" @click="assetCreate.open = false">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <h2 id="asset-create-title" class="dialog-title">{{ t('episode.create.title', { type: assetCreateTypeLabel }) }}</h2>
+            <button
+              type="button"
+              class="btn btn-ghost btn-icon"
+              :title="t('common.close')"
+              :aria-label="t('common.close')"
+              @click="assetCreate.open = false"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </header>
           <div class="dialog-body asset-create-body">
@@ -1838,10 +1906,16 @@
             </template>
           </div>
           <footer class="dialog-foot">
-            <button class="btn" @click="assetCreate.open = false">{{ t('common.cancel') }}</button>
-            <button class="btn btn-primary" :disabled="assetCreate.saving" @click="saveAssetCreate">
-              <Loader2 v-if="assetCreate.saving" :size="12" class="animate-spin" />
-              {{ t('common.add') }}
+            <button type="button" class="btn" @click="assetCreate.open = false">{{ t('common.cancel') }}</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              :disabled="assetCreate.saving"
+              :title="assetCreate.saving ? t('episode.create.saving') : null"
+              @click="saveAssetCreate"
+            >
+              <Loader2 v-if="assetCreate.saving" :size="12" class="animate-spin" aria-hidden="true" />
+              {{ assetCreate.saving ? t('episode.create.saving') : t('episode.create.submit', { type: assetCreateTypeLabel }) }}
             </button>
           </footer>
         </div>
@@ -1851,7 +1925,7 @@
         <div class="dialog batch-video-dialog">
           <header class="dialog-head">
             <h2 class="dialog-title">{{ t('episode.vid.confirmTitle') }}</h2>
-            <button class="btn btn-ghost btn-icon" @click="batchVideoConfirm.open = false">
+            <button class="btn btn-ghost btn-icon" :title="t('common.close')" :aria-label="t('common.close')" @click="batchVideoConfirm.open = false">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </header>
@@ -1873,7 +1947,7 @@
         <div class="dialog merge-title-dialog">
           <header class="dialog-head">
             <h2 class="dialog-title">{{ t('episode.export.titleDialog') }}</h2>
-            <button class="btn btn-ghost btn-icon" @click="mergeDialog.open = false">
+            <button class="btn btn-ghost btn-icon" :title="t('common.close')" :aria-label="t('common.close')" @click="mergeDialog.open = false">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </header>
@@ -2118,6 +2192,7 @@ import { videoModelCapabilities } from '~/utils/model-capabilities'
 import { createStoryboardUpdateQueue } from '~/utils/storyboard-update-queue'
 import { toastError, mapError, MODERATION_RE } from '~/composables/useToast'
 import LocaleSwitcher from '~/components/LocaleSwitcher.vue'
+import StudioTopBar from '~/components/studio/StudioTopBar.vue'
 import EpisodeDeliveryDialog from '~/components/EpisodeDeliveryDialog.vue'
 
 const DirectorTab = defineAsyncComponent(() => import('~/components/director/DirectorTab.vue'))
@@ -5629,7 +5704,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   margin: 8px 0 0;
   font-size: 11px;
   line-height: 1.6;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 /* ===== Studio Layout ===== */
 .studio {
@@ -5648,23 +5723,21 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   --sel-glow: var(--bg-hover);
 }
 
-.studio-topbar {
+.episode-topbar.studio-topbar {
+  flex-shrink: 0;
+  background: var(--surface-soft);
+}
+.episode-topbar :deep(.studio-topbar-left) { flex: 0 1 auto; }
+.episode-topbar :deep(.studio-topbar-center) { flex: 1 1 auto; min-width: 0; justify-content: center; }
+.episode-topbar :deep(.studio-topbar-right) { flex: 0 0 auto; }
+
+.studio-topbar-main {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  flex-shrink: 0;
-  min-height: 40px;
-  padding: 4px 10px;
-  border-radius: var(--radius-lg);
-  background: var(--header-bg);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-card);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  min-width: 0;
 }
 
-.studio-topbar-main,
 .sidebar,
 .main {
   background: var(--surface-raised);
@@ -5672,27 +5745,27 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   box-shadow: var(--shadow-card);
 }
 
-.studio-topbar-main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0;
-  border: 0;
-  box-shadow: none;
-  backdrop-filter: none;
-  background: transparent;
-  min-width: 0;
-}
-
 /* 用更高特异性压过后面的 .back-btn{height:40px}，保持顶栏紧凑 */
 .studio-topbar .topbar-back {
   width: auto;
-  min-width: 72px;
-  padding: 0 12px;
-  height: 26px;
-  border-radius: var(--radius-pill);
+  min-width: 0;
+  height: var(--control-sm);
+  padding: 0 10px;
+  gap: 6px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-1);
+  font-size: var(--text-meta);
+  font-weight: 600;
   white-space: nowrap;
-  font-size: 11px;
+}
+.studio-topbar .topbar-back:hover {
+  background: var(--bg-hover);
+  color: var(--text-0);
+}
+.studio-topbar .topbar-back:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .studio-identity {
@@ -5700,41 +5773,31 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
-}
-.studio-overline {
-  display: none;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
-
-.studio-title-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .studio-title {
-  font-size: 13px;
-  line-height: 1;
-  letter-spacing: -0.04em;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: var(--text-strong);
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
 }
 
 .studio-episode-chip {
   display: inline-flex;
   align-items: center;
-  height: 18px;
+  height: 20px;
   padding: 0 8px;
   border-radius: var(--radius-pill);
   background: var(--accent-bg);
-  color: var(--accent-text);
-  font-size: 9px;
+  color: var(--accent-text-strong);
+  font-size: var(--text-micro);
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .studio-meta-row {
@@ -5748,47 +5811,61 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 .studio-meta-pill {
   display: inline-flex;
   align-items: center;
-  height: 18px;
+  height: 20px;
   padding: 0 8px;
   border-radius: var(--radius-pill);
   background: var(--accent-bg);
-  color: var(--accent-text);
-  font-size: 8px;
+  color: var(--accent-text-strong);
+  font-size: var(--text-micro);
   font-weight: 600;
   white-space: nowrap;
 }
 
 .studio-meta-pill.is-stage {
   background: var(--accent-bg);
-  color: var(--accent-text);
+  color: var(--accent-text-strong);
 }
 .studio-meta-pill.is-progress {
   background: var(--success-bg);
   color: var(--success);
 }
 .studio-meta-inline {
-  font-size: 9px;
-  color: var(--text-3);
+  font-size: var(--text-meta);
+  color: var(--text-2);
   font-weight: 600;
   white-space: nowrap;
 }
 
-.studio-topbar-side {
+.studio-model-picks {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.studio-model-picks::-webkit-scrollbar { display: none; }
+.studio-model-picks > * { flex: 0 0 auto; }
 
 .studio-actions {
   display: flex;
+  align-items: center;
   gap: 6px;
+  flex-wrap: nowrap;
 }
 .studio-topbar .btn {
-  height: 26px;
-  padding: 0 9px;
-  font-size: 10.5px;
+  height: var(--control-sm);
+  padding: 0 10px;
+  font-size: var(--text-meta);
   white-space: nowrap;
+}
+.studio-topbar .btn-icon {
+  width: var(--control-sm);
+  padding: 0;
+}
+
+@media (max-width: 1360px) {
+  .studio-meta-inline { display: none; }
 }
 
 .studio-body {
@@ -5827,7 +5904,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 }
 .back-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3.5px var(--button-focus);
+  box-shadow: var(--focus-ring);
 }
 
 /* Pipeline Nav */
@@ -5835,7 +5912,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 .pipe-section { display: flex; flex-direction: column; gap: 2px; }
 .pipe-section-label {
   display: flex; align-items: center; gap: 5px;
-  font-size: 10.5px; font-weight: 700; color: var(--text-3);
+  font-size: 11px; font-weight: 700; color: var(--text-2);
   text-transform: uppercase; letter-spacing: 0.06em;
   padding: 0 7px 2px;
 }
@@ -5863,7 +5940,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 .pipe-section-tag {
-  font-size: 9.5px; font-weight: 600; letter-spacing: 0.03em;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.03em;
   color: var(--text-2); background: var(--bg-2);
   border-radius: 999px; padding: 1px 5px;
   text-transform: none;
@@ -5884,7 +5961,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px;
   padding: 7px 10px;
   border-radius: var(--radius);
-  font-size: 13px; font-weight: 600;
+  font-size: 13.5px; font-weight: 600;
   background: transparent; border: 1px solid transparent; color: var(--text-2); cursor: pointer;
   transition: all 0.18s var(--ease-out); width: 100%; text-align: left;
 }
@@ -5913,15 +5990,15 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 .pipe-item:focus-visible {
   outline: none;
   border-color: var(--action-primary);
-  box-shadow: 0 0 0 3px var(--button-focus), var(--button-shadow);
+  box-shadow: var(--focus-ring), var(--button-shadow);
 }
 .pipe-item.done { color: var(--text-2); }
 .pipe-item-sub {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  padding: 5px 8px;
+  padding: var(--row-pad-y) 8px;
   position: relative;
-  min-height: 34px;
+  min-height: var(--row-h);
 }
 
 .pipe-item-sub:not(:last-child)::after {
@@ -5949,18 +6026,18 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 .icon-done { background: var(--success-bg) !important; border-color: var(--success-bg) !important; color: var(--success) !important; }
 .pipe-item.active.done .icon-done { background: var(--sel) !important; border-color: var(--sel) !important; color: var(--surface-raised) !important; }
 
-.pipe-label { flex: 1; font-size: 12.5px; }
+.pipe-label { flex: 1; font-size: 12px; }
 .pipe-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .pipe-sub {
   display: none;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.35;
-  color: var(--text-3);
+  color: var(--text-2);
   font-weight: 500;
 }
 .pipe-badge {
-  font-size: 9px; font-weight: 700; padding: 1px 5px;
-  border-radius: 99px; background: var(--bg-3); color: var(--text-3);
+  font-size: 11px; font-weight: 700; padding: 1px 5px;
+  border-radius: 99px; background: var(--bg-3); color: var(--text-2);
   font-family: var(--font-mono);
 }
 .pipe-badge.badge-done { background: var(--success-bg); color: var(--success); }
@@ -6029,7 +6106,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--text-1);
 }
@@ -6037,7 +6114,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   flex-shrink: 0;
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .sidebar-progress-track {
   display: flex;
@@ -6058,7 +6135,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 .sidebar-progress-seg:hover { transform: scaleY(1.6); }
 .sidebar-progress-seg:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--button-focus);
+  box-shadow: var(--focus-ring);
 }
 .sidebar-progress-seg.done { background: var(--success); }
 .sidebar-progress-seg.current { background: var(--accent-bg); }
@@ -6089,8 +6166,8 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: center;
-  font-size: 10.5px;
-  color: var(--text-3);
+  font-size: 11px;
+  color: var(--text-2);
 }
 .sidebar-progress-labels span.done { color: var(--success); }
 .sidebar-progress-labels span.on {
@@ -6114,7 +6191,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 .refresh-btn:focus-visible {
   outline: none;
   border-color: var(--action-primary);
-  box-shadow: 0 0 0 3px var(--button-focus), var(--button-shadow-hover);
+  box-shadow: var(--focus-ring), var(--button-shadow-hover);
 }
 
 /* ===== Main Content ===== */
@@ -6170,10 +6247,10 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   width: 26px; height: 26px; border-radius: 10px;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--accent-bg);
-  font-family: var(--font-mono); font-size: 10px; font-weight: 800; color: var(--accent-text); letter-spacing: 0.05em;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 800; color: var(--accent-text); letter-spacing: 0.05em;
 }
-.step-name { font-size: 12.5px; font-weight: 700; color: var(--text-1); font-family: var(--font-display); }
-.char-count { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
+.step-name { font-size: 13.5px; font-weight: 700; color: var(--text-1); font-family: var(--font-display); }
+.char-count { font-size: 11px; color: var(--text-2); font-family: var(--font-mono); }
 
 /* Editor Area */
 .step-editor { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -6182,7 +6259,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   font-size: 13.5px; line-height: 1.9; resize: none; outline: none;
   font-family: var(--font-body); background: var(--bg-input); color: var(--text-0);
 }
-.fill-textarea:focus { box-shadow: none; }
+.fill-textarea:focus-visible { box-shadow: var(--focus-ring); }
 
 /* Step Empty State */
 .step-empty {
@@ -6234,15 +6311,15 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   grid-column: 1 / -1;
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-3);
+  color: var(--text-2);
   letter-spacing: 0.02em;
   padding: 0 2px;
 }
 .storyboard-ref-scope-hint {
   margin: 2px 0 6px;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.4;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .storyboard-ref-scope {
   display: inline-block;
@@ -6250,8 +6327,8 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   padding: 0 4px;
   border-radius: 4px;
   background: var(--surface-outline);
-  color: var(--text-3);
-  font-size: 9.5px;
+  color: var(--text-2);
+  font-size: 11px;
   font-weight: 600;
   vertical-align: 1px;
 }
@@ -6263,7 +6340,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   background: transparent;
   padding: 0 2px;
   border-radius: var(--radius-sm, 6px);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--accent);
   cursor: pointer;
@@ -6276,7 +6353,8 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   grid-template-columns: 30px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
-  padding: 5px 7px;
+  padding: var(--row-pad-y) 7px;
+  min-height: var(--row-h);
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--surface-raised);
@@ -6303,11 +6381,11 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   border: 1px solid var(--surface-outline);
   overflow: hidden;
   background: var(--bg-2);
-  color: var(--text-3);
+  color: var(--text-2);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
 }
 .storyboard-ref-thumb:disabled { cursor: default; }
@@ -6326,22 +6404,22 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 .storyboard-ref-state {
   flex-shrink: 0;
   margin-left: auto;
-  font-size: 10px;
-  color: var(--text-3);
+  font-size: 11px;
+  color: var(--text-2);
 }
 .storyboard-ref-state.is-ready { color: var(--success); }
 .storyboard-ref-meta {
   flex: 1;
   min-width: 0;
-  font-size: 10.5px;
-  color: var(--text-3);
+  font-size: 11px;
+  color: var(--text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .storyboard-ref-empty {
   padding: 14px 10px;
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: 12px;
   line-height: 1.5;
   border: 1px dashed var(--surface-outline);
@@ -6385,7 +6463,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   flex-wrap: wrap;
 }
 .detail-section-title { font-size: 12px; font-weight: 700; color: var(--text-0); }
-.detail-section-copy { font-size: 11px; color: var(--text-3); }
+.detail-section-copy { font-size: 11px; color: var(--text-2); }
 
 /* Field */
 .field { display: flex; flex-direction: column; gap: 5px; }
@@ -6425,7 +6503,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 .prod-tab:focus-visible {
   outline: none;
   border-color: var(--action-primary);
-  box-shadow: 0 0 0 3px var(--button-focus), var(--button-shadow);
+  box-shadow: var(--focus-ring), var(--button-shadow);
 }
 .prod-tab-badge { font-size: 10px; font-family: var(--font-mono); padding: 0 4px; background: var(--bg-3); border-radius: 99px; }
 .prod-tab.active .prod-tab-badge { background: var(--accent-bg); color: var(--accent-text); }
@@ -6449,7 +6527,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 .video-mode-tab:focus-visible {
   outline: none;
   border-color: var(--action-primary);
-  box-shadow: 0 0 0 3px var(--button-focus);
+  box-shadow: var(--focus-ring);
 }
 
 /* ComfyUI 监控舞台：右侧嵌入官方工作流页面，网关校验路径票据 */
@@ -6558,7 +6636,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   border-radius: 999px;
   border: 1px dashed var(--surface-outline-strong);
   background: transparent;
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -6640,7 +6718,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 }
 
 /* 新增资产弹窗 */
-.asset-create-dialog { width: 440px; max-width: calc(100vw - 48px); }
+.asset-create-dialog { width: 480px; max-width: calc(100vw - 48px); }
 .asset-create-body { display: flex; flex-direction: column; gap: 10px; }
 
 /* Asset grid */
@@ -6664,7 +6742,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   padding: 14px;
   border: 1px dashed var(--surface-outline);
   border-radius: var(--radius);
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: 12px;
   text-align: center;
 }
@@ -6688,7 +6766,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 .character-asset-card:focus-visible {
   outline: none;
   border-color: var(--accent-glow);
-  box-shadow: 0 0 0 3px var(--button-focus), var(--shadow-panel);
+  box-shadow: var(--focus-ring), var(--shadow-panel);
 }
 .character-asset-card {
   display: flex;
@@ -6725,7 +6803,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .character-asset-main {
   min-width: 0;
@@ -6766,28 +6844,20 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   color: var(--text-0);
 }
 .character-gen-btn { flex-shrink: 0; align-self: center; }
-.studio-model-picks {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-right: 12px;
-  padding-right: 12px;
-  border-right: 1px solid var(--border);
-}
 .asset-final-prompt {
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding-top: 7px;
   border-top: 1px solid var(--border);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.5;
 }
 .afp-label {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .afp-text {
   display: -webkit-box;
@@ -6812,8 +6882,8 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   display: flex;
   gap: 8px;
   overflow: hidden;
-  color: var(--text-3);
-  font-size: 10.5px;
+  color: var(--text-2);
+  font-size: 11px;
   line-height: 1.45;
   white-space: nowrap;
 }
@@ -6840,7 +6910,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   -webkit-backdrop-filter: blur(10px);
   box-shadow: 0 1px 4px rgba(0,0,0,0.08);
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
 }
 .asset-cover-badge.is-ready {
@@ -6851,7 +6921,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   background: var(--accent-bg);
   color: var(--accent-text);
 }
-.asset-cover-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-3); }
+.asset-cover-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-2); }
 .asset-body {
   flex: 1;
   display: flex;
@@ -6861,7 +6931,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   min-width: 0;
 }
 .asset-name {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 650;
   color: var(--text-0);
   white-space: nowrap;
@@ -7609,16 +7679,16 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   padding: 28px;
 }
 .asset-detail-dialog {
-  width: min(1040px, calc(100vw - 56px));
-  max-height: calc(100vh - 56px);
+  width: min(880px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
 }
 .asset-detail-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--surface-outline);
+  padding: var(--sp-4) var(--sp-6);
+  border-bottom: 1px solid var(--border);
 }
 .asset-detail-title-block {
   min-width: 0;
@@ -7627,8 +7697,8 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   gap: 4px;
 }
 .asset-detail-kicker {
-  color: var(--text-3);
-  font-size: 10px;
+  color: var(--text-2);
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -7636,7 +7706,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .asset-detail-title {
   margin: 0;
   color: var(--text-0);
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1.2;
   font-family: var(--font-display);
 }
@@ -7649,7 +7719,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .asset-detail-body {
   min-height: 0;
   overflow: auto;
-  padding: 16px;
+  padding: var(--sp-6);
 }
 .asset-detail-shell {
   display: grid;
@@ -7692,8 +7762,8 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   padding: 0 7px;
   border-radius: 999px;
   background: var(--overlay-track);
-  color: var(--text-3);
-  font-size: 10px;
+  color: var(--text-2);
+  font-size: 11px;
   font-weight: 760;
   white-space: nowrap;
 }
@@ -7721,7 +7791,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .asset-detail-media-frame:focus-visible {
   outline: none;
   border-color: var(--action-primary);
-  box-shadow: 0 0 0 3px var(--button-focus);
+  box-shadow: var(--focus-ring);
 }
 .asset-detail-media-frame img {
   width: 100%;
@@ -7740,7 +7810,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .asset-detail-desc {
   margin: 0;
   color: var(--text-1);
-  font-size: 13px;
+  font-size: 13.5px;
   line-height: 1.7;
 }
 .asset-detail-grid {
@@ -7760,8 +7830,8 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .asset-detail-text-block span,
 .asset-detail-shot-head {
   display: block;
-  color: var(--text-3);
-  font-size: 10px;
+  color: var(--text-2);
+  font-size: 11px;
   font-weight: 780;
   letter-spacing: 0.04em;
 }
@@ -7868,7 +7938,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   animation: asset-ref-spin 0.7s linear infinite;
 }
 @keyframes asset-ref-spin { to { transform: rotate(360deg); } }
-.asset-ref-hint { margin: 0; color: var(--text-3); font-size: 10.5px; line-height: 1.5; }
+.asset-ref-hint { margin: 0; color: var(--text-2); font-size: 11px; line-height: 1.5; }
 /* 角色音色：全宽横跨预览与编辑两栏，避免挤在窄预览列里 */
 .asset-detail-voice-row {
   min-width: 0;
@@ -7881,9 +7951,9 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 .asset-detail-voice-row :deep(.character-voice) { margin-top: 0; padding-top: 0; }
 .asset-ref-chip {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  color: var(--text-3);
+  color: var(--text-2);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 1px 6px;
@@ -7899,8 +7969,8 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 .asset-detail-meta-item span {
   display: block;
-  color: var(--text-3);
-  font-size: 10px;
+  color: var(--text-2);
+  font-size: 11px;
   font-weight: 780;
   letter-spacing: 0.04em;
 }
@@ -7956,7 +8026,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 .asset-detail-shot-row small,
 .asset-detail-empty {
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: 11px;
 }
 .asset-detail-foot {
@@ -7964,8 +8034,8 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--surface-outline);
+  padding: var(--sp-4) var(--sp-6);
+  border-top: 1px solid var(--border);
 }
 .asset-detail-secondary-actions,
 .asset-detail-primary-actions {
@@ -8009,7 +8079,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 .asset-detail-prompt-hint {
   margin: 0;
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -8027,8 +8097,8 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 .asset-detail-readonly span {
   display: block;
-  color: var(--text-3);
-  font-size: 10px;
+  color: var(--text-2);
+  font-size: 11px;
   font-weight: 780;
   letter-spacing: 0.04em;
 }
@@ -8444,24 +8514,31 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 
   .studio-topbar-main {
     align-items: flex-start;
+    flex-wrap: wrap;
   }
 
-  .studio-topbar {
-    flex-direction: column;
-    align-items: stretch;
+  .episode-topbar.studio-topbar {
+    height: auto;
+    min-height: var(--topbar-h);
+    flex-wrap: wrap;
+    padding: 6px var(--topbar-pad-x);
+    row-gap: 6px;
   }
-
-  .studio-topbar-side {
-    justify-content: space-between;
+  .episode-topbar :deep(.studio-topbar-left) { flex: 1 1 auto; }
+  .episode-topbar :deep(.studio-topbar-center) {
+    flex: 1 1 100%;
+    order: 3;
+    justify-content: flex-start;
   }
+  .episode-topbar :deep(.studio-topbar-right) { flex: 0 1 auto; }
 
   .sidebar {
     max-height: 340px;
   }
 
-  .studio-topbar-side,
   .studio-actions {
     flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .toolbar-right,
@@ -8595,7 +8672,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   white-space: nowrap;
 }
 .ai-transition-chip.unsupported { opacity: 0.65; }
-.ai-transition-chip-state { display: inline-flex; align-items: center; gap: 4px; color: var(--text-3); }
+.ai-transition-chip-state { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); }
 .ai-transition-block {
   display: flex;
   flex-direction: column;
@@ -8673,7 +8750,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   border-radius: 999px;
   background: var(--surface-outline);
   color: var(--text-2);
-  font-size: 10px;
+  font-size: 11px;
 }
 .ai-transition-prompt-source.source-ai { color: var(--success); }
 .ai-transition-prompt-source.source-fallback { color: var(--accent); }
@@ -8686,7 +8763,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   line-height: 1.5;
 }
 .ai-transition-prompt-actions { display: flex; justify-content: flex-end; gap: 6px; }
-.ai-transition-prompt-note { margin: 0; color: var(--text-2); font-size: 10px; line-height: 1.4; }
+.ai-transition-prompt-note { margin: 0; color: var(--text-2); font-size: 11px; line-height: 1.4; }
 .merge-title-dialog { width: min(760px, calc(100vw - 48px)); }
 .ai-transition-cards {
   display: grid;
@@ -8760,7 +8837,13 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   font-size: 11px;
   color: var(--text-1);
 }
-.transition-detail-dialog { width: min(760px, calc(100vw - 48px)); }
+.transition-detail-dialog { width: min(640px, calc(100vw - 48px)); }
+.transition-detail-meta { font-size: var(--text-micro); }
+.dialog-hint {
+  color: var(--text-2);
+  font-size: var(--text-meta);
+  line-height: 1.4;
+}
 .transition-detail-body {
   display: flex;
   flex-direction: column;

@@ -4,17 +4,29 @@ import { useI18n } from 'vue-i18n'
 
 const props = withDefaults(defineProps<{
   treeVisible?: boolean
+  focusReading?: boolean
 }>(), {
   treeVisible: true,
+  focusReading: false,
 })
 
 const { t } = useI18n()
 const railWidth = ref(240)
 const inspectorCollapsed = ref(false)
 const mobileInspectorOpen = ref(false)
+const narrowInspector = ref(false)
+
+if (typeof window !== 'undefined') {
+  const mql = window.matchMedia('(max-width: 1180px)')
+  narrowInspector.value = mql.matches
+  mql.addEventListener('change', (event) => { narrowInspector.value = event.matches })
+}
+
+// 窄屏检查器改为抽屉，折叠态只在宽屏生效
+const inspectorCollapsedView = computed(() => inspectorCollapsed.value && !narrowInspector.value)
 
 const gridStyle = computed(() => ({
-  '--rail-width': `${railWidth.value}px`,
+  '--rail-w': `${railWidth.value}px`,
 }))
 
 function startResize(event: MouseEvent) {
@@ -37,12 +49,13 @@ function startResize(event: MouseEvent) {
     class="novel-workbench"
     :class="{
       'tree-collapsed': !props.treeVisible,
-      'inspector-collapsed': inspectorCollapsed,
+      'inspector-collapsed': inspectorCollapsedView,
       'mobile-inspector-open': mobileInspectorOpen,
+      'focus-reading': props.focusReading,
     }"
     :style="gridStyle"
   >
-    <aside v-if="props.treeVisible" class="novel-workbench-rail" aria-label="chapter-tree">
+    <aside v-if="props.treeVisible && !props.focusReading" class="novel-workbench-rail" aria-label="chapter-tree">
       <slot name="tree" />
       <div
         class="rail-resizer"
@@ -54,9 +67,9 @@ function startResize(event: MouseEvent) {
     <div class="novel-workbench-main">
       <slot />
     </div>
-    <aside class="novel-workbench-inspector" aria-label="inspector">
+    <aside v-if="!props.focusReading" class="novel-workbench-inspector" aria-label="inspector">
       <button
-        v-if="inspectorCollapsed"
+        v-if="inspectorCollapsedView"
         type="button"
         class="inspector-tab"
         :title="t('novels.workbench.inspectorEmptyTitle')"
@@ -74,6 +87,7 @@ function startResize(event: MouseEvent) {
       </template>
     </aside>
     <button
+      v-if="!props.focusReading"
       type="button"
       class="mobile-inspector-toggle"
       @click="mobileInspectorOpen = !mobileInspectorOpen"
@@ -85,7 +99,7 @@ function startResize(event: MouseEvent) {
 .novel-workbench {
   position: relative;
   display: grid;
-  grid-template-columns: var(--rail-width, 240px) minmax(0, 1fr) var(--inspector-w, 320px);
+  grid-template-columns: var(--rail-w, 240px) minmax(0, 1fr) var(--inspector-w, 320px);
   min-height: calc(100vh - 280px);
   overflow: hidden;
   border: 1px solid var(--surface-outline);
@@ -96,10 +110,13 @@ function startResize(event: MouseEvent) {
   grid-template-columns: minmax(0, 1fr) var(--inspector-w, 320px);
 }
 .novel-workbench.inspector-collapsed {
-  grid-template-columns: var(--rail-width, 240px) minmax(0, 1fr) 40px;
+  grid-template-columns: var(--rail-w, 240px) minmax(0, 1fr) 40px;
 }
 .novel-workbench.tree-collapsed.inspector-collapsed {
   grid-template-columns: minmax(0, 1fr) 40px;
+}
+.novel-workbench.focus-reading {
+  grid-template-columns: minmax(0, 1fr);
 }
 .novel-workbench-rail {
   position: relative;
@@ -166,22 +183,15 @@ function startResize(event: MouseEvent) {
 .mobile-inspector-toggle {
   display: none;
 }
-@media (max-width: 960px) {
+/* 窄于 1180px：检查器改为抽屉，章节树保留 */
+@media (max-width: 1180px) {
   .novel-workbench,
-  .novel-workbench.tree-collapsed,
-  .novel-workbench.inspector-collapsed,
-  .novel-workbench.tree-collapsed.inspector-collapsed {
-    grid-template-columns: minmax(0, 1fr) var(--inspector-w, 320px);
+  .novel-workbench.inspector-collapsed {
+    grid-template-columns: var(--rail-w, 240px) minmax(0, 1fr);
   }
-  .novel-workbench-rail {
-    display: none;
-  }
-}
-@media (max-width: 720px) {
-  .novel-workbench,
   .novel-workbench.tree-collapsed,
-  .novel-workbench.inspector-collapsed,
-  .novel-workbench.tree-collapsed.inspector-collapsed {
+  .novel-workbench.tree-collapsed.inspector-collapsed,
+  .novel-workbench.focus-reading {
     grid-template-columns: minmax(0, 1fr);
   }
   .novel-workbench-inspector {
@@ -190,7 +200,7 @@ function startResize(event: MouseEvent) {
     right: 0;
     bottom: var(--statusbar-h, 24px);
     z-index: 30;
-    width: min(320px, 88vw);
+    width: min(var(--inspector-w, 320px), 88vw);
     background: var(--surface-raised);
     transform: translateX(100%);
     transition: transform var(--motion-base, 180ms) var(--ease-out, ease);
@@ -215,6 +225,19 @@ function startResize(event: MouseEvent) {
     color: var(--text-0);
     font-size: var(--text-meta);
     cursor: pointer;
+  }
+}
+/* 窄于 860px：章节树也改为抽屉，正文单列 */
+@media (max-width: 860px) {
+  .novel-workbench,
+  .novel-workbench.tree-collapsed,
+  .novel-workbench.inspector-collapsed,
+  .novel-workbench.tree-collapsed.inspector-collapsed,
+  .novel-workbench.focus-reading {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .novel-workbench-rail {
+    display: none;
   }
 }
 </style>

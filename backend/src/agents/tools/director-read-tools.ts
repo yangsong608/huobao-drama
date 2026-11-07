@@ -1,6 +1,6 @@
 /**
- * 导演专员只读工具：导演台作用域专用。
- * 只查询导演计划、分集、素材与分镜；不建计划、不写业务表、不读取素材 URL 或服务器路径。
+ * 单集只读工具：episode / director / edit / mix / delivery 作用域共享。
+ * 只查询分集上下文、剧本、配音、分镜与导演计划；不建计划、不写业务表、不读取素材 URL 或服务器路径。
  */
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
@@ -49,7 +49,23 @@ function plainText(raw: unknown, limit = 1200): string {
   return clipText(redactPaths(String(raw ?? '').trim()), limit).text
 }
 
-function directorScope(scope: AgentScope | null): AgentScope | ReturnType<typeof fail> {
+const EPISODE_SCOPE_KINDS = new Set<AgentScope['kind']>(['episode', 'director', 'edit', 'mix', 'delivery'])
+
+function episodeScope(scope: AgentScope | null): AgentScope | ReturnType<typeof fail> {
+  if (!scope || !EPISODE_SCOPE_KINDS.has(scope.kind) || !scope.drama_id || !scope.episode_id) {
+    return fail('当前页面不是分集作用域', '请在分集制作区（含导演台、剪辑、混音、交付）使用该工具。', 403)
+  }
+  return scope
+}
+
+function episodeOnlyScope(scope: AgentScope | null): AgentScope | ReturnType<typeof fail> {
+  if (!scope || scope.kind !== 'episode' || !scope.drama_id || !scope.episode_id) {
+    return fail('当前页面不是分集作用域', '请在分集页的剧本或配音阶段使用该工具。', 403)
+  }
+  return scope
+}
+
+function directorOnlyScope(scope: AgentScope | null): AgentScope | ReturnType<typeof fail> {
   if (!scope || scope.kind !== 'director' || !scope.drama_id || !scope.episode_id) {
     return fail('当前页面不是导演台作用域', '请在单集制作区的导演台页签使用该工具。', 403)
   }
@@ -111,7 +127,7 @@ const readDirectorPlan = createTool({
     storyboard_id: z.number().int().positive().optional().describe('Optional storyboard ID to focus; defaults to the focused shot in the current page scope'),
   }),
   execute: async ({ storyboard_id }, context) => {
-    const scope = directorScope(getAssistantScope(context?.requestContext))
+    const scope = directorOnlyScope(getAssistantScope(context?.requestContext))
     if (isFail(scope)) return scope
     let payload: DirectorPlanPayload
     try {
@@ -150,7 +166,7 @@ const readEpisodeContext = createTool({
   description: 'Read the current episode context: drama/episode identity, script length, asset and storyboard counts, line/dubbing completion. Read-only; never creates rows.',
   inputSchema: z.object({}),
   execute: async (_input, context) => {
-    const scope = directorScope(getAssistantScope(context?.requestContext))
+    const scope = episodeScope(getAssistantScope(context?.requestContext))
     if (isFail(scope)) return scope
     const dramaId = scope.drama_id!
     const episodeId = scope.episode_id!
@@ -201,156 +217,128 @@ const readEpisodeContext = createTool({
   },
 })
 
-type AssetType = 'character' | 'scene' | 'prop'
-
-function assetTypeLabel(type: AssetType): string {
-  return type === 'character' ? '角色' : type === 'scene' ? '场景' : '道具'
-}
-
-function loadAssetRows(scope: AgentScope, type: AssetType, ids: number[]): any[] {
-  if (!ids.length) return []
-  const table = type === 'character' ? schema.characters : type === 'scene' ? schema.scenes : schema.props
-  return db.select().from(table)
-    .where(and(inArray(table.id, ids), isNull(table.deletedAt)))
-    .all()
-}
-
-function assetSummary(type: AssetType, row: Record<string, any>) {
-  if (type === 'character') {
-    return {
-      asset_type: type,
-      id: row.id,
-      name: safeText(row.name, 80),
-      role: safeText(row.role, 80),
-      has_final_prompt: Boolean(row.finalPrompt),
-      has_image: Boolean(row.imageUrl),
-      description: safeText(row.description, 160),
-    }
-  }
-  if (type === 'scene') {
-    return {
-      asset_type: type,
-      id: row.id,
-      name: safeText(row.location, 80),
-      time: safeText(row.time, 40),
-      has_final_prompt: Boolean(row.finalPrompt),
-      has_image: Boolean(row.imageUrl),
-      description: safeText(row.prompt, 160),
-    }
-  }
-  return {
-    asset_type: type,
-    id: row.id,
-    name: safeText(row.name, 80),
-    type: safeText(row.type, 40),
-    has_final_prompt: Boolean(row.finalPrompt),
-    has_image: Boolean(row.imageUrl),
-    description: safeText(row.description, 160),
-  }
-}
-
-const readAssets = createTool({
-  id: 'read_assets',
-  description: 'List the characters, scenes and props bound to the current episode. Returns summaries only; use read_asset_detail for full prompts. Read-only.',
-  inputSchema: z.object({
-    asset_type: z.enum(['character', 'scene', 'prop']).optional().describe('Optional asset type filter'),
-    limit: z.number().int().min(1).max(100).optional().describe('Max rows per type; default 50'),
-  }),
-  execute: async ({ asset_type, limit }, context) => {
-    const scope = directorScope(getAssistantScope(context?.requestContext))
+const readScript = createTool({
+  id: 'read_script',
+  description: 'Read the current episode script. Prefers the rewritten script_content; when empty falls back to episodes.content and marks it as the original unrewritten text. Returns character count, source and last update. Only available in the episode scope.',
+  inputSchema: z.object({}),
+  execute: async (_input, context) => {
+    const scope = episodeOnlyScope(getAssistantScope(context?.requestContext))
     if (isFail(scope)) return scope
+    const dramaId = scope.drama_id!
     const episodeId = scope.episode_id!
-    const max = limit ?? 50
-    const types: AssetType[] = asset_type ? [asset_type] : ['character', 'scene', 'prop']
-    const result: Record<string, any[]> = {}
-    for (const type of types) {
-      const links = type === 'character'
-        ? db.select().from(schema.episodeCharacters).where(eq(schema.episodeCharacters.episodeId, episodeId)).all()
-          .map(link => link.characterId)
-        : type === 'scene'
-          ? db.select().from(schema.episodeScenes).where(eq(schema.episodeScenes.episodeId, episodeId)).all()
-            .map(link => link.sceneId)
-          : db.select().from(schema.episodeProps).where(eq(schema.episodeProps.episodeId, episodeId)).all()
-            .map(link => link.propId)
-      const rows = loadAssetRows(scope, type, links).slice(0, max)
-      result[type === 'character' ? 'characters' : type === 'scene' ? 'scenes' : 'props'] = rows.map(row => assetSummary(type, row))
+    const episode = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
+    if (!episode || episode.deletedAt || episode.dramaId !== dramaId) {
+      return fail('分集不存在或已删除', '请返回项目页重新打开分集。', 404)
     }
+    const drama = db.select().from(schema.dramas).where(eq(schema.dramas.id, dramaId)).get()
+    if (!drama || drama.deletedAt) return fail('项目不存在或已删除', '请返回项目列表。', 404)
+
+    const rewritten = String(episode.scriptContent ?? '').trim()
+    const original = String(episode.content ?? '').trim()
+    const content = rewritten || original
     return limitResult({
+      drama_id: dramaId,
       episode_id: episodeId,
-      total_by_type: Object.fromEntries(types.map((type) => [
-        type,
-        type === 'character'
-          ? db.select().from(schema.episodeCharacters).where(eq(schema.episodeCharacters.episodeId, episodeId)).all().length
-          : type === 'scene'
-            ? db.select().from(schema.episodeScenes).where(eq(schema.episodeScenes.episodeId, episodeId)).all().length
-            : db.select().from(schema.episodeProps).where(eq(schema.episodeProps.episodeId, episodeId)).all().length,
-      ])),
-      ...result,
+      title: safeText(episode.title, 120),
+      source: rewritten ? 'script_content' : original ? 'content' : 'empty',
+      original: !rewritten,
+      note: !rewritten && original ? '原文未改写：剧本尚未生成，当前返回的是原文（episodes.content）。' : null,
+      chars: content.length,
+      updated_at: episode.updatedAt,
+      content,
+      truncated: false,
+      hint: content
+        ? rewritten
+          ? '正文只读；需要改写请在剧本页运行 AI 改写。'
+          : '当前返回原文未改写；需要正式剧本请在剧本页运行 AI 改写。'
+        : '当前集还没有剧本内容；可在剧本页粘贴原文或生成剧本。',
     })
   },
 })
 
-const readAssetDetail = createTool({
-  id: 'read_asset_detail',
-  description: 'Read one episode asset detail: prompts and visual description for a character, scene or prop. Read-only and limited to the current drama.',
-  inputSchema: z.object({
-    asset_type: z.enum(['character', 'scene', 'prop']).describe('Asset table'),
-    asset_id: z.number().int().positive().describe('Asset row ID from read_assets'),
-  }),
-  execute: async ({ asset_type, asset_id }, context) => {
-    const scope = directorScope(getAssistantScope(context?.requestContext))
+const readDubbingStatus = createTool({
+  id: 'read_dubbing_status',
+  description: 'Read current episode dubbing status: line count, ready takes, missing dialogue, missing narrator lines and voice profiles. Never returns audio file paths. Only available in the episode scope.',
+  inputSchema: z.object({}),
+  execute: async (_input, context) => {
+    const scope = episodeOnlyScope(getAssistantScope(context?.requestContext))
     if (isFail(scope)) return scope
-    const rows = loadAssetRows(scope, asset_type as AssetType, [asset_id])
-    const row = rows[0]
-    if (!row || row.dramaId !== scope.drama_id) {
-      return fail(`${assetTypeLabel(asset_type as AssetType)}不存在或不属于当前项目`, '请先用 read_assets 获取当前集可用的素材编号。', 404)
+    const dramaId = scope.drama_id!
+    const episodeId = scope.episode_id!
+    const episode = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
+    if (!episode || episode.deletedAt || episode.dramaId !== dramaId) {
+      return fail('分集不存在或已删除', '请返回项目页重新打开分集。', 404)
     }
-    const storyboardIds = asset_type === 'character'
-      ? db.select().from(schema.storyboardCharacters)
-        .where(eq(schema.storyboardCharacters.characterId, asset_id)).all()
-        .map(link => link.storyboardId)
-      : asset_type === 'prop'
-        ? db.select().from(schema.storyboardProps)
-          .where(eq(schema.storyboardProps.propId, asset_id)).all()
-          .map(link => link.storyboardId)
-        : db.select({ id: schema.storyboards.id }).from(schema.storyboards)
-          .where(and(eq(schema.storyboards.sceneId, asset_id), eq(schema.storyboards.episodeId, scope.episode_id!), isNull(schema.storyboards.deletedAt))).all()
-          .map(link => link.id)
 
-    const base = {
-      asset_type,
-      id: row.id,
-      name: safeText(asset_type === 'scene' ? row.location : row.name, 100),
-      has_image: Boolean(row.imageUrl),
-      bound_storyboards: [...new Set(storyboardIds)].slice(0, 100),
+    const lines = db.select().from(schema.storyboardLines)
+      .where(and(eq(schema.storyboardLines.episodeId, episodeId), isNull(schema.storyboardLines.deletedAt)))
+      .orderBy(asc(schema.storyboardLines.lineNo), asc(schema.storyboardLines.id))
+      .all()
+    const takes = db.select().from(schema.lineTakes)
+      .where(and(eq(schema.lineTakes.episodeId, episodeId), isNull(schema.lineTakes.deletedAt)))
+      .all()
+    const takesByLine = new Map<number, typeof takes>()
+    for (const take of takes) {
+      const list = takesByLine.get(take.lineId) ?? []
+      list.push(take)
+      takesByLine.set(take.lineId, list)
     }
-    if (asset_type === 'character') {
-      return limitResult({
-        ...base,
-        role: safeText(row.role, 120),
-        description: plainText(row.description, 1000),
-        appearance: plainText(row.appearance, 1000),
-        styling: plainText(row.styling, 1000),
-        personality: plainText(row.personality, 800),
-        final_prompt: plainText(row.finalPrompt, 2000),
-      })
-    }
-    if (asset_type === 'scene') {
-      return limitResult({
-        ...base,
-        time: safeText(row.time, 60),
-        lighting: plainText(row.lighting, 600),
-        prompt: plainText(row.prompt, 1200),
-        final_prompt: plainText(row.finalPrompt, 2000),
-        reference_images: jsonArrayText(row.referenceImages),
-      })
-    }
+    const hasTake = (lineId: number) => (takesByLine.get(lineId) ?? [])
+      .some((take) => take.status === 'ready' && Boolean(take.audioUrl))
+    const isGenerated = (line: typeof lines[number]) => Boolean(line.audioUrl) || hasTake(line.id)
+    const generatedLines = lines.filter(isGenerated)
+    const missingLines = lines.filter((line) => !isGenerated(line))
+    const narratorLines = lines.filter((line) => line.speakerType === 'narrator')
+    const narratorGenerated = narratorLines.filter(isGenerated)
+
+    const voices = db.select().from(schema.characterVoices)
+      .where(and(eq(schema.characterVoices.dramaId, dramaId), isNull(schema.characterVoices.deletedAt)))
+      .all()
+    const activeVoices = voices.filter((voice) => voice.isActive)
+    const narratorVoice = activeVoices.find((voice) => voice.scope === 'narrator') ?? null
+
     return limitResult({
-      ...base,
-      type: safeText(row.type, 60),
-      description: plainText(row.description, 1000),
-      prompt: plainText(row.prompt, 1200),
-      final_prompt: plainText(row.finalPrompt, 2000),
+      drama_id: dramaId,
+      episode_id: episodeId,
+      dub_status: episode.dubStatus ?? null,
+      lines: lines.length,
+      generated: generatedLines.length,
+      missing: missingLines.length,
+      narrator: {
+        total: narratorLines.length,
+        generated: narratorGenerated.length,
+        missing: narratorLines.length - narratorGenerated.length,
+      },
+      takes: {
+        total: takes.length,
+        active: takes.filter((take) => take.isActive).length,
+        ready: takes.filter((take) => take.status === 'ready').length,
+        failed: takes.filter((take) => take.status === 'failed').length,
+      },
+      voices: {
+        total: voices.length,
+        active: activeVoices.length,
+        narrator_present: Boolean(narratorVoice),
+        items: voices.slice(0, 50).map((voice) => ({
+          id: voice.id,
+          name: safeText(voice.name, 80),
+          scope: voice.scope,
+          character_id: voice.characterId ?? null,
+          status: voice.status,
+          is_active: Boolean(voice.isActive),
+        })),
+      },
+      missing_line_refs: missingLines.slice(0, 50).map((line) => ({
+        line_id: line.id,
+        line_no: line.lineNo,
+        speaker_type: line.speakerType,
+        speaker_name: safeText(line.speakerName, 60),
+      })),
+      hint: lines.length
+        ? missingLines.length
+          ? '仍有台词未生成音频；可回到配音阶段生成缺失台词。'
+          : '全部台词已有音频；如需调整音色请回到配音阶段。'
+        : '当前集还没有台词；请先在分镜或配音阶段抽取台词。',
     })
   },
 })
@@ -362,7 +350,7 @@ const readStoryboards = createTool({
     limit: z.number().int().min(1).max(100).optional().describe('Max rows; default 50'),
   }),
   execute: async ({ limit }, context) => {
-    const scope = directorScope(getAssistantScope(context?.requestContext))
+    const scope = episodeScope(getAssistantScope(context?.requestContext))
     if (isFail(scope)) return scope
     const episodeId = scope.episode_id!
     const rows = db.select().from(schema.storyboards)
@@ -374,7 +362,9 @@ const readStoryboards = createTool({
     const characterCounts = new Map<number, number>()
     const propCounts = new Map<number, number>()
     if (ids.length) {
-      for (const line of db.select().from(schema.storyboardLines).where(inArray(schema.storyboardLines.storyboardId, ids)).all()) {
+      for (const line of db.select().from(schema.storyboardLines)
+        .where(and(inArray(schema.storyboardLines.storyboardId, ids), isNull(schema.storyboardLines.deletedAt)))
+        .all()) {
         if (line.storyboardId == null) continue
         lineCounts.set(line.storyboardId, (lineCounts.get(line.storyboardId) ?? 0) + 1)
       }
@@ -401,6 +391,9 @@ const readStoryboards = createTool({
         transition: row.transition,
         has_video: Boolean(row.videoUrl || row.composedVideoUrl),
         has_image: Boolean(row.composedImage || row.firstFrameImage || row.imagePrompt),
+        image_prompt_length: String(row.imagePrompt ?? '').length,
+        video_prompt_length: String(row.videoPrompt ?? '').length,
+        description_length: String(row.description ?? '').length,
         line_count: lineCounts.get(row.id) ?? 0,
         character_count: characterCounts.get(row.id) ?? 0,
         prop_count: propCounts.get(row.id) ?? 0,
@@ -416,14 +409,14 @@ const readStoryboardDetail = createTool({
     storyboard_id: z.number().int().positive().describe('Storyboard ID from read_storyboards'),
   }),
   execute: async ({ storyboard_id }, context) => {
-    const scope = directorScope(getAssistantScope(context?.requestContext))
+    const scope = episodeScope(getAssistantScope(context?.requestContext))
     if (isFail(scope)) return scope
     const row = db.select().from(schema.storyboards).where(eq(schema.storyboards.id, storyboard_id)).get()
     if (!row || row.deletedAt || row.episodeId !== scope.episode_id) {
       return fail('分镜不存在或不属于当前分集', '请先用 read_storyboards 获取当前集的分镜编号。', 404)
     }
     const lines = db.select().from(schema.storyboardLines)
-      .where(eq(schema.storyboardLines.storyboardId, storyboard_id))
+      .where(and(eq(schema.storyboardLines.storyboardId, storyboard_id), isNull(schema.storyboardLines.deletedAt)))
       .orderBy(asc(schema.storyboardLines.lineNo))
       .all()
     const characterIds = db.select().from(schema.storyboardCharacters)
@@ -433,10 +426,12 @@ const readStoryboardDetail = createTool({
       .where(eq(schema.storyboardProps.storyboardId, storyboard_id)).all()
       .map(link => link.propId)
     const characters = characterIds.length
-      ? db.select({ id: schema.characters.id, name: schema.characters.name }).from(schema.characters).where(inArray(schema.characters.id, characterIds)).all()
+      ? db.select({ id: schema.characters.id, name: schema.characters.name }).from(schema.characters)
+        .where(and(inArray(schema.characters.id, characterIds), isNull(schema.characters.deletedAt))).all()
       : []
     const props = propIds.length
-      ? db.select({ id: schema.props.id, name: schema.props.name }).from(schema.props).where(inArray(schema.props.id, propIds)).all()
+      ? db.select({ id: schema.props.id, name: schema.props.name }).from(schema.props)
+        .where(and(inArray(schema.props.id, propIds), isNull(schema.props.deletedAt))).all()
       : []
 
     return limitResult({
@@ -479,11 +474,19 @@ const readStoryboardDetail = createTool({
   },
 })
 
-export const DIRECTOR_READ_TOOLS: Record<string, any> = {
-  read_director_plan: readDirectorPlan,
+export const EPISODE_CONTEXT_READ_TOOLS: Record<string, any> = {
   read_episode_context: readEpisodeContext,
-  read_assets: readAssets,
-  read_asset_detail: readAssetDetail,
   read_storyboards: readStoryboards,
   read_storyboard_detail: readStoryboardDetail,
+}
+
+export const EPISODE_READ_TOOLS: Record<string, any> = {
+  ...EPISODE_CONTEXT_READ_TOOLS,
+  read_script: readScript,
+  read_dubbing_status: readDubbingStatus,
+}
+
+export const DIRECTOR_READ_TOOLS: Record<string, any> = {
+  ...EPISODE_CONTEXT_READ_TOOLS,
+  read_director_plan: readDirectorPlan,
 }

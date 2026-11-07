@@ -238,7 +238,7 @@ test('图谱摘要只读取 meta 并给出审计计数', () => {
   assert.equal(summarizeGraphMeta('not-json').auditCount, 0)
 })
 
-test('工具注册按作用域收窄：小说不注册提案/建议，首页为空，导演台注册只读、提案与建议', () => {
+test('工具注册按作用域收窄：小说不注册提案/建议，首页仅项目列表，导演台注册只读、提案与建议', () => {
   const build = (scope: any) => buildAssistantRequestContext({
     sessionId: 1,
     messageId: 2,
@@ -252,10 +252,10 @@ test('工具注册按作用域收窄：小说不注册提案/建议，首页为�
     Object.keys(getPresetTools(build({ workspace_key: 'novel:1', kind: 'novel', novel_id: 1 }))).sort(),
     ['read_novel_atlas', 'read_novel_chapter_content', 'read_novel_chapters', 'read_novel_context'],
   )
-  assert.deepEqual(Object.keys(getPresetTools(build({ workspace_key: 'home', kind: 'home' }))), [])
+  assert.deepEqual(Object.keys(getPresetTools(build({ workspace_key: 'home', kind: 'home' }))), ['read_project_list'])
   assert.deepEqual(
-    Object.keys(getPresetTools(build({ workspace_key: 'drama:1', kind: 'drama', drama_id: 1 }))),
-    ['propose_change'],
+    Object.keys(getPresetTools(build({ workspace_key: 'drama:1', kind: 'drama', drama_id: 1 }))).sort(),
+    ['propose_change', 'read_asset_detail', 'read_assets', 'read_delivery_status', 'read_project_overview'],
   )
   assert.deepEqual(
     Object.keys(getPresetTools(build({ workspace_key: 'drama:1', kind: 'director', drama_id: 1, episode_id: 1 }))).sort(),

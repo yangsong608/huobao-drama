@@ -15,6 +15,7 @@ process.env.MYSQL_AUTO_IMPORT = 'false'
 const { getPresetTools } = await import('../src/agents/tools/read-tools.ts')
 const { buildAssistantRequestContext } = await import('../src/agents/context.ts')
 const { db, schema } = await import('../src/db/index.ts')
+const { eq } = await import('drizzle-orm')
 
 after(async () => {
   await fs.rm(root, { recursive: true, force: true })
@@ -242,4 +243,382 @@ test('工具注册不包含写工具或文件/命令工具', () => {
   }
   assert.equal((toolsFor(novelLibrary) as any).read_novel_chapters, undefined)
   assert.equal((toolsFor(scopeA) as any).read_novel_list, undefined)
+})
+
+// ===== A1-4/A1-5 项目、分集、资产、分镜、配音、交付 =====
+
+function insertDrama(title: string, extra: Record<string, unknown> = {}) {
+  return Number(db.insert(schema.dramas).values({ title, createdAt: ts, updatedAt: ts, ...extra }).run().lastInsertRowid)
+}
+
+function insertEpisode(dramaId: number, episodeNumber: number, title: string, extra: Record<string, unknown> = {}) {
+  return Number(db.insert(schema.episodes).values({
+    dramaId, episodeNumber, title, createdAt: ts, updatedAt: ts, ...extra,
+  }).run().lastInsertRowid)
+}
+
+function insertCharacter(dramaId: number, name: string, extra: Record<string, unknown> = {}) {
+  return Number(db.insert(schema.characters).values({ dramaId, name, createdAt: ts, updatedAt: ts, ...extra }).run().lastInsertRowid)
+}
+
+function insertScene(dramaId: number, location: string, extra: Record<string, unknown> = {}) {
+  return Number(db.insert(schema.scenes).values({
+    dramaId, location, time: '夜', prompt: '场景提示词', createdAt: ts, updatedAt: ts, ...extra,
+  }).run().lastInsertRowid)
+}
+
+function insertProp(dramaId: number, name: string, extra: Record<string, unknown> = {}) {
+  return Number(db.insert(schema.props).values({ dramaId, name, createdAt: ts, updatedAt: ts, ...extra }).run().lastInsertRowid)
+}
+
+function insertStoryboard(episodeId: number, storyboardNumber: number, extra: Record<string, unknown> = {}) {
+  return Number(db.insert(schema.storyboards).values({
+    episodeId, storyboardNumber, title: `分镜${storyboardNumber}`, createdAt: ts, updatedAt: ts, ...extra,
+  }).run().lastInsertRowid)
+}
+
+function insertLine(episodeId: number, dramaId: number, lineNo: number, extra: Record<string, unknown> = {}) {
+  return Number(db.insert(schema.storyboardLines).values({
+    episodeId, dramaId, lineNo, text: `台词${lineNo}`, createdAt: ts, updatedAt: ts, ...extra,
+  }).run().lastInsertRowid)
+}
+
+function insertTake(lineId: number, episodeId: number, dramaId: number, takeNo: number, extra: Record<string, unknown> = {}) {
+  return Number(db.insert(schema.lineTakes).values({
+    lineId, episodeId, dramaId, takeNo, text: `台词${takeNo}`, status: 'ready', createdAt: ts, ...extra,
+  }).run().lastInsertRowid)
+}
+
+function insertVoice(dramaId: number, name: string, extra: Record<string, unknown> = {}) {
+  return Number(db.insert(schema.characterVoices).values({
+    dramaId, name, createdAt: ts, updatedAt: ts, ...extra,
+  }).run().lastInsertRowid)
+}
+
+function insertMerge(episodeId: number, dramaId: number, extra: Record<string, unknown> = {}) {
+  return Number(db.insert(schema.videoMerges).values({
+    episodeId, dramaId, title: `成片${episodeId}`, provider: 'test', model: 'test',
+    status: 'completed', createdAt: ts, ...extra,
+  }).run().lastInsertRowid)
+}
+
+function insertExport(episodeId: number, extra: Record<string, unknown> = {}) {
+  return Number(db.insert(schema.episodeExports).values({
+    episodeId, kind: 'video', status: 'completed', createdAt: ts, ...extra,
+  }).run().lastInsertRowid)
+}
+
+const dramaA = insertDrama('长夜项目')
+const epA1 = insertEpisode(dramaA, 1, '第一集', { scriptContent: '正式剧本内容' })
+const epA2 = insertEpisode(dramaA, 2, '第二集', { content: '原始内容未改写' })
+const epA3 = insertEpisode(dramaA, 3, '第三集', { scriptContent: '长'.repeat(7000) })
+const dramaB = insertDrama('白昼项目')
+const epB1 = insertEpisode(dramaB, 1, 'B 第一集', { scriptContent: '另一项目剧本' })
+const deletedDrama = insertDrama('废弃项目', { deletedAt: ts })
+const deletedEpisode = insertEpisode(deletedDrama, 1, '废弃集', { scriptContent: '不可见剧本' })
+
+const charA1 = insertCharacter(dramaA, '林晚', {
+  role: '主角', finalPrompt: '角色最终提示词', imageUrl: '/static/char-a.png', description: '冷静。',
+})
+const charA2 = insertCharacter(dramaA, '沈舟', { description: '尚未生成提示词。' })
+const charB1 = insertCharacter(dramaB, '外人', { finalPrompt: '别项目角色' })
+const deletedChar = insertCharacter(dramaA, '旧角色', { deletedAt: ts, finalPrompt: '删除角色' })
+const sceneA1 = insertScene(dramaA, '旧宅')
+const deletedScene = insertScene(dramaA, '废墟', { deletedAt: ts })
+const propA1 = insertProp(dramaA, '怀表', { type: '道具' })
+
+db.insert(schema.episodeCharacters).values({ episodeId: epA1, characterId: charA1, createdAt: ts }).run()
+db.insert(schema.episodeCharacters).values({ episodeId: epA2, characterId: charA1, createdAt: ts }).run()
+db.insert(schema.episodeCharacters).values({ episodeId: epA1, characterId: deletedChar, createdAt: ts }).run()
+db.insert(schema.episodeCharacters).values({ episodeId: deletedEpisode, characterId: charA1, createdAt: ts }).run()
+db.insert(schema.episodeScenes).values({ episodeId: epA1, sceneId: sceneA1, createdAt: ts }).run()
+db.insert(schema.episodeScenes).values({ episodeId: epA1, sceneId: deletedScene, createdAt: ts }).run()
+db.insert(schema.episodeProps).values({ episodeId: epA1, propId: propA1, createdAt: ts }).run()
+
+const sbA1 = insertStoryboard(epA1, 1, {
+  title: '开场', sceneId: sceneA1, duration: 5, shotType: 'medium', angle: 'eye level', movement: 'static',
+  imagePrompt: '图片提示词', videoPrompt: '视频提示词', description: '分镜描述', videoUrl: '/static/shot-a1.mp4',
+})
+const sbA2 = insertStoryboard(epA1, 2, { deletedAt: ts, title: '已删除分镜', videoPrompt: '不可见' })
+const sbB1 = insertStoryboard(epB1, 1, { title: 'B 分镜', videoPrompt: '别项目分镜' })
+
+db.insert(schema.storyboardCharacters).values({ storyboardId: sbA1, characterId: charA1 }).run()
+db.insert(schema.storyboardProps).values({ storyboardId: sbA1, propId: propA1 }).run()
+
+const lineA1 = insertLine(epA1, dramaA, 1, {
+  storyboardId: sbA1, speakerType: 'dialogue', speakerName: '林晚', text: '你终于来了。', audioUrl: '/static/line-a1.mp3',
+})
+const lineA2 = insertLine(epA1, dramaA, 2, {
+  storyboardId: sbA1, speakerType: 'narrator', speakerName: '旁白', text: '夜色渐深。',
+})
+insertLine(epA1, dramaA, 3, { storyboardId: sbA1, text: '已删除台词', deletedAt: ts })
+insertTake(lineA1, epA1, dramaA, 1, { isActive: true, audioUrl: '/static/take-a1.mp3' })
+insertTake(lineA2, epA1, dramaA, 1, { deletedAt: ts, isActive: true, audioUrl: '/static/take-a2.mp3' })
+
+insertVoice(dramaA, '林晚音色', {
+  characterId: charA1, scope: 'character', isActive: true, status: 'ready',
+})
+insertVoice(dramaA, '旁白音色', { scope: 'narrator', isActive: true, status: 'ready' })
+insertVoice(dramaA, '废弃音色', { scope: 'character', deletedAt: ts })
+
+const mergeA1 = insertMerge(epA1, dramaA, {
+  mergedUrl: '/static/film-a1.mp4', duration: 10, kind: 'mix', origin: 'export',
+})
+const mergeFailed = insertMerge(epA2, dramaA, {
+  status: 'failed', errorMsg: '素材缺失，无法合片',
+})
+insertMerge(epA1, dramaA, { deletedAt: ts, mergedUrl: '/static/deleted-film.mp4' })
+db.update(schema.episodes).set({ currentFilmId: mergeA1 }).where(eq(schema.episodes.id, epA1)).run()
+
+const exportA1 = insertExport(epA1, {
+  preset: 'final', durationMs: 10000, isCurrent: true, outputUrl: '/static/export-a1.mp4',
+})
+const exportFailed = insertExport(epA2, { status: 'failed', error: '渲染失败：编码器不可用' })
+insertExport(epA1, { deletedAt: ts, outputUrl: '/static/deleted-export.mp4' })
+
+const homeScope = { workspace_key: 'home', kind: 'home' }
+const dramaScope = { workspace_key: `drama:${dramaA}`, kind: 'drama', drama_id: dramaA }
+const episodeScope = {
+  workspace_key: `drama:${dramaA}`, kind: 'episode', drama_id: dramaA, episode_id: epA1, stage: 'script',
+}
+const directorScope = { workspace_key: `drama:${dramaA}`, kind: 'director', drama_id: dramaA, episode_id: epA1 }
+const editScope = { workspace_key: `drama:${dramaA}`, kind: 'edit', drama_id: dramaA, episode_id: epA1, edit_project_id: 1 }
+const mixScope = { workspace_key: `drama:${dramaA}`, kind: 'mix', drama_id: dramaA, episode_id: epA1 }
+const deliveryScope = { workspace_key: `drama:${dramaA}`, kind: 'delivery', drama_id: dramaA, episode_id: epA1 }
+
+test('read_project_list 只接受首页作用域，软删项目不可见，返回集数', async () => {
+  const result: any = await run(homeScope, 'read_project_list')
+  assert.equal(result.total, 2)
+  assert.deepEqual(new Set(result.items.map((item: any) => item.id)), new Set([dramaA, dramaB]))
+  const itemA = result.items.find((item: any) => item.id === dramaA)
+  assert.equal(itemA.episode_count, 3)
+  assert.equal(itemA.title, '长夜项目')
+  assert.ok(!result.items.some((item: any) => item.id === deletedDrama))
+  assert.ok(result.hint.length > 0)
+
+  assert.equal((toolsFor(homeScope) as any).read_project_overview, undefined)
+  assert.equal((toolsFor(dramaScope) as any).read_project_list, undefined)
+})
+
+test('read_project_overview 按项目聚合集数、阶段与资产/分镜/成片计数', async () => {
+  const result: any = await run(dramaScope, 'read_project_overview')
+  assert.equal(result.project.id, dramaA)
+  assert.equal(result.episode_count, 3)
+  assert.equal(result.counts.characters, 2)
+  assert.equal(result.counts.scenes, 1)
+  assert.equal(result.counts.props, 1)
+  assert.equal(result.counts.storyboards, 1)
+  assert.equal(result.counts.lines, 2)
+  assert.equal(result.counts.films, 1)
+  assert.equal(result.counts.exports, 2)
+  assert.equal(result.counts.current_films, 1)
+
+  const first = result.episodes.find((item: any) => item.episode_id === epA1)
+  assert.equal(first.episode_number, 1)
+  assert.equal(first.stage, 'delivery')
+  assert.equal(first.storyboard_count, 1)
+  assert.equal(first.line_count, 2)
+  assert.equal(first.has_current_film, true)
+  const second = result.episodes.find((item: any) => item.episode_id === epA2)
+  assert.equal(second.stage, 'script')
+  assert.equal(second.script_chars, '原始内容未改写'.length)
+
+  const deleted: any = await run(
+    { workspace_key: `drama:${deletedDrama}`, kind: 'drama', drama_id: deletedDrama },
+    'read_project_overview',
+  )
+  assert.equal(deleted.status, 404)
+  assert.equal((toolsFor(episodeScope) as any).read_project_overview, undefined)
+})
+
+test('read_script 优先改写剧本，回退原文并标注，超限截断', async () => {
+  const result: any = await run(episodeScope, 'read_script')
+  assert.equal(result.source, 'script_content')
+  assert.equal(result.original, false)
+  assert.equal(result.content, '正式剧本内容')
+  assert.equal(result.chars, '正式剧本内容'.length)
+  assert.equal(result.truncated, false)
+
+  const fallback: any = await run({ ...episodeScope, episode_id: epA2 }, 'read_script')
+  assert.equal(fallback.source, 'content')
+  assert.equal(fallback.original, true)
+  assert.equal(fallback.content, '原始内容未改写')
+  assert.match(fallback.note, /原文未改写/)
+
+  const long: any = await run({ ...episodeScope, episode_id: epA3 }, 'read_script')
+  assert.equal(long.truncated, true)
+  assert.ok(JSON.stringify(long).length <= 6000)
+  assert.match(long.hint, /截断/)
+
+  assert.equal((toolsFor(directorScope) as any).read_script, undefined)
+  assert.equal((toolsFor(dramaScope) as any).read_script, undefined)
+})
+
+test('read_dubbing_status 统计台词、take、旁白缺失与音色档案', async () => {
+  const result: any = await run(episodeScope, 'read_dubbing_status')
+  assert.equal(result.lines, 2)
+  assert.equal(result.generated, 1)
+  assert.equal(result.missing, 1)
+  assert.equal(result.narrator.total, 1)
+  assert.equal(result.narrator.generated, 0)
+  assert.equal(result.narrator.missing, 1)
+  assert.equal(result.takes.total, 1)
+  assert.equal(result.takes.active, 1)
+  assert.equal(result.takes.ready, 1)
+  assert.equal(result.voices.total, 2)
+  assert.equal(result.voices.active, 2)
+  assert.equal(result.voices.narrator_present, true)
+  assert.deepEqual(result.missing_line_refs.map((item: any) => item.line_id), [lineA2])
+  const text = JSON.stringify(result)
+  assert.ok(!text.includes('.mp3'))
+  assert.ok(!text.includes('.wav'))
+
+  assert.equal((toolsFor(directorScope) as any).read_dubbing_status, undefined)
+})
+
+test('read_assets 项目级列出全部资产，集内只列绑定资产，软删不可见', async () => {
+  const project: any = await run(dramaScope, 'read_assets')
+  assert.equal(project.characters.length, 2)
+  assert.equal(project.scenes.length, 1)
+  assert.equal(project.props.length, 1)
+  assert.ok(!project.characters.some((item: any) => item.id === deletedChar))
+  const bound = project.characters.find((item: any) => item.id === charA1)
+  assert.equal(bound.bound_episode_count, 2)
+  assert.equal(bound.has_final_prompt, true)
+  assert.ok(!('final_prompt' in bound))
+  const unbound = project.characters.find((item: any) => item.id === charA2)
+  assert.equal(unbound.bound_episode_count, 0)
+
+  const episode: any = await run(episodeScope, 'read_assets')
+  assert.equal(episode.episode_id, epA1)
+  assert.equal(episode.characters.length, 1)
+  assert.equal(episode.characters[0].id, charA1)
+  assert.equal(episode.characters[0].bound_current_episode, true)
+  assert.equal(episode.scenes[0].name, '旧宅')
+  assert.equal(episode.props[0].name, '怀表')
+
+  const filtered: any = await run(episodeScope, 'read_assets', { asset_type: 'scene' })
+  assert.equal(filtered.characters, undefined)
+  assert.equal(filtered.scenes.length, 1)
+
+  assert.equal((toolsFor(episodeScope) as any).read_storyboards !== undefined, true)
+  assert.equal((toolsFor(dramaScope) as any).read_storyboards, undefined)
+})
+
+test('read_asset_detail 返回完整提示词与绑定集，跨项目/软删拒绝', async () => {
+  const detail: any = await run(dramaScope, 'read_asset_detail', { asset_type: 'character', asset_id: charA1 })
+  assert.equal(detail.final_prompt, '角色最终提示词')
+  assert.equal(detail.has_image, true)
+  assert.deepEqual(detail.bound_episodes.map((item: any) => item.episode_number), [1, 2])
+
+  const episodeDetail: any = await run(episodeScope, 'read_asset_detail', { asset_type: 'character', asset_id: charA1 })
+  assert.deepEqual(episodeDetail.bound_storyboards, [sbA1])
+
+  const sceneDetail: any = await run(episodeScope, 'read_asset_detail', { asset_type: 'scene', asset_id: sceneA1 })
+  assert.equal(sceneDetail.name, '旧宅')
+  assert.equal(sceneDetail.final_prompt, null)
+
+  const cross: any = await run(dramaScope, 'read_asset_detail', { asset_type: 'character', asset_id: charB1 })
+  assert.equal(cross.status, 404)
+  const deleted: any = await run(dramaScope, 'read_asset_detail', { asset_type: 'character', asset_id: deletedChar })
+  assert.equal(deleted.status, 404)
+  const deletedSceneResult: any = await run(dramaScope, 'read_asset_detail', { asset_type: 'scene', asset_id: deletedScene })
+  assert.equal(deletedSceneResult.status, 404)
+})
+
+test('read_storyboards 列表不含提示词正文，派生作用域均可用', async () => {
+  const result: any = await run(episodeScope, 'read_storyboards')
+  assert.equal(result.total, 1)
+  const item = result.storyboards[0]
+  assert.equal(item.storyboard_id, sbA1)
+  assert.equal(item.video_prompt_length, '视频提示词'.length)
+  assert.equal(item.image_prompt_length, '图片提示词'.length)
+  assert.ok(!('video_prompt' in item))
+  assert.ok(!('description' in item))
+  assert.equal(item.line_count, 2)
+  assert.equal(item.character_count, 1)
+  assert.equal(item.prop_count, 1)
+
+  for (const kind of ['director', 'edit', 'mix', 'delivery']) {
+    assert.ok((toolsFor({ ...episodeScope, kind, ...(kind === 'edit' ? { edit_project_id: 1 } : {}) }) as any).read_storyboards,
+      `read_storyboards should be registered for ${kind}`)
+  }
+  assert.equal((toolsFor(dramaScope) as any).read_storyboards, undefined)
+
+  const cross: any = await run(episodeScope, 'read_storyboard_detail', { storyboard_id: sbB1 })
+  assert.equal(cross.status, 404)
+  const deleted: any = await run(episodeScope, 'read_storyboard_detail', { storyboard_id: sbA2 })
+  assert.equal(deleted.status, 404)
+})
+
+test('read_storyboard_detail 返回完整字段、绑定资产与未删台词', async () => {
+  const result: any = await run(episodeScope, 'read_storyboard_detail', { storyboard_id: sbA1 })
+  assert.equal(result.video_prompt, '视频提示词')
+  assert.equal(result.image_prompt, '图片提示词')
+  assert.equal(result.lines.length, 2)
+  assert.equal(result.lines[0].text, '你终于来了。')
+  assert.equal(result.lines[1].speaker_type, 'narrator')
+  assert.deepEqual(result.characters, [{ id: charA1, name: '林晚' }])
+  assert.deepEqual(result.props, [{ id: propA1, name: '怀表' }])
+})
+
+test('read_delivery_status 集内读取当前成片与失败原因，项目级聚合不要求 episode_id', async () => {
+  const episode: any = await run(deliveryScope, 'read_delivery_status')
+  assert.equal(episode.current_film.id, mergeA1)
+  assert.equal(episode.merges.total, 1)
+  assert.equal(episode.exports.total, 1)
+  assert.equal(episode.merges.items[0].id, mergeA1)
+  assert.equal(episode.exports.items[0].id, exportA1)
+
+  const failed: any = await run({ ...deliveryScope, episode_id: epA2 }, 'read_delivery_status')
+  assert.equal(failed.current_film, null)
+  assert.equal(failed.merges.failed, 1)
+  assert.equal(failed.exports.failed, 1)
+  assert.match(failed.merges.items[0].error, /素材缺失/)
+  assert.match(failed.exports.items[0].error, /渲染失败/)
+
+  const project: any = await run(dramaScope, 'read_delivery_status')
+  assert.equal(project.total, 3)
+  assert.equal(project.counts.episodes_with_current_film, 1)
+  assert.equal(project.counts.failed_merges, 1)
+  assert.equal(project.counts.failed_exports, 1)
+  const first = project.episodes.find((item: any) => item.episode_id === epA1)
+  assert.equal(first.current_film.id, mergeA1)
+  assert.equal(first.latest_export.id, exportA1)
+  const second = project.episodes.find((item: any) => item.episode_id === epA2)
+  assert.equal(second.current_film, null)
+  assert.equal(second.failed_merges, 1)
+  assert.equal(second.failed_exports, 1)
+
+  assert.equal((toolsFor(episodeScope) as any).read_delivery_status, undefined)
+  assert.equal((toolsFor(deliveryScope) as any).read_export_history !== undefined, true)
+  assert.equal((toolsFor(dramaScope) as any).read_export_history, undefined)
+
+  const text = JSON.stringify([episode, project])
+  assert.ok(!text.includes(root))
+  assert.ok(!text.includes('.mp4'))
+})
+
+test('项目/分集只读结果不含数据库路径、密钥或服务器绝对路径', async () => {
+  const payloads = [
+    await run(homeScope, 'read_project_list'),
+    await run(dramaScope, 'read_project_overview'),
+    await run(episodeScope, 'read_script'),
+    await run(episodeScope, 'read_dubbing_status'),
+    await run(dramaScope, 'read_assets'),
+    await run(episodeScope, 'read_assets'),
+    await run(dramaScope, 'read_asset_detail', { asset_type: 'character', asset_id: charA1 }),
+    await run(episodeScope, 'read_storyboards'),
+    await run(episodeScope, 'read_storyboard_detail', { storyboard_id: sbA1 }),
+    await run(deliveryScope, 'read_delivery_status'),
+    await run(dramaScope, 'read_delivery_status'),
+  ]
+  for (const payload of payloads) {
+    const text = JSON.stringify(payload)
+    assert.ok(!text.includes(root), 'tool result must not contain the database path')
+    assert.ok(!text.includes('.sqlite3'))
+    assert.ok(!text.toLowerCase().includes('apikey'))
+    assert.ok(!text.toLowerCase().includes('baseurl'))
+    assert.ok(!text.includes('/static/'))
+  }
 })

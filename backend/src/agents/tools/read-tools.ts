@@ -23,7 +23,17 @@ import {
   parseWorldMap,
 } from '../../services/novel/story-atlas.js'
 import { DELIVERY_READ_TOOLS, EDIT_READ_TOOLS, MIX_READ_TOOLS } from './edit-read-tools.js'
-import { DIRECTOR_READ_TOOLS } from './director-read-tools.js'
+import {
+  DIRECTOR_READ_TOOLS,
+  EPISODE_CONTEXT_READ_TOOLS,
+  EPISODE_READ_TOOLS,
+} from './director-read-tools.js'
+import {
+  ASSET_READ_TOOLS,
+  DELIVERY_STATUS_TOOLS,
+  DRAMA_READ_TOOLS,
+  HOME_READ_TOOLS,
+} from './project-read-tools.js'
 import { PROPOSAL_TOOLS } from './proposal-tools.js'
 import { SUGGESTION_TOOLS } from './suggestion-tools.js'
 
@@ -440,11 +450,16 @@ export function getPresetTools(requestContext: RequestContext | undefined): Reco
   if (!scope) return {}
   const preset = getAgentPreset(requestContext)
   let tools: Record<string, any> = {}
-  if (scope.kind === 'novel-library') tools = { ...NOVEL_LIBRARY_TOOLS }
+  if (scope.kind === 'home') tools = { ...HOME_READ_TOOLS }
+  else if (scope.kind === 'novel-library') tools = { ...NOVEL_LIBRARY_TOOLS }
   else if (scope.kind === 'novel') tools = { ...NOVEL_TOOLS }
-  else if (scope.kind === 'director') tools = { ...DIRECTOR_READ_TOOLS }
-  else if (scope.kind === 'edit') tools = { ...EDIT_READ_TOOLS }
-  else if (scope.kind === 'mix') tools = { ...MIX_READ_TOOLS }
-  else if (scope.kind === 'delivery') tools = { ...DELIVERY_READ_TOOLS }
+  else if (scope.kind === 'drama') tools = { ...DRAMA_READ_TOOLS }
+  else if (scope.kind === 'episode') tools = { ...EPISODE_READ_TOOLS, ...ASSET_READ_TOOLS }
+  else if (scope.kind === 'director') tools = { ...DIRECTOR_READ_TOOLS, ...ASSET_READ_TOOLS }
+  else if (scope.kind === 'edit') tools = { ...EDIT_READ_TOOLS, ...EPISODE_CONTEXT_READ_TOOLS, ...ASSET_READ_TOOLS }
+  else if (scope.kind === 'mix') tools = { ...MIX_READ_TOOLS, ...EPISODE_CONTEXT_READ_TOOLS, ...ASSET_READ_TOOLS }
+  else if (scope.kind === 'delivery') {
+    tools = { ...DELIVERY_READ_TOOLS, ...DELIVERY_STATUS_TOOLS, ...EPISODE_CONTEXT_READ_TOOLS, ...ASSET_READ_TOOLS }
+  }
   return withSuggestionTools(withProposalTools(withPageToolScope(tools, scope), scope, preset), scope, preset)
 }

@@ -4,7 +4,7 @@
  */
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
-import { success, badRequest, notFound } from '../utils/response.js'
+import { success, badRequest, notFound, now } from '../utils/response.js'
 import { getAgentSettings, agentPageAllowsScope } from '../services/app-settings.js'
 import {
   AgentScopeError,
@@ -47,6 +47,13 @@ import {
   listAgentProposals,
   rejectAgentProposal,
 } from '../services/agent-proposals.js'
+import {
+  checkModels,
+  listTools,
+  recentErrors,
+  runReadTool,
+  simulateRoute,
+} from '../services/agent-diagnostics.js'
 
 const app = new Hono()
 const HEARTBEAT_MS = Math.max(100, Number(process.env.AGENT_HEARTBEAT_MS || 15_000))
@@ -103,7 +110,7 @@ function parseMessageJson(raw: string | null): unknown {
   }
 }
 
-function serializeSession(row: AgentSessionRow) {
+function serializeSession(row: AgentSessionRow, meta?: { messageCount?: number; proposalCount?: number; scope?: unknown }) {
   return {
     id: row.id,
     workspace_key: row.workspaceKey,
@@ -113,6 +120,9 @@ function serializeSession(row: AgentSessionRow) {
     last_message_at: row.lastMessageAt,
     created_at: row.createdAt,
     updated_at: row.updatedAt,
+    ...(meta?.scope !== undefined ? { scope: meta.scope } : {}),
+    ...(meta?.messageCount !== undefined ? { message_count: meta.messageCount } : {}),
+    ...(meta?.proposalCount !== undefined ? { proposal_count: meta.proposalCount } : {}),
   }
 }
 
@@ -122,6 +132,7 @@ function serializeMessage(row: AgentMessageRow) {
     session_id: row.sessionId,
     role: row.role,
     content: row.content || '',
+    content_cleared: row.content === null,
     status: row.status,
     scope: parseMessageJson(row.scopeJson),
     preset: row.preset,
@@ -199,6 +210,33 @@ function stopLiveTurn(sessionId: number) {
   closeAgentStream(running.id)
 }
 
+// GET /assistant/diagnostics?route= — 工具清单、路由模拟、模型可用性、最近错误（只读）
+app.get('/diagnostics', (c) => {
+  try {
+    const route = c.req.query('route')?.trim()
+    return success(c, {
+      tools: listTools(),
+      models: checkModels(),
+      errors: recentErrors(),
+      route: route ? simulateRoute(route) : null,
+      generated_at: now(),
+    })
+  } catch (error) {
+    return errorResponse(c, error)
+  }
+})
+
+// POST /assistant/diagnostics/tool — 只读工具试跑；写/未知/越界一律 400
+app.post('/diagnostics/tool', async (c) => {
+  try {
+    const body = await readJson(c)
+    const result = await runReadTool({ tool: body.tool, args: body.args, scope: body.scope })
+    return success(c, result)
+  } catch (error) {
+    return errorResponse(c, error)
+  }
+})
+
 // POST /assistant/sessions/resolve — 按 workspace_key 取活动线程，没有则创建
 app.post('/sessions/resolve', async (c) => {
   if (!getAgentSettings().dock.enabled) return dockDisabled(c)
@@ -253,7 +291,14 @@ app.get('/sessions', (c) => {
       ...(Number.isFinite(limit) ? { limit } : {}),
       ...(Number.isFinite(offset) ? { offset } : {}),
     })
-    return success(c, { items: page.items.map(serializeSession), has_more: page.has_more })
+    return success(c, {
+      items: page.items.map(row => serializeSession(row, {
+        messageCount: row.messageCount,
+        proposalCount: row.proposalCount,
+        scope: row.scope ?? null,
+      })),
+      has_more: page.has_more,
+    })
   } catch (error) {
     return errorResponse(c, error)
   }
@@ -273,8 +318,11 @@ app.get('/sessions/:id', (c) => {
       ...(beforeId ? { beforeId } : {}),
       ...(Number.isFinite(limit) ? { limit } : {}),
     })
+    const latestScope = [...page.items].reverse()
+      .map(row => parseMessageJson(row.scopeJson))
+      .find(scope => scope !== null) ?? null
     return success(c, {
-      session: serializeSession(session),
+      session: serializeSession(session, { scope: latestScope }),
       messages: page.items.map(serializeMessage),
       has_more: page.has_more,
     })

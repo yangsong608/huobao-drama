@@ -1,5 +1,5 @@
 <template>
-  <div class="page">
+  <div class="page" :data-reading="focusReading ? 'on' : undefined">
     <div v-if="store.loading && !novel" class="page-loading">{{ t('common.loading') }}</div>
 
     <div v-else-if="!novel" class="page-empty card">
@@ -96,7 +96,7 @@
       />
       <template v-else-if="activeTab === 'writer'">
         <div v-if="!workbenchLayoutReady" class="page-loading">{{ t('common.loading') }}</div>
-        <NovelWorkbenchShell v-else-if="workbenchLayout === 'split'" :tree-visible="workbenchTree">
+        <NovelWorkbenchShell v-else-if="workbenchLayout === 'split'" :tree-visible="workbenchTree" :focus-reading="focusReading">
           <NovelChapterWriterPanel
             ref="writerRef"
             :novel="novel"
@@ -105,6 +105,8 @@
             :foreshadows="workbenchForeshadows"
             :annotations-enabled="annotationsEnabled"
             :foreshadow-enabled="foreshadowEnabled"
+            :focus-reading="focusReading"
+            @toggle-focus-reading="toggleFocusReading"
             @refresh="refreshAll"
             @chapter-change="onWriterChapterChange"
             @selection="onSelection"
@@ -151,6 +153,8 @@
           v-else-if="workbenchLayout === 'tabs'"
           :novel="novel"
           :initial-chapter-no="writerChapter || undefined"
+          :focus-reading="focusReading"
+          @toggle-focus-reading="toggleFocusReading"
           @refresh="load"
         />
       </template>
@@ -328,6 +332,12 @@ const showHeaderAssistant = computed(() =>
   dockEnabled.value && (agentSettings.value !== null || Boolean(agentSettingsError.value)),
 )
 const layoutSwitching = ref(false)
+const focusReading = ref(false)
+
+function toggleFocusReading() {
+  if (activeTab.value !== 'writer') return
+  focusReading.value = !focusReading.value
+}
 
 useAgentPageAdapter({
   id: 'novel-detail',
@@ -417,11 +427,13 @@ watch(() => route.query.tab, (value) => {
 }, { immediate: true })
 
 function setTab(tab: NovelTab) {
+  if (tab !== 'writer') focusReading.value = false
   activeTab.value = tab
   router.replace({ query: { ...route.query, tab } })
 }
 
 function goWrite(chapterNo: number) {
+  focusReading.value = false
   writerChapter.value = Number(chapterNo) || 1
   annotationSelection.value = null
   activeAnnotationId.value = null
@@ -476,6 +488,7 @@ function refreshAll() {
 
 async function switchWorkbenchLayout(next: 'split' | 'tabs') {
   if (layoutSwitching.value || workbenchLayout.value === next) return
+  focusReading.value = false
   layoutSwitching.value = true
   try {
     await novelAPI.saveSettings({ workbench: { layout: next } })
@@ -606,7 +619,7 @@ onMounted(async () => {
 }
 .back-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3.5px var(--button-focus);
+  box-shadow: var(--focus-ring);
 }
 .head-info {
   flex: 1;
@@ -820,7 +833,7 @@ onMounted(async () => {
 }
 .detail-progress-number span {
   font-size: 14px;
-  color: var(--text-3);
+  color: var(--text-2);
   font-weight: 500;
 }
 .detail-progress .progress {
@@ -830,7 +843,7 @@ onMounted(async () => {
   margin: 10px 0 0;
   font-size: 12.5px;
   line-height: 1.6;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .detail-blueprint {
   margin: 0;
@@ -871,7 +884,7 @@ onMounted(async () => {
 }
 .detail-chapter-no {
   width: 30px;
-  color: var(--text-3);
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 .detail-chapter-title {
@@ -882,7 +895,7 @@ onMounted(async () => {
 }
 .detail-chapter-meta {
   font-size: 11.5px;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .detail-chapter-status {
   padding: 1px 8px;

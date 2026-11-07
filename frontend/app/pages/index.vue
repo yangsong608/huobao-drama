@@ -12,10 +12,10 @@
         <span class="tag tag-accent">{{ t('index.hero.styleCount', { n: stylePresets.length }) }}</span>
       </div>
       <div class="head-actions">
-        <button class="btn btn-icon tour-help-btn" :title="t('tour.helpTitle')" @click="startTour('index', INDEX_TOUR, t)">
-          <CircleHelp :size="15" :stroke-width="1.8" />
+        <button type="button" class="btn btn-icon tour-help-btn" :title="t('tour.helpTitle')" :aria-label="t('tour.helpTitle')" @click="startTour('index', INDEX_TOUR, t)">
+          <CircleHelp :size="15" :stroke-width="1.8" aria-hidden="true" />
         </button>
-        <button class="btn btn-primary" @click="showCreate = true">
+        <button type="button" class="btn btn-primary" @click="showCreate = true">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
@@ -84,7 +84,7 @@
               @update:open="(v) => { statusMenuId = v ? d.id : null }"
             >
               <template #trigger>
-                <button type="button" class="cover-badge status-badge" :title="t('index.statusBadgeTitle')">
+                <button type="button" class="cover-badge status-badge" :title="t('index.statusBadgeTitle')" :aria-label="projectStatus(d)">
                   <span class="status-dot" :class="statusDotClass(d)"></span>
                   {{ projectStatus(d) }}
                 </button>
@@ -105,7 +105,7 @@
               @update:open="(v) => { activeMenuId = v ? d.id : null }"
             >
               <template #trigger>
-                <button class="btn btn-icon btn-sm cover-more" type="button" :title="t('common.more')">
+                <button class="btn btn-icon btn-sm cover-more" type="button" :title="t('common.more')" :aria-label="t('common.more')">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                     <circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>
                   </svg>
@@ -130,18 +130,24 @@
       </article>
     </div>
 
-    <div v-else class="empty-state">
-      <div class="empty-icon">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
-          <rect x="3" y="3" width="18" height="18" rx="3"/>
-          <line x1="12" y1="8" x2="12" y2="16"/>
-          <line x1="8" y1="12" x2="16" y2="12"/>
-        </svg>
-      </div>
-      <p class="empty-title">{{ dramas.length ? t('index.emptyFilteredTitle') : t('index.emptyTitle') }}</p>
-      <p class="empty-desc">{{ dramas.length ? t('index.emptyFilteredDesc') : t('index.emptyDesc') }}</p>
-      <button v-if="!dramas.length" class="btn btn-primary" @click="showCreate = true">{{ t('index.create') }}</button>
-    </div>
+    <StudioEmptyState
+      v-else
+      class="project-empty"
+      :title="dramas.length ? t('index.emptyFilteredTitle') : t('index.emptyTitle')"
+      :description="dramas.length ? t('index.emptyFilteredDesc') : t('index.emptyDesc')"
+      :action-label="dramas.length ? undefined : t('index.create')"
+      @action="showCreate = true"
+    >
+      <template #icon>
+        <span class="empty-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="3"/>
+            <line x1="12" y1="8" x2="12" y2="16"/>
+            <line x1="8" y1="12" x2="16" y2="12"/>
+          </svg>
+        </span>
+      </template>
+    </StudioEmptyState>
 
     <div v-if="showCreate" class="overlay" @click.self="closeCreate">
       <div class="dialog create-dialog">
@@ -306,6 +312,7 @@ import { Clock, CircleHelp } from 'lucide-vue-next'
 import { dramaAPI, stylePresetAPI, aiConfigAPI, uploadAPI, settingsAPI } from '~/composables/useApi'
 import { textModelSupportsVision } from '~/utils/model-capabilities'
 import BaseSelect from '~/components/BaseSelect.vue'
+import StudioEmptyState from '~/components/studio/StudioEmptyState.vue'
 import { startTour, autoTour } from '~/composables/useTour'
 
 const { t, locale } = useI18n()
@@ -651,14 +658,15 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
 }
 .head-left { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 .launcher-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 650;
   letter-spacing: -0.02em;
   color: var(--text-0);
   white-space: nowrap;
 }
-.launcher-sub { color: var(--text-3); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.launcher-sub { color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hero-stats { display: flex; gap: var(--sp-2); margin-left: auto; }
+.hero-stats .tag-accent { color: var(--accent-text-strong); }
 .launcher-head .btn { flex-shrink: 0; }
 .head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
@@ -701,7 +709,7 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
 .filter-chip:hover { color: var(--text-0); background: var(--bg-active); }
 .filter-chip:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3.5px var(--button-focus);
+  box-shadow: var(--focus-ring);
 }
 .filter-chip.on { background: var(--inverse-surface); color: var(--on-inverse); }
 .sort-select-wrap { margin-left: auto; width: 132px; flex-shrink: 0; }
@@ -723,7 +731,7 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
 .project-card:focus-visible {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3.5px var(--button-focus);
+  box-shadow: var(--focus-ring);
 }
 
 /* 封面：品牌柔光洗色 + 首字符，状态色只在圆点上出现 */
@@ -751,8 +759,8 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
   border-radius: 5px;
   background: var(--surface-raised);
   border: 1px solid var(--border);
-  color: var(--text-3);
-  font-size: 10px;
+  color: var(--text-2);
+  font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.02em;
   font-family: var(--font-mono);
@@ -802,7 +810,7 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
 .project-body { padding: 12px 14px 13px; }
 .project-name {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text-0);
@@ -812,16 +820,18 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
   align-items: center;
   gap: 8px;
   margin-top: 7px;
-  font-size: 11.5px;
+  font-size: 12px;
   flex-wrap: wrap;
 }
+.project-meta .dim { color: var(--text-2); }
+.project-meta .tag-accent { color: var(--accent-text-strong); }
 .project-foot {
   display: flex;
   align-items: center;
   gap: 4px;
   margin-top: 10px;
-  font-size: 11px;
-  color: var(--text-3);
+  font-size: 12px;
+  color: var(--text-2);
   white-space: nowrap;
 }
 
@@ -844,18 +854,14 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
 @keyframes skeleton-pulse { to { opacity: 0.55; } }
 
 /* 空状态吃掉剩余高度 */
-.empty-state {
+.project-empty {
   flex: 1;
   min-height: 240px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  max-width: none;
   justify-content: center;
-  gap: 10px;
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-lg);
   background: var(--surface-raised);
-  text-align: center;
 }
 .empty-icon {
   width: 56px;
@@ -868,18 +874,16 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
   color: var(--text-3);
   margin-bottom: 4px;
 }
-.empty-title { font-size: 14px; font-weight: 600; color: var(--text-1); }
-.empty-desc { font-size: 12px; color: var(--text-3); max-width: 240px; line-height: 1.6; }
 
 .create-dialog { width: 460px; max-width: calc(100vw - 32px); }
 .dub-default { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; }
 .dub-default input { width: 15px; height: 15px; margin-top: 1px; accent-color: var(--accent); flex: none; }
 .dub-default-copy { display: flex; flex-direction: column; gap: 1px; font-size: 12px; color: var(--text-2); }
 .dub-default-copy b { font-size: 12.5px; font-weight: 600; color: var(--text-1); }
-.dub-default-copy span { color: var(--text-3); line-height: 1.45; }
+.dub-default-copy span { color: var(--text-2); line-height: 1.45; }
 /* 参考图 → 视觉风格 */
 .style-ref-field { gap: 8px; }
-.field-optional { color: var(--text-3); font-weight: 400; margin-left: 4px; }
+.field-optional { color: var(--text-2); font-weight: 400; margin-left: 4px; }
 .style-ref-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .style-ref-item {
   position: relative;
@@ -916,13 +920,13 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius);
   background: transparent;
-  color: var(--text-3);
+  color: var(--text-2);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
   transition: all 0.16s var(--ease-out);
 }
@@ -941,7 +945,7 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
 }
 @keyframes ref-spin { to { transform: rotate(360deg); } }
 .dialog-head-copy { display: flex; flex-direction: column; gap: 2px; }
-.dialog-desc { font-size: 12.5px; color: var(--text-3); }
+.dialog-desc { font-size: 12.5px; color: var(--text-2); }
 .modal-icon {
   width: 40px;
   height: 40px;
@@ -961,9 +965,9 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
 }
 .dialog-body { display: flex; flex-direction: column; gap: 16px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
-.field-label { font-size: 12px; font-weight: 600; color: var(--text-1); }
+.field-label { font-size: 12.5px; font-weight: 600; color: var(--text-1); }
 .required { color: var(--error); }
-.field-hint { font-size: 11px; color: var(--text-3); line-height: 1.5; }
+.field-hint { font-size: 12px; color: var(--text-2); line-height: 1.5; }
 .field-hint-warn { color: var(--error); }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 

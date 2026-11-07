@@ -151,8 +151,8 @@ const selectedScene = computed(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 54px;
-  min-height: 54px;
+  height: 96px;
+  min-height: 96px;
   padding: 0 10px;
   border-top: 1px solid var(--border);
   background: var(--panel-bg);

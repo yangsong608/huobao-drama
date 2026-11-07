@@ -902,7 +902,8 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-pill);
   background: rgba(11, 13, 16, 0.66);
   color: var(--on-media, rgba(255, 255, 255, 0.7));
-  font-size: 10px;
+  font-size: 11px;
   pointer-events: none;
 }
+.director-stage3d :is(button, input, select):focus-visible { outline: none; box-shadow: var(--focus-ring); }
 </style>

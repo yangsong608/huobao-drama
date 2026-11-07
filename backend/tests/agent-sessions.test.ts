@@ -42,7 +42,7 @@ test('resolve 命中同一活动线程，重复调用不建新线程', () => {
 
 test('新对话归档旧线程并重新创建；标题取首条用户消息前 40 字', () => {
   const first = resolveSession({ workspaceKey: 'novel:2' })
-  createUserMessage({ sessionId: first.id, content: '一'.repeat(60), preset: 'assistant' })
+  createUserMessage({ sessionId: first.id, content: '一'.repeat(60), preset: 'assistant', scope: { kind: 'novel', novel_id: 2 } })
   const detail = getSessionDetail(first.id)
   assert.equal(detail.session.title, '一'.repeat(40))
   assert.equal(detail.messages.length, 1)
@@ -57,6 +57,26 @@ test('新对话归档旧线程并重新创建；标题取首条用户消息前 4
   assert.equal(active.items[0].id, created.id)
   const all = listSessions({ workspaceKey: 'novel:2', status: 'all' })
   assert.equal(all.items.length, 2)
+  assert.equal(all.items.find(item => item.id === first.id)?.messageCount, 1)
+  assert.deepEqual(all.items.find(item => item.id === first.id)?.scope, { kind: 'novel', novel_id: 2 })
+  const activeItem = all.items.find(item => item.id === created.id)
+  assert.equal(activeItem?.messageCount, 0)
+  assert.equal(activeItem?.proposalCount, 0)
+  assert.equal(activeItem?.scope, null)
+
+  const ts = new Date().toISOString()
+  db.insert(schema.agentProposals).values({
+    sessionId: created.id,
+    kind: 'update_storyboard',
+    targetType: 'storyboard',
+    targetId: 1,
+    status: 'proposed',
+    createdAt: ts,
+    updatedAt: ts,
+  }).run()
+  const withProposal = listSessions({ workspaceKey: 'novel:2', status: 'all' }).items
+  assert.equal(withProposal.find(item => item.id === created.id)?.proposalCount, 1)
+  assert.equal(withProposal.find(item => item.id === first.id)?.proposalCount, 0)
 })
 
 test('同一会话只允许一条 running；完成后可继续发消息', () => {
@@ -112,11 +132,12 @@ test('归档不删除；软删除后列表不可见且提案过期', () => {
   const afterArchive = listSessions({ workspaceKey: 'novel:6', status: 'all' }).items
   assert.equal(afterArchive.length, 1)
   assert.equal(afterArchive[0].status, 'archived')
-  assert.equal(db.select().from(schema.agentProposals).all()[0].status, 'proposed')
+  const proposalOf = () => db.select().from(schema.agentProposals).all().find(row => row.sessionId === session.id)
+  assert.equal(proposalOf()?.status, 'proposed')
 
   deleteSession(session.id)
   assert.equal(listSessions({ workspaceKey: 'novel:6', status: 'all' }).items.length, 0)
-  assert.equal(db.select().from(schema.agentProposals).all()[0].status, 'expired')
+  assert.equal(proposalOf()?.status, 'expired')
   assert.throws(() => getSessionDetail(session.id), /会话不存在/)
 })
 

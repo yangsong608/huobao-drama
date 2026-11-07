@@ -585,7 +585,8 @@
       "mcp": "MCP",
       "rules": "Pipeline rules",
       "queue": "Job queue",
-      "novel": "Novel"
+      "novel": "Novel",
+      "ui": "Interface"
     },
     "novel": {
       "title": "Novel generation",
@@ -925,7 +926,9 @@
           "suggestionsHint": "Offer actionable next steps after an answer.",
           "autoDetect": "Auto-detect scope",
           "autoDetectHint": "Lock the scope to the current page; when off, choose the scope manually."
-        }
+        },
+        "goAiConfig": "AI configuration",
+        "goRules": "Pipeline rules"
       },
       "pages": {
         "title": "Page Bindings",
@@ -1018,12 +1021,149 @@
       "sessions": {
         "title": "Sessions & Audit",
         "desc": "Review agent sessions, messages and run records.",
-        "source": "agent_sessions / agent_messages"
+        "source": "agent_sessions / agent_messages",
+        "retentionTitle": "Retention & cleanup",
+        "retentionDays": "Content retention days",
+        "retentionHint": "Only archived or soft-deleted sessions older than the retention window are cleaned: message text, tool calls/results and suggestions are cleared. Session shells, message rows and proposal audits are kept. Range 7–365 days.",
+        "retentionInvalid": "Retention days must be between 7 and 365",
+        "retentionSaved": "Retention days saved",
+        "filters": {
+          "workspace": "Workspace key",
+          "workspacePlaceholder": "e.g. novel:12 or drama:3; leave empty for all",
+          "status": "Status",
+          "statusAll": "All",
+          "statusActive": "Active",
+          "statusArchived": "Archived",
+          "hint": "Soft-deleted sessions are hidden; details are read-only audit records.",
+          "refresh": "Refresh"
+        },
+        "loading": "Loading sessions…",
+        "errorTitle": "Failed to load sessions",
+        "retry": "Retry",
+        "emptyTitle": "No sessions yet",
+        "emptyHint": "Sessions appear here after you ask the assistant from a novel or episode page.",
+        "goNovels": "Go to novel library",
+        "checkModels": "Check model config",
+        "untitled": "Untitled session",
+        "view": "View",
+        "archive": "Archive",
+        "delete": "Delete",
+        "archived": "Session archived",
+        "deleted": "Session deleted",
+        "cancelled": "Running answer cancelled",
+        "loadMore": "Load more",
+        "columns": {
+          "thread": "Thread",
+          "preset": "Preset",
+          "workspace": "Scope / workspace",
+          "messages": "Messages",
+          "proposals": "Proposals",
+          "status": "Status",
+          "actions": "Actions"
+        },
+        "statusLabels": {
+          "active": "Active",
+          "archived": "Archived"
+        },
+        "archiveTitle": "Archive session",
+        "archiveMessage": "Archived sessions leave the active list. Pending proposals do not expire.",
+        "deleteTitle": "Delete session",
+        "deleteMessage": "Delete is a soft delete: the session and messages are kept, pending proposals expire, and the thread disappears from the list.",
+        "detailTitle": "Session details",
+        "detailLoading": "Loading details…",
+        "close": "Close",
+        "messageCount": "Messages",
+        "proposalCount": "Proposals",
+        "cancel": "Cancel answer",
+        "messagesTitle": "Messages",
+        "loadOlder": "Load earlier messages",
+        "noMessages": "This session has no messages",
+        "contentCleared": "Content cleared (past retention window)",
+        "messageExtras": "{tools} tool calls · {suggestions} suggestions",
+        "roles": {
+          "user": "User",
+          "assistant": "Assistant"
+        },
+        "messageStatus": {
+          "pending": "Pending",
+          "running": "Generating",
+          "completed": "Completed",
+          "failed": "Failed",
+          "cancelled": "Cancelled",
+          "interrupted": "Interrupted"
+        },
+        "proposalsTitle": "Proposals",
+        "noProposals": "This session has no proposals",
+        "proposalColumns": {
+          "kind": "Kind",
+          "target": "Target",
+          "status": "Status",
+          "appliedBy": "Applied by",
+          "updatedAt": "Time"
+        },
+        "proposalStatus": {
+          "proposed": "Pending",
+          "applied": "Applied",
+          "rejected": "Rejected",
+          "conflict": "Conflict",
+          "expired": "Expired"
+        },
+        "emptyFilteredTitle": "No matching sessions",
+        "emptyFilteredHint": "No sessions match the current workspace key or status filter. Clear the filters to see all sessions.",
+        "clearFilters": "Clear filters"
       },
       "diagnostics": {
         "title": "Diagnostics",
         "desc": "Check model, tool and streaming connection status.",
-        "source": "Runtime status and recent errors"
+        "source": "Runtime status and recent errors",
+        "loading": "Loading diagnostics…",
+        "loadFailed": "Failed to load diagnostics",
+        "retry": "Retry",
+        "routeTitle": "Route resolution",
+        "routePlaceholder": "/drama/1/episode/1?panel=dubbing&step=3",
+        "routeHint": "Enter a frontend route; the server simulates the same adapter rules without opening the page.",
+        "simulate": "Resolve route",
+        "matched": "Matched",
+        "unmatched": "Unmatched",
+        "unmatchedHint": "No page binding or adapter matches this route. Check the Page bindings section or use a concrete episode route.",
+        "adapter": "Adapter",
+        "scope": "Scope",
+        "bindingStage": "Page stage",
+        "visible": "Entry visible",
+        "yes": "Yes",
+        "no": "No",
+        "defaultPreset": "Default preset",
+        "allowedTools": "Allowed tools",
+        "modelsTitle": "Model availability",
+        "modelsAvailable": "Available",
+        "modelsUnavailable": "Unavailable",
+        "activeConfig": "Active text model",
+        "modelConfigMissing": "No active text model config found. Enable a text model on the AI config tab first.",
+        "presetModels": "Preset models (empty uses default)",
+        "modelFallback": "Default",
+        "goAiConfig": "Go to AI config",
+        "toolsTitle": "Tool registry",
+        "errorsTitle": "Recent errors",
+        "noErrors": "No recent errors",
+        "trialTitle": "Read-only tool trial",
+        "trialHint": "Runs only registered read-only tools. Write tools, unknown tools and out-of-scope requests are rejected; trials never write data.",
+        "scopeSelect": "Scope",
+        "toolSelect": "Tool",
+        "toolPlaceholder": "Select a read-only tool",
+        "novel": "Novel",
+        "novelPlaceholder": "Select a novel",
+        "drama": "Project",
+        "dramaPlaceholder": "Select a project",
+        "episode": "Episode",
+        "episodePlaceholder": "Select an episode",
+        "editProject": "Edit project ID",
+        "args": "Arguments JSON",
+        "argsHint": "Provide a JSON object. Novel/project/episode IDs from the selectors are added to the scope automatically.",
+        "argsInvalid": "Arguments must be a JSON object",
+        "run": "Run trial",
+        "result": "Trial result",
+        "truncated": "Truncated",
+        "emptyResult": "Choose a tool and run a trial to see the result here."
       }
     },
     "skills": {
@@ -1241,6 +1381,56 @@
       "analyzing": "Analyzing…",
       "done": "Style \"{name}\" created",
       "failed": "Style analysis failed"
+    },
+    "ui": {
+      "title": "Interface",
+      "desc": "Display density, motion, and reading typography for this device. Preferences stay on this device and never modify project data.",
+      "appearance": "Appearance",
+      "appearanceSub": "Density and motion only affect this device",
+      "densityLabel": "Display density",
+      "densityNote": "Comfortable increases row height in lists, forms, and cards; timelines stay compact",
+      "density": {
+        "compact": "Compact",
+        "comfortable": "Comfortable"
+      },
+      "motionLabel": "Motion",
+      "motionNote": "System follows the operating system's reduce-motion setting",
+      "motion": {
+        "system": "System",
+        "full": "Full",
+        "reduced": "Reduced"
+      },
+      "reading": "Reading",
+      "readingSub": "Font, size, and line width for the novel reading view",
+      "readingFontLabel": "Reading font",
+      "readingFontNote": "Serif reads better for long text; missing glyphs fall back automatically",
+      "font": {
+        "serif": "Serif",
+        "sans": "Sans"
+      },
+      "readingSizeLabel": "Reading size",
+      "readingSizeNote": "Affects the reading view only, not the editor",
+      "readingWidthLabel": "Reading width",
+      "readingWidthNote": "Sets the maximum line width; narrow screens shrink automatically",
+      "width": {
+        "60": "Narrow",
+        "68": "Standard",
+        "76": "Wide"
+      },
+      "action": "Actions",
+      "actionSub": "Whether primary actions show text labels",
+      "actionLabelsLabel": "Show text on primary actions",
+      "actionLabelsNote": "When off, low-frequency actions may show icons only but keep tooltips",
+      "actionLabels": {
+        "on": "Show",
+        "off": "Icons only"
+      },
+      "reset": "Restore defaults",
+      "resetHint": "Clears this device's preferences and returns to deployment defaults",
+      "lockedTitle": "Using deployment defaults",
+      "lockedNote": "User overrides are disabled by the administrator. Display and reading settings come from deployment defaults; local preferences are kept and return when re-enabled.",
+      "loadFailed": "Failed to load deployment defaults. Using cached or built-in defaults.",
+      "retry": "Retry"
     }
   },
   "episode": {
@@ -1414,6 +1604,8 @@
       "saved": "Changes saved",
       "saveFailed": "Save failed",
       "saveChanges": "Save Changes",
+      "savingChanges": "Saving changes",
+      "uploadingImage": "Uploading…",
       "unnamedChar": "Unnamed character",
       "unnamedProp": "Unnamed prop",
       "unnamedScene": "Unnamed scene",
@@ -1448,7 +1640,9 @@
       "appearanceOnlyPlaceholder": "Describe only the object's appearance, nothing else",
       "locationRequired": "Please enter the scene location",
       "nameRequired": "Please enter a name",
-      "created": "{type} added"
+      "created": "{type} added",
+      "submit": "Add {type}",
+      "saving": "Saving…"
     },
     "delete": {
       "title": "Delete {type}",
@@ -1735,6 +1929,7 @@
         "deleted": "Transition clip deleted",
         "deleteFailed": "Failed to delete transition clip",
         "processingHint": "Generating; cannot delete yet",
+        "busyHint": "Processing; please try again shortly",
         "loadFailed": "Failed to load transition status",
         "actionFailed": "Transition action failed",
         "partialFailed": "{n} transition(s) failed to submit: {message}",
@@ -2361,6 +2556,10 @@
     "kindMotion": "Motion",
     "current": "In use",
     "withSubtitle": "With subtitle",
+    "statusRendering": "Rendering",
+    "statusFailed": "Failed",
+    "statusCanceled": "Canceled",
+    "statusQueued": "Queued",
     "play": "Play",
     "download": "Download",
     "setCurrent": "Use this version",
@@ -2791,7 +2990,9 @@
         "mapTitle": "World map",
         "refinalize": "Retry timeline",
         "timelineFailed": "Timeline update failed. Retry finalizing or edit it manually."
-      }
+      },
+      "focusReading": "Focus reading",
+      "exitFocusReading": "Exit focus"
     },
     "compass": {
       "title": "Inspiration compass",
@@ -3885,6 +4086,9 @@
     "exportWarnOverlay": "Overlay tracks (picture-in-picture / text) are ignored",
     "exportWarnSpeed": "Speed outside 0.5–2× will be clamped to the supported range",
     "exportAck": "I understand and confirm",
+    "exportDisabledReadonly": "Read-only view cannot export",
+    "exportDisabledBlocked": "Resolve the blocking issues above first",
+    "exportDisabledAck": "Acknowledge the export warnings first",
     "exportBlocked": {
       "title": "The following cannot be exported yet",
       "overlay": "Overlay tracks (PiP/text) are not supported yet — remove or hide them first",

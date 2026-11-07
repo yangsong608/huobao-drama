@@ -27,6 +27,7 @@ import {
   getAgentStreamText,
   publishAgentEvent,
 } from './agent-stream.js'
+import { recordDiagnosticError } from './agent-diagnostics.js'
 
 export interface AssistantTurnInput {
   sessionId: number
@@ -216,6 +217,7 @@ export async function runAssistantTurn(input: AssistantTurnInput): Promise<void>
     } else {
       status = 'failed'
       failure = sanitizeAssistantError(error)
+      recordDiagnosticError('assistant', failure)
     }
   } finally {
     clearTimeout(timer)

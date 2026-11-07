@@ -58,7 +58,7 @@ function formatTime(value: string): string {
 </script>
 
 <template>
-  <StudioTopBar dense class="director-topbar">
+  <StudioTopBar class="director-topbar">
     <template #left>
       <div class="director-title-block">
         <span class="director-title">{{ props.title }}</span>
@@ -244,7 +244,7 @@ function formatTime(value: string): string {
 .director-saved-at {
   flex-shrink: 0;
   font-size: var(--text-meta);
-  color: var(--text-3);
+  color: var(--text-2);
   white-space: nowrap;
 }
 .director-note-input {
@@ -296,4 +296,5 @@ function formatTime(value: string): string {
   .director-saved-at { display: none; }
   .director-note-input { width: 104px; }
 }
+.director-topbar :is(button, input):focus-visible { outline: none; box-shadow: var(--focus-ring); }
 </style>

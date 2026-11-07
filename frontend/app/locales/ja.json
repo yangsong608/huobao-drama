@@ -585,7 +585,8 @@
       "mcp": "MCP",
       "rules": "フロー規則",
       "queue": "タスクキュー",
-      "novel": "小説"
+      "novel": "小説",
+      "ui": "表示"
     },
     "novel": {
       "title": "小説生成",
@@ -925,7 +926,9 @@
           "suggestionsHint": "回答後に実行可能な次のステップを提示します。",
           "autoDetect": "スコープ自動判定",
           "autoDetectHint": "現在のページにスコープを固定します。オフの場合は手動で選択します。"
-        }
+        },
+        "goAiConfig": "AI 設定へ",
+        "goRules": "ルールページへ"
       },
       "pages": {
         "title": "ページバインディング",
@@ -1018,12 +1021,149 @@
       "sessions": {
         "title": "セッションと監査",
         "desc": "エージェントのセッション、メッセージ、実行記録を確認します。",
-        "source": "agent_sessions / agent_messages"
+        "source": "agent_sessions / agent_messages",
+        "retentionTitle": "保持とクリーンアップ",
+        "retentionDays": "コンテンツ保持日数",
+        "retentionHint": "保持期間を超えたアーカイブ済みまたはソフト削除済みセッションのみをクリーンアップします。メッセージ本文、ツール呼び出し/結果、提案内容がクリアされます。セッション、メッセージ行、提案監査は保持されます。範囲 7–365 日。",
+        "retentionInvalid": "保持日数は 7–365 の範囲で入力してください",
+        "retentionSaved": "保持日数を保存しました",
+        "filters": {
+          "workspace": "ワークスペースキー",
+          "workspacePlaceholder": "例：novel:12 または drama:3、空欄ですべて表示",
+          "status": "ステータス",
+          "statusAll": "すべて",
+          "statusActive": "進行中",
+          "statusArchived": "アーカイブ済み",
+          "hint": "ソフト削除されたセッションは一覧に表示されません。セッション詳細は読み取り専用の監査です。",
+          "refresh": "更新"
+        },
+        "loading": "セッションを読み込み中…",
+        "errorTitle": "セッションの読み込みに失敗しました",
+        "retry": "再試行",
+        "emptyTitle": "セッションがありません",
+        "emptyHint": "小説またはエピソードページでエージェントドロワーを開いて質問すると、ここにセッション記録が表示されます。",
+        "goNovels": "小説ライブラリへ",
+        "checkModels": "モデル設定を確認",
+        "untitled": "無題のセッション",
+        "view": "表示",
+        "archive": "アーカイブ",
+        "delete": "削除",
+        "archived": "セッションをアーカイブしました",
+        "deleted": "セッションを削除しました",
+        "cancelled": "進行中の回答をキャンセルしました",
+        "loadMore": "さらに読み込む",
+        "columns": {
+          "thread": "スレッド",
+          "preset": "プリセット",
+          "workspace": "スコープ / ワークスペースキー",
+          "messages": "メッセージ",
+          "proposals": "提案",
+          "status": "ステータス",
+          "actions": "操作"
+        },
+        "statusLabels": {
+          "active": "進行中",
+          "archived": "アーカイブ済み"
+        },
+        "archiveTitle": "セッションをアーカイブ",
+        "archiveMessage": "アーカイブ後、セッションは進行中一覧に表示されません。未処理の提案は失効しません。",
+        "deleteTitle": "セッションを削除",
+        "deleteMessage": "削除はソフト削除です。セッションとメッセージは保持され、未処理の提案は期限切れにマークされ、以後一覧に表示されません。",
+        "detailTitle": "セッション詳細",
+        "detailLoading": "詳細を読み込み中…",
+        "close": "閉じる",
+        "messageCount": "メッセージ数",
+        "proposalCount": "提案数",
+        "cancel": "回答をキャンセル",
+        "messagesTitle": "メッセージ記録",
+        "loadOlder": "古いメッセージを読み込む",
+        "noMessages": "このセッションにはメッセージがありません",
+        "contentCleared": "内容はクリアされました（保持期間超過）",
+        "messageExtras": "ツール呼び出し {tools} 回 · 提案 {suggestions} 件",
+        "roles": {
+          "user": "ユーザー",
+          "assistant": "アシスタント"
+        },
+        "messageStatus": {
+          "pending": "待機中",
+          "running": "生成中",
+          "completed": "完了",
+          "failed": "失敗",
+          "cancelled": "キャンセル済み",
+          "interrupted": "中断"
+        },
+        "proposalsTitle": "提案記録",
+        "noProposals": "このセッションには提案がありません",
+        "proposalColumns": {
+          "kind": "種類",
+          "target": "対象",
+          "status": "ステータス",
+          "appliedBy": "適用者",
+          "updatedAt": "時刻"
+        },
+        "proposalStatus": {
+          "proposed": "未処理",
+          "applied": "適用済み",
+          "rejected": "拒否",
+          "conflict": "競合",
+          "expired": "期限切れ"
+        },
+        "emptyFilteredTitle": "一致するセッションがありません",
+        "emptyFilteredHint": "現在のワークスペースキーまたはステータス条件に一致するセッションはありません。フィルターを解除するとすべて表示されます。",
+        "clearFilters": "フィルターを解除"
       },
       "diagnostics": {
         "title": "診断",
         "desc": "モデル、ツール、ストリーミング接続の状態を確認します。",
-        "source": "実行時状態と最近のエラー"
+        "source": "実行時状態と最近のエラー",
+        "loading": "診断を読み込み中…",
+        "loadFailed": "診断の読み込みに失敗しました",
+        "retry": "再試行",
+        "routeTitle": "ページルート解決",
+        "routePlaceholder": "/drama/1/episode/1?panel=dubbing&step=3",
+        "routeHint": "フロントエンドのページパスを入力すると、サーバーがページと同じアダプタールールで解決をシミュレートします。ページは開きません。",
+        "simulate": "ルートを解決",
+        "matched": "一致",
+        "unmatched": "不一致",
+        "unmatchedHint": "このルートにはページバインドまたはアダプターがありません。「ページバインド」サブセクションを確認するか、具体的なエピソードルートに変更してください。",
+        "adapter": "アダプター",
+        "scope": "スコープ",
+        "bindingStage": "ページ段階",
+        "visible": "入口表示",
+        "yes": "はい",
+        "no": "いいえ",
+        "defaultPreset": "既定プリセット",
+        "allowedTools": "許可ツール",
+        "modelsTitle": "モデル可用性",
+        "modelsAvailable": "利用可能",
+        "modelsUnavailable": "利用不可",
+        "activeConfig": "現在のテキストモデル",
+        "modelConfigMissing": "有効なテキストモデル設定が見つかりません。「AI 設定」ページでテキストモデルを有効にしてください。",
+        "presetModels": "プリセットモデル（空欄時は既定を使用）",
+        "modelFallback": "既定",
+        "goAiConfig": "AI 設定へ",
+        "toolsTitle": "ツール一覧",
+        "errorsTitle": "最近のエラー",
+        "noErrors": "最近のエラーはありません",
+        "trialTitle": "読み取り専用ツールの試行",
+        "trialHint": "サーバーに登録済みの読み取り専用ツールのみ実行します。書き込みツール、未知のツール、範囲外のスコープは拒否され、試行は DB に書き込みません。",
+        "scopeSelect": "スコープ",
+        "toolSelect": "ツール",
+        "toolPlaceholder": "読み取り専用ツールを選択",
+        "novel": "小説",
+        "novelPlaceholder": "小説を選択",
+        "drama": "プロジェクト",
+        "dramaPlaceholder": "プロジェクトを選択",
+        "episode": "エピソード",
+        "episodePlaceholder": "エピソードを選択",
+        "editProject": "編集プロジェクト ID",
+        "args": "パラメータ JSON",
+        "argsHint": "パラメータは JSON オブジェクトで入力してください。プロジェクト/エピソードと小説番号は上の選択からスコープに自動入力されます。",
+        "argsInvalid": "パラメータは JSON オブジェクトである必要があります",
+        "run": "試行",
+        "result": "試行結果",
+        "truncated": "切り詰め済み",
+        "emptyResult": "ツールを選択して試行すると、ここに結果が表示されます。"
       }
     },
     "skills": {
@@ -1241,6 +1381,56 @@
       "analyzing": "分析中…",
       "done": "スタイル「{name}」を生成しました",
       "failed": "スタイル分析に失敗しました"
+    },
+    "ui": {
+      "title": "表示",
+      "desc": "このデバイスの表示密度、モーション、読書レイアウトを設定します。設定は本機にのみ保存され、プロジェクトデータは変更しません。",
+      "appearance": "外観",
+      "appearanceSub": "密度とモーションは本機の表示にのみ影響します",
+      "densityLabel": "表示密度",
+      "densityNote": "ゆったりではリスト・フォーム・カードの行高を広げます。タイムラインはコンパクトのままです",
+      "density": {
+        "compact": "コンパクト",
+        "comfortable": "ゆったり"
+      },
+      "motionLabel": "モーション",
+      "motionNote": "システムに従う場合、OS の「視差効果を減らす」設定を尊重します",
+      "motion": {
+        "system": "システムに従う",
+        "full": "すべて",
+        "reduced": "減らす"
+      },
+      "reading": "読書",
+      "readingSub": "小説の閲覧ビューのフォント・サイズ・行幅",
+      "readingFontLabel": "閲覧フォント",
+      "readingFontNote": "長文にはセリフ体が適しています。字形がない場合は自動的に代替されます",
+      "font": {
+        "serif": "セリフ",
+        "sans": "サンセリフ"
+      },
+      "readingSizeLabel": "閲覧サイズ",
+      "readingSizeNote": "閲覧ビューのみに適用され、エディタのサイズは変わりません",
+      "readingWidthLabel": "閲覧行幅",
+      "readingWidthNote": "本文の最大行幅を設定します。狭い画面では自動的に縮小されます",
+      "width": {
+        "60": "狭い",
+        "68": "標準",
+        "76": "広い"
+      },
+      "action": "操作",
+      "actionSub": "主要操作にテキストラベルを表示するか",
+      "actionLabelsLabel": "主要操作にテキストを表示",
+      "actionLabelsNote": "オフの場合、頻度の低い操作はアイコンのみになりますが、ツールチップは残ります",
+      "actionLabels": {
+        "on": "表示",
+        "off": "アイコンのみ"
+      },
+      "reset": "デフォルトに戻す",
+      "resetHint": "本機の設定を消去し、配備のデフォルトに戻します",
+      "lockedTitle": "配備のデフォルトを使用中",
+      "lockedNote": "管理者がユーザーによる上書きを無効にしています。表示と閲覧の設定は配備のデフォルトに従います。本機の設定は保持され、再度有効にすると復元されます。",
+      "loadFailed": "配備のデフォルトを読み込めませんでした。キャッシュまたは内蔵のデフォルトを使用します。",
+      "retry": "再試行"
     }
   },
   "episode": {
@@ -1414,6 +1604,8 @@
       "saved": "変更を保存しました",
       "saveFailed": "保存に失敗しました",
       "saveChanges": "変更を保存",
+      "savingChanges": "変更を保存中",
+      "uploadingImage": "アップロード中…",
       "unnamedChar": "名称未設定のキャラクター",
       "unnamedProp": "名称未設定の小道具",
       "unnamedScene": "名称未設定のシーン",
@@ -1448,7 +1640,9 @@
       "appearanceOnlyPlaceholder": "物品の外見のみを記述（他の要素は不要）",
       "locationRequired": "シーンの場所を入力してください",
       "nameRequired": "名前を入力してください",
-      "created": "{type}を追加しました"
+      "created": "{type}を追加しました",
+      "submit": "{type}を追加",
+      "saving": "保存中…"
     },
     "delete": {
       "title": "{type}を削除",
@@ -1735,6 +1929,7 @@
         "deleted": "トランジションクリップを削除しました",
         "deleteFailed": "トランジションクリップの削除に失敗しました",
         "processingHint": "生成中のため削除できません",
+        "busyHint": "処理中のため、しばらくしてから再度お試しください",
         "loadFailed": "トランジション状態の読み込みに失敗しました",
         "actionFailed": "トランジション操作に失敗しました",
         "partialFailed": "{n} 件のトランジション送信に失敗しました：{message}",
@@ -2361,6 +2556,10 @@
     "kindMotion": "画像アニメ",
     "current": "使用中",
     "withSubtitle": "字幕あり",
+    "statusRendering": "生成中",
+    "statusFailed": "失敗",
+    "statusCanceled": "キャンセル済み",
+    "statusQueued": "待機中",
     "play": "再生",
     "download": "ダウンロード",
     "setCurrent": "この版を使用",
@@ -2791,7 +2990,9 @@
         "mapTitle": "世界地図",
         "refinalize": "タイムラインを再試行",
         "timelineFailed": "タイムラインの更新に失敗しました。定稿を再試行するか手動で編集してください。"
-      }
+      },
+      "focusReading": "集中閲覧",
+      "exitFocusReading": "集中閲覧を終了"
     },
     "compass": {
       "title": "インスピレーション・コンパス",
@@ -3885,6 +4086,9 @@
     "exportWarnOverlay": "オーバーレイトラック（ピクチャインピクチャ／テキスト）は無視されます",
     "exportWarnSpeed": "0.5–2× 以外の速度は対応範囲に制限されます",
     "exportAck": "内容を理解し、書き出しに同意します",
+    "exportDisabledReadonly": "読み取り専用のため書き出せません",
+    "exportDisabledBlocked": "上記のブロッキング項目を先に解消してください",
+    "exportDisabledAck": "書き出しの警告に同意してください",
     "exportBlocked": {
       "title": "以下はまだ書き出せません",
       "overlay": "オーバーレイ（ピクチャーインピクチャー/テキスト）は未対応です。削除または非表示にしてください",

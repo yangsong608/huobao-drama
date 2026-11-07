@@ -89,7 +89,7 @@ function durationText(value: unknown): string {
   color: var(--text-1);
   line-height: 1.6;
 }
-.director-shotlist-empty .dim { color: var(--text-3); font-size: var(--text-meta); }
+.director-shotlist-empty .dim { color: var(--text-2); font-size: var(--text-meta); }
 .director-shotlist-scroll {
   flex: 1;
   min-height: 0;
@@ -97,6 +97,7 @@ function durationText(value: unknown): string {
   padding: 6px;
 }
 .director-shot-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -117,6 +118,17 @@ function durationText(value: unknown): string {
   background: var(--bg-active, var(--bg-hover));
   color: var(--text-0);
 }
+.director-shot-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+.director-shot-item.active .director-shot-no { font-weight: 700; }
 .director-shot-no { font-size: var(--text-label); font-weight: 650; color: inherit; }
 .director-shot-meta {
   display: flex;
@@ -136,9 +148,10 @@ function durationText(value: unknown): string {
 }
 .director-shot-camera {
   font-size: var(--text-meta);
-  color: var(--text-3);
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.director-shotlist :is(button):focus-visible { outline: none; box-shadow: var(--focus-ring); }
 </style>

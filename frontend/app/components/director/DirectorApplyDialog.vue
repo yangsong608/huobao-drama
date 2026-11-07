@@ -258,7 +258,7 @@ function skipReason(id: number): string {
             <b>{{ isResult ? t('director.apply.resultTitle') : t('director.apply.title') }}</b>
             <span v-if="!isResult" class="director-apply-version">{{ t('director.apply.baseVersion', { version: props.baseVersion }) }}</span>
           </div>
-          <button type="button" class="director-apply-close" :aria-label="t('director.apply.close')" :disabled="props.applying" @click="requestClose">
+          <button type="button" class="director-apply-close" :title="t('director.apply.close')" :aria-label="t('director.apply.close')" :disabled="props.applying" @click="requestClose">
             <X :size="14" />
           </button>
         </header>
@@ -550,7 +550,7 @@ function skipReason(id: number): string {
 .director-apply-mask {
   position: fixed;
   inset: 0;
-  z-index: 70;
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -629,7 +629,7 @@ function skipReason(id: number): string {
 }
 .director-apply-panel-head b { font-size: var(--text-label); color: var(--text-0); }
 .director-apply-panel-head.is-options { margin-top: 12px; }
-.director-apply-hint { margin: 0 0 6px; font-size: var(--text-meta); color: var(--text-3); line-height: 1.45; }
+.director-apply-hint { margin: 0 0 6px; font-size: var(--text-meta); color: var(--text-2); line-height: 1.45; }
 .director-apply-hint.is-inline { margin: 0; }
 .director-apply-link {
   padding: 0;
@@ -668,7 +668,7 @@ function skipReason(id: number): string {
   border-radius: 3px;
   background: var(--bg-1);
   color: var(--accent-contrast, #fff);
-  font-size: 10px;
+  font-size: 11px;
   flex-shrink: 0;
 }
 .director-apply-shot.active .director-apply-check { border-color: var(--accent); background: var(--accent); }
@@ -687,15 +687,15 @@ function skipReason(id: number): string {
   padding: 0 5px;
   border-radius: var(--radius-pill);
   background: var(--bg-2, var(--bg-1));
-  color: var(--text-3);
-  font-size: 10px;
+  color: var(--text-2);
+  font-size: 11px;
   white-space: nowrap;
 }
 .director-apply-tag.is-dirty {
   background: var(--warning-soft, rgba(217, 152, 38, 0.14));
   color: var(--warning, #b7791f);
 }
-.director-apply-empty { margin: 0; padding: 10px 0; font-size: var(--text-meta); color: var(--text-3); text-align: center; }
+.director-apply-empty { margin: 0; padding: 10px 0; font-size: var(--text-meta); color: var(--text-2); text-align: center; }
 .director-apply-field-list { display: flex; flex-direction: column; gap: 2px; }
 .director-apply-field {
   display: flex;
@@ -724,7 +724,7 @@ function skipReason(id: number): string {
 .director-apply-option input { margin-top: 2px; }
 .director-apply-option span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .director-apply-option b { font-size: var(--text-label); font-weight: 600; color: inherit; }
-.director-apply-option small { font-size: var(--text-meta); color: var(--text-3); line-height: 1.4; }
+.director-apply-option small { font-size: var(--text-meta); color: var(--text-2); line-height: 1.4; }
 .director-apply-durations {
   padding: 10px;
   border: 1px solid var(--border);
@@ -742,7 +742,7 @@ function skipReason(id: number): string {
 .director-snapshot-table th {
   padding: 4px 6px;
   border-bottom: 1px solid var(--border);
-  color: var(--text-3);
+  color: var(--text-2);
   font-weight: 600;
   text-align: left;
   white-space: nowrap;
@@ -804,7 +804,7 @@ function skipReason(id: number): string {
   background: var(--bg-0, var(--panel-bg));
 }
 .director-result-group h4 { margin: 0; font-size: var(--text-label); color: var(--text-0); }
-.director-result-empty { margin: 0; font-size: var(--text-meta); color: var(--text-3); }
+.director-result-empty { margin: 0; font-size: var(--text-meta); color: var(--text-2); }
 .director-result-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .director-result-list li {
   display: flex;
@@ -824,7 +824,7 @@ function skipReason(id: number): string {
   border-radius: var(--radius-pill);
   background: var(--accent-soft, rgba(88, 166, 255, 0.1));
   color: var(--accent);
-  font-size: 10px;
+  font-size: 11px;
 }
 .director-result-reason { color: var(--text-2); }
 .director-result-stale { color: var(--warning, #b7791f); font-size: var(--text-meta); font-weight: 600; }
@@ -846,8 +846,8 @@ function skipReason(id: number): string {
   color: var(--text-0);
   cursor: pointer;
 }
-.director-snapshot-fields { display: flex; flex-wrap: wrap; gap: 4px; color: var(--text-3); font-weight: 400; }
-.director-snapshot-fields span { padding: 0 5px; border-radius: var(--radius-pill); background: var(--bg-2, var(--bg-1)); font-size: 10px; }
+.director-snapshot-fields { display: flex; flex-wrap: wrap; gap: 4px; color: var(--text-2); font-weight: 400; }
+.director-snapshot-fields span { padding: 0 5px; border-radius: var(--radius-pill); background: var(--bg-2, var(--bg-1)); font-size: 11px; }
 .director-snapshot-table { margin-top: 5px; }
 .director-apply-foot {
   display: flex;
@@ -857,7 +857,7 @@ function skipReason(id: number): string {
   padding: 10px 16px;
   border-top: 1px solid var(--border);
 }
-.director-apply-blocked { flex: 1; min-width: 0; font-size: var(--text-meta); color: var(--text-3); line-height: 1.4; }
+.director-apply-blocked { flex: 1; min-width: 0; font-size: var(--text-meta); color: var(--text-2); line-height: 1.4; }
 .director-apply-blocked.is-ready { color: var(--text-2); }
 .director-apply-btn {
   display: inline-flex;
@@ -883,4 +883,5 @@ function skipReason(id: number): string {
 @media (max-width: 720px) {
   .director-apply-grid { grid-template-columns: minmax(0, 1fr); }
 }
+.director-apply :is(button, input, select, textarea, summary):focus-visible { outline: none; box-shadow: var(--focus-ring); }
 </style>
