@@ -19,6 +19,9 @@ const {
   duplicateClip,
   addMarker,
   deleteMarker,
+  markerAtOrAfter,
+  markerAtOrBefore,
+  nextMarkerId,
   DEFAULT_MARKER_COLOR,
   moveCue,
   setCueText,
@@ -347,6 +350,33 @@ test('复制片段：原样克隆插入其后并承接指向后段的转场', ()
   assert.ok(missing.issues.some((item) => item.severity === 'error' && item.code === 'CLIP_NOT_FOUND'))
   const dupId = duplicateClip(base, 'a', 'b')
   assert.ok(dupId.issues.some((item) => item.severity === 'error' && item.code === 'CLIP_ID_DUPLICATE'))
+})
+
+test('标记：时间 clamp、mk 编号递增与上一个/下一个边界', () => {
+  const base = plan([clip('a')])
+  assert.equal(nextMarkerId(base), 'mk_1')
+  const end = addMarker(base, { id: nextMarkerId(base), atMs: 99999 })
+  assert.equal(end.plan.markers[0].atMs, 5000, '超出片尾的标记 clamp 到布局时长')
+
+  const withIds = plan([clip('a')], {
+    markers: [
+      { id: 'mk_2', atMs: 1000, label: '', color: '' },
+      { id: 'mk_7', atMs: 2000, label: '', color: '' },
+      { id: 'mk_x', atMs: 3000, label: '', color: '' },
+    ],
+  })
+  assert.equal(nextMarkerId(withIds), 'mk_8', '忽略随机后缀历史 id，取数字最大编号加一')
+  const duplicate = addMarker(withIds, { id: 'mk_7', atMs: 4000 })
+  assert.ok(duplicate.issues.some((item) => item.severity === 'error' && item.code === 'MARKER_ID_DUPLICATE'))
+
+  assert.equal(markerAtOrBefore(withIds, 500), null, '首个标记之前没有上一个')
+  assert.equal(markerAtOrAfter(withIds, 9000), null, '最后一个标记之后没有下一个')
+  assert.equal(markerAtOrBefore(withIds, 2000)?.id, 'mk_2', '上一个标记严格早于当前时间')
+  assert.equal(markerAtOrAfter(withIds, 2000)?.id, 'mk_x', '下一个标记严格晚于当前时间')
+  assert.equal(markerAtOrAfter(withIds, 0)?.id, 'mk_2')
+  assert.equal(markerAtOrBefore(withIds, 9000)?.id, 'mk_x')
+  assert.equal(markerAtOrBefore(plan([clip('a')]), 1000), null, '无标记时返回 null')
+  assert.equal(markerAtOrAfter(plan([clip('a')]), 1000), null, '无标记时返回 null')
 })
 
 test('时间线标记：添加、点击定位与删除', () => {

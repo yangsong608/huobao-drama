@@ -24,7 +24,8 @@ process.env.MYSQL_AUTO_IMPORT = 'false'
 
 const { createSingleClipPlan, projectSettingsForAspect } = await import('../src/services/edit-plan.ts')
 const { buildEditAss } = await import('../src/services/edit-subtitle-ass.ts')
-const { buildRenderReport, renderEditVideo } = await import('../src/services/edit-render-plan.ts')
+const { blockingFeaturesOf, buildRenderReport, renderEditVideo, EditRenderAbortedError } = await import('../src/services/edit-render-plan.ts')
+import type { EditPlanV1 } from '../src/services/edit-plan.ts'
 
 const videoFile = path.join(root, 'src.mp4')
 execFileSync(ffmpegBin, [
@@ -76,6 +77,53 @@ test('渲染报告列出转场/滤镜/变换/叠加降级', () => {
   assert.ok(codes.includes('FILTER_UNSUPPORTED'))
   assert.ok(codes.includes('TRANSFORM_UNSUPPORTED'))
   assert.ok(codes.includes('OVERLAY_UNSUPPORTED'))
+})
+
+test('导出阻断清单：滤镜/变换/变速/转场/叠加逐项命中', () => {
+  assert.deepEqual(blockingFeaturesOf(basePlan()), [])
+
+  const cases: Array<[string, (plan: EditPlanV1) => void, string]> = [
+    ['filter', (plan) => { plan.clips[0].filter.preset = 'warm' }, 'FILTER_UNSUPPORTED'],
+    ['scale', (plan) => { plan.clips[0].transform.scale = 1.2 }, 'TRANSFORM_UNSUPPORTED'],
+    ['offset-x', (plan) => { plan.clips[0].transform.x = 10 }, 'TRANSFORM_UNSUPPORTED'],
+    ['offset-y', (plan) => { plan.clips[0].transform.y = -10 }, 'TRANSFORM_UNSUPPORTED'],
+    ['speed-low', (plan) => { plan.clips[0].speed = 0.4 }, 'SPEED_UNSUPPORTED'],
+    ['speed-high', (plan) => { plan.clips[0].speed = 2.1 }, 'SPEED_UNSUPPORTED'],
+    ['transition', (plan) => {
+      plan.transitions = [{ id: 'tr1', fromClipId: plan.clips[0].id, toClipId: 'c2', type: 'dissolve', durationMs: 300 }]
+    }, 'TRANSITION_UNSUPPORTED'],
+    ['overlay', (plan) => {
+      plan.overlays = [{
+        id: 'ovl_1', kind: 'text', text: {
+          text: '标题', preset: 'title', fontFamily: 'PingFang SC', fontSize: 48,
+          color: '#FFFFFF', strokeColor: '#000000', strokeWidth: 2, backgroundColor: null,
+          align: 'center', x: 50, y: 50,
+        }, startMs: 0, endMs: 1000, transform: {
+          scale: 1, x: 0, y: 0, rotation: 0, flipH: false, flipV: false,
+        }, opacity: 1, fadeInMs: 0, fadeOutMs: 0, track: 0,
+      }]
+    }, 'OVERLAY_UNSUPPORTED'],
+  ]
+  for (const [label, mutate, code] of cases) {
+    const plan = basePlan()
+    mutate(plan)
+    const blocking = blockingFeaturesOf(plan)
+    const hit = blocking.find((item) => item.code === code)
+    assert.ok(hit, `${label} 应阻断 ${code}，实际 ${JSON.stringify(blocking)}`)
+    assert.ok(hit.path.length > 0 && hit.message.length > 0, `${label} 需带路径与说明`)
+    assert.equal(blocking.length, 1, `${label} 只应命中一项：${JSON.stringify(blocking)}`)
+  }
+})
+
+test('导出阻断清单：旋转/翻转与 0.5–2× 速度边界不阻断', () => {
+  const plan = basePlan()
+  plan.clips[0].transform.rotation = 15
+  plan.clips[0].transform.flipH = true
+  plan.clips[0].transform.flipV = true
+  plan.clips[0].speed = 0.5
+  assert.deepEqual(blockingFeaturesOf(plan), [])
+  plan.clips[0].speed = 2
+  assert.deepEqual(blockingFeaturesOf(plan), [])
 })
 
 test('渲染两段 + 空档：时长误差 ≤1 帧，含 H.264 与 AAC 流', async () => {
@@ -182,6 +230,70 @@ test('烧录字幕：传入 ASS 后输出含烧录字幕（时长不变）', asy
   assert.ok(Math.abs(durationMs - 1000) <= 40)
   // 烧录字幕不改变流结构
   assert.ok(probe(output).streams.some((s: any) => s.codec_name === 'h264'))
+})
+
+test('外部 WAV 音轨：按布局裁剪并编码 AAC 48k 双声道', async () => {
+  const plan = basePlan() // 布局 1000ms
+  const wav = path.join(root, 'mix.wav')
+  execFileSync(ffmpegBin, [
+    '-y', '-f', 'lavfi', '-i', 'sine=frequency=660:duration=2',
+    '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s24le', wav,
+  ], { stdio: 'ignore' })
+  const output = path.join(root, 'mix-audio-out.mp4')
+  const { durationMs } = await renderEditVideo({
+    plan, outputPath: output, subtitleMode: 'none', audio: { mode: 'mix', path: wav },
+  })
+  const media = probe(output)
+  const audio = media.streams.find((s: any) => s.codec_type === 'audio')
+  assert.ok(audio, '混音导出必须有音轨')
+  assert.equal(audio.codec_name, 'aac')
+  assert.equal(Number(audio.sample_rate), 48000)
+  assert.equal(Number(audio.channels), 2)
+  assert.ok(Math.abs(durationMs - 1000) <= 40, `混音长度不得改变布局时长：${durationMs}`)
+})
+
+test('静音模式：生成与布局等长的 AAC 音轨', async () => {
+  const plan = basePlan()
+  const output = path.join(root, 'silent-track-out.mp4')
+  const { durationMs } = await renderEditVideo({
+    plan, outputPath: output, subtitleMode: 'none', audio: { mode: 'silent' },
+  })
+  const media = probe(output)
+  const audio = media.streams.find((s: any) => s.codec_type === 'audio')
+  assert.ok(audio, '静音模式仍需输出音轨')
+  assert.equal(audio.codec_name, 'aac')
+  assert.ok(Math.abs(durationMs - 1000) <= 40)
+})
+
+test('中止信号：渲染抛 EditRenderAbortedError 并清掉未完成输出', async () => {
+  const longFile = path.join(root, 'long.mp4')
+  execFileSync(ffmpegBin, [
+    '-y', '-f', 'lavfi', '-i', 'color=c=blue:s=1280x720:r=25:d=6',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-an', longFile,
+  ], { stdio: 'ignore' })
+  const plan = createSingleClipPlan(1, {
+    kind: 'episode-video', id: 9, url: longFile, durationMs: 6000,
+    width: 1280, height: 720, fps: 25, hasAudio: false, fingerprint: 'fp-abort',
+  }, { ...projectSettingsForAspect('16:9', 25), width: 1280, height: 720 })
+  plan.clips[0].sourceInMs = 0
+  plan.clips[0].sourceOutMs = 6000
+
+  const pre = new AbortController()
+  pre.abort()
+  const preOut = path.join(root, 'aborted-pre.mp4')
+  await assert.rejects(
+    renderEditVideo({ plan, outputPath: preOut, subtitleMode: 'none', signal: pre.signal }),
+    (error: any) => error instanceof EditRenderAbortedError,
+  )
+  assert.equal(fs.existsSync(preOut), false)
+
+  // 渲染中中止：AbortSignal 透传给 execFile，半成品输出必须清理
+  const live = new AbortController()
+  const liveOut = path.join(root, 'aborted-live.mp4')
+  const running = renderEditVideo({ plan, outputPath: liveOut, subtitleMode: 'none', signal: live.signal })
+  setTimeout(() => live.abort(), 30)
+  await assert.rejects(running, (error: any) => error instanceof EditRenderAbortedError)
+  assert.equal(fs.existsSync(liveOut), false)
 })
 
 after(() => fs.rmSync(root, { recursive: true, force: true }))

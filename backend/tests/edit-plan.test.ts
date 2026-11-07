@@ -96,17 +96,17 @@ test('工程默认值、画幅与帧率归一', () => {
   const vertical = projectSettingsForAspect('9:16', 60)
   assert.deepEqual(
     { aspect: vertical.aspect, width: vertical.width, height: vertical.height, fps: vertical.fps, preset: vertical.defaultExportPreset },
-    { aspect: '9:16', width: 1080, height: 1920, fps: 30, preset: 'edit-vertical-hd' },
+    { aspect: '9:16', width: 1080, height: 1920, fps: 30, preset: 'vertical-hd' },
   )
   const horizontal = projectSettingsForAspect('16:9', 24)
   assert.deepEqual(
     { width: horizontal.width, height: horizontal.height, fps: horizontal.fps, preset: horizontal.defaultExportPreset },
-    { width: 1920, height: 1080, fps: 24, preset: 'edit-horizontal-hd' },
+    { width: 1920, height: 1080, fps: 24, preset: 'horizontal-hd' },
   )
   const square = projectSettingsForAspect('1:1', 25)
   assert.deepEqual(
     { width: square.width, height: square.height, preset: square.defaultExportPreset },
-    { width: 1080, height: 1080, preset: 'edit-source' },
+    { width: 1080, height: 1080, preset: 'square-hd' },
   )
 })
 

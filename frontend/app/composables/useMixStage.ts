@@ -14,6 +14,7 @@ import {
   type MixBus,
   type MixBusKey,
   type MixClip,
+  type MixEditSync,
   type MixExcludedLine,
   type MixPlan,
   type MixPlanWithSource,
@@ -149,6 +150,8 @@ export function useMixStage(options: UseMixStageOptions) {
   /** 源成片快照与警告（GET /mix · PUT /mix/source 返回，Task 8） */
   const sourceFilm = ref<MixSourceSnapshot | null>(null)
   const sourceWarnings = ref<MixSourceWarning[]>([])
+  /** 剪辑对齐镜像（GET /mix · edit_sync），与剪辑台 mix_status 同源 */
+  const editSync = ref<MixEditSync | null>(null)
   const exportSource = computed(() => sourceFilm.value)
 
   // 成片中心「在混音中打开」通过 ?film= 指定初始源成片；无路由上下文（单测）时忽略
@@ -287,9 +290,21 @@ export function useMixStage(options: UseMixStageOptions) {
     source_film?: MixSourceSnapshot | null
     source?: MixSourceSnapshot | null
     source_warnings?: MixSourceWarning[]
+    edit_sync?: MixEditSync
   }) {
     sourceFilm.value = next.source_film ?? next.source ?? null
     sourceWarnings.value = next.source_warnings ?? []
+    if (next.edit_sync !== undefined) editSync.value = next.edit_sync
+  }
+
+  /** 保存/恢复版本后重取镜像状态；失败不阻断本地操作 */
+  async function refreshEditSync() {
+    const episodeId = options.episodeId()
+    if (!episodeId) return
+    try {
+      const next = await mixAPI.plan(episodeId)
+      if (next.edit_sync !== undefined) editSync.value = next.edit_sync
+    } catch { /* 镜像状态仅展示，不影响混音编辑 */ }
   }
 
   /** 只重取计划，保留播放头、选中与撤销栈（台词重排后同步虚拟轨） */
@@ -1101,6 +1116,7 @@ export function useMixStage(options: UseMixStageOptions) {
     await flushSave()
     const revision = await mixAPI.saveRevision(episodeId, note)
     revisions.value = [revision, ...revisions.filter((item) => item.id !== revision.id)]
+    await refreshEditSync()
     return revision
   }
 
@@ -1111,6 +1127,7 @@ export function useMixStage(options: UseMixStageOptions) {
     applyPlan(result.plan, true)
     dirty.value = false
     revisions.value = (await mixAPI.revisions(episodeId)).items
+    await refreshEditSync()
     return result
   }
 
@@ -1220,6 +1237,7 @@ export function useMixStage(options: UseMixStageOptions) {
     durationMs,
     sourceFilm,
     sourceWarnings,
+    editSync,
     exportSource,
     selectSourceFilm,
     load,

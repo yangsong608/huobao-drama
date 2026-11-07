@@ -308,7 +308,14 @@ app.post('/episodes/:id/edit/render', async (c) => {
     getWritableEpisode(episodeId)
     const body = await readBody(c)
     const result = await startEditExport(episodeId, body)
-    return success(c, { export_id: result.exportId })
+    return success(c, {
+      export_id: result.exportId,
+      reused: result.reused,
+      source_warnings: result.sourceWarnings.map((warning) => ({
+        code: warning.code,
+        message: warning.message,
+      })),
+    })
   } catch (error) {
     return handleEditError(c, error)
   }

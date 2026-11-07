@@ -15,6 +15,59 @@ import { resolveFfmpegSuite } from '../utils/ffmpeg.js'
 import { computeLayout, type EditClip, type EditPlanV1 } from './edit-plan.js'
 
 export interface EditRenderWarning { code: string; message: string }
+export interface EditRenderBlocking { code: string; path: string; message: string }
+
+/** 中止信号触发的取消：与真实渲染失败区分，调用方据此不得把状态写成 failed */
+export class EditRenderAbortedError extends Error {
+  constructor() {
+    super('渲染已取消')
+    this.name = 'EditRenderAbortedError'
+  }
+}
+
+/** 导出阻断清单：与 buildRenderReport 的警告用途分离，命中即拒绝导出（设计 §6.5） */
+export function blockingFeaturesOf(plan: EditPlanV1): EditRenderBlocking[] {
+  const blocking: EditRenderBlocking[] = []
+  plan.overlays.forEach((overlay, index) => {
+    blocking.push({
+      code: 'OVERLAY_UNSUPPORTED',
+      path: `overlays[${index}]`,
+      message: `叠加轨 ${index + 1}（${overlay.id}）暂不支持导出，请先移除`,
+    })
+  })
+  plan.clips.forEach((clip, index) => {
+    if (clip.filter.preset !== 'none') {
+      blocking.push({
+        code: 'FILTER_UNSUPPORTED',
+        path: `clips[${index}].filter`,
+        message: `片段 ${index + 1}（${clip.id}）使用了滤镜，暂不支持导出`,
+      })
+    }
+    if (clip.transform.scale !== 1 || clip.transform.x !== 0 || clip.transform.y !== 0) {
+      blocking.push({
+        code: 'TRANSFORM_UNSUPPORTED',
+        path: `clips[${index}].transform`,
+        message: `片段 ${index + 1}（${clip.id}）使用了缩放或位移，暂不支持导出`,
+      })
+    }
+    const speed = Number(clip.speed) || 1
+    if (speed < 0.5 || speed > 2) {
+      blocking.push({
+        code: 'SPEED_UNSUPPORTED',
+        path: `clips[${index}].speed`,
+        message: `片段 ${index + 1}（${clip.id}）的变速 ${speed}× 超出 0.5–2×`,
+      })
+    }
+  })
+  plan.transitions.forEach((transition, index) => {
+    blocking.push({
+      code: 'TRANSITION_UNSUPPORTED',
+      path: `transitions[${index}]`,
+      message: `片段 ${transition.fromClipId} → ${transition.toClipId} 的转场暂不支持导出，请改为硬切`,
+    })
+  })
+  return blocking
+}
 
 /** 导出降级清单：所有不支持项必须出现在报告中（设计 6.10 支持范围表） */
 export function buildRenderReport(plan: EditPlanV1): { warnings: EditRenderWarning[] } {
@@ -40,14 +93,22 @@ export function buildRenderReport(plan: EditPlanV1): { warnings: EditRenderWarni
 const VIDEO_ARGS = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p']
 const AUDIO_ARGS = ['-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2']
 
-function run(args: string[]): Promise<void> {
+function run(args: string[], signal?: AbortSignal): Promise<void> {
   const bin = resolveFfmpegSuite().ffmpeg.path || 'ffmpeg'
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new EditRenderAbortedError())
+      return
+    }
     execFile(
       bin,
       ['-hide_banner', '-loglevel', 'error', ...args],
-      { windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+      { windowsHide: true, maxBuffer: 16 * 1024 * 1024, signal },
       (error) => {
+        if (signal?.aborted || (error as NodeJS.ErrnoException | null)?.name === 'AbortError') {
+          reject(new EditRenderAbortedError())
+          return
+        }
         if (error) reject(new Error(`渲染失败：${error.message}`))
         else resolve()
       },
@@ -125,6 +186,7 @@ async function renderSegment(
   plan: EditPlanV1,
   clip: EditClip,
   file: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const { fps } = plan.project
   const speed = clampSpeed(clip)
@@ -139,7 +201,7 @@ async function renderSegment(
       '-vf', videoFilter(clip, plan).join(','), '-af', 'aresample=48000',
       '-r', String(fps), ...VIDEO_ARGS, ...AUDIO_ARGS,
       '-shortest', file,
-    ])
+    ], signal)
     return
   }
   if (!clip.source.hasAudio) {
@@ -151,7 +213,7 @@ async function renderSegment(
       '-vf', videoFilter(clip, plan).join(','),
       '-r', String(fps), ...VIDEO_ARGS, ...AUDIO_ARGS,
       '-shortest', file,
-    ])
+    ], signal)
     return
   }
   await run([
@@ -160,10 +222,10 @@ async function renderSegment(
     '-af', audioFilter(clip).join(','),
     '-r', String(fps), ...VIDEO_ARGS, ...AUDIO_ARGS,
     file,
-  ])
+  ], signal)
 }
 
-async function renderGap(plan: EditPlanV1, gapMs: number, file: string): Promise<void> {
+async function renderGap(plan: EditPlanV1, gapMs: number, file: string, signal?: AbortSignal): Promise<void> {
   const { width, height, fps } = plan.project
   const sec = (gapMs / 1000).toFixed(3)
   await run([
@@ -172,7 +234,82 @@ async function renderGap(plan: EditPlanV1, gapMs: number, file: string): Promise
     '-f', 'lavfi', '-t', sec, '-i', 'anullsrc=r=48000:cl=stereo',
     '-r', String(fps), ...VIDEO_ARGS, ...AUDIO_ARGS,
     file,
-  ])
+  ], signal)
+}
+
+export interface EditRenderAudioInput {
+  mode: 'clip' | 'mix' | 'silent'
+  /** mix 模式可直接给路径，或由 prepare 在画面组装后生成（带信号与进度） */
+  path?: string
+  prepare?: (signal: AbortSignal | undefined, onProgress: (pct: number) => void) => Promise<string>
+}
+
+/** 外部音轨按布局时长裁剪/补静音；对白与混音长度不得改变成片时长 */
+function externalAudioFilter(layoutSec: string): string {
+  return `aresample=48000,apad,atrim=0:${layoutSec},asetpts=N/SR/TB`
+}
+
+async function renderFinalCut(input: {
+  concatFile: string
+  outputPath: string
+  subtitleMode: 'burn' | 'soft' | 'none'
+  assPath?: string
+  srtPath?: string
+  layoutSec: string
+  audioPath?: string
+  silent: boolean
+  signal?: AbortSignal
+}): Promise<void> {
+  const external = input.silent || Boolean(input.audioPath)
+  const audioInput = input.silent
+    ? ['-f', 'lavfi', '-t', input.layoutSec, '-i', 'anullsrc=r=48000:cl=stereo']
+    : input.audioPath
+      ? ['-i', input.audioPath]
+      : []
+  const audioFilterArgs = external
+    ? [...AUDIO_ARGS, '-af', externalAudioFilter(input.layoutSec)]
+    : []
+  if (input.subtitleMode === 'burn' && input.assPath) {
+    const assFilterPath = input.assPath.replace(/\\/g, '/').replace(/:/g, '\\:')
+    if (external) {
+      await run([
+        '-y', '-i', input.concatFile, ...audioInput,
+        '-vf', `ass=${assFilterPath}`,
+        '-map', '0:v:0', '-map', '1:a:0',
+        ...VIDEO_ARGS, ...audioFilterArgs, '-movflags', '+faststart', input.outputPath,
+      ], input.signal)
+    } else {
+      await run([
+        '-y', '-i', input.concatFile,
+        '-vf', `ass=${assFilterPath}`,
+        ...VIDEO_ARGS,
+        '-c:a', 'copy', '-movflags', '+faststart', input.outputPath,
+      ], input.signal)
+    }
+  } else if (input.subtitleMode === 'soft' && input.srtPath) {
+    if (external) {
+      await run([
+        '-y', '-i', input.concatFile, ...audioInput, '-i', input.srtPath,
+        '-map', '0:v:0', '-map', '1:a:0', '-map', '2:s',
+        '-c:v', 'copy', ...audioFilterArgs, '-c:s', 'mov_text',
+        '-metadata:s:s:0', 'language=chi', '-movflags', '+faststart', input.outputPath,
+      ], input.signal)
+    } else {
+      await run([
+        '-y', '-i', input.concatFile, '-i', input.srtPath,
+        '-c', 'copy', '-c:s', 'mov_text',
+        '-metadata:s:s:0', 'language=chi', '-movflags', '+faststart', input.outputPath,
+      ], input.signal)
+    }
+  } else if (external) {
+    await run([
+      '-y', '-i', input.concatFile, ...audioInput,
+      '-map', '0:v:0', '-map', '1:a:0',
+      '-c:v', 'copy', ...audioFilterArgs, '-movflags', '+faststart', input.outputPath,
+    ], input.signal)
+  } else {
+    await run(['-y', '-i', input.concatFile, '-c', 'copy', '-movflags', '+faststart', input.outputPath], input.signal)
+  }
 }
 
 export async function renderEditVideo(input: {
@@ -181,15 +318,21 @@ export async function renderEditVideo(input: {
   subtitleMode: 'burn' | 'soft' | 'none'
   assPath?: string
   srtPath?: string
+  audio?: EditRenderAudioInput
   onProgress?: (pct: number) => void
+  signal?: AbortSignal
 }): Promise<{ durationMs: number; warnings: EditRenderWarning[] }> {
   const warnings = buildRenderReport(input.plan).warnings
   const layout = computeLayout(input.plan)
+  const layoutSec = (layout.durationMs / 1000).toFixed(3)
+  const audioMode = input.audio?.mode ?? 'clip'
   const workDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'huobao-edit-render-'))
+  let completed = false
   try {
     const listLines: string[] = []
     let prevEndMs = 0
     let index = 0
+    // 画面组装 5–55%
     for (const layoutClip of layout.clips) {
       const clip = input.plan.clips.find((c) => c.id === layoutClip.clipId)
       if (!clip) continue
@@ -197,46 +340,57 @@ export async function renderEditVideo(input: {
       const gapMs = layoutClip.timelineStartMs - prevEndMs
       if (gapMs > 0) {
         const gapFile = path.join(workDir, `gap-${index}.mp4`)
-        await renderGap(input.plan, gapMs, gapFile)
+        await renderGap(input.plan, gapMs, gapFile, input.signal)
         listLines.push(`file '${gapFile.replace(/'/g, "'\\''")}'`)
       }
       const segFile = path.join(workDir, `seg-${index}.mp4`)
-      await renderSegment(input.plan, clip, segFile)
+      await renderSegment(input.plan, clip, segFile, input.signal)
       listLines.push(`file '${segFile.replace(/'/g, "'\\''")}'`)
       prevEndMs = layoutClip.timelineEndMs
       index += 1
-      input.onProgress?.(Math.round((index / Math.max(1, layout.clips.length)) * 80))
+      input.onProgress?.(5 + Math.round((index / Math.max(1, layout.clips.length)) * 50))
     }
     if (!listLines.length) throw new Error('时间线没有任何可渲染片段')
     const listFile = path.join(workDir, 'list.txt')
     await fsp.writeFile(listFile, listLines.join('\n'), 'utf8')
     const concatFile = path.join(workDir, 'concat.mp4')
-    await run(['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', concatFile])
-    input.onProgress?.(85)
+    await run(['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', concatFile], input.signal)
+    input.onProgress?.(55)
 
-    // 字幕阶段：burn 需要重编码；soft 挂 mov_text 流；none 直接拷贝。三分支统一 +faststart
-    if (input.subtitleMode === 'burn' && input.assPath) {
-      const assFilterPath = input.assPath.replace(/\\/g, '/').replace(/:/g, '\\:')
-      await run([
-        '-y', '-i', concatFile,
-        '-vf', `ass=${assFilterPath}`,
-        ...VIDEO_ARGS,
-        '-c:a', 'copy', '-movflags', '+faststart', input.outputPath,
-      ])
-    } else if (input.subtitleMode === 'soft' && input.srtPath) {
-      await run([
-        '-y', '-i', concatFile, '-i', input.srtPath,
-        '-c', 'copy', '-c:s', 'mov_text',
-        '-metadata:s:s:0', 'language=chi', '-movflags', '+faststart', input.outputPath,
-      ])
-    } else {
-      await run(['-y', '-i', concatFile, '-c', 'copy', '-movflags', '+faststart', input.outputPath])
+    // 混音 WAV 55–72%：组装完成后再渲染，失败不回退原声
+    let audioPath = input.audio?.path
+    if (audioMode === 'mix') {
+      if (input.audio?.prepare) {
+        audioPath = await input.audio.prepare(
+          input.signal,
+          (pct) => input.onProgress?.(55 + Math.round((Math.max(0, Math.min(100, pct)) / 100) * 17)),
+        )
+      }
+      if (!audioPath) throw new Error('混音音轨缺失，无法导出')
     }
-    input.onProgress?.(95)
+    input.onProgress?.(72)
+
+    // 字幕与最终封装 72–95%
+    await renderFinalCut({
+      concatFile,
+      outputPath: input.outputPath,
+      subtitleMode: input.subtitleMode,
+      assPath: input.assPath,
+      srtPath: input.srtPath,
+      layoutSec,
+      audioPath,
+      silent: audioMode === 'silent',
+      signal: input.signal,
+    })
+    input.onProgress?.(92)
     const durationMs = await probeDurationMs(input.outputPath)
+    input.onProgress?.(95)
+    completed = true
     return { durationMs, warnings }
   } finally {
-    await fsp.rm(workDir, { recursive: true, force: true })
+    await fsp.rm(workDir, { recursive: true, force: true }).catch(() => {})
+    // 取消/失败时输出可能是 0 字节或被截断的半成品，必须清掉，避免被误当可下载成片
+    if (!completed) await fsp.rm(input.outputPath, { force: true }).catch(() => {})
   }
 }
 

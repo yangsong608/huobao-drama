@@ -21,6 +21,7 @@ import {
   type MixPlanSource,
   type MixSourceWarning,
 } from './mix-source.js'
+import { mixHashesForEpisode } from './edit-mix-sync.js'
 
 export const MIX_BUS_KEYS = ['dialogue', 'original', 'sfx', 'bgm', 'master'] as const
 export type MixBusKey = typeof MIX_BUS_KEYS[number]
@@ -163,6 +164,45 @@ function requireEpisode(episodeId: number) {
 
 function busKeyOf(raw: unknown): MixBusKey | null {
   return MIX_BUS_KEYS.includes(raw as MixBusKey) ? raw as MixBusKey : null
+}
+
+/**
+ * 只读编译的总线读取：已有行原样返回，缺失键在内存按内置预设补齐。
+ * 占位总线使用负 ID，既避免与真实行冲突，也便于调用方识别未落库。
+ */
+function readBusesForCompile(episodeId: number): BusRow[] {
+  requireEpisode(episodeId)
+  const existing = db.select().from(schema.audioBuses)
+    .where(eq(schema.audioBuses.episodeId, episodeId))
+    .all()
+  const byKey = new Map<MixBusKey, BusRow>()
+  for (const row of existing) {
+    const key = busKeyOf(row.key)
+    if (key && !byKey.has(key)) byKey.set(key, row)
+  }
+  let placeholderId = -1
+  for (const key of MIX_BUS_KEYS) {
+    if (byKey.has(key)) continue
+    const preset = BUS_PRESETS[key]
+    byKey.set(key, {
+      id: placeholderId--,
+      episodeId,
+      key,
+      name: preset.name,
+      volume: preset.volume,
+      muted: false,
+      solo: false,
+      ducking: preset.ducking,
+      duckRatio: 6,
+      duckAttackMs: 20,
+      duckReleaseMs: 250,
+      lufsTarget: preset.lufsTarget,
+      limiterCeiling: preset.limiterCeiling,
+      createdAt: '',
+      updatedAt: '',
+    })
+  }
+  return MIX_BUS_KEYS.map((key) => byKey.get(key)!)
 }
 
 /** 缺失则补齐 5 条默认总线；幂等，返回按固定顺序排列的总线 */
@@ -546,13 +586,13 @@ async function buildVirtualBgmTrack(
 export async function compileMixPlanDetailed(
   episodeId: number,
   dramaId: number,
-  options: { sourceFilmId?: number | null } = {},
+  options: { sourceFilmId?: number | null; readOnly?: boolean } = {},
 ): Promise<{ plan: MixPlan; source: MixPlanSource; warnings: MixSourceWarning[] }> {
   const episode = requireEpisode(episodeId)
   const drama = db.select().from(schema.dramas).where(eq(schema.dramas.id, dramaId)).get()
   const resolved = await resolveMixSource(episodeId, options.sourceFilmId)
   const source = resolved.source
-  const busRows = ensureDefaultBuses(episodeId)
+  const busRows = options.readOnly ? readBusesForCompile(episodeId) : ensureDefaultBuses(episodeId)
   const buses: MixBus[] = busRows.map((row) => ({
     id: row.id,
     key: busKeyOf(row.key)!,
@@ -703,7 +743,7 @@ export async function compileMixPlanDetailed(
 export async function compileMixPlan(
   episodeId: number,
   dramaId: number,
-  options: { sourceFilmId?: number | null } = {},
+  options: { sourceFilmId?: number | null; readOnly?: boolean } = {},
 ): Promise<MixPlan> {
   return (await compileMixPlanDetailed(episodeId, dramaId, options)).plan
 }
@@ -724,8 +764,13 @@ function fallbackClipSource(raw: string | null | undefined): { url: string | nul
  * 本集没有任何可用成片时的降级编译：保留总线、音轨片段与虚拟对白轨，无原声床。
  * 源成片是混音的主输入，但空集也要能打开混音台并校验试听范围，因此在编译层兜底。
  */
-export async function compilePlanWithoutSource(episodeId: number, dramaId: number): Promise<MixPlan> {
-  const buses: MixBus[] = ensureDefaultBuses(episodeId)
+export async function compilePlanWithoutSource(
+  episodeId: number,
+  dramaId: number,
+  options: { readOnly?: boolean } = {},
+): Promise<MixPlan> {
+  const busRows = options.readOnly ? readBusesForCompile(episodeId) : ensureDefaultBuses(episodeId)
+  const buses: MixBus[] = busRows
     .map((row) => (MIX_BUS_KEYS as readonly string[]).includes(row.key)
       ? {
         id: row.id,
@@ -915,13 +960,15 @@ export async function compileEpisodePlan(
   episodeId: number,
   dramaId: number,
   sourceFilmId?: number | null,
+  options: { readOnly?: boolean } = {},
 ): Promise<{ plan: MixPlan; warnings: MixSourceWarning[] }> {
+  const readOnly = options.readOnly === true
   try {
-    return await compileMixPlanDetailed(episodeId, dramaId, { sourceFilmId })
+    return await compileMixPlanDetailed(episodeId, dramaId, { sourceFilmId, readOnly })
   } catch (error) {
     if (error instanceof MixSourceError && error.status === 400 && error.code === 'MIX_SOURCE_MISSING') {
       return {
-        plan: await compilePlanWithoutSource(episodeId, dramaId),
+        plan: await compilePlanWithoutSource(episodeId, dramaId, { readOnly }),
         warnings: [{ code: 'MIX_SOURCE_FALLBACK', message: '本集还没有可用成片，可先添加配音与音效。' }],
       }
     }
@@ -1314,6 +1361,13 @@ export function listMixRevisions(episodeId: number): MixRevision[] {
 export async function createMixRevision(episodeId: number, note?: string): Promise<MixRevision> {
   const episode = requireEpisode(episodeId)
   const plan = await compileMixPlan(episodeId, episode.dramaId)
+  // 版本不可变：对齐哈希只在创建时采样；采样失败不阻断混音保存，按旧版（null）处理
+  let syncHashes: { editSyncHash: string; dialogueSyncHash: string } | null = null
+  try {
+    syncHashes = mixHashesForEpisode(episodeId)
+  } catch (error: any) {
+    console.warn('[mix] 读取剪辑同步哈希失败，混音版本按旧版写入:', error?.message || error)
+  }
   const revisions = db.select().from(schema.mixRevisions)
     .where(eq(schema.mixRevisions.episodeId, episodeId))
     .all()
@@ -1327,6 +1381,8 @@ export async function createMixRevision(episodeId: number, note?: string): Promi
       revisionNo,
       planJson: JSON.stringify(plan),
       planHash: hashMixPlan(plan),
+      editSyncHash: syncHashes?.editSyncHash ?? null,
+      dialogueSyncHash: syncHashes?.dialogueSyncHash ?? null,
       note: note ? String(note).slice(0, 500) : null,
       isCurrent: true,
       sourceFilmId: plan.source?.filmId ?? null,

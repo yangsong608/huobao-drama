@@ -14,7 +14,6 @@ import { now } from '../utils/response.js'
 import { checkFfmpegSuite } from '../utils/ffmpeg.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import {
-  getProjectStorageRoot,
   projectStorageRelative,
   projectSubdirPath,
 } from './project-storage.js'
@@ -40,6 +39,12 @@ import { measureLoudness, validateExport } from './export-validation.js'
 import { writeZip } from './export-zip.js'
 import { renderMixAudio } from './mix-render.js'
 import { getDubbingDefaults } from './app-settings.js'
+import {
+  assertCapacity,
+  ExportCapacityError,
+  formatBytes,
+  freeBytesForDrama,
+} from './export-capacity.js'
 import { FilmError, projectFilmFromExport, setCurrentFilm } from './film-hub.js'
 import {
   MixSourceError,
@@ -222,33 +227,35 @@ function paramsJsonOf(
 }
 
 /** “设为当前”与渲染产物地址只是副作用，不参与复用键，否则同内容会因该选项无法复用 */
-function reuseParamsJson(paramsJson: string | null): string {
+function reuseParamsJson(paramsJson: string | null, ignoreKeys: readonly string[] = []): string {
   if (!paramsJson) return ''
   try {
     const parsed = JSON.parse(paramsJson) as Record<string, unknown>
-    delete parsed.setCurrent
-    delete parsed.subtitleUrl
+    for (const key of ['setCurrent', 'subtitleUrl', ...ignoreKeys]) delete parsed[key]
     return JSON.stringify(canonicalize(parsed))
   } catch {
     return paramsJson
   }
 }
 
-function reuseKeyOf(row: {
+export function reuseKeyOf(row: {
   kind: string
   preset: string | null
   planHash: string | null
   sourceVideoHash: string | null
   subtitleHash: string | null
   paramsJson: string | null
-}): string {
+  mixRevisionId?: number | null
+}, options: { ignoreParams?: readonly string[]; mixRevisionId?: number | null } = {}): string {
+  const mixRevisionId = options.mixRevisionId !== undefined ? options.mixRevisionId : row.mixRevisionId
   return crypto.createHash('sha256').update(JSON.stringify([
     row.kind,
     row.preset || '',
     row.planHash || '',
     row.sourceVideoHash || '',
     row.subtitleHash || '',
-    reuseParamsJson(row.paramsJson),
+    mixRevisionId == null ? '' : String(mixRevisionId),
+    reuseParamsJson(row.paramsJson, options.ignoreParams),
   ])).digest('hex')
 }
 
@@ -321,24 +328,6 @@ function planTrackCount(plan: MixPlan): number {
   return plan.tracks.filter((track) => track.clips.some((clip) => clip.usable && !clip.muted && clip.audioUrl)).length
 }
 
-function diskFreeBytes(dramaId: number): number | null {
-  try {
-    const stat = fs.statfsSync(getProjectStorageRoot(dramaId))
-    const available = Number(stat.bavail ?? stat.bfree ?? 0)
-    const blockSize = Number(stat.bsize ?? 0)
-    if (available > 0 && blockSize > 0) return available * blockSize
-  } catch {
-    /* statfs 在部分平台/文件系统不可用，跳过前置检查 */
-  }
-  return null
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)}GB`
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(0)}MB`
-  return `${Math.max(0, Math.round(bytes / 1024))}KB`
-}
-
 export async function getExportChecks(episodeId: number): Promise<ExportChecks> {
   const { episode } = requireEpisode(episodeId)
   const lines = db.select().from(schema.storyboardLines)
@@ -358,7 +347,7 @@ export async function getExportChecks(episodeId: number): Promise<ExportChecks> 
     if (!(error instanceof MixSourceError) || error.code !== 'MIX_SOURCE_MISSING') throw error
     const ffmpeg = await checkFfmpegSuite()
     const ffmpegOk = ffmpeg.ffmpeg && ffmpeg.ffprobe
-    const freeBytes = diskFreeBytes(episode.dramaId)
+    const freeBytes = freeBytesForDrama(episode.dramaId)
     const missingMessage = '请先在拼接导出生成一部成片'
     return {
       episodeId,
@@ -404,7 +393,7 @@ export async function getExportChecks(episodeId: number): Promise<ExportChecks> 
   const ffmpegOk = ffmpeg.ffmpeg && ffmpeg.ffprobe
 
   const requiredBytes = estimateExportBytes('video', plan.durationMs, EXPORT_PRESETS['vertical-hd'])
-  const freeBytes = diskFreeBytes(episode.dramaId)
+  const freeBytes = freeBytesForDrama(episode.dramaId)
   const diskOk = freeBytes == null || freeBytes >= requiredBytes
 
   const mixOk = plan.durationMs > 0 && clipCount > 0
@@ -504,7 +493,7 @@ function exportUrlOf(dramaId: number, episodeId: number, recordId: number, filen
   return projectStorageRelative(dramaId, `episodes/${episodeId}/exports/${recordId}`, filename)
 }
 
-function removeExportFiles(dir: string): void {
+export function removeExportFiles(dir: string): void {
   try {
     fs.rmSync(dir, { recursive: true, force: true })
   } catch {
@@ -793,7 +782,7 @@ export function markFailed(recordId: number, message: string, dir?: string): voi
     .set({ status: 'failed', error: message.slice(0, 2000), finishedAt: now() })
     .where(and(
       eq(schema.episodeExports.id, recordId),
-      inArray(schema.episodeExports.status, ['pending', 'running']),
+      inArray(schema.episodeExports.status, ['pending', 'running', 'rendering']),
     ))
     .run()
   if (dir) removeExportFiles(dir)
@@ -1088,12 +1077,16 @@ async function startEpisodeExportLocked(
   }
 
   const requiredBytes = estimateExportBytes(kind, plan.durationMs, preset)
-  const freeBytes = diskFreeBytes(episode.dramaId)
-  if (freeBytes != null && freeBytes < requiredBytes) {
-    throw new ExportError(
-      `磁盘空间不足：预计需要 ${formatBytes(requiredBytes)}，剩余 ${formatBytes(freeBytes)}`,
-      507,
-    )
+  try {
+    assertCapacity(requiredBytes, freeBytesForDrama(episode.dramaId))
+  } catch (error) {
+    if (error instanceof ExportCapacityError) {
+      throw new ExportError(
+        `磁盘空间不足：预计需要 ${formatBytes(error.requiredBytes)}，剩余 ${formatBytes(error.freeBytes)}`,
+        507,
+      )
+    }
+    throw error
   }
 
   const revision = db.select().from(schema.mixRevisions)
@@ -1218,7 +1211,7 @@ export async function retryExport(id: number): Promise<ExportRecord> {
 
 export async function deleteExport(id: number): Promise<ExportRecord> {
   const record = requireExport(id)
-  if (['pending', 'running'].includes(String(record.status))) {
+  if (['pending', 'running', 'rendering'].includes(String(record.status))) {
     throw new ExportError('导出进行中，请先取消再删除', 409)
   }
   const film = record.filmId

@@ -27,7 +27,7 @@ export interface AgentScope {
   drama_id?: number
   episode_id?: number
   edit_project_id?: number
-  stage?: 'script' | 'assets' | 'videos' | 'dubbing' | 'mix' | 'delivery'
+  stage?: 'script' | 'assets' | 'videos' | 'dubbing'
   focus?: Record<string, number | string>
 }
 

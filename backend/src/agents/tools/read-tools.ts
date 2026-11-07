@@ -21,6 +21,7 @@ import {
   parseTimelineEvents,
   parseWorldMap,
 } from '../../services/novel/story-atlas.js'
+import { DELIVERY_READ_TOOLS, EDIT_READ_TOOLS, MIX_READ_TOOLS } from './edit-read-tools.js'
 
 const NOVEL_LIST_LIMIT = 50
 const NOVEL_CHAPTER_LIMIT = 50
@@ -408,5 +409,8 @@ export function getPresetTools(requestContext: RequestContext | undefined): Reco
   if (!scope) return {}
   if (scope.kind === 'novel-library') return { ...NOVEL_LIBRARY_TOOLS }
   if (scope.kind === 'novel') return { ...NOVEL_TOOLS }
+  if (scope.kind === 'edit') return { ...EDIT_READ_TOOLS }
+  if (scope.kind === 'mix') return { ...MIX_READ_TOOLS }
+  if (scope.kind === 'delivery') return { ...DELIVERY_READ_TOOLS }
   return {}
 }

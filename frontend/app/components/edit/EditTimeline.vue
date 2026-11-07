@@ -8,6 +8,10 @@
         <!-- 可见操作入口（spec 6.8：不依赖右键和快捷键），右键菜单只是快捷路径 -->
         <button
           class="ed-tool is-text" type="button" :disabled="readonly"
+          @click="openMenuFromButton($event, clipMenuItems(selectedClipView))"
+        >{{ t('edit.clipOps') }} ▾</button>
+        <button
+          class="ed-tool is-text" type="button" :disabled="readonly"
           @click="openMenuFromButton($event, frameMenuItems())"
         >{{ t('edit.frameOps') }} ▾</button>
         <button
@@ -20,6 +24,11 @@
         <button class="ed-tool is-text" type="button" :disabled="!selectedClipId || readonly" @click="removeSelected">
           {{ t('edit.delete') }}
         </button>
+        <button
+          v-if="showMarkers"
+          class="ed-tool is-text ed-marker-toggle" type="button"
+          @click="toggleMarkerPopover($event)"
+        >{{ t('edit.markers.button') }} ▾</button>
         <button class="ed-tool is-text" type="button" @click="$emit('fit-view')">
           {{ t('edit.fitView') }}
         </button>
@@ -128,17 +137,20 @@
             >×</button>
           </div>
 
-          <div
-            v-for="marker in markerViews"
-            :key="marker.id"
-            class="ed-tl-marker"
-            :style="{ left: `${marker.left}px`, '--marker-color': marker.color || 'var(--warning, #f59e0b)' }"
-            :title="marker.title"
-            @pointerdown.stop.prevent="emit('seek', marker.atMs)"
-            @contextmenu.prevent.stop="openMarkerMenu($event, marker)"
-          >
-            <span class="ed-tl-marker-flag"></span>
-          </div>
+          <template v-if="showMarkers">
+            <div
+              v-for="marker in markerViews"
+              :key="marker.id"
+              class="ed-tl-marker"
+              :class="{ 'is-current': marker.isCurrent }"
+              :style="{ left: `${marker.left}px`, '--marker-color': marker.color || 'var(--warning, #f59e0b)' }"
+              :title="marker.title"
+              @pointerdown.stop.prevent="emit('seek', marker.atMs)"
+              @contextmenu.prevent.stop="openMarkerMenu($event, marker)"
+            >
+              <span class="ed-tl-marker-flag"></span>
+            </div>
+          </template>
 
           <div class="ed-tl-playhead" :style="{ left: `${playheadLeft}px` }"></div>
           <div
@@ -157,6 +169,39 @@
         :items="menu?.items ?? []"
         @update:show="onMenuShowChange"
       />
+
+      <div
+        v-if="showMarkers && markerPopover"
+        class="ed-marker-popover"
+        :style="{ left: `${markerPopover.x}px`, top: `${markerPopover.y}px` }"
+      >
+        <header>
+          <b>{{ t('edit.markers.title') }}</b>
+          <button type="button" :title="t('edit.markers.close')" @click="closeMarkerPopover">×</button>
+        </header>
+        <button
+          class="ed-marker-add" type="button" :disabled="readonly"
+          @click="emit('add-marker', Math.round(currentMs))"
+        >{{ t('edit.markers.addAtPlayhead') }}</button>
+        <p v-if="!markerViews.length" class="ed-marker-empty">{{ t('edit.markers.empty') }}</p>
+        <ul v-else class="ed-marker-list">
+          <li
+            v-for="marker in markerViews"
+            :key="marker.id"
+            :class="{ 'is-current': marker.isCurrent }"
+          >
+            <button type="button" class="ed-marker-jump" @click="emit('seek', marker.atMs)">
+              <span class="ed-marker-time">{{ formatPrecise(marker.atMs) }}</span>
+              <span class="ed-marker-label">{{ marker.label || t('edit.markers.defaultLabel', { n: marker.index + 1 }) }}</span>
+            </button>
+            <button
+              type="button" class="ed-marker-delete" :disabled="readonly"
+              :title="t('edit.markers.delete')"
+              @click="emit('delete-marker', marker.id)"
+            >×</button>
+          </li>
+        </ul>
+      </div>
     </div>
   </section>
 </template>
@@ -179,11 +224,15 @@ const props = defineProps({
   readonly: { type: Boolean, default: false },
   audioMode: { type: String, default: 'none' },
   showSubtitles: { type: Boolean, default: true },
+  /** edit.ux.contextMenu：只控制右键菜单，工具栏下拉始终可用 */
+  contextMenu: { type: Boolean, default: true },
+  /** edit.ux.markers：隐藏标记入口/列表/旗标，但不清除计划内已有标记 */
+  showMarkers: { type: Boolean, default: true },
 })
 const emit = defineEmits([
   'seek', 'select-clip', 'select-cue', 'move-clip', 'trim-clip',
   'split-clip', 'move-cue', 'remove-transition',
-  'frame-op', 'cue-op', 'toggle-subtitles', 'fit-view', 'open-subtitles', 'remove-clip',
+  'frame-op', 'cue-op', 'clip-op', 'toggle-subtitles', 'fit-view', 'open-subtitles', 'remove-clip',
   'duplicate-clip', 'add-marker', 'delete-marker', 'close-gaps',
 ])
 const { t } = useI18n()
@@ -243,18 +292,32 @@ const transitionViews = computed(() => props.layout.transitions.map((transition)
   return { ...transition, left: pad + (to?.timeline_start_ms ?? 0) * pxPerMs.value }
 }))
 
-const markerViews = computed(() => props.plan.markers.map((marker) => ({
-  ...marker,
-  left: pad + Math.max(0, marker.atMs) * pxPerMs.value,
-  title: marker.label
-    ? `${marker.label} ${formatPrecise(marker.atMs)}`
-    : formatPrecise(marker.atMs),
-})))
+const frameMs = computed(() => 1000 / Math.max(1, Number(props.plan.project?.fps) || 30))
+const markerViews = computed(() => [...props.plan.markers]
+  .sort((a, b) => a.atMs - b.atMs)
+  .map((marker, index) => ({
+    ...marker,
+    index,
+    left: pad + Math.max(0, marker.atMs) * pxPerMs.value,
+    isCurrent: Math.abs(marker.atMs - props.currentMs) <= frameMs.value,
+    title: marker.label
+      ? `${marker.label} ${formatPrecise(marker.atMs)}`
+      : formatPrecise(marker.atMs),
+  })))
 
 const activeIndex = computed(() => activeClipIndex(props.layout, props.currentMs))
 const activeClip = computed(() => props.plan.clips[activeIndex.value] ?? null)
 const activeLayoutClip = computed(() => props.layout.clips[activeIndex.value] ?? null)
-// 与 splitClip 的 minimumSourceMs 边界一致（3 秒按帧率折算），避免按钮可用但命令拒绝
+// 片段操作作用于当前选中片段；未选中时按播放头定位（与右键定位规则一致）
+const selectedClipView = computed(() => {
+  if (props.selectedClipId) {
+    const selected = clipViews.value.find((view) => view.clip_id === props.selectedClipId)
+    if (selected) return selected
+  }
+  const index = activeClipIndex(props.layout, props.currentMs)
+  return clipViews.value.find((view) => view.clip_id === props.layout.clips[index]?.clip_id) ?? null
+})
+// 与 splitClip 的 minimumSourceMs 边界一致（3 帧按帧率折算），避免按钮可用但命令拒绝
 const splitMinMs = computed(() => (
   Math.ceil(3000 / Math.max(1, Number(props.plan.project?.fps) || 30))
 ))
@@ -445,6 +508,32 @@ function splitAtPlayhead() {
   })
 }
 
+// ---- 标记浮层：添加/列表/跳转/删除，入口跟随 edit.ux.markers ----
+const markerPopover = ref(null)
+
+function toggleMarkerPopover(event) {
+  if (markerPopover.value) {
+    closeMarkerPopover()
+    return
+  }
+  const rect = event.currentTarget.getBoundingClientRect()
+  markerPopover.value = {
+    x: Math.max(8, Math.min(rect.left, window.innerWidth - 268)),
+    y: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 320)),
+  }
+}
+
+function closeMarkerPopover() {
+  markerPopover.value = null
+}
+
+function onMarkerPopoverPointerDown(event) {
+  if (!markerPopover.value) return
+  const target = event.target
+  if (target?.closest?.('.ed-marker-popover, .ed-marker-toggle')) return
+  closeMarkerPopover()
+}
+
 // ---- 右键菜单与工具栏下拉（共用 ContextMenu 与同一套事件，spec 6.8） ----
 const menu = ref(null)
 
@@ -485,10 +574,66 @@ function clipIdAt(ms) {
   return props.layout.clips[index]?.clip_id ?? ''
 }
 
+// 分割只在播放头严格位于片段内部（距两端至少 1 帧）时可用；其余情况置灰并说明原因
+function clipSplitState(view) {
+  if (!view) return { disabled: true, atMs: 0 }
+  const atMs = Math.round(props.currentMs - view.timeline_start_ms)
+  const inside = props.currentMs - view.timeline_start_ms >= frameMs.value
+    && view.timeline_end_ms - props.currentMs >= frameMs.value
+  return { disabled: props.readonly || !inside, atMs }
+}
+
+// 片段菜单：三项片段操作 + 分隔线 + 现有帧级操作（右键与工具栏“片段操作”共用）
+function clipMenuItems(view) {
+  const target = view || selectedClipView.value
+  const clipId = target?.clip_id ?? ''
+  const split = clipSplitState(target)
+  const at = target ? Math.round(target.timeline_start_ms) : Math.round(props.currentMs)
+  const splitItem = {
+    key: 'clip-split-at-playhead',
+    label: t('edit.clipMenu.splitAtPlayhead'),
+    shortcut: 'S',
+    disabled: split.disabled,
+    reason: split.disabled ? t('edit.clipMenu.outsidePlayhead') : undefined,
+    action: () => {
+      if (!clipId) return
+      emit('clip-op', { kind: 'split', clipId, atMs: split.atMs })
+    },
+  }
+  return [
+    splitItem,
+    {
+      key: 'clip-delete',
+      label: t('edit.clipMenu.delete'),
+      shortcut: 'Delete',
+      danger: true,
+      disabled: !clipId,
+      action: () => emit('clip-op', { kind: 'delete', clipId }),
+    },
+    {
+      key: 'clip-ripple-delete',
+      label: t('edit.clipMenu.rippleDelete'),
+      danger: true,
+      disabled: !clipId,
+      action: () => emit('clip-op', { kind: 'ripple-delete', clipId }),
+    },
+    { separator: true, key: 'sep-clip', label: '' },
+    { key: 'delete-frame', label: t('edit.frameDelete'), shortcut: 'D', action: () => emit('frame-op', { kind: 'delete-frame', clipId, atMs: at }) },
+    { key: 'duplicate-frame', label: t('edit.frameDuplicate'), action: () => emit('frame-op', { kind: 'duplicate-frame', clipId, atMs: at }) },
+    { key: 'insert-image', label: t('edit.frameInsertImage'), action: () => emit('frame-op', { kind: 'insert-image', clipId, atMs: at }) },
+    { separator: true, key: 'sep-clip-frames', label: '' },
+    { key: 'extend-1s', label: t('edit.frameExtend'), action: () => emit('frame-op', { kind: 'extend-1s', clipId, atMs: at }) },
+    { separator: true, key: 'sep-clip-extra', label: '' },
+    { key: 'duplicate-clip', label: t('edit.clipDuplicate'), disabled: !clipId, action: () => emit('duplicate-clip', clipId) },
+    { key: 'add-marker', label: t('edit.markerAdd'), action: () => emit('add-marker', Math.round(props.currentMs)) },
+    { key: 'close-gaps', label: t('edit.closeGaps'), action: () => emit('close-gaps') },
+  ]
+}
+
 function openClipMenu(event, view) {
-  if (props.readonly) return
+  if (props.readonly || !props.contextMenu) return
   emit('select-clip', view.clip_id)
-  openMenuAt(event, frameMenuItems(view))
+  openMenuAt(event, clipMenuItems(view))
 }
 
 function subtitleMenuItems() {
@@ -501,7 +646,7 @@ function subtitleMenuItems() {
 }
 
 function openMarkerMenu(event, marker) {
-  if (props.readonly) return
+  if (props.readonly || !props.contextMenu) return
   openMenuAt(event, [
     { key: 'seek', label: t('edit.markerGoto'), action: () => emit('seek', marker.atMs) },
     { separator: true, key: 'sep', label: '' },
@@ -510,7 +655,7 @@ function openMarkerMenu(event, marker) {
 }
 
 function openCueMenu(event, cue) {
-  if (props.readonly) return
+  if (props.readonly || !props.contextMenu) return
   emit('select-cue', cue.id)
   const next = props.plan.subtitles[props.plan.subtitles.findIndex((item) => item.id === cue.id) + 1]
   openMenuAt(event, [
@@ -533,12 +678,13 @@ function zoomToFit() {
   zoom.value = Math.max(0.02, Math.min(8, (width - pad * 2) / Math.max(1, Number(props.layout.duration_ms) || 1)))
 }
 
-defineExpose({ zoomToFit })
+defineExpose({ zoomToFit, closeMarkerPopover })
 
 onMounted(() => {
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)
   window.addEventListener('pointercancel', onPointerCancel)
+  window.addEventListener('pointerdown', onMarkerPopoverPointerDown, true)
   // 指针在窗口外松开时收不到 pointerup，窗口失焦同样终止拖拽，避免残留预览
   window.addEventListener('blur', onPointerCancel)
 })
@@ -546,6 +692,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
   window.removeEventListener('pointercancel', onPointerCancel)
+  window.removeEventListener('pointerdown', onMarkerPopoverPointerDown, true)
   window.removeEventListener('blur', onPointerCancel)
 })
 </script>
@@ -646,6 +793,44 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 1px var(--bg-0);
 }
 .ed-tl-marker:hover .ed-tl-marker-flag { transform: rotate(45deg) scale(1.25); }
+.ed-tl-marker.is-current .ed-tl-marker-flag { box-shadow: 0 0 0 2px var(--accent); }
+.ed-marker-popover {
+  position: fixed; z-index: 3000; width: 260px; max-height: 320px; overflow: auto;
+  display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--bg-1);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .28);
+}
+.ed-marker-popover header { display: flex; align-items: center; justify-content: space-between; }
+.ed-marker-popover header b { font-size: 11px; color: var(--text-1); }
+.ed-marker-popover header button {
+  width: 20px; height: 20px; padding: 0; border: 0; border-radius: 5px;
+  background: transparent; color: var(--text-3); cursor: pointer;
+}
+.ed-marker-add {
+  height: 26px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-2); color: var(--text-0); font-size: 11px; cursor: pointer;
+}
+.ed-marker-add:disabled { opacity: .45; cursor: not-allowed; }
+.ed-marker-empty { margin: 4px 0; font-size: 10px; color: var(--text-3); text-align: center; }
+.ed-marker-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.ed-marker-list li {
+  display: flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 6px;
+}
+.ed-marker-list li.is-current { background: color-mix(in srgb, var(--accent) 12%, var(--bg-1)); }
+.ed-marker-jump {
+  flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline;
+  padding: 3px 4px; border: 0; border-radius: 4px; background: transparent;
+  color: var(--text-0); font-size: 10px; text-align: left; cursor: pointer;
+}
+.ed-marker-jump:hover { background: var(--bg-hover); }
+.ed-marker-time { flex: 0 0 52px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.ed-marker-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-marker-delete {
+  width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px;
+  background: transparent; color: var(--text-3); cursor: pointer; line-height: 1;
+}
+.ed-marker-delete:hover { color: var(--action-danger); background: var(--bg-hover); }
+.ed-marker-delete:disabled { opacity: .35; cursor: not-allowed; }
 .ed-tl-playhead {
   position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
   background: var(--accent); pointer-events: none; z-index: 5;

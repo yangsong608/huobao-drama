@@ -23,6 +23,8 @@ import {
   type ExportRecord,
 } from '../services/export-service.js'
 import { MixSourceError } from '../services/mix-source.js'
+import { cancelEditExport, retryEditExport } from '../services/edit-export-service.js'
+import { EditWorkspaceError } from '../services/edit-errors.js'
 
 const app = new Hono()
 
@@ -52,6 +54,9 @@ function exportView(record: ExportRecord) {
 function handleError(c: Context, error: unknown, fallback: string) {
   if (error instanceof MixSourceError) {
     return c.json({ code: error.code, message: error.message }, error.status as any)
+  }
+  if (error instanceof EditWorkspaceError) {
+    return c.json({ code: error.code, message: error.message, ...(error.data ?? {}) }, error.status as any)
   }
   if (error instanceof ExportError) {
     if (error.status === 404) return notFound(c, error.message)
@@ -113,6 +118,14 @@ app.get('/exports/:id', (c) => {
 app.post('/exports/:id/cancel', async (c) => {
   const id = parseId(c.req.param('id'))
   if (!id) return badRequest(c, '导出编号无效')
+  const record = getExport(id)
+  if (record?.renderMode === 'edit') {
+    try {
+      return success(c, cancelEditExport(id))
+    } catch (error) {
+      return handleError(c, error, '取消导出失败')
+    }
+  }
   try {
     return success(c, await cancelExport(id))
   } catch (error) {
@@ -123,6 +136,14 @@ app.post('/exports/:id/cancel', async (c) => {
 app.post('/exports/:id/retry', async (c) => {
   const id = parseId(c.req.param('id'))
   if (!id) return badRequest(c, '导出编号无效')
+  const record = getExport(id)
+  if (record?.renderMode === 'edit') {
+    try {
+      return success(c, await retryEditExport(id))
+    } catch (error) {
+      return handleError(c, error, '重试导出失败')
+    }
+  }
   try {
     return success(c, await retryExport(id))
   } catch (error) {

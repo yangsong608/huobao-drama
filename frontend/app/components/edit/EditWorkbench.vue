@@ -11,6 +11,7 @@
       :legacy="Boolean(topState.legacy_project)"
       :rough-cut-busy="roughCutBusy"
       :subtitle-busy="subtitleBusy"
+      :show-agent="showAgent"
       @back="$emit('back')"
       @undo="undo"
       @redo="redo"
@@ -19,10 +20,12 @@
       @open-revisions="openRevisions"
       @rough-cut="runRoughCut"
       @suggest-subtitles="runSubtitleSuggest"
-      @open-export="exportOpen = true"
+      @open-export="openExportDialog"
+      @go-mix="openMixWorkbench"
       @shortcuts="shortcutsOpen = true"
       @toggle-media="mediaOpen = !mediaOpen"
       @toggle-subtitles="subtitlesOpen = !subtitlesOpen"
+      @open-agent="$emit('open-agent')"
     />
 
     <div v-if="saveStatus === 'error'" class="ed-banner is-error">
@@ -102,12 +105,15 @@
             :readonly="!canEdit"
             :audio-mode="audioMode === 'mix' ? 'video' : audioMode"
             :show-subtitles="showSubtitles"
+            :context-menu="uxEnabled('contextMenu')"
+            :show-markers="uxEnabled('markers')"
             @seek="seek"
             @select-clip="selectClip"
             @select-cue="selectCue"
             @move-clip="moveClipTo"
             @trim-clip="trimClip"
             @split-clip="splitAt"
+            @clip-op="onClipOp"
             @move-cue="moveCueTo"
             @remove-transition="removeTransitionById"
             @frame-op="onFrameOp"
@@ -134,6 +140,7 @@
         :current-ms="currentMs"
         :readonly="!canEdit"
         :cue="selectedCue"
+        :subtitle-styles-enabled="uxEnabled('subtitleStyles')"
         @trim-start="trimSelectedStart"
         @trim-end="trimSelectedEnd"
         @speed="setSelectedSpeed"
@@ -199,9 +206,19 @@
       :project-id="stateProjectId"
       :version="version"
       :plan="plan"
+      :layout="layout"
       :can-edit="canEdit"
+      :settings="props.settings"
+      :mix-status="topState.mix_status"
+      :resume-export-id="resumeExport?.id || 0"
+      :resume-status="resumeExport"
       @close="exportOpen = false"
       @exported="onExported"
+      @reused="onReused"
+      @cancelled="onRenderCancelled"
+      @failed="onRenderFailed"
+      @progress="onRenderProgress"
+      @delivery="openExportDelivery"
     />
 
     <div v-if="shortcutsOpen" class="ed-modal-mask" @click.self="shortcutsOpen = false">
@@ -217,6 +234,11 @@
           <div><dt>⌘/Ctrl+S</dt><dd>{{ t('edit.shortcutSave') }}</dd></div>
           <div><dt>S</dt><dd>{{ t('edit.shortcutSplit') }}</dd></div>
           <div><dt>Delete</dt><dd>{{ t('edit.shortcutDelete') }}</dd></div>
+          <div><dt>{{ t('edit.clipOps') }}</dt><dd>{{ t('edit.shortcutClipMenu') }}</dd></div>
+          <template v-if="uxEnabled('markers')">
+            <div><dt>M</dt><dd>{{ t('edit.markers.shortcutAdd') }}</dd></div>
+            <div><dt>[ / ]</dt><dd>{{ t('edit.markers.shortcutNav') }}</dd></div>
+          </template>
           <div><dt>Home / End</dt><dd>{{ t('edit.shortcutHomeEnd') }}</dd></div>
           <div><dt>Esc</dt><dd>{{ t('edit.shortcutEscape') }}</dd></div>
         </dl>
@@ -250,6 +272,9 @@ import {
   createCommandId,
   deleteCue,
   deleteMarker,
+  markerAtOrAfter,
+  markerAtOrBefore,
+  nextMarkerId,
   duplicateClip,
   mergeCueWithNext,
   moveClip,
@@ -277,10 +302,19 @@ import { mediaUrl } from '~/utils/edit-plan'
 const props = defineProps({
   state: { type: Object, required: true },
   episodeLabel: { type: String, default: '' },
+  settings: { type: Object, default: () => ({}) },
+  focusClipId: { type: String, default: '' },
+  showAgent: { type: Boolean, default: false },
 })
-const emit = defineEmits(['back', 'open-film'])
+const emit = defineEmits(['back', 'open-film', 'open-agent'])
 const route = useRoute()
 const { t } = useI18n()
+
+// 三个 UX 开关只隐藏对应交互，不影响后端与已有数据；配置读取失败按开启处理
+const uxSettings = computed(() => props.settings?.ux || {})
+function uxEnabled(key) {
+  return uxSettings.value[key] !== false
+}
 
 // props.state 是页面 ref 解包后的深层代理，useEditPlan 内部 structuredClone 会抛 DataCloneError，
 // 因此初始快照走 toRaw；模板仍读 props.state 保持响应性。
@@ -378,6 +412,17 @@ function openFilmInMix(film) {
   })
 }
 
+// 顶栏混音胶囊：回剧集页配音阶段第 3 步（预览与混音），带上当前工程的源成片。
+function openMixWorkbench() {
+  const filmId = Number(topState.value?.project?.source_merge_id) || 0
+  const query = { panel: 'dubbing', step: '3' }
+  if (filmId) query.film = String(filmId)
+  navigateTo({
+    path: `/drama/${route.params.id}/episode/${route.params.episodeNumber}`,
+    query,
+  })
+}
+
 // 回剧集页拼接导出条，新建拼接成片。
 function goNewConcat() {
   navigateTo(`${route.path.replace(/\/edit$/, '')}#exports`)
@@ -403,6 +448,10 @@ const imagePickerOpen = ref(false)
 const pendingInsertAt = ref(null)
 const freezeBusy = ref(false)
 const exportOpen = ref(false)
+// 刷新后恢复轮询的导出记录；liveExport 用于弹窗关闭期间让顶栏继续显示进度胶囊
+const resumeExport = ref(null)
+const liveExport = ref(null)
+const ACTIVE_RENDER_STATUSES = ['pending', 'running', 'rendering']
 const stateProjectId = computed(() => Number(props.state.project?.id) || 0)
 
 // 服务端派生字段（台词放置、素材告警、音频、混音状态、初剪可用性）只读：
@@ -413,8 +462,20 @@ const derived = ref({
   audio: props.state.audio,
   mix_status: props.state.mix_status,
   rough_cut_available: Boolean(props.state.rough_cut_available),
+  renders: props.state.renders,
 })
-const topState = computed(() => ({ ...props.state, ...derived.value }))
+const topState = computed(() => {
+  const merged = { ...props.state, ...derived.value }
+  if (!liveExport.value) return merged
+  // 弹窗轮询到的进度优先于页面加载时的快照，顶栏胶囊才能持续更新
+  return {
+    ...merged,
+    renders: {
+      ...(merged.renders || {}),
+      latest: { ...(merged.renders?.latest || {}), ...liveExport.value },
+    },
+  }
+})
 
 let rafId = 0
 let lastTick = 0
@@ -541,6 +602,7 @@ async function refreshDerived() {
       audio: fresh.audio ?? props.state.audio,
       mix_status: fresh.mix_status ?? props.state.mix_status,
       rough_cut_available: Boolean(fresh.rough_cut_available),
+      renders: fresh.renders ?? props.state.renders,
     }
   } catch {
     // 后台刷新失败保留旧值，不打断编辑，也不进入保存错误状态。
@@ -695,6 +757,26 @@ function splitAt(payload) {
   if (ok) selection.value = { type: 'clip', id: secondId }
 }
 
+// 片段菜单三项：分割/删除/波纹删除，全部走 runCommand 进入撤销栈
+function onClipOp({ kind, clipId, atMs }) {
+  if (!canEdit.value || !clipId) return
+  if (kind === 'split') {
+    if (!Number.isFinite(Number(atMs))) return
+    const secondId = createCommandId('clp')
+    const ok = runCommand((value) => splitClip(value, clipId, Number(atMs), secondId))
+    if (ok) selection.value = { type: 'clip', id: secondId }
+    return
+  }
+  if (kind !== 'delete' && kind !== 'ripple-delete') return
+  const index = plan.value.clips.findIndex((clip) => clip.id === clipId)
+  const ok = runCommand((value) => removeClip(value, clipId, { ripple: kind === 'ripple-delete' }))
+  if (!ok) return
+  const clips = plan.value.clips
+  selection.value = clips.length
+    ? { type: 'clip', id: clips[Math.min(Math.max(0, index), clips.length - 1)]?.id ?? clips[0].id }
+    : null
+}
+
 function splitAtPlayhead() {
   if (!canEdit.value) return
   const item = activeLayoutClip.value
@@ -796,11 +878,73 @@ function insertImage(img) {
   ), { selectFocus: false })
 }
 
+// 顶栏“导出”与进度胶囊共用入口：进行中→恢复轮询；失败/取消→进入重试；其余→新建导出
+// 设计 §4.2：草稿未保存时先保存再打开，绝不让服务端读取陈旧草稿渲染。
+async function openExportDialog(exportId) {
+  const latest = topState.value.renders?.latest || null
+  const state = latest ? String(latest.status) : ''
+  const resumable = ACTIVE_RENDER_STATUSES.includes(state) || state === 'failed' || state === 'cancelled'
+  if (latest && resumable && (!exportId || Number(exportId) === Number(latest.id))) {
+    resumeExport.value = { ...latest, status: state, progress: Number(latest.progress) || 0 }
+    exportOpen.value = true
+    return
+  }
+  resumeExport.value = null
+  if (dirty.value) {
+    await saveNow()
+    if (saveStatus.value === 'error' || saveStatus.value === 'conflict') {
+      notify(t('edit.exportSaveFirstFailed'))
+      return
+    }
+  }
+  exportOpen.value = true
+}
+
+function onRenderProgress(status) {
+  if (!status?.id) return
+  liveExport.value = {
+    id: Number(status.id),
+    status: String(status.status || 'pending'),
+    progress: Math.round(Number(status.progress) || 0),
+  }
+  if (resumeExport.value?.id) resumeExport.value = { ...resumeExport.value, ...status }
+}
+
+function onRenderCancelled() {
+  liveExport.value = null
+  resumeExport.value = null
+  notify(t('edit.exportCancelled'))
+  scheduleDerivedRefresh()
+}
+
+// 失败记录保留在 resumeExport，便于重新打开弹窗后直接重试同一记录
+function onRenderFailed(status) {
+  liveExport.value = null
+  resumeExport.value = status?.id ? { ...status } : null
+  scheduleDerivedRefresh()
+}
+
 // 导出完成：刷新左侧成片列表并提示（成片由后端投影进成片中心）
 function onExported() {
+  liveExport.value = null
+  resumeExport.value = null
   void loadFilms()
   notify(t('edit.exportDone'))
   scheduleDerivedRefresh()
+}
+
+// 命中复用的副作用（set_current）已在服务端生效，这里只刷新列表与状态
+function onReused() {
+  liveExport.value = null
+  resumeExport.value = null
+  void loadFilms()
+  notify(t('edit.exportReusedDone'))
+  scheduleDerivedRefresh()
+}
+
+function openExportDelivery() {
+  exportOpen.value = false
+  navigateTo(`${route.path.replace(/\/edit$/, '')}#exports`)
 }
 
 function extendClipByMs(clipId, deltaMs) {
@@ -837,16 +981,26 @@ function duplicateClipById(clipId) {
 }
 
 function addMarkerAt(atMs) {
-  if (!canEdit.value) return
+  if (!canEdit.value || !uxEnabled('markers')) return
   runCommand((value) => addMarker(value, {
-    id: createCommandId('mk'),
-    atMs: Math.max(0, Math.round(Number(atMs) || 0)),
+    id: nextMarkerId(value),
+    atMs: Math.round(Number(atMs) || 0),
+    label: t('edit.markers.defaultLabel', { n: (value.markers?.length || 0) + 1 }),
   }), { selectFocus: false })
 }
 
 function deleteMarkerById(markerId) {
-  if (!markerId || !canEdit.value) return
+  if (!markerId || !canEdit.value || !uxEnabled('markers')) return
   runCommand((value) => deleteMarker(value, markerId), { selectFocus: false })
+}
+
+// 标记导航只读可用；首尾之外没有目标时保持当前位置
+function jumpMarker(direction) {
+  if (!uxEnabled('markers')) return
+  const marker = Number(direction) < 0
+    ? markerAtOrBefore(plan.value, currentMs.value)
+    : markerAtOrAfter(plan.value, currentMs.value)
+  if (marker) seek(marker.atMs)
 }
 
 function closeAllGaps() {
@@ -1250,6 +1404,18 @@ function onKeydown(event) {
     splitAtPlayhead()
     return
   }
+  if (key === 'm') {
+    if (!uxEnabled('markers')) return
+    event.preventDefault()
+    addMarkerAt(currentMs.value)
+    return
+  }
+  if (event.key === '[' || event.key === ']') {
+    if (!uxEnabled('markers')) return
+    event.preventDefault()
+    jumpMarker(event.key === '[' ? -1 : 1)
+    return
+  }
   if (event.key === 'Delete' || event.key === 'Backspace') {
     if (rangeFocused) return
     event.preventDefault()
@@ -1257,6 +1423,7 @@ function onKeydown(event) {
     return
   }
   if (event.key === 'Escape') {
+    timelineRef.value?.closeMarkerPopover?.()
     selection.value = null
   }
 }
@@ -1271,6 +1438,12 @@ watch(plan, (value) => {
     selection.value = null
   }
 })
+
+// 助手定位：只选当前计划内存在的片段，找不到时保持原选择
+watch(() => props.focusClipId, (clipId) => {
+  if (!clipId) return
+  if (plan.value.clips.some((clip) => clip.id === clipId)) selectClip(clipId)
+}, { immediate: true })
 
 watch(conflict, (value) => {
   if (value) pausePlayback()

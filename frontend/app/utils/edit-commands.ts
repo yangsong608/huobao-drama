@@ -465,19 +465,50 @@ export function duplicateClip(plan: EditPlanV1, clipId: string, newClipId: strin
 
 export const DEFAULT_MARKER_COLOR = '#f59e0b'
 
+/** 扫描 mk_<n> 取最大编号加一；忽略随机后缀的历史 id，避免与后端缺省 id 撞号 */
+export function nextMarkerId(plan: EditPlanV1): string {
+  let max = 0
+  for (const marker of plan.markers) {
+    const match = /^mk_(\d+)$/.exec(String(marker.id || ''))
+    if (match) max = Math.max(max, Number(match[1]))
+  }
+  return `mk_${max + 1}`
+}
+
 export function addMarker(
   plan: EditPlanV1,
   marker: { id: string; atMs: number; label?: string; color?: string },
 ): EditCommandResult {
+  if (plan.markers.some((item) => item.id === marker.id)) {
+    return unchanged(plan, error('MARKER_ID_DUPLICATE', `marker:${marker.id}`, '标记 ID 已存在'))
+  }
+  const durationMs = computeLocalLayout(plan).duration_ms
   const entry = {
     id: marker.id,
-    atMs: Math.max(0, Math.round(Number(marker.atMs) || 0)),
+    atMs: clamp(Math.round(Number(marker.atMs) || 0), 0, Math.max(0, durationMs)),
     label: String(marker.label ?? ''),
     color: String(marker.color ?? '') || DEFAULT_MARKER_COLOR,
   }
   const next = clonePlan(plan)
   next.markers = [...next.markers, entry].sort((a, b) => a.atMs - b.atMs)
   return { plan: sync(next), issues: [], focusClipId: null }
+}
+
+/** 上一个标记：严格早于当前时间；到达首个标记后返回 null */
+export function markerAtOrBefore(plan: EditPlanV1, ms: number) {
+  const time = Number(ms) || 0
+  let found: EditPlanV1['markers'][number] | null = null
+  for (const marker of [...plan.markers].sort((a, b) => a.atMs - b.atMs)) {
+    if (marker.atMs < time) found = marker
+  }
+  return found
+}
+
+/** 下一个标记：严格晚于当前时间；到达最后一个标记后返回 null */
+export function markerAtOrAfter(plan: EditPlanV1, ms: number) {
+  const time = Number(ms) || 0
+  const sorted = [...plan.markers].sort((a, b) => a.atMs - b.atMs)
+  return sorted.find((marker) => marker.atMs > time) ?? null
 }
 
 export function deleteMarker(plan: EditPlanV1, markerId: string): EditCommandResult {

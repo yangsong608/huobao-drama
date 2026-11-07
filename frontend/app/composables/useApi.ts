@@ -138,18 +138,31 @@ export const editAPI = {
   uploadImage(episodeId: number, file: File) {
     return uploadForm(`/episodes/${episodeId}/edit/assets/images`, file)
   },
-  // 剪辑导出（Task 21）：返回 { export_id }；状态行字段与后端 getEditExportStatus 同构
+  // 剪辑导出（Task 21）：返回 { export_id, reused, source_warnings }；状态行字段与后端 getEditExportStatus 同构
   render(episodeId: number, body: {
     project_id?: number
-    preset: 'vertical-hd' | 'horizontal-hd' | 'vertical-high'
+    preset: 'auto' | 'vertical-hd' | 'horizontal-hd' | 'vertical-high' | 'square-hd'
     subtitle_mode: 'burn' | 'soft' | 'none'
+    audio_source?: 'auto' | 'mix' | 'clip' | 'silent'
     set_current?: boolean
     base_version: number
   }) {
-    return api.post(`/episodes/${episodeId}/edit/render`, body)
+    return api.post<{
+      export_id: number
+      reused?: boolean
+      source_warnings?: Array<{ code: string; message: string }>
+    }>(`/episodes/${episodeId}/edit/render`, body)
   },
   renderStatus(episodeId: number, exportId: number) {
-    return api.get(`/episodes/${episodeId}/edit/render/${exportId}`)
+    return api.get<{
+      id: number
+      status: string
+      progress: number
+      audio_source?: 'auto' | 'mix' | 'clip' | 'silent' | null
+      output_url?: string | null
+      error?: string | null
+      [key: string]: unknown
+    }>(`/episodes/${episodeId}/edit/render/${exportId}`)
   },
 }
 
@@ -744,10 +757,22 @@ export interface MixSourceWarning {
   message: string
 }
 
+/** 剪辑-混音对齐事实（GET /mix · edit_sync，与后端 mixSyncStatusOf 同构） */
+export interface MixEditSync {
+  status: 'aligned' | 'stale' | 'missing' | 'no_edit_plan'
+  reasons: string[]
+  edit_revision_id: number | null
+  edit_plan_hash: string | null
+  edit_sync_hash: string | null
+  dialogue_sync_hash: string | null
+  mix_revision_id: number | null
+}
+
 /** 混音计划响应携带的源成片与警告（GET /mix、PUT /mix/source） */
 export type MixPlanWithSource = MixPlan & {
   source_film: MixSourceSnapshot | null
   source_warnings: MixSourceWarning[]
+  edit_sync?: MixEditSync
 }
 
 /** 从混音移除的台词（虚拟对白轨不再生成对应片段） */
@@ -940,11 +965,12 @@ export const mixAPI = {
   autoTracks: (episodeId: number, assetId: number) =>
     api.post<{ tracks: EpisodeAudioTrack[]; clips: EpisodeAudioClip[] }>(`/episodes/${episodeId}/audio/assets/${assetId}/tracks`),
   getPlan: (episodeId: number) => api.get<MixPlan>(`/episodes/${episodeId}/mix`),
-  /** GET /mix 支持 ?source_film_id= 预览指定源成片（不写持久化），响应带 source_film / source_warnings */
+  /** GET /mix 支持 ?source_film_id= 预览指定源成片（不写持久化），响应带 source_film / source_warnings / edit_sync */
   plan: (episodeId: number, sourceFilmId?: number | null) =>
     api.get<MixPlan & {
       source_film: MixSourceSnapshot | null
       source_warnings: MixSourceWarning[]
+      edit_sync: MixEditSync
     }>(`/episodes/${episodeId}/mix${sourceFilmId ? `?source_film_id=${sourceFilmId}` : ''}`),
   setSource: (episodeId: number, filmId: number) =>
     api.put<MixPlan & {
@@ -1384,6 +1410,20 @@ export const assistantAPI = {
     `/assistant/sessions/${sessionId}/stream?message_id=${messageId}&after_seq=${afterSeq}`,
 }
 
+export interface EditSettings {
+  export: {
+    enabled: boolean
+    defaultPreset: 'auto' | 'vertical-hd' | 'horizontal-hd' | 'vertical-high' | 'square-hd'
+    subtitleMode: 'soft' | 'burn' | 'none'
+    audioSource: 'auto' | 'mix' | 'clip' | 'silent'
+    requireAlignedMix: boolean
+    maxDurationSec: number
+    concurrency: number
+  }
+  ux: { contextMenu: boolean; markers: boolean; subtitleStyles: boolean }
+  filmSources: { enabled: boolean }
+}
+
 export const settingsAPI = {
   contentLanguage: () => api.get<{ language: string }>('/settings/content-language'),
   setContentLanguage: (language: string) => api.put('/settings/content-language', { language }),
@@ -1393,6 +1433,8 @@ export const settingsAPI = {
   saveNovel: (patch: Partial<NovelSettings>) => api.put<{ settings: NovelSettings }>('/settings/novel', patch),
   media: () => api.get<MediaSettingsPayload>('/settings/media'),
   saveMedia: (ffmpegDir: string) => api.put<MediaSettingsPayload>('/settings/media', { ffmpegDir }),
+  edit: () => api.get<{ settings: EditSettings }>('/settings/edit'),
+  saveEdit: (patch: Partial<EditSettings>) => api.put<{ settings: EditSettings }>('/settings/edit', patch),
   agent: () => api.get<{ settings: AgentSettings }>('/settings/agent'),
   saveAgent: (patch: Partial<AgentSettings>) => api.put<{ settings: AgentSettings }>('/settings/agent', patch),
 }

@@ -278,6 +278,19 @@ export interface EditSubtitleSuggestResult extends EditPlanEnvelope {
   skipped: number
 }
 
+export interface EditRenderItem {
+  id: number
+  status: string
+  progress: number
+  output_url: string | null
+  preset: string | null
+  subtitle_mode: string | null
+  duration_ms: number | null
+  size_bytes: number | null
+  error: string | null
+  created_at: string
+}
+
 export interface EditWorkspaceState {
   episode_id: number
   episode_number: number
@@ -297,13 +310,14 @@ export interface EditWorkspaceState {
     mix_revision_id: number | null
     summary: unknown
   }
-  renders: { cut: unknown; audio_ref: unknown }
+  renders: { latest: EditRenderItem | null; items: EditRenderItem[] }
   // 与 backend/src/services/edit-plan.ts 的 EditAudioState 同构（§6.9）
   audio: {
     mode: 'mix' | 'video' | 'none'
     url?: string
     reference_only: boolean
     duration_ms?: number
+    mix_revision_id: number | null
   }
   media_warnings: EditIssue[]
   line_placements: EditLinePlacement[]
@@ -311,6 +325,7 @@ export interface EditWorkspaceState {
   capabilities: {
     can_edit: boolean
     can_export: boolean
+    export_blocked_reason: string | null
     lock: { kind: string; owner: string; expires_at: string } | null
   }
 }
@@ -385,10 +400,10 @@ export function projectSettingsForAspect(aspect: EditAspect, fps = 30): EditProj
     defaultTransition: 'cut',
     defaultSubtitleStyle: 'default',
     defaultExportPreset: aspect === '9:16'
-      ? 'edit-vertical-hd'
+      ? 'vertical-hd'
       : aspect === '16:9'
-        ? 'edit-horizontal-hd'
-        : 'edit-source',
+        ? 'horizontal-hd'
+        : 'square-hd',
     tailGapMs: 0,
     subtitleAppearance: subtitleAppearanceForPreset('default'),
     subtitleSafeAreaPct: 8,

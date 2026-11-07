@@ -6,6 +6,7 @@
  */
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
+import { getEditSettings } from './app-settings.js'
 import {
   aspectOf,
   computeLayout,
@@ -36,6 +37,7 @@ import { listFilms } from './film-hub.js'
 import { layoutResponse, parsePlanJson, planHashes, revisionResponse } from './edit-response.js'
 import { buildTimelineForPlan, placementsResponse } from './edit-timeline-data.js'
 import { dialogPlacementsOf } from './edit-timeline.js'
+import { existingProjectForEpisode } from './edit-mix-sync.js'
 
 type EpisodeRow = typeof schema.episodes.$inferSelect
 type EditWorkspaceMode = ReturnType<typeof getReadableEpisode>['mode']
@@ -79,6 +81,53 @@ function warningsResponse(warnings: EditIssue[]) {
   }))
 }
 
+/** 编辑导出记录（设计 §5.2）：仅 kind=edit 且 render_mode=edit，软删过滤，时间倒序 */
+function rendersOf(episodeId: number) {
+  const items = db.select().from(schema.episodeExports)
+    .where(and(
+      eq(schema.episodeExports.episodeId, episodeId),
+      eq(schema.episodeExports.kind, 'edit'),
+      eq(schema.episodeExports.renderMode, 'edit'),
+      isNull(schema.episodeExports.deletedAt),
+    ))
+    .orderBy(desc(schema.episodeExports.createdAt), desc(schema.episodeExports.id))
+    .limit(10)
+    .all()
+    .map((row) => ({
+      id: row.id,
+      status: row.status,
+      progress: row.progress ?? 0,
+      output_url: row.outputUrl ?? null,
+      preset: row.preset,
+      subtitle_mode: row.subtitleMode ?? null,
+      duration_ms: row.durationMs ?? null,
+      size_bytes: row.sizeBytes ?? null,
+      error: row.error ?? null,
+      created_at: row.createdAt,
+    }))
+  return { latest: items[0] ?? null, items }
+}
+
+/** 能力位（设计 §5.2）：只解释模式、开关、工程可用性；不支持字段/磁盘/时长交给 dialog 与服务端 */
+function capabilitiesOf(
+  mode: EditWorkspaceMode,
+  project: Pick<EditProjectRow, 'sourceMergeId'> | null,
+  lock: { kind: string; owner: string; expires_at: string } | null,
+) {
+  const exportEnabled = getEditSettings().export.enabled
+  let exportBlockedReason: string | null = null
+  if (mode !== 'on') exportBlockedReason = '当前为只读模式，不能导出'
+  else if (!exportEnabled) exportBlockedReason = '剪辑导出已关闭'
+  else if (!project) exportBlockedReason = '还没有可导出的工程'
+  else if (!project.sourceMergeId) exportBlockedReason = '旧版工程不支持导出，请先另存为成片工程'
+  return {
+    can_edit: mode === 'on',
+    can_export: exportBlockedReason === null,
+    export_blocked_reason: exportBlockedReason,
+    lock,
+  }
+}
+
 /** 最新可用的混音成片（kind='mix' completed，未删除）：aligned 时作为剪辑预览音轨 */
 function latestMixFilmUrlOf(episodeId: number) {
   const row = db.select().from(schema.videoMerges)
@@ -106,13 +155,21 @@ function singleClipSourceOf(plan: EditPlanV1) {
  */
 function audioStateOf(
   episodeId: number,
-  mixStatus: { status: string },
+  mixStatus: { status: string; mix_revision_id: number | null },
   singleSource: EditPlanV1['clips'][number] | null,
   durationMs: number,
 ): EditAudioState {
   if (mixStatus.status === 'aligned') {
     const mixUrl = latestMixFilmUrlOf(episodeId)
-    if (mixUrl) return { mode: 'mix', url: mixUrl, reference_only: false, duration_ms: durationMs }
+    if (mixUrl) {
+      return {
+        mode: 'mix',
+        url: mixUrl,
+        reference_only: false,
+        duration_ms: durationMs,
+        mix_revision_id: mixStatus.mix_revision_id ?? null,
+      }
+    }
   }
   if (singleSource && singleSource.source.hasAudio) {
     return {
@@ -120,9 +177,10 @@ function audioStateOf(
       url: singleSource.source.url,
       reference_only: mixStatus.status === 'stale',
       duration_ms: durationMs,
+      mix_revision_id: mixStatus.mix_revision_id ?? null,
     }
   }
-  return { mode: 'none', reference_only: false }
+  return { mode: 'none', reference_only: false, mix_revision_id: null }
 }
 
 /** 空态（无成片）：不建工程、不写草稿/版本。 */
@@ -153,12 +211,12 @@ function emptyStateOf(
     hashes: planHashes(plan),
     draft_dirty: false,
     mix_status: { status: 'missing', reasons: [], edit_revision_id: null, mix_revision_id: null, summary: null },
-    renders: { cut: null, audio_ref: null },
-    audio: { mode: 'none', reference_only: false } satisfies EditAudioState,
+    renders: rendersOf(episode.id),
+    audio: { mode: 'none', reference_only: false, mix_revision_id: null } satisfies EditAudioState,
     media_warnings: [],
     line_placements: placementsResponse([]),
     rough_cut_available: false,
-    capabilities: { can_edit: mode === 'on', can_export: false, lock: null },
+    capabilities: capabilitiesOf(mode, null, null),
   }
 }
 
@@ -206,31 +264,41 @@ function tempReadonlyStateOf(
     hashes,
     draft_dirty: false,
     mix_status: mixStatus,
-    renders: { cut: null, audio_ref: null },
+    renders: rendersOf(episode.id),
     audio: audioStateOf(episode.id, mixStatus, singleSource, layout.durationMs),
     media_warnings: warningsResponse(warnings),
     line_placements: placementsResponse(placements),
     rough_cut_available: false,
-    capabilities: { can_edit: false, can_export: false, lock: null },
+    capabilities: capabilitiesOf(mode, null, null),
   }
 }
 
-export async function getEpisodeEditState(episodeId: number, projectIdParam?: number | null) {
+export async function getEpisodeEditState(
+  episodeId: number,
+  projectIdParam?: number | null,
+  options: { readOnly?: boolean } = {},
+) {
   // 404（分集不存在）/ 403（开关关闭）先于任何工程解析与成片自动打开，顺序与文案由 getReadableEpisode 保证。
   const { episode, mode } = getReadableEpisode(episodeId)
+  const readOnly = options.readOnly === true
 
   const drama = db.select().from(schema.dramas)
     .where(eq(schema.dramas.id, episode.dramaId))
     .get()
   const projects = listEditProjects(episodeId).items
 
-  let project: EditProjectRow | null = resolveEditProject(episodeId, projectIdParam ?? null)
+  // 只读：显式 project_id 仅做归属校验；其余只解析既有工程，绝不自动打开/创建
+  let project: EditProjectRow | null = readOnly
+    ? (projectIdParam
+        ? resolveEditProject(episodeId, projectIdParam)
+        : existingProjectForEpisode(episodeId))
+    : resolveEditProject(episodeId, projectIdParam ?? null)
   const warnings: EditIssue[] = []
 
   if (!project) {
     const films = filmsOf(episode.id)
     if (films.length > 0) {
-      if (mode === 'on') {
+      if (mode === 'on' && !readOnly) {
         project = openProjectForFilm(episodeId, films[0].id).project
       } else {
         // readonly：有成片但无工程 → 临时成片计划，不建工程、不落库
@@ -282,20 +350,24 @@ export async function getEpisodeEditState(episodeId: number, projectIdParam?: nu
           warnings,
         })
         if (built) {
-          const persisted = persistInitialProjectPlan({
-            episodeId: episode.id,
-            dramaId: episode.dramaId,
-            projectId: project.id,
-            plan: built,
-            mode,
-          })
-          plan = persisted.plan
-          // 成片初始计划可能新建版本（并发首读时复用已落库版本）；
-          // 只要落到了某个版本，就必须重新读取，否则会错误地报告 current_revision: null。
-          if (persisted.revisionId) {
-            draft = draftFor(project.id)
-            revision = currentRevisionFor(project.id)
-            revisionPlan = parsePlanJson(revision?.planJson)
+          if (readOnly) {
+            plan = built
+          } else {
+            const persisted = persistInitialProjectPlan({
+              episodeId: episode.id,
+              dramaId: episode.dramaId,
+              projectId: project.id,
+              plan: built,
+              mode,
+            })
+            plan = persisted.plan
+            // 成片初始计划可能新建版本（并发首读时复用已落库版本）；
+            // 只要落到了某个版本，就必须重新读取，否则会错误地报告 current_revision: null。
+            if (persisted.revisionId) {
+              draft = draftFor(project.id)
+              revision = currentRevisionFor(project.id)
+              revisionPlan = parsePlanJson(revision?.planJson)
+            }
           }
         }
       }
@@ -359,15 +431,11 @@ export async function getEpisodeEditState(episodeId: number, projectIdParam?: nu
     hashes,
     draft_dirty: draftDirty,
     mix_status: mixStatus,
-    renders: { cut: null, audio_ref: null },
+    renders: rendersOf(episode.id),
     audio,
     media_warnings: warningsResponse(warnings),
     line_placements: placementsResponse(placements),
     rough_cut_available: !project.sourceMergeId && hasStoryboardMedia(episodeId),
-    capabilities: {
-      can_edit: mode === 'on',
-      can_export: false,
-      lock,
-    },
+    capabilities: capabilitiesOf(mode, project, lock),
   }
 }

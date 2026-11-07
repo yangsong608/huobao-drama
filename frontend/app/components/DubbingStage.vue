@@ -357,6 +357,7 @@
               :cues="timelineCues"
               :episode-number="episodeNumber"
               :drama-aspect="dramaAspect"
+              :focus-track-id="focusTrackId"
               @soundscape-busy="mixSoundscapeBusy = $event"
               @locate-line="locateMixLine"
               @regenerate-line="regenerateMixLine"
@@ -384,6 +385,7 @@
           <ExportStage
             :episode-id="episodeId"
             :drama-id="dramaId"
+            :focus-export-id="focusExportId"
             @go-stage="goStep"
             @changed="exportDone = $event"
           />
@@ -528,9 +530,14 @@ const props = withDefaults(defineProps<{
   /** 导出成片弹窗需要：集数与画幅（预设跟随画幅） */
   episodeNumber?: number
   dramaAspect?: string
+  /** 助手定位：混音音轨 / 导出记录，找不到时组件忽略 */
+  focusTrackId?: number | null
+  focusExportId?: number | null
 }>(), {
   episodeNumber: 0,
   dramaAspect: '16:9',
+  focusTrackId: null,
+  focusExportId: null,
 })
 
 const emit = defineEmits<{

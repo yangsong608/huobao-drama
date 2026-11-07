@@ -265,6 +265,10 @@ test('版本创建与恢复保持 is_current 唯一', async () => {
   assert.equal(v1.revisionNo, 1)
   assert.equal(v1.isCurrent, true)
   assert.match(v1.planHash || '', /^[0-9a-f]{32}$/)
+  // 无编辑工程：对齐哈希按 null 写入，旧版语义
+  const v1Row = db.select().from(schema.mixRevisions).where(eq(schema.mixRevisions.id, v1.id)).get()!
+  assert.equal(v1Row.editSyncHash, null)
+  assert.equal(v1Row.dialogueSyncHash, null)
 
   db.update(schema.episodeAudioTracks).set({ volume: 0.7 }).where(eq(schema.episodeAudioTracks.id, ambience.id)).run()
   const v2 = await createMixRevision(episode.id, '调整')

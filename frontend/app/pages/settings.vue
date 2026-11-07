@@ -131,6 +131,101 @@
             </template>
             <p class="config-empty">{{ t('settings.general.ffmpegDirHint') }}</p>
           </section>
+
+          <!-- 剪辑与导出 -->
+          <section class="card svc-group">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
+                <span class="svc-group-title">{{ t('settings.general.editTitle') }}</span>
+                <div class="svc-group-sub">{{ t('settings.general.editSub') }}</div>
+              </div>
+              <button class="btn btn-primary btn-sm ml-auto" :disabled="editSaving" @click="saveEditSettings">
+                <Loader2 v-if="editSaving" :size="13" class="animate-spin" />
+                {{ t('settings.general.editSave') }}
+              </button>
+            </div>
+            <div class="agent-toggle-row">
+              <div class="agent-toggle-copy">
+                <div class="agent-toggle-label">{{ t('settings.general.editExportEnabled') }}</div>
+                <div class="field-hint">{{ t('settings.general.editExportEnabledNote') }}</div>
+              </div>
+              <input v-model="editSettings.export.enabled" type="checkbox" class="agent-switch" />
+            </div>
+            <div class="config-row">
+              <div class="config-main">
+                <div class="config-line"><span class="config-name">{{ t('settings.general.editDefaultPreset') }}</span></div>
+                <div class="config-sub">{{ t('settings.general.editDefaultPresetNote') }}</div>
+              </div>
+              <select v-model="editSettings.export.defaultPreset" class="input edit-setting-select">
+                <option v-for="opt in editPresetOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </div>
+            <div class="config-row">
+              <div class="config-main">
+                <div class="config-line"><span class="config-name">{{ t('settings.general.editSubtitle') }}</span></div>
+                <div class="config-sub">{{ t('settings.general.editSubtitleNote') }}</div>
+              </div>
+              <select v-model="editSettings.export.subtitleMode" class="input edit-setting-select">
+                <option v-for="opt in editSubtitleOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </div>
+            <div class="config-row">
+              <div class="config-main">
+                <div class="config-line"><span class="config-name">{{ t('settings.general.editAudioSource') }}</span></div>
+                <div class="config-sub">{{ t('settings.general.editAudioSourceNote') }}</div>
+              </div>
+              <select v-model="editSettings.export.audioSource" class="input edit-setting-select">
+                <option v-for="opt in editAudioOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </div>
+            <div class="config-row">
+              <div class="config-main">
+                <div class="config-line"><span class="config-name">{{ t('settings.general.editMaxDuration') }}</span></div>
+                <div class="config-sub">{{ t('settings.general.editMaxDurationNote') }}</div>
+              </div>
+              <input v-model.number="editSettings.export.maxDurationSec" class="input edit-setting-number" type="number" min="60" max="7200" step="60" />
+            </div>
+            <div class="config-row">
+              <div class="config-main">
+                <div class="config-line"><span class="config-name">{{ t('settings.general.editConcurrency') }}</span></div>
+                <div class="config-sub">{{ t('settings.general.editConcurrencyNote') }}</div>
+              </div>
+              <select v-model.number="editSettings.export.concurrency" class="input edit-setting-select">
+                <option :value="1">1</option>
+                <option :value="2">2</option>
+              </select>
+            </div>
+            <div class="agent-toggle-row">
+              <div class="agent-toggle-copy">
+                <div class="agent-toggle-label">{{ t('settings.general.editRequireAlignedMix') }}</div>
+                <div class="field-hint">{{ t('settings.general.editRequireAlignedMixNote') }}</div>
+              </div>
+              <input v-model="editSettings.export.requireAlignedMix" type="checkbox" class="agent-switch" />
+            </div>
+            <div class="config-sub edit-ux-title">{{ t('settings.general.editUxTitle') }}</div>
+            <div class="agent-toggle-row">
+              <div class="agent-toggle-copy">
+                <div class="agent-toggle-label">{{ t('settings.general.editUxContextMenu') }}</div>
+                <div class="field-hint">{{ t('settings.general.editUxContextMenuNote') }}</div>
+              </div>
+              <input v-model="editSettings.ux.contextMenu" type="checkbox" class="agent-switch" />
+            </div>
+            <div class="agent-toggle-row">
+              <div class="agent-toggle-copy">
+                <div class="agent-toggle-label">{{ t('settings.general.editUxMarkers') }}</div>
+                <div class="field-hint">{{ t('settings.general.editUxMarkersNote') }}</div>
+              </div>
+              <input v-model="editSettings.ux.markers" type="checkbox" class="agent-switch" />
+            </div>
+            <div class="agent-toggle-row">
+              <div class="agent-toggle-copy">
+                <div class="agent-toggle-label">{{ t('settings.general.editUxSubtitleStyles') }}</div>
+                <div class="field-hint">{{ t('settings.general.editUxSubtitleStylesNote') }}</div>
+              </div>
+              <input v-model="editSettings.ux.subtitleStyles" type="checkbox" class="agent-switch" />
+            </div>
+            <p class="config-empty">{{ t('settings.general.editHint') }}</p>
+          </section>
         </div>
 
         <!-- ===== AI 服务配置 ===== -->
@@ -3301,6 +3396,7 @@ onMounted(() => {
   loadMcp()
   loadPipelineRules()
   loadMediaSettings()
+  loadEditSettings()
   if (tab.value === 'dubbing') loadDubbing()
   if (tab.value === 'novel') loadNovel()
 })
@@ -3351,7 +3447,10 @@ async function loadStorage() {
 watch(tab, (active) => {
   if (active === 'storage') loadStorage()
   else stopUsagePoll()
-  if (active === 'general') loadMediaSettings()
+  if (active === 'general') {
+    loadMediaSettings()
+    loadEditSettings()
+  }
   if (active === 'dubbing') loadDubbing()
 })
 
@@ -3449,6 +3548,70 @@ async function pickFfmpegDir() {
     return
   }
   mediaFfmpegDir.value = res.path
+}
+
+// ===== 通用：剪辑与导出 =====
+const DEFAULT_EDIT_SETTINGS = {
+  export: {
+    enabled: true,
+    defaultPreset: 'auto',
+    subtitleMode: 'soft',
+    audioSource: 'auto',
+    requireAlignedMix: false,
+    maxDurationSec: 1800,
+    concurrency: 1,
+  },
+  ux: { contextMenu: true, markers: true, subtitleStyles: true },
+  filmSources: { enabled: false },
+}
+function defaultEditSettings() {
+  return JSON.parse(JSON.stringify(DEFAULT_EDIT_SETTINGS))
+}
+const editSettings = ref(defaultEditSettings())
+const editSaving = ref(false)
+const editPresetOptions = computed(() => [
+  { value: 'auto', label: t('edit.presetAuto') },
+  { value: 'vertical-hd', label: t('edit.presetVerticalHd') },
+  { value: 'horizontal-hd', label: t('edit.presetHorizontalHd') },
+  { value: 'square-hd', label: t('edit.presetSquareHd') },
+  { value: 'vertical-high', label: t('edit.presetVerticalHigh') },
+])
+const editSubtitleOptions = computed(() => [
+  { value: 'soft', label: t('edit.subtitleSoft') },
+  { value: 'burn', label: t('edit.subtitleBurn') },
+  { value: 'none', label: t('edit.subtitleNone') },
+])
+const editAudioOptions = computed(() => [
+  { value: 'auto', label: t('edit.audioSourceAuto') },
+  { value: 'mix', label: t('edit.audioSourceMix') },
+  { value: 'clip', label: t('edit.audioSourceClip') },
+  { value: 'silent', label: t('edit.audioSourceSilent') },
+])
+
+async function loadEditSettings() {
+  try {
+    const res = await settingsAPI.edit()
+    if (res?.settings) editSettings.value = res.settings
+  } catch {
+    /* 配置读取失败时保留内置保守默认，不阻断设置页 */
+  }
+}
+
+async function saveEditSettings() {
+  if (editSaving.value) return
+  editSaving.value = true
+  try {
+    const res = await settingsAPI.saveEdit({
+      export: { ...editSettings.value.export },
+      ux: { ...editSettings.value.ux },
+    })
+    if (res?.settings) editSettings.value = res.settings
+    toast.success(t('settings.general.editSaved'))
+  } catch (e) {
+    toastError(e, { fallback: 'settings.general.editSaveFailed' })
+  } finally {
+    editSaving.value = false
+  }
 }
 
 // ===== 应用内更新（桌面版走 Electron 桥；服务器/Docker 走后端 server-update 路由） =====
@@ -3798,6 +3961,9 @@ onBeforeUnmount(stopUsagePoll)
 /* ===== FFmpeg 目录（通用 tab） ===== */
 .media-dir-actions { display: flex; align-items: center; gap: 8px; flex: 1 1 360px; min-width: 0; }
 .media-dir-input { flex: 1; min-width: 0; }
+.edit-setting-select { flex: 0 0 220px; max-width: 220px; }
+.edit-setting-number { width: 120px; }
+.edit-ux-title { margin-top: 8px; font-weight: 600; color: var(--text-1); }
 
 /* 按服务类型分组的配置卡 */
 .sections { display: flex; flex-direction: column; gap: 16px; }

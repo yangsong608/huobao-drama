@@ -9,6 +9,7 @@ import {
   projectSettingsForAspect,
   renderHashOf,
   shortHash,
+  sourceFingerprintOf,
   subtitleHashOf,
   validateEditPlan,
   type EditClip,
@@ -212,6 +213,41 @@ test('哈希：换源、转场、叠加轨延长总时长会改变 editSyncHash'
   const longer = basePlan()
   longer.overlays = [overlay(12000)]
   assert.notEqual(editSyncHashOf(longer), short, '叠加轨延长总时长必须影响混音')
+})
+
+test('哈希：源素材指纹随文件指纹、换源与裁剪点变化，顺序无关', () => {
+  const plan = basePlan()
+  const fingerprint = sourceFingerprintOf(plan)
+  assert.equal(fingerprint.length, 32)
+  assert.equal(sourceFingerprintOf(basePlan()), fingerprint)
+
+  const reordered = basePlan()
+  reordered.clips = [
+    { ...clip('clp_2'), source: source(2, 5000), sourceOutMs: 5000 },
+    { ...clip('clp_1'), source: source(1, 5000), sourceOutMs: 5000 },
+  ]
+  const flipped = basePlan()
+  flipped.clips = [
+    { ...clip('clp_1'), source: source(1, 5000), sourceOutMs: 5000 },
+    { ...clip('clp_2'), source: source(2, 5000), sourceOutMs: 5000 },
+  ]
+  assert.equal(sourceFingerprintOf(reordered), sourceFingerprintOf(flipped))
+
+  const changedFile = basePlan()
+  changedFile.clips[0].source.fingerprint = '9:9'
+  assert.notEqual(sourceFingerprintOf(changedFile), fingerprint)
+
+  const swapped = basePlan()
+  swapped.clips[0].source = source(2, 10000)
+  assert.notEqual(sourceFingerprintOf(swapped), fingerprint)
+
+  const trimmedIn = basePlan()
+  trimmedIn.clips[0].sourceInMs = 1000
+  assert.notEqual(sourceFingerprintOf(trimmedIn), fingerprint)
+
+  const trimmedOut = basePlan()
+  trimmedOut.clips[0].sourceOutMs = 8000
+  assert.notEqual(sourceFingerprintOf(trimmedOut), fingerprint)
 })
 
 test('哈希：配音 Take 顺序、URL、指纹与时长变化均失效', () => {

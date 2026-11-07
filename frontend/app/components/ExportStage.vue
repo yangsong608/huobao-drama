@@ -144,7 +144,7 @@
       </section>
     </div>
 
-    <aside class="ex-side">
+    <aside ref="sideEl" class="ex-side">
       <header class="ex-side-head">
         <h3>{{ t('export.records') }}</h3>
         <span class="ex-count">{{ exports.length }}</span>
@@ -159,7 +159,8 @@
       <article
         v-for="record in exports"
         :key="record.id"
-        :class="['ex-record', { 'is-current': record.isCurrent, 'is-dead': record.status === 'failed' || record.status === 'cancelled' }]"
+        :data-export-id="record.id"
+        :class="['ex-record', { 'is-current': record.isCurrent, 'is-focused': record.id === focusExportId, 'is-dead': record.status === 'failed' || record.status === 'cancelled' }]"
       >
         <header class="ex-record-head">
           <span class="ex-kind">{{ kindLabel(record.kind) }}</span>
@@ -258,6 +259,8 @@ import BaseSelect from '~/components/BaseSelect.vue'
 const props = defineProps<{
   episodeId: number | null
   dramaId: number
+  /** 助手定位：高亮并滚动到指定导出记录，找不到时忽略 */
+  focusExportId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -310,6 +313,20 @@ watch(
 )
 
 watch(hasOutput, (value) => emit('changed', value), { immediate: true })
+
+const sideEl = ref<HTMLElement | null>(null)
+let appliedFocusId: number | null = null
+watch(
+  [() => props.focusExportId, exports],
+  async ([exportId, list]) => {
+    if (exportId == null || exportId === appliedFocusId) return
+    if (!list.some(record => record.id === exportId)) return
+    await nextTick()
+    appliedFocusId = exportId
+    sideEl.value?.querySelector(`[data-export-id="${exportId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  },
+  { immediate: true },
+)
 
 onBeforeUnmount(dispose)
 
@@ -571,6 +588,7 @@ async function remove(id: number) {
   padding: 8px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-0);
 }
 .ex-record.is-current { border-color: var(--accent-glow); }
+.ex-record.is-focused { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
 .ex-record.is-dead { opacity: .82; }
 .ex-record-head { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .ex-kind { font-size: 10.5px; font-weight: 700; color: var(--text-1); }

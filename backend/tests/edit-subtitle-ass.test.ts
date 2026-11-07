@@ -102,6 +102,37 @@ test('有背景色的 cue 使用 Boxed 样式并带 \\4c 透明度', () => {
   assert.ok(/\\4a&H[0-9A-F]{2}&/.test(line!))
 })
 
+test('检查器外观进入 ASS：字号/颜色/描边/背景透明度/九宫格对齐', () => {
+  const plan = planWithCue('custom', {
+    fontFamily: 'PingFang SC', fontSize: 28, color: '#FFD400', strokeColor: '#101010',
+    strokeWidth: 3, backgroundColor: '#112233', backgroundOpacity: 40,
+    align: 'left', xPct: 12, yPct: 12,
+  })
+  const line = buildEditAss(plan).split('\n').find((l) => l.startsWith('Dialogue:'))
+  assert.ok(line)
+  assert.ok(line!.includes('\\fnPingFang SC'), line)
+  assert.ok(line!.includes('\\fs28'), line)
+  assert.ok(line!.includes('\\1c&H00D4FF&'), line)
+  assert.ok(line!.includes('\\3c&H101010&'), line)
+  assert.ok(line!.includes('\\bord3'), line)
+  assert.ok(line!.includes('\\4c&H332211&'), line)
+  assert.ok(line!.includes('\\4a&H99&'), line)
+  assert.ok(line!.includes('\\an7'), line)
+  assert.ok(line!.includes('\\pos(130,230)'), line)
+  assert.ok(line!.includes('Boxed,'), line)
+})
+
+test('字幕文本转义：花括号、反斜杠与换行不注入 ASS 控制符', () => {
+  const plan = planWithCue('default', null)
+  plan.subtitles[0].text = '第一行{注入\\N}第二行\n第三行'
+  const line = buildEditAss(plan).split('\n').find((l) => l.startsWith('Dialogue:'))
+  assert.ok(line)
+  const textPart = line!.slice(line!.lastIndexOf('}') + 1)
+  assert.ok(textPart.includes('第一行（注入＼N）第二行\\N第三行'), textPart)
+  assert.equal(/[{}]/.test(textPart), false, '用户花括号必须替换为全角')
+  assert.equal(textPart.replace(/\\N/g, '').includes('\\'), false, '除换行标记外不得出现裸反斜杠')
+})
+
 test('SRT 按时间排序且含序号/时间行', () => {
   const plan = planWithCue('default', null)
   plan.subtitles.push({ ...plan.subtitles[0], id: 'cue_0', startMs: 0, endMs: 500 })

@@ -1011,6 +1011,8 @@
           :step="dubStep"
           :episode-number="episode?.episode_number || episodeNumber"
           :drama-aspect="dramaAspectRatio"
+          :focus-track-id="focusTrackId || null"
+          :focus-export-id="focusExportId || null"
           @update:step="dubStep = $event"
           @open-preview="dubOpen = true"
           @open-settings="goDubbingSettings"
@@ -2095,6 +2097,7 @@ import {
 import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
 import { useAgent } from '~/composables/useAgent'
+import { useAgentPageAdapter } from '~/composables/useAgentPageAdapter'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
 import { episodeResolutionKey, isLocalH3Config, videoResolutionKey, videoResolutionOptions, videoResolutionProvider, videoResolutionVendor } from '~/utils/video-resolution'
 import { videoModelCapabilities } from '~/utils/model-capabilities'
@@ -2239,6 +2242,104 @@ const dubSummary = ref(null)
 function onDubSummary(payload) { dubSummary.value = payload }
 function openDubbingStage() { panel.value = 'dubbing' }
 applyRoutePanelQuery()
+
+// ===== 助手页面适配器：分集 / 混音 / 交付作用域（智能体规格 §4.2、§4.3） =====
+const focusTrackId = ref(null)
+const focusExportId = ref(null)
+const agentScope = computed(() => {
+  const episodeId = Number(episode.value?.id) || 0
+  if (!episodeId) return null
+  const base = {
+    workspace_key: `drama:${dramaId}`,
+    drama_id: dramaId,
+    episode_id: episodeId,
+  }
+  if (deliveryOpen.value || panel.value === 'export' || (panel.value === 'dubbing' && dubStep.value === 4)) {
+    return {
+      ...base,
+      kind: 'delivery',
+      ...(focusExportId.value != null ? { focus: { export_id: focusExportId.value } } : {}),
+    }
+  }
+  if (panel.value === 'dubbing' && dubStep.value === 3) {
+    return {
+      ...base,
+      kind: 'mix',
+      ...(focusTrackId.value != null ? { focus: { track_id: focusTrackId.value } } : {}),
+    }
+  }
+  const stage = panel.value === 'script'
+    ? 'script'
+    : panel.value === 'production'
+      ? (prodTab.value === 'videos' ? 'videos' : 'assets')
+      : 'dubbing'
+  return { ...base, kind: 'episode', stage }
+})
+function agentPrompts() {
+  const kind = agentScope.value?.kind
+  if (kind === 'mix') return [t('assistant.prompts.mix1'), t('assistant.prompts.mix2')]
+  if (kind === 'delivery') return [t('assistant.prompts.delivery1'), t('assistant.prompts.delivery2')]
+  return [t('assistant.prompts.episode1'), t('assistant.prompts.episode2')]
+}
+useAgentPageAdapter({
+  id: 'drama-episode',
+  match: { name: 'drama-episode', pattern: /^\/drama\/\d+\/episode\/\d+$/ },
+  scope: () => agentScope.value,
+  entries: ['floating'],
+  quickPrompts: agentPrompts,
+  supportedScopes: ['episode', 'mix', 'delivery'],
+})
+
+// 消费助手建议的 open/focus_* 参数：只做导航与定位，不执行生产动作
+function applyAgentQuery() {
+  const q = route.query
+  const open = String(q.open || '').trim()
+  if (open === 'edit') {
+    const n = episode.value?.episode_number || episodeNumber
+    const projectId = Number(q.project_id)
+    router.push({
+      path: `/drama/${dramaId}/episode/${n}/edit`,
+      query: Number.isSafeInteger(projectId) && projectId > 0 ? { project_id: String(projectId) } : {},
+    })
+    return
+  }
+  if (open === 'script') {
+    panel.value = 'script'
+  } else if (open === 'assets') {
+    panel.value = 'production'
+    prodTab.value = 'assets'
+  } else if (open === 'videos') {
+    panel.value = 'production'
+    prodTab.value = 'videos'
+  } else if (open === 'dubbing') {
+    panel.value = 'dubbing'
+    dubStep.value = 0
+  } else if (open === 'mix') {
+    panel.value = 'dubbing'
+    dubStep.value = 3
+  } else if (open === 'delivery') {
+    panel.value = 'dubbing'
+    dubStep.value = 4
+  }
+  const trackId = Number(q.focus_track_id)
+  focusTrackId.value = Number.isSafeInteger(trackId) && trackId > 0 ? trackId : null
+  const exportId = Number(q.focus_export_id)
+  focusExportId.value = Number.isSafeInteger(exportId) && exportId > 0 ? exportId : null
+  if (open || q.focus_track_id || q.focus_export_id) {
+    const next = { ...route.query }
+    delete next.open
+    delete next.project_id
+    delete next.focus_track_id
+    delete next.focus_export_id
+    router.replace({ path: route.path, query: next, hash: route.hash })
+  }
+}
+applyAgentQuery()
+watch(() => route.query, () => {
+  applyRoutePanelQuery()
+  applyAgentQuery()
+})
+
 const hasEditEntry = computed(() => Boolean(episode.value?.video_url || episode.value?.videoUrl))
 
 function openEditWorkspace() {

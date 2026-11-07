@@ -54,6 +54,21 @@ test('空集 GET /mix 返回 5 条总线与空的对白虚拟轨', async () => {
   assert.equal(plan.durationMs, 0)
 })
 
+test('GET /mix 返回只读 edit_sync，不写剪辑工程/草稿/版本', async () => {
+  const counts = () => ({
+    projects: db.select().from(schema.editProjects).all().length,
+    drafts: db.select().from(schema.episodeEditDrafts).all().length,
+    revisions: db.select().from(schema.editRevisions).all().length,
+  })
+  const before = counts()
+  const response = await app.request(`/episodes/${episode.id}/mix`)
+  assert.equal(response.status, 200, await response.clone().text())
+  const plan = (await body(response)).data
+  assert.equal(plan.edit_sync.status, 'no_edit_plan')
+  assert.deepEqual(plan.edit_sync.reasons, [])
+  assert.deepEqual(counts(), before)
+})
+
 test('PUT /mix 拒绝他集音轨与非法片段', async () => {
   const foreignTrack = db.insert(schema.episodeAudioTracks).values({
     episodeId: otherEpisode.id,

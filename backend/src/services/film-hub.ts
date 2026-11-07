@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import { probeMedia } from './export-validation.js'
@@ -192,14 +192,20 @@ export function setCurrentFilm(episodeId: number, filmId: number) {
       updatedAt: new Date().toISOString(),
     }).where(eq(schema.episodes.id, episodeId)).run()
     if (film.exportId) {
-      tx.update(schema.episodeExports).set({ isCurrent: false })
-        .where(and(
-          eq(schema.episodeExports.episodeId, episodeId),
-          eq(schema.episodeExports.kind, 'video'),
-          eq(schema.episodeExports.isCurrent, true),
-        )).run()
-      tx.update(schema.episodeExports).set({ isCurrent: true })
-        .where(eq(schema.episodeExports.id, film.exportId)).run()
+      const target = tx.select().from(schema.episodeExports)
+        .where(eq(schema.episodeExports.id, film.exportId)).get()
+      if (target) {
+        // 唯一索引按 (episode_id, kind) 判重：必须清掉同 kind 的旧 current，编辑导出同样适用
+        tx.update(schema.episodeExports).set({ isCurrent: false })
+          .where(and(
+            eq(schema.episodeExports.episodeId, episodeId),
+            eq(schema.episodeExports.kind, target.kind),
+            eq(schema.episodeExports.isCurrent, true),
+            ne(schema.episodeExports.id, target.id),
+          )).run()
+        tx.update(schema.episodeExports).set({ isCurrent: true })
+          .where(eq(schema.episodeExports.id, target.id)).run()
+      }
     }
   }, { behavior: 'immediate' })
   return { current_film_id: film.id, video_url: film.mergedUrl, subtitle_url: subtitleUrl }

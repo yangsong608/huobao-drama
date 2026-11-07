@@ -40,7 +40,11 @@
         </label>
       </section>
 
-      <section class="ed-insp-section">
+      <section v-if="!subtitleStylesEnabled" class="ed-insp-section ed-insp-note">
+        <p>{{ t('edit.subtitleStylesDisabled') }}</p>
+      </section>
+
+      <section v-if="subtitleStylesEnabled" class="ed-insp-section">
         <h4>{{ t('edit.subtitleStyle') }}</h4>
         <label class="ed-insp-field">
           <span>{{ t('edit.fontFamily') }}</span>
@@ -74,7 +78,7 @@
         </div>
       </section>
 
-      <section class="ed-insp-section">
+      <section v-if="subtitleStylesEnabled" class="ed-insp-section">
         <h4>{{ t('edit.subtitlePosition') }}</h4>
         <div class="ed-row" role="radiogroup">
           <button type="button" :class="{ 'is-on': styleDraft.yPct <= 33 }" @click="setPosition(styleDraft.xPct ?? 50, 12)">{{ t('edit.posTop') }}</button>
@@ -97,7 +101,7 @@
         <p v-if="outOfBounds" class="ed-insp-warn">{{ t('edit.subtitleOutOfBounds') }}</p>
       </section>
 
-      <section class="ed-insp-section">
+      <section v-if="subtitleStylesEnabled" class="ed-insp-section">
         <h4>{{ t('edit.subtitleBatch') }}</h4>
         <div class="ed-row">
           <button type="button" @click="$emit('cue-apply-all', effectiveAppearance)">{{ t('edit.applyAll') }}</button>
@@ -266,6 +270,8 @@ const props = defineProps({
   currentMs: { type: Number, default: 0 },
   readonly: { type: Boolean, default: false },
   cue: { type: Object, default: null },
+  /** edit.ux.subtitleStyles：关闭时只隐藏样式/位置/批量外观区，文本与时间不受影响 */
+  subtitleStylesEnabled: { type: Boolean, default: true },
 })
 const emit = defineEmits([
   'trim-start', 'trim-end', 'speed', 'gap', 'fades', 'split', 'remove',
@@ -448,6 +454,7 @@ function onEndInput(event) {
   background: var(--bg-2); color: var(--text-0); font-size: 10px;
 }
 .ed-insp-text { margin: 0; font-size: 10px; color: var(--text-2); line-height: 1.5; }
+.ed-insp-note p { margin: 0; font-size: 10px; color: var(--text-3); line-height: 1.5; }
 .ed-insp-warn { margin: 0; font-size: 10px; color: var(--warning); line-height: 1.5; }
 .ed-insp-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .ed-insp-actions button.is-danger { color: var(--action-danger); border-color: color-mix(in srgb, var(--action-danger) 40%, var(--border)); }

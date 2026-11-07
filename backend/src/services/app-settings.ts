@@ -988,7 +988,7 @@ export function setDirectorSettings(patch: unknown): DirectorSettings {
 
 // --- edit.*（11 键，剪辑工作台规格 §7） ---
 
-export const EDIT_EXPORT_PRESETS = ['auto', 'vertical-hd', 'horizontal-hd', 'square-hd'] as const
+export const EDIT_EXPORT_PRESETS = ['auto', 'vertical-hd', 'horizontal-hd', 'vertical-high', 'square-hd'] as const
 export const EDIT_SUBTITLE_MODES = ['soft', 'burn', 'none'] as const
 export const EDIT_AUDIO_SOURCES = ['auto', 'mix', 'clip', 'silent'] as const
 

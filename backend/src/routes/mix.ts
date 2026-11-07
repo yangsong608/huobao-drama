@@ -15,6 +15,7 @@ import type { Context } from 'hono'
 import { badRequest, notFound, serverError, success } from '../utils/response.js'
 import { db, schema } from '../db/index.js'
 import { asc, eq } from 'drizzle-orm'
+import { mixSyncStatusOf } from '../services/edit-mix-sync.js'
 import {
   MIX_BUS_KEYS,
   MixPlanError,
@@ -174,7 +175,8 @@ app.get('/episodes/:id/mix', async (c) => {
   if (sourceFilmId === null) return badRequest(c, '源成片编号无效')
   try {
     const { plan, warnings } = await compileEpisodePlan(episodeId, episode.dramaId, sourceFilmId)
-    return success(c, planResponse(plan, warnings))
+    // 只读对齐事实源：即使预览了其他源成片，也按当前混音版本与编辑计划判定
+    return success(c, { ...planResponse(plan, warnings), edit_sync: mixSyncStatusOf(episodeId) })
   } catch (error: any) {
     return handleError(c, error, '读取混音计划失败')
   }

@@ -185,9 +185,9 @@ export interface EditLayout {
  * - none：两者皆无，静音预览
  */
 export type EditAudioState =
-  | { mode: 'mix'; url: string; reference_only: false; duration_ms?: number }
-  | { mode: 'video'; url?: string; reference_only: boolean; duration_ms?: number }
-  | { mode: 'none'; reference_only: false }
+  | { mode: 'mix'; url: string; reference_only: false; duration_ms?: number; mix_revision_id: number | null }
+  | { mode: 'video'; url?: string; reference_only: boolean; duration_ms?: number; mix_revision_id: number | null }
+  | { mode: 'none'; reference_only: false; mix_revision_id: null }
 
 export interface EditPlanV1 {
   version: typeof EDIT_PLAN_VERSION
@@ -257,10 +257,10 @@ export function projectSettingsForAspect(aspect: EditAspect, fps = 30): EditProj
     defaultTransition: 'cut',
     defaultSubtitleStyle: 'default',
     defaultExportPreset: aspect === '9:16'
-      ? 'edit-vertical-hd'
+      ? 'vertical-hd'
       : aspect === '16:9'
-        ? 'edit-horizontal-hd'
-        : 'edit-source',
+        ? 'horizontal-hd'
+        : 'square-hd',
     tailGapMs: 0,
     subtitleAppearance: subtitleAppearanceForPreset('default'),
     subtitleSafeAreaPct: 8,
@@ -622,6 +622,19 @@ export function renderHashOf(plan: EditPlanV1): string {
 
 export function subtitleHashOf(plan: EditPlanV1): string {
   return shortHash({ version: plan.version, cues: subtitleRows(plan) })
+}
+
+/** 源素材指纹：排序后哈希，供导出复用判断源文件是否变化 */
+export function sourceFingerprintOf(plan: EditPlanV1): string {
+  const rows = plan.clips.map((clip) => [
+    clip.source.kind,
+    String(clip.source.id),
+    clip.source.fingerprint,
+    clip.sourceInMs,
+    clip.sourceOutMs,
+  ])
+  rows.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+  return shortHash(rows)
 }
 
 export function editSyncHashOf(plan: EditPlanV1): string {

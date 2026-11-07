@@ -21,7 +21,7 @@ process.env.STORAGE_PATH = path.join(root, 'static')
 process.env.MYSQL_AUTO_IMPORT = 'false'
 
 const { db, schema } = await import('../src/db/index.ts')
-const { eq } = await import('drizzle-orm')
+const { eq, sql } = await import('drizzle-orm')
 const {
   getExportChecks,
   startEpisodeExport,
@@ -345,6 +345,77 @@ test('删除导出级联软删其剪辑工程并清空工程指针', async () =>
   const episodeAfter = db.select().from(schema.episodes)
     .where(eq(schema.episodes.id, episode.id)).get()!
   assert.equal(episodeAfter.editProjectId, null)
+})
+
+test('删除已完成编辑导出同样级联软删成片/工程并清空指针', async () => {
+  const filmRow = db.insert(schema.videoMerges).values({
+    episodeId: episode.id, dramaId: 1, title: '编辑级联成片', provider: 'edit', model: 'vertical-hd',
+    status: 'completed', kind: 'edit', origin: 'export', mergedUrl: `static/projects/1/videos/edit-cascade.mp4`,
+    duration: 10, createdAt: ts,
+  }).returning().get()
+  const exportRow = db.insert(schema.episodeExports).values({
+    episodeId: episode.id, kind: 'edit', renderMode: 'edit', preset: 'vertical-hd', status: 'completed', progress: 100,
+    outputUrl: `static/projects/1/videos/edit-cascade.mp4`, filmId: filmRow.id,
+    paramsJson: JSON.stringify({ renderMode: 'edit' }), isCurrent: false, createdAt: ts,
+  }).returning().get()
+  const project = db.insert(schema.editProjects).values({
+    episodeId: episode.id, dramaId: 1, sourceMergeId: filmRow.id,
+    sourceUrl: `static/projects/1/videos/edit-cascade.mp4`,
+    title: '编辑级联工程', status: 'active', createdAt: ts, updatedAt: ts,
+  }).returning().get()
+  db.update(schema.episodes).set({ editProjectId: project.id })
+    .where(eq(schema.episodes.id, episode.id)).run()
+
+  const removed = await deleteExport(exportRow.id)
+  assert.ok(removed.deletedAt)
+  const deletedFilm = db.select().from(schema.videoMerges)
+    .where(eq(schema.videoMerges.id, filmRow.id)).get()!
+  assert.ok(deletedFilm.deletedAt, '编辑导出删除时应软删成片')
+  const deletedProject = db.select().from(schema.editProjects)
+    .where(eq(schema.editProjects.id, project.id)).get()!
+  assert.ok(deletedProject.deletedAt, '编辑导出删除时应级联软删工程')
+  assert.equal(deletedProject.status, 'deleted')
+  assert.equal(db.select().from(schema.episodes)
+    .where(eq(schema.episodes.id, episode.id)).get()!.editProjectId, null)
+})
+
+test('删除级联事务中途失败时，导出/成片/工程整体回滚', async () => {
+  const filmRow = db.insert(schema.videoMerges).values({
+    episodeId: episode.id, dramaId: 1, title: '回滚成片', provider: 'edit', model: 'vertical-hd',
+    status: 'completed', kind: 'edit', origin: 'export', mergedUrl: `static/projects/1/videos/rollback.mp4`,
+    duration: 10, createdAt: ts,
+  }).returning().get()
+  const exportRow = db.insert(schema.episodeExports).values({
+    episodeId: episode.id, kind: 'edit', renderMode: 'edit', preset: 'vertical-hd', status: 'completed', progress: 100,
+    outputUrl: `static/projects/1/videos/rollback.mp4`, filmId: filmRow.id,
+    paramsJson: JSON.stringify({ renderMode: 'edit' }), isCurrent: false, createdAt: ts,
+  }).returning().get()
+  const project = db.insert(schema.editProjects).values({
+    episodeId: episode.id, dramaId: 1, sourceMergeId: filmRow.id,
+    sourceUrl: `static/projects/1/videos/rollback.mp4`,
+    title: '回滚工程', status: 'active', createdAt: ts, updatedAt: ts,
+  }).returning().get()
+  db.update(schema.episodes).set({ editProjectId: project.id })
+    .where(eq(schema.episodes.id, episode.id)).run()
+
+  db.run(sql`CREATE TRIGGER abort_video_merge_delete BEFORE UPDATE ON video_merges
+    BEGIN SELECT RAISE(ABORT, 'cascade aborted'); END`)
+  try {
+    await assert.rejects(() => deleteExport(exportRow.id))
+  } finally {
+    db.run(sql`DROP TRIGGER IF EXISTS abort_video_merge_delete`)
+  }
+
+  assert.equal(db.select().from(schema.episodeExports)
+    .where(eq(schema.episodeExports.id, exportRow.id)).get()!.deletedAt, null)
+  assert.equal(db.select().from(schema.videoMerges)
+    .where(eq(schema.videoMerges.id, filmRow.id)).get()!.deletedAt, null)
+  const projectAfter = db.select().from(schema.editProjects)
+    .where(eq(schema.editProjects.id, project.id)).get()!
+  assert.equal(projectAfter.deletedAt, null)
+  assert.equal(projectAfter.status, 'active')
+  assert.equal(db.select().from(schema.episodes)
+    .where(eq(schema.episodes.id, episode.id)).get()!.editProjectId, project.id)
 })
 
 test('失败导出清理残留输出文件', async () => {

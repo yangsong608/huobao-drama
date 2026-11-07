@@ -12,8 +12,8 @@ import {
   computeLayout,
   editSyncHashOf,
   planHashOf,
+  projectSettingsForAspect,
   renderHashOf,
-  subtitleAppearanceForPreset,
   type EditProjectSettings,
 } from './edit-plan.js'
 import { normalizeEditPlan } from './edit-normalize.js'
@@ -46,22 +46,7 @@ export function getEditRevision(project: EditProjectRow, revisionId: number) {
 function fallbackSettingsOf(project: EditProjectRow): EditProjectSettings {
   const drama = db.select().from(schema.dramas)
     .where(eq(schema.dramas.id, project.dramaId)).get()
-  const raw = drama?.aspectRatio
-  const aspect = raw === '9:16' || raw === '16:9' || raw === '1:1' ? raw : '16:9'
-  return {
-    aspect,
-    width: aspect === '16:9' ? 1920 : 1080,
-    height: aspect === '16:9' ? 1080 : 1920,
-    fps: 30,
-    background: 'black',
-    defaultFit: aspect === '16:9' ? 'fit' : 'fill',
-    defaultTransition: 'cut',
-    defaultSubtitleStyle: 'default',
-    defaultExportPreset: aspect === '9:16' ? 'edit-vertical-hd' : 'edit-horizontal-hd',
-    tailGapMs: 0,
-    subtitleAppearance: subtitleAppearanceForPreset('default'),
-    subtitleSafeAreaPct: 8,
-  }
+  return projectSettingsForAspect(aspectOf(drama?.aspectRatio), 30)
 }
 
 export function createEditRevision(

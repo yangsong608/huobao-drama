@@ -2,7 +2,9 @@
  * 导出预设（设计 9.3/9.7）：预设解析、字幕模式收敛与文件名。
  */
 export type ExportKind = 'mix' | 'video' | 'stems'
-export type ExportPresetKey = 'vertical-hd' | 'horizontal-hd' | 'vertical-high' | 'audio-wav' | 'stems'
+export type ExportPresetKey = 'vertical-hd' | 'horizontal-hd' | 'vertical-high' | 'square-hd' | 'audio-wav' | 'stems'
+/** 剪辑导出可选具体预设；auto 只作为请求/配置值，解析后落具体键 */
+export type EditExportPresetKey = 'vertical-hd' | 'horizontal-hd' | 'vertical-high' | 'square-hd'
 /** copy（复制源成片外挂字幕）不在任何预设的 subtitleModes 内，仅导出服务在有源成片时放行 */
 export type ExportSubtitleMode = 'soft' | 'burn' | 'none' | 'copy'
 
@@ -61,6 +63,23 @@ export const EXPORT_PRESETS: Record<ExportPresetKey, ExportPreset> = {
     labelKey: 'export.preset.horizontalHd',
     label: '横屏高清',
     width: 1920,
+    height: 1080,
+    extension: 'mp4',
+    videoCodec: 'h264',
+    videoBitrateKbps: 10000,
+    maxrateKbps: 12000,
+    bufsizeKbps: 24000,
+    audioCodec: 'aac',
+    audioBitrateKbps: 192,
+    sampleRate: 48000,
+    subtitleModes: SUBTITLE_MODES_FULL,
+  },
+  'square-hd': {
+    key: 'square-hd',
+    kind: 'video',
+    labelKey: 'export.preset.squareHd',
+    label: '方形高清',
+    width: 1080,
     height: 1080,
     extension: 'mp4',
     videoCodec: 'h264',
@@ -133,6 +152,46 @@ function isExportKind(value: string): value is ExportKind {
   return value === 'mix' || value === 'video' || value === 'stems'
 }
 
+const EDIT_EXPORT_PRESET_KEYS: EditExportPresetKey[] = [
+  'vertical-hd', 'horizontal-hd', 'vertical-high', 'square-hd',
+]
+
+/** 旧草稿/旧版本只出现在解析层：不写回计划、不落库 */
+const LEGACY_EDIT_PRESET_ALIASES: Record<string, EditExportPresetKey | 'auto'> = {
+  'edit-vertical-hd': 'vertical-hd',
+  'edit-horizontal-hd': 'horizontal-hd',
+  'edit-source': 'auto',
+}
+
+function videoPresetKeyForAspect(aspect: string | null | undefined): EditExportPresetKey {
+  if (aspect === '16:9') return 'horizontal-hd'
+  if (aspect === '1:1') return 'square-hd'
+  return 'vertical-hd'
+}
+
+/** 旧别名 → canonical；无法识别返回 null。auto 表示按画幅解析 */
+export function canonicalExportPreset(value: string): ExportPresetKey | 'auto' | null {
+  const raw = value.trim()
+  if (!raw) return null
+  if (raw === 'auto') return 'auto'
+  if (isPresetKey(raw)) return raw
+  return LEGACY_EDIT_PRESET_ALIASES[raw] ?? null
+}
+
+/** 剪辑导出预设解析：auto/旧键按工程画幅收敛为具体键，非法值抛 400 */
+export function resolveEditExportPreset(
+  value: string | null | undefined,
+  aspect: string | null | undefined,
+): EditExportPresetKey {
+  const raw = String(value ?? '').trim() || 'auto'
+  const canonical = canonicalExportPreset(raw)
+  if (canonical === 'auto') return videoPresetKeyForAspect(aspect)
+  if (canonical && EDIT_EXPORT_PRESET_KEYS.includes(canonical as EditExportPresetKey)) {
+    return canonical as EditExportPresetKey
+  }
+  throw new ExportPresetError(`不支持的剪辑导出预设：${raw}`)
+}
+
 export interface ResolveExportPresetInput {
   preset?: string | null
   kind?: string | null
@@ -147,10 +206,17 @@ export function resolveExportPreset(input: ResolveExportPresetInput = {}): Expor
 
   const requestedPreset = input.preset?.trim() || null
   if (requestedPreset) {
-    if (!isPresetKey(requestedPreset)) {
+    const canonical = canonicalExportPreset(requestedPreset)
+    if (!canonical) {
       throw new ExportPresetError(`不支持的导出预设：${requestedPreset}`)
     }
-    const preset = EXPORT_PRESETS[requestedPreset]
+    if (canonical === 'auto') {
+      if (requestedKind && requestedKind !== 'video') {
+        throw new ExportPresetError(`预设「自适应」不支持产物 ${requestedKind}`)
+      }
+      return EXPORT_PRESETS[videoPresetKeyForAspect(input.aspect)]
+    }
+    const preset = EXPORT_PRESETS[canonical]
     if (requestedKind && requestedKind !== preset.kind) {
       throw new ExportPresetError(`预设「${preset.label}」不支持产物 ${requestedKind}`)
     }
@@ -159,10 +225,7 @@ export function resolveExportPreset(input: ResolveExportPresetInput = {}): Expor
 
   if (requestedKind === 'mix') return EXPORT_PRESETS['audio-wav']
   if (requestedKind === 'stems') return EXPORT_PRESETS.stems
-  if (requestedKind === 'video') {
-    return input.aspect === '16:9' ? EXPORT_PRESETS['horizontal-hd'] : EXPORT_PRESETS['vertical-hd']
-  }
-  return input.aspect === '16:9' ? EXPORT_PRESETS['horizontal-hd'] : EXPORT_PRESETS['vertical-hd']
+  return EXPORT_PRESETS[videoPresetKeyForAspect(input.aspect)]
 }
 
 export function normalizeSubtitleMode(raw: unknown, preset: ExportPreset): ExportSubtitleMode {

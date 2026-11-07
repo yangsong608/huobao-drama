@@ -23,7 +23,7 @@ process.env.MYSQL_AUTO_IMPORT = 'false'
 delete process.env.EDIT_WORKSPACE
 
 const { db, schema } = await import('../src/db/index.ts')
-const { setEditWorkspaceMode } = await import('../src/services/app-settings.ts')
+const { setEditWorkspaceMode, setEditSettings } = await import('../src/services/app-settings.ts')
 const { getEpisodeEditState } = await import('../src/services/edit-service.ts')
 
 const ts = '2026-11-06T00:00:00.000Z'
@@ -66,6 +66,7 @@ function insertFilm(episodeId: number, url: string, kind: string, createdAt: str
 const alignedEpisode = insertEpisode(1, '混音对齐')
 const staleEpisode = insertEpisode(2, '混音过期')
 const silentEpisode = insertEpisode(3, '无声成片')
+const emptyEpisode = insertEpisode(4, '无成片')
 
 insertFilm(alignedEpisode.id, soundUrl, 'concat', '2026-11-02T00:00:00.000Z')
 insertFilm(alignedEpisode.id, 'static/mix-export.mp4', 'mix', '2026-11-01T00:00:00.000Z')
@@ -74,10 +75,24 @@ insertFilm(staleEpisode.id, 'static/mix-export.mp4', 'mix', '2026-11-01T00:00:00
 insertFilm(silentEpisode.id, silentUrl, 'concat', '2026-11-02T00:00:00.000Z')
 
 function insertMixRevision(episodeId: number, editSyncHash: string | null) {
-  db.insert(schema.mixRevisions).values({
+  return db.insert(schema.mixRevisions).values({
     episodeId, revisionNo: 1, planJson: '{}',
     isCurrent: true, createdAt: ts, editSyncHash,
-  }).run()
+  }).returning().get()
+}
+
+function insertEditExport(episodeId: number, values: Record<string, unknown> = {}) {
+  return db.insert(schema.episodeExports).values({
+    episodeId,
+    kind: 'edit',
+    renderMode: 'edit',
+    preset: 'vertical-hd',
+    subtitleMode: 'soft',
+    status: 'completed',
+    progress: 100,
+    createdAt: ts,
+    ...values,
+  }).returning().get()
 }
 
 after(() => {
@@ -90,14 +105,16 @@ test('混音 aligned 时 audio.mode 为 mix', async () => {
   const before = await getEpisodeEditState(alignedEpisode.id)
   assert.equal(before.audio.mode, 'video')
   assert.equal(before.audio.reference_only, false)
+  assert.equal(before.audio.mix_revision_id, null)
 
   // 用当前工程哈希落当前混音版本 → mix_status aligned
-  insertMixRevision(alignedEpisode.id, before.hashes.edit_sync_hash)
+  const revision = insertMixRevision(alignedEpisode.id, before.hashes.edit_sync_hash)
   const state = await getEpisodeEditState(alignedEpisode.id)
   assert.equal(state.mix_status.status, 'aligned')
   assert.equal(state.audio.mode, 'mix')
   assert.equal(state.audio.reference_only, false)
   assert.equal(state.audio.url, 'static/mix-export.mp4')
+  assert.equal(state.audio.mix_revision_id, revision.id)
 })
 
 test('混音 stale 时回退源原声并标记 reference_only', async () => {
@@ -117,4 +134,67 @@ test('无混音无原声时 mode 为 none', async () => {
   assert.equal(state.audio.mode, 'none')
   assert.equal(state.audio.reference_only, false)
   assert.equal(state.audio.url, undefined)
+  assert.equal(state.audio.mix_revision_id, null)
+})
+
+test('renders 返回最近编辑导出并过滤软删', async () => {
+  setEditWorkspaceMode('on')
+  const completed = insertEditExport(alignedEpisode.id, {
+    status: 'completed',
+    progress: 100,
+    outputUrl: 'static/edit/completed.mp4',
+    durationMs: 4200,
+    sizeBytes: 12345,
+    createdAt: '2026-11-07T10:00:00.000Z',
+  })
+  const rendering = insertEditExport(alignedEpisode.id, {
+    status: 'rendering',
+    progress: 42,
+    createdAt: '2026-11-07T10:01:00.000Z',
+  })
+  insertEditExport(alignedEpisode.id, {
+    status: 'failed',
+    error: 'boom',
+    deletedAt: '2026-11-07T10:02:00.000Z',
+    createdAt: '2026-11-07T10:02:00.000Z',
+  })
+  // 混音/合片类导出不得混入编辑渲染历史
+  insertEditExport(alignedEpisode.id, {
+    kind: 'mix',
+    renderMode: null,
+    createdAt: '2026-11-07T10:03:00.000Z',
+  })
+
+  const state = await getEpisodeEditState(alignedEpisode.id)
+  assert.equal(state.renders.latest.id, rendering.id)
+  assert.deepEqual(state.renders.items.map((item: any) => item.id), [rendering.id, completed.id])
+  assert.deepEqual(
+    Object.keys(state.renders.latest).sort(),
+    ['created_at', 'duration_ms', 'error', 'id', 'output_url', 'preset', 'progress', 'size_bytes', 'status', 'subtitle_mode'],
+  )
+  assert.equal(state.renders.latest.output_url, null)
+  assert.equal(state.renders.items[1].output_url, 'static/edit/completed.mp4')
+  assert.equal(state.renders.items[1].duration_ms, 4200)
+})
+
+test('能力位：只读、导出关闭与无工程给出原因', async () => {
+  setEditWorkspaceMode('readonly')
+  const readonly = await getEpisodeEditState(alignedEpisode.id)
+  assert.equal(readonly.capabilities.can_export, false)
+  assert.equal(readonly.capabilities.export_blocked_reason, '当前为只读模式，不能导出')
+
+  setEditWorkspaceMode('on')
+  setEditSettings({ export: { enabled: false } })
+  const disabled = await getEpisodeEditState(alignedEpisode.id)
+  assert.equal(disabled.capabilities.can_export, false)
+  assert.equal(disabled.capabilities.export_blocked_reason, '剪辑导出已关闭')
+
+  setEditSettings({ export: { enabled: true } })
+  const enabled = await getEpisodeEditState(alignedEpisode.id)
+  assert.equal(enabled.capabilities.can_export, true)
+  assert.equal(enabled.capabilities.export_blocked_reason, null)
+
+  const empty = await getEpisodeEditState(emptyEpisode.id)
+  assert.equal(empty.capabilities.can_export, false)
+  assert.equal(empty.capabilities.export_blocked_reason, '还没有可导出的工程')
 })

@@ -11,6 +11,35 @@
         <span class="mx-title"><SlidersHorizontal :size="14" /> {{ t('mix.title') }}</span>
         <span v-if="episodeId" class="mx-meta">{{ t('mix.trackCount', { n: tracks.length }) }} · {{ formatTime(totalDuration) }}</span>
         <span :class="['mx-status', { 'is-dirty': dirty, 'is-saving': saving }]">{{ saveState }}</span>
+        <AppMenu v-if="editSync" v-model:open="editSyncOpen" :min-width="240">
+          <template #trigger>
+            <button
+              :class="['mx-chip', 'mx-sync-chip', `is-${editSyncStatus}`]"
+              type="button"
+              :title="editSyncHint"
+              :aria-expanded="editSyncOpen"
+            >
+              <span class="mx-sync-shape" aria-hidden="true" />{{ editSyncLabel }}
+            </button>
+          </template>
+          <div class="mx-sync-pop">
+            <span :class="['mx-chip', 'mx-sync-chip', `is-${editSyncStatus}`]">
+              <span class="mx-sync-shape" aria-hidden="true" />{{ editSyncLabel }}
+            </span>
+            <ul v-if="editSyncReasons.length" class="mx-sync-reasons">
+              <li v-for="reason in editSyncReasons" :key="reason">{{ t(`edit.mixReason.${reason}`) }}</li>
+            </ul>
+            <p class="mx-sync-hint">{{ editSyncHint }}</p>
+          </div>
+        </AppMenu>
+        <button
+          v-if="episodeNumber"
+          class="mx-btn is-plain mx-back-edit"
+          type="button"
+          @click="goEditWorkbench"
+        >
+          <Scissors :size="12" />{{ t('mix.editSync.backToEdit') }}
+        </button>
         <span v-if="separationRunning" class="mx-chip is-accent">{{ t('mix.separating') }}</span>
         <span v-else-if="separation?.engine === 'basic'" class="mx-chip is-warning">{{ t('mix.engineBasic') }}</span>
         <span v-if="soundscapeRunning" class="mx-chip is-accent">{{ t('mix.soundscape.running') }}</span>
@@ -454,6 +483,7 @@ import {
   Redo2,
   RefreshCw,
   Save,
+  Scissors,
   SlidersHorizontal,
   Sparkles,
   Undo2,
@@ -500,6 +530,8 @@ const props = defineProps<{
   /** 导出对话框默认标题与预设需要 */
   episodeNumber?: number
   dramaAspect?: string
+  /** 助手定位：加载后选中指定音轨，找不到时保持默认选择 */
+  focusTrackId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -547,6 +579,7 @@ const {
   durationMs: planDuration,
   sourceFilm,
   sourceWarnings,
+  editSync,
   selectSourceFilm,
   load,
   refreshPlan,
@@ -615,6 +648,29 @@ const soundscapePreviewing = ref(false)
 const soundscapeError = ref('')
 const sourcePickerOpen = ref(false)
 const exportOpen = ref(false)
+const editSyncOpen = ref(false)
+const EDIT_SYNC_REASONS = ['legacy_mix', 'timing_changed', 'dialogue_changed']
+const editSyncStatus = computed(() => editSync.value?.status || 'no_edit_plan')
+const editSyncLabel = computed(() => {
+  if (editSyncStatus.value === 'aligned') return t('mix.editSync.aligned')
+  if (editSyncStatus.value === 'stale') return t('mix.editSync.stale')
+  if (editSyncStatus.value === 'no_edit_plan') return t('mix.editSync.noEditPlan')
+  return t('mix.editSync.missing')
+})
+const editSyncReasons = computed(() =>
+  (editSync.value?.reasons ?? []).filter((reason) => EDIT_SYNC_REASONS.includes(reason)),
+)
+const editSyncHint = computed(() => {
+  if (editSyncStatus.value === 'aligned') return t('mix.editSync.alignedHint')
+  if (editSyncStatus.value === 'stale') return t('mix.editSync.staleHint')
+  if (editSyncStatus.value === 'no_edit_plan') return t('mix.editSync.noEditPlanHint')
+  return t('mix.editSync.missingHint')
+})
+function goEditWorkbench() {
+  if (!props.episodeNumber) return
+  editSyncOpen.value = false
+  navigateTo(`/drama/${props.dramaId}/episode/${props.episodeNumber}/edit`)
+}
 
 const playback = useMixPlayback({
   tracks: () => tracks.value,
@@ -787,8 +843,17 @@ watch(tracks, (list) => {
     return
   }
   if (!list.some(track => track._uid === activeTrackUid.value)) {
-    activeTrackUid.value = (list.find(track => !track.virtual) ?? list[0])._uid
+    const focused = props.focusTrackId != null
+      ? list.find(track => !track.virtual && track.id === props.focusTrackId)
+      : null
+    activeTrackUid.value = (focused ?? list.find(track => !track.virtual) ?? list[0])._uid
   }
+}, { immediate: true })
+
+watch(() => props.focusTrackId, (trackId) => {
+  if (trackId == null) return
+  const target = tracks.value.find(track => !track.virtual && track.id === trackId)
+  if (target) activeTrackUid.value = target._uid
 }, { immediate: true })
 
 watch(totalDuration, (total) => {
@@ -1705,6 +1770,21 @@ defineExpose({ seekTo, pause, play: togglePlay })
 .mx-chip { padding: 0 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 9px; line-height: 16px; color: var(--text-2); white-space: nowrap; }
 .mx-chip.is-accent { border-color: var(--accent-glow); background: var(--accent-bg); color: var(--accent-text); }
 .mx-chip.is-warning { border-color: transparent; background: var(--warning-bg); color: var(--warning); }
+.mx-sync-chip {
+  display: inline-flex; align-items: center; gap: 5px; border: 1px solid transparent;
+  font-family: inherit; cursor: pointer;
+}
+.mx-sync-chip:hover { filter: brightness(1.06); }
+.mx-sync-chip.is-aligned { background: var(--success-bg); color: var(--success); }
+.mx-sync-chip.is-stale { background: var(--warning-bg); color: var(--warning); }
+.mx-sync-chip.is-missing, .mx-sync-chip.is-no_edit_plan { background: var(--bg-2); color: var(--text-2); }
+.mx-sync-shape { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: currentColor; }
+.mx-sync-chip.is-stale .mx-sync-shape { border-radius: 1px; transform: rotate(45deg); }
+.mx-sync-chip.is-missing .mx-sync-shape, .mx-sync-chip.is-no_edit_plan .mx-sync-shape { border-radius: 1px; }
+.mx-sync-pop { display: flex; flex-direction: column; gap: 7px; padding: 9px; }
+.mx-sync-reasons { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; color: var(--text-1); font-size: 10px; line-height: 1.5; }
+.mx-sync-hint { margin: 0; color: var(--text-3); font-size: 9.5px; line-height: 1.5; }
+.mx-back-edit { flex: 0 0 auto; }
 .mx-btn { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-0); color: var(--text-1); font: inherit; font-size: 10px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .mx-btn:hover { border-color: var(--accent); color: var(--accent-text); }
 .mx-btn.is-primary { border-color: var(--accent); background: var(--accent); color: var(--action-primary-text); }
