@@ -137,9 +137,10 @@ test('握手与工具列表：initialize / tools/list', async () => {
   const list = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, token)
   const names = list.json.result.tools.map((t: any) => t.name)
   assert.equal(names.length, getMcpStatus().tool_count)
-  assert.equal(getMcpStatus().tool_count, 61)
+  assert.equal(getMcpStatus().tool_count, 66)
   const expectedTools = [
     'list_projects', 'api_request', 'list_api_endpoints', 'generate_image', 'parse_script', 'import_novel_to_drama',
+    'create_episode', 'update_episode', 'create_storyboard', 'update_storyboard', 'delete_storyboard',
     'list_novels', 'get_novel', 'list_novel_jobs', 'get_novel_job', 'list_novel_imports', 'get_novel_graph',
     'create_novel', 'update_novel', 'delete_novel', 'save_novel_chapter', 'delete_novel_import',
     'generate_novel_architecture', 'generate_novel_blueprint', 'generate_novel_chapter',

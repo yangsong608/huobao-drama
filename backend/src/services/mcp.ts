@@ -350,6 +350,10 @@ interface ToolDef {
   handler: (args: any) => Promise<any>
 }
 
+export function getMcpTool(name: string): ToolDef | undefined {
+  return TOOLS.find(t => t.name === name)
+}
+
 function obj(properties: Record<string, unknown>, required: string[] = []) {
   return { type: 'object', properties, required, additionalProperties: false }
 }
@@ -421,10 +425,103 @@ const TOOLS: ToolDef[] = [
     handler: ({ episode_id }) => callApi('GET', `/api/v1/episodes/${Number(episode_id)}`),
   },
   {
+    name: 'create_episode',
+    description: [
+      '在某项目下新建一集并返回 id。content 传该集原始内容（小说章节/剧本文本），供全自动流程改写使用。',
+      '短剧生成完整链路：list_projects → create_project → create_episode → start_episode_automation → get_episode_automation 轮询到 done → merge_episode 合片。',
+    ].join('\n'),
+    inputSchema: obj({
+      drama_id: int('项目 ID'),
+      title: str('集标题（可选，默认「第N集」）'),
+      content: str('该集原始内容：小说章节/剧本正文（可选）'),
+      resolution: str('视频分辨率 480p / 720p / 1080p（可选，默认 720p）'),
+      auto_pipeline: bool('建集后是否自动进入全自动流程（可选）'),
+      auto_dub: bool('视频阶段结束后是否自动跑配音（可选）'),
+    }, ['drama_id']),
+    handler: args => callApi('POST', '/api/v1/episodes', { body: args }),
+  },
+  {
+    name: 'update_episode',
+    description: [
+      '修改剧集字段：标题、原始内容（content，改完重跑 start_episode_automation 可增量补齐缺失阶段）、剧本（script_content）、状态、',
+      '分辨率 480p/720p/1080p、原声模式 video_audio_mode（auto/native/ambient/silent）、BGM 地址、视频模式等。只传需要修改的字段。',
+    ].join('\n'),
+    inputSchema: obj({
+      episode_id: int('剧集 ID'),
+      title: str('新标题（可选）'),
+      content: str('新原始内容（可选）'),
+      script_content: str('新剧本内容（可选）'),
+      status: str('状态（可选）'),
+      resolution: str('480p / 720p / 1080p（可选）'),
+      video_audio_mode: str('auto / native / ambient / silent（可选）'),
+      bgm_url: str('BGM 文件路径（可选）'),
+      auto_dub: bool('视频后是否自动配音（可选）'),
+    }, ['episode_id']),
+    handler: ({ episode_id, ...rest }) => callApi('PUT', `/api/v1/episodes/${Number(episode_id)}`, { body: rest }),
+  },
+  {
     name: 'list_storyboards',
     description: '列出某集的全部分镜（含提示词、首帧图、视频地址、状态）。',
     inputSchema: obj({ episode_id: int('剧集 ID') }, ['episode_id']),
     handler: ({ episode_id }) => callApi('GET', `/api/v1/episodes/${Number(episode_id)}/storyboards`),
+  },
+  {
+    name: 'create_storyboard',
+    description: [
+      '在某集下手工新增一个分镜，可绑定场景、角色与道具。分镜一般由 start_episode_automation 自动拆分，此工具用于补镜头或手动建分镜。',
+      '新建后用 update_storyboard 补提示词，再用 generate_image / generate_video 出图出片。',
+    ].join('\n'),
+    inputSchema: obj({
+      episode_id: int('剧集 ID'),
+      storyboard_number: int('镜头序号（可选，默认 1）'),
+      title: str('镜头标题（可选）'),
+      description: str('镜头内容描述（可选）'),
+      scene_id: int('绑定场景 ID（可选）'),
+      character_ids: intArray('绑定角色 ID 列表（可选）'),
+      prop_ids: intArray('绑定道具 ID 列表（可选）'),
+      duration: int('时长秒数（可选，默认 10）'),
+      transition: str('转场方式（可选）'),
+    }, ['episode_id']),
+    handler: args => callApi('POST', '/api/v1/storyboards', { body: args }),
+  },
+  {
+    name: 'update_storyboard',
+    description: [
+      '优化/修订分镜：改视频提示词 video_prompt、图片提示词 image_prompt、镜头 shot_type/angle/movement、时长 duration、',
+      '地点/时间/氛围、音效 sound_effect、配乐 bgm_prompt、转场 transition，或重新绑定场景/角色/道具。',
+      '改完 video_prompt 后用 generate_video 重新出片。只传需要修改的字段。',
+    ].join('\n'),
+    inputSchema: obj({
+      storyboard_id: int('分镜 ID'),
+      title: str('镜头标题（可选）'),
+      description: str('镜头描述（可选）'),
+      video_prompt: str('视频提示词（可选）'),
+      image_prompt: str('首帧图片提示词（可选）'),
+      shot_type: str('景别（可选）'),
+      angle: str('角度（可选）'),
+      movement: str('运镜（可选）'),
+      duration: int('时长秒数（可选）'),
+      scene_id: int('绑定场景 ID（可选）'),
+      location: str('地点（可选）'),
+      time: str('时间（可选）'),
+      atmosphere: str('氛围（可选）'),
+      result: str('画面结果描述（可选）'),
+      sound_effect: str('音效提示词（可选）'),
+      bgm_prompt: str('配乐提示词（可选）'),
+      transition: str('转场方式（可选）'),
+      continuity: str('连贯性说明（可选）'),
+      character_ids: intArray('重新绑定角色 ID 列表（可选，传空数组清空）'),
+      prop_ids: intArray('重新绑定道具 ID 列表（可选，传空数组清空）'),
+    }, ['storyboard_id']),
+    handler: ({ storyboard_id, ...rest }) => callApi('PUT', `/api/v1/storyboards/${Number(storyboard_id)}`, { body: rest }),
+  },
+  {
+    name: 'delete_storyboard',
+    description: [
+      '删除分镜。全自动流程的分镜拆分阶段会跳过已有分镜；想让 start_episode_automation 重新拆分该集，先删除旧分镜再启动。',
+    ].join('\n'),
+    inputSchema: obj({ storyboard_id: int('分镜 ID') }, ['storyboard_id']),
+    handler: ({ storyboard_id }) => callApi('DELETE', `/api/v1/storyboards/${Number(storyboard_id)}`),
   },
   {
     name: 'list_characters',
