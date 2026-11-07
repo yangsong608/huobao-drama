@@ -809,64 +809,12 @@ export async function compilePlanWithoutSource(episodeId: number, dramaId: numbe
   // 动态加载：dubbing 依赖 export-service，静态引用会形成循环
   const { previewTimeline: readTimeline } = await import('./dubbing.js')
   const timeline = await readTimeline(episodeId, dramaId)
-  const takes = db.select().from(schema.lineTakes)
-    .where(eq(schema.lineTakes.episodeId, episodeId))
-    .orderBy(asc(schema.lineTakes.takeNo))
-    .all()
-  const activeByLine = new Map<number, (typeof takes)[number]>()
-  for (const take of takes) {
-    if (!take.isActive || take.deletedAt) continue
-    activeByLine.set(take.lineId, take)
-  }
-  const dialogueClips: MixClip[] = []
-  for (const cue of timeline.cues) {
-    const take = activeByLine.get(cue.lineId)
-    const src = fallbackClipSource(take?.audioUrl || cue.audioUrl)
-    if (!src.url) continue
-    dialogueClips.push({
-      id: null,
-      assetId: null,
-      takeId: take?.id ?? null,
-      lineId: cue.lineId,
-      name: null,
-      startMs: cue.startMs,
-      endMs: cue.endMs,
-      sourceStartMs: 0,
-      gainDb: 0,
-      pan: 0,
-      fadeInMs: 0,
-      fadeOutMs: 0,
-      fadeCurve: 'linear',
-      loop: false,
-      muted: false,
-      locked: false,
-      audioUrl: src.url,
-      usable: src.usable,
-      reason: src.reason,
-    })
-  }
-  tracks.unshift({
-    id: null,
-    role: 'voice',
-    name: '对白',
-    busId: 'dialogue',
-    virtual: true,
-    volume: 1,
-    pan: 0,
-    muted: false,
-    solo: false,
-    effectiveMuted: false,
-    ducking: false,
-    locked: false,
-    hidden: false,
-    loop: false,
-    color: '#f59e0b',
-    height: 72,
-    sortOrder: -1,
-    origin: null,
-    stemAssetId: null,
-    clips: dialogueClips,
-  })
+  // 降级编译与正常编译共用按角色分轨与台词排除，避免两条编译路径行为不一致
+  const excludedLineIds = new Set([
+    ...soundscapeCrowdLineIds(episodeId),
+    ...mixExcludedLineIds(episodeId),
+  ])
+  tracks.unshift(...buildVirtualDialogueTracks(episodeId, timeline, excludedLineIds))
 
   const soloActive = tracks.some((track) => track.solo)
     || buses.some((bus) => bus.key !== 'master' && bus.solo)

@@ -157,6 +157,25 @@ test('有原始内容但缺文本模型：异步失败并记录错误（并发�
   assert.equal(state?.running, false)
 })
 
+test('分镜拆分素材列表取全剧资产（跨集可绑定）', async () => {
+  // 建两个场景：一个关联第1集，一个只存在于剧项目（其他集提取的）
+  const ts2 = new Date().toISOString()
+  const [ep] = db.select().from(schema.episodes).all().slice(-1)
+  const [sceneA] = db.insert(schema.scenes).values({
+    dramaId: 1, location: '破庙', time: '夜', prompt: '破庙夜景', createdAt: ts2, updatedAt: ts2,
+  }).returning().all()
+  const [sceneB] = db.insert(schema.scenes).values({
+    dramaId: 1, location: '县城街道', time: '昼', prompt: '白天街道', createdAt: ts2, updatedAt: ts2,
+  }).returning().all()
+  db.insert(schema.episodeScenes).values({ episodeId: ep.id, sceneId: sceneA.id, createdAt: ts2 }).run()
+
+  const dramaAssets = await import('../src/services/automation.ts').then((m) => m.dramaAssets)
+  const assets = await dramaAssets(1)
+  const ids = assets.scenes.map((s) => s.id)
+  assert.ok(ids.includes(sceneA.id), '本集关联的场景在列表中')
+  assert.ok(ids.includes(sceneB.id), '其他集/未关联的全剧场景也必须在列表中')
+})
+
 after(async () => {
   await fs.rm(root, { recursive: true, force: true })
 })

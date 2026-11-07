@@ -286,7 +286,7 @@
                 >
                   <Loader2 v-if="isExtracting(et.key)" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  {{ (et.key === 'characters' ? chars.length : et.key === 'scenes' ? scenes.length : propItems.length) ? t('episode.prod.reextract', { type: et.label }) : t('episode.prod.extract', { type: et.label }) }}
+                  {{ (et.key === 'characters' ? chars.length : et.key === 'scenes' ? inEpisodeScenes.length : inEpisodeProps.length) ? t('episode.prod.reextract', { type: et.label }) : t('episode.prod.extract', { type: et.label }) }}
                 </button>
                 <span class="asset-bar-divider" />
                 <button class="btn btn-sm asset-btn-batch" @click="batchCharImages">
@@ -303,11 +303,11 @@
                 </button>
               </div>
             </div>
-            <div v-if="extractingTargets.length && !chars.length && !scenes.length && !propItems.length" class="step-loading">
+            <div v-if="extractingTargets.length && !chars.length && !inEpisodeScenes.length && !inEpisodeProps.length" class="step-loading">
               <Loader2 :size="24" class="animate-spin" style="color:var(--accent)" />
               <div class="loading-text">{{ t('episode.prod.extractingTypes', { types: extractingLabels }) }}</div>
             </div>
-            <div v-else-if="!chars.length && !scenes.length && !propItems.length" class="step-empty asset-empty-state">
+            <div v-else-if="!chars.length && !inEpisodeScenes.length && !inEpisodeProps.length" class="step-empty asset-empty-state">
               <div class="empty-visual">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               </div>
@@ -389,6 +389,7 @@
 
             <div class="asset-section-title">
               {{ t('common.scene') }}
+              <span class="asset-shared-hint">{{ t('episode.asset.sharedHint') }}</span>
               <button class="asset-add-btn" @click="openAssetCreate('scene')"><Plus :size="11" /> {{ t('common.add') }}</button>
             </div>
             <template v-if="scenes.length">
@@ -419,7 +420,10 @@
                   <span class="asset-cover-badge" :class="(s.image_url || s.imageUrl) ? 'is-ready' : (isPendingSceneImage(s.id) ? 'is-pending' : '')">{{ (s.image_url || s.imageUrl) ? t('episode.asset.ready') : (isPendingSceneImage(s.id) ? t('episode.asset.generating') : t('episode.asset.todo')) }}</span>
                 </div>
                 <div class="asset-body">
-                  <div class="asset-name" :title="s.location">{{ s.location }}</div>
+                  <div class="prop-name-row">
+                    <span class="asset-name" :title="s.location">{{ s.location }}</span>
+                    <span class="asset-ep-badge" :class="isEpisodeScoped(s) ? 'is-current' : 'is-other'">{{ isEpisodeScoped(s) ? t('episode.asset.currentEpisodeBadge') : t('episode.asset.otherEpisodeBadge') }}</span>
+                  </div>
                   <div class="asset-meta asset-desc dim" :title="sceneDescriptionValue(s)">{{ sceneDescriptionValue(s) }}</div>
                   <div v-if="sceneLightingValue(s)" class="asset-meta asset-light dim" :title="sceneLightingValue(s)">{{ t('episode.asset.lighting') }}{{ sceneLightingValue(s) }}</div>
                   <div class="asset-meta asset-final" :class="{ dim: !(s.final_prompt || s.finalPrompt) }" :title="s.final_prompt || s.finalPrompt || ''">
@@ -446,6 +450,7 @@
 
             <div class="asset-section-title">
               {{ t('common.prop') }}
+              <span class="asset-shared-hint">{{ t('episode.asset.sharedHint') }}</span>
               <button class="asset-add-btn" @click="openAssetCreate('prop')"><Plus :size="11" /> {{ t('common.add') }}</button>
             </div>
             <div v-if="propItems.length" class="asset-grid">
@@ -478,6 +483,7 @@
                   <div class="prop-name-row">
                     <span class="asset-name" :title="p.name">{{ p.name }}</span>
                     <span class="tag">{{ p.type || t('common.prop') }}</span>
+                    <span class="asset-ep-badge" :class="isEpisodeScoped(p) ? 'is-current' : 'is-other'">{{ isEpisodeScoped(p) ? t('episode.asset.currentEpisodeBadge') : t('episode.asset.otherEpisodeBadge') }}</span>
                   </div>
                   <div class="asset-meta asset-desc dim" :title="p.description || ''">{{ p.description || t('episode.asset.noDescription') }}</div>
                   <div class="asset-meta asset-final" :class="{ dim: !(p.final_prompt || p.finalPrompt) }" :title="p.final_prompt || p.finalPrompt || ''">
@@ -2884,8 +2890,13 @@ const bindableChars = computed(() => mergeAssetsById(projectVisualChars.value, v
 const bindableScenes = computed(() => mergeAssetsById(projectSceneList.value, scenes.value))
 const bindableProps = computed(() => mergeAssetsById(projectPropList.value, propItems.value))
 const episodeCharacterIdSet = computed(() => new Set(chars.value.map(c => c.id)))
-const episodeSceneIdSet = computed(() => new Set(scenes.value.map(s => s.id)))
-const episodePropIdSet = computed(() => new Set(propItems.value.map(p => p.id)))
+// 全剧共享资产：scope=all 返回带 in_episode 标记（后端 snake_case），本集资产排前
+// 本集相关的计数/批量/绑定判断都以 in_episode 为准，全剧列表仅用于展示
+const isEpisodeScoped = item => !!(item?.in_episode ?? item?.inEpisode)
+const inEpisodeScenes = computed(() => scenes.value.filter(isEpisodeScoped))
+const inEpisodeProps = computed(() => propItems.value.filter(isEpisodeScoped))
+const episodeSceneIdSet = computed(() => new Set(inEpisodeScenes.value.map(s => s.id)))
+const episodePropIdSet = computed(() => new Set(inEpisodeProps.value.map(p => p.id)))
 // 视频制作双模式：native = 逐分镜生成，comfyui = 整集工作流一次提交
 const episodeVideoMode = computed(() =>
   (episode.value?.video_mode || episode.value?.videoMode) === 'comfyui' ? 'comfyui' : 'native')
@@ -3591,14 +3602,14 @@ function goProductionBlockTarget() {
 const stepLabels = computed(() => [t('episode.script.raw'), t('episode.script.rewrite')])
 
 const charImgCount = computed(() => visualChars.value.filter(c => c.image_url || c.imageUrl).length)
-const sceneImgCount = computed(() => scenes.value.filter(s => s.image_url || s.imageUrl).length)
-const propImgCount = computed(() => propItems.value.filter(p => p.image_url || p.imageUrl).length)
+const sceneImgCount = computed(() => inEpisodeScenes.value.filter(s => s.image_url || s.imageUrl).length)
+const propImgCount = computed(() => inEpisodeProps.value.filter(p => p.image_url || p.imageUrl).length)
 const shotVidCount = computed(() => sbs.value.filter(s => s.video_url || s.videoUrl).length)
 const visualCharTotal = computed(() => visualChars.value.length)
 const pendingCharacterImageCount = computed(() => Math.max(visualCharTotal.value - charImgCount.value, 0))
-const pendingSceneImageCount = computed(() => Math.max(scenes.value.length - sceneImgCount.value, 0))
+const pendingSceneImageCount = computed(() => Math.max(inEpisodeScenes.value.length - sceneImgCount.value, 0))
 const pendingAssetImageCount = computed(() => pendingCharacterImageCount.value + pendingSceneImageCount.value)
-const assetTotalCount = computed(() => visualCharTotal.value + scenes.value.length + propItems.value.length)
+const assetTotalCount = computed(() => visualCharTotal.value + inEpisodeScenes.value.length + inEpisodeProps.value.length)
 const assetReadyCount = computed(() => charImgCount.value + sceneImgCount.value + propImgCount.value)
 
 const prodTabDefs = computed(() => [
@@ -3669,7 +3680,7 @@ function sectionState(sectionId) {
 
   const hasProgress = sectionId === 'script'
     ? !!(rawContent.value || scriptContent.value)
-    : !!(chars.value.length || scenes.value.length || propItems.value.length || sbs.value.length || shotVidCount.value)
+    : !!(chars.value.length || inEpisodeScenes.value.length || inEpisodeProps.value.length || sbs.value.length || shotVidCount.value)
   const isCurrent = sectionId === 'script'
     ? panel.value === 'script'
     : panel.value === 'production'
@@ -3829,8 +3840,8 @@ async function resyncStoryboards() {
     const currentId = selectedSb.value?.id
     selectedSb.value = sbs.value.find(sb => sb.id === currentId) || sbs.value[0] || null
     try { chars.value = await episodeAPI.characters(ep.id) } catch {}
-    try { scenes.value = await episodeAPI.scenes(ep.id) } catch {}
-    try { propItems.value = await episodeAPI.props(ep.id) } catch {}
+    try { scenes.value = await episodeAPI.scenes(ep.id, { scope: 'all' }) } catch {}
+    try { propItems.value = await episodeAPI.props(ep.id, { scope: 'all' }) } catch {}
   } catch (error) {
     console.error('Failed to resync storyboards', error)
   }
@@ -3928,8 +3939,8 @@ async function refresh() {
     if (ep) {
       episode.value = ep
       try { chars.value = await episodeAPI.characters(ep.id) } catch { chars.value = [] }
-      try { scenes.value = await episodeAPI.scenes(ep.id) } catch { scenes.value = [] }
-      try { propItems.value = await episodeAPI.props(ep.id) } catch { propItems.value = [] }
+      try { scenes.value = await episodeAPI.scenes(ep.id, { scope: 'all' }) } catch { scenes.value = [] }
+      try { propItems.value = await episodeAPI.props(ep.id, { scope: 'all' }) } catch { propItems.value = [] }
       sbs.value = await episodeAPI.storyboards(ep.id)
       selectedVideoSbIds.value = selectedVideoSbIds.value.filter(id => sbs.value.some(sb => sb.id === id))
       if (sbs.value.length) {
@@ -4310,7 +4321,8 @@ async function genPropImg(id) {
   }
 }
 function batchSceneImages() {
-  const ids = scenes.value.filter(s => !(s.image_url || s.imageUrl)).map(s => s.id)
+  // 批量生图只覆盖本集场景：全剧共享列表里的其他集资产由各自页面处理
+  const ids = inEpisodeScenes.value.filter(s => !(s.image_url || s.imageUrl)).map(s => s.id)
   if (!ids.length) { toast.info(t('episode.image.allScenesDone')); return }
   pendingSceneImageIds.value = [...new Set([...pendingSceneImageIds.value, ...ids])]
   ids.forEach(id => { sceneAPI.generateImage(id, epId.value, bareModelName(imageModel.value) || undefined, ownerConfigId(imageModelOptions.value, imageModel.value), chatModelOverride(), chatConfigId()).then(() => refresh()).catch(e => toastError(e)) })
@@ -4326,7 +4338,8 @@ function batchSceneImages() {
   })
 }
 function batchPropImages() {
-  const ids = propItems.value.filter(p => !(p.image_url || p.imageUrl)).map(p => p.id)
+  // 批量生图只覆盖本集道具：全剧共享列表里的其他集资产由各自页面处理
+  const ids = inEpisodeProps.value.filter(p => !(p.image_url || p.imageUrl)).map(p => p.id)
   if (!ids.length) { toast.info(t('episode.image.allPropsDone')); return }
   pendingPropImageIds.value = [...new Set([...pendingPropImageIds.value, ...ids])]
   ids.forEach(id => { propAPI.generateImage(id, epId.value, bareModelName(imageModel.value) || undefined, ownerConfigId(imageModelOptions.value, imageModel.value), chatModelOverride(), chatConfigId()).then(() => refresh()).catch(e => toastError(e)) })
@@ -6655,6 +6668,30 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* 本集 / 其他集归属徽标（全剧共享资产展示） */
+.asset-ep-badge {
+  flex: none;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.asset-ep-badge.is-current {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.asset-ep-badge.is-other {
+  color: var(--text-2);
+  background: var(--surface-muted);
+  border: 1px solid var(--surface-outline);
+}
+.asset-shared-hint {
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
 }
 .asset-meta { font-size: 11px; line-height: 1.5; }
 .asset-desc {

@@ -21,6 +21,7 @@ process.env.MYSQL_AUTO_IMPORT = 'false'
 
 const { db, schema } = await import('../src/db/index.ts')
 const {
+  compileEpisodePlan,
   compileMixPlan,
   createMixRevision,
   ensureDefaultBuses,
@@ -674,4 +675,53 @@ test('虚拟对白轨按角色分轨', async () => {
   assert.deepEqual(voiceTracks[1].clips.map((c) => c.lineId), [lineB.id])
   assert.equal(voiceTracks[0].busId, 'dialogue')
   assert.notEqual(voiceTracks[0].color, voiceTracks[1].color, '不同角色轨道颜色应可区分')
+})
+
+test('无源降级编译同样按角色分轨', async () => {
+  // 本集没有任何可用成片（不建 videoMerges）：compileEpisodePlan 降级为无源计划
+  const [nsEpisode] = db.insert(schema.episodes).values({
+    dramaId: 1, episodeNumber: 5, title: '第5集', createdAt: ts, updatedAt: ts,
+  }).returning().all()
+  const [nsStoryboard] = db.insert(schema.storyboards).values({
+    episodeId: nsEpisode.id, storyboardNumber: 1, description: '对峙', videoUrl: shotUrl,
+    createdAt: ts, updatedAt: ts,
+  }).returning().all()
+  const insertLine = (lineNo: number, speaker: string, text: string, plannedStartMs: number) =>
+    db.insert(schema.storyboardLines).values({
+      episodeId: nsEpisode.id, dramaId: 1, storyboardId: nsStoryboard.id,
+      lineNo, sortOrder: lineNo, speakerType: 'dialogue', speakerName: speaker,
+      text, speakText: text, plannedStartMs, audioDurationMs: 1000, audioUrl: toneUrl,
+      status: 'ready', createdAt: ts, updatedAt: ts,
+    }).returning().get()
+  const lineA = insertLine(1, '林小雨', '你骗了我三年。', 200)
+  const lineB = insertLine(2, '顾云舟', '我没有。', 1500)
+  for (const l of [lineA, lineB]) {
+    db.insert(schema.lineTakes).values({
+      lineId: l.id, episodeId: nsEpisode.id, dramaId: 1, takeNo: 1,
+      text: l.text, speakText: l.speakText, audioUrl: toneUrl, durationMs: 1000,
+      status: 'ready', isActive: true, createdAt: ts,
+    }).run()
+  }
+
+  const { plan, warnings } = await compileEpisodePlan(nsEpisode.id, 1)
+  assert.ok(
+    warnings.some((w) => w.code === 'MIX_SOURCE_FALLBACK'),
+    '无源时应返回 MIX_SOURCE_FALLBACK 提示',
+  )
+  const voiceTracks = plan.tracks.filter((t) => t.virtual && t.role === 'voice')
+  assert.equal(voiceTracks.length, 2, '降级编译也应每个角色各一条虚拟对白轨')
+  assert.deepEqual(voiceTracks.map((t) => t.name), ['林小雨', '顾云舟'])
+  assert.equal(voiceTracks[0].busId, 'dialogue')
+
+  // 降级编译同样遵守台词排除：角色的全部台词被移除后其角色轨消失（与正常编译一致）
+  excludeMixLine(nsEpisode.id, lineA.id)
+  const excluded = await compileEpisodePlan(nsEpisode.id, 1)
+  const afterExclude = excluded.plan.tracks.filter((t) => t.virtual && t.role === 'voice')
+  assert.deepEqual(
+    afterExclude.map((t) => t.name),
+    ['顾云舟'],
+    '被移除台词不应再进入虚拟对白轨',
+  )
+  assert.equal(afterExclude[0].clips.length, 1)
+  restoreMixLine(nsEpisode.id, lineA.id)
 })

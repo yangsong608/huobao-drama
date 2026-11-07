@@ -164,6 +164,7 @@ export async function analyzeLinePerformance(
     voiceId: line.voiceId,
     characterId: line.characterId,
     dramaId: line.dramaId,
+    lineId: line.id,
   })
   const base = applyOverrides(lightParams(line, voice, context), options.overrides)
 

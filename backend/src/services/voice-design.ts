@@ -475,7 +475,41 @@ export async function generateNarratorProfile(
   return getVoice(created.id) || created
 }
 
-/** 重新设计：始终创建新版本，旧版本与激活状态不动（设计 6.5） */
+/**
+ * 落库一份重新设计结果并自动激活（用户决策 2026-11-08）：
+ * 新版本立即生效，旧版本保留为历史可切回。
+ */
+export function persistRedesign(
+  source: VoiceRow,
+  profile: VoiceProfileSuggestion,
+  options: { language?: string } = {},
+) {
+  const created = createVoice({
+    dramaId: source.dramaId,
+    characterId: source.characterId,
+    scope: source.scope as 'character' | 'narrator',
+    name: source.name,
+    source: 'design',
+    voicePrompt: profile.voice_prompt,
+    voicePromptSource: profile.source,
+    designInstruct: profile.design_instruct,
+    sampleText: profile.sample_text,
+    gender: profile.gender,
+    ageRange: profile.age_range,
+    speed: profile.speed,
+    emotion: profile.emotion,
+    language: options.language || source.language || 'Chinese',
+    status: 'draft',
+  })
+  if (source.scope === 'narrator') {
+    setNarratorVoice(source.dramaId, created.id)
+  } else if (source.characterId) {
+    activateVoice(source.characterId, created.id)
+  }
+  return getVoice(created.id) || created
+}
+
+/** 重新设计：始终创建新版本并自动激活（旧版本保留可切回） */
 export async function redesignVoice(
   voiceId: number,
   options: {
@@ -517,21 +551,5 @@ export async function redesignVoice(
   })
   if (!profile) throw new Error('重新设计失败：没有生成音色档案')
 
-  return createVoice({
-    dramaId: source.dramaId,
-    characterId: source.characterId,
-    scope: source.scope as 'character' | 'narrator',
-    name: source.name,
-    source: 'design',
-    voicePrompt: profile.voice_prompt,
-    voicePromptSource: profile.source,
-    designInstruct: profile.design_instruct,
-    sampleText: profile.sample_text,
-    gender: profile.gender,
-    ageRange: profile.age_range,
-    speed: profile.speed,
-    emotion: profile.emotion,
-    language: options.language || source.language || 'Chinese',
-    status: 'draft',
-  })
+  return persistRedesign(source, profile, { language: options.language })
 }

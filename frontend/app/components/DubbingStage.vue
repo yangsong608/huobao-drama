@@ -142,6 +142,12 @@
                 <Loader2 v-if="voiceGeneratingAll" :size="11" class="animate-spin" />
                 {{ t('workbench.voiceGenerateMissing') }}
               </button>
+              <button
+                class="btn btn-sm"
+                type="button"
+                :disabled="speakerActionBusy"
+                @click="onResetVoices"
+              >{{ t('workbench.voiceReset') }}</button>
             </div>
           </div>
 
@@ -172,7 +178,41 @@
                 :name="speaker.name"
                 :line-count="speaker.lineCount"
                 @updated="onVoiceChanged"
+                @delete-character="onDetachSpeaker(speaker.characterId, speaker.name)"
               />
+            </div>
+            <div v-if="unassignedSpeakers.length" class="dub-unassigned">
+              <div class="dub-unassigned-head">
+                <span class="dub-unassigned-title">{{ t('workbench.unassignedGroupTitle', { n: unassignedSpeakers.length }) }}</span>
+                <span class="dub-unassigned-desc">{{ t('workbench.unassignedGroupDesc') }}</span>
+              </div>
+              <div v-for="speaker in unassignedSpeakers" :key="speaker.name" class="dub-unassigned-row">
+                <span class="dub-unassigned-name">{{ speaker.name }}</span>
+                <span class="dub-unassigned-count">{{ t('workbench.lineCount', { n: speaker.lineCount }) }}</span>
+                <template v-if="bindingSpeakerName === speaker.name">
+                  <BaseSelect
+                    v-model="bindingCharacterId"
+                    :options="bindCharacterOptions"
+                    :placeholder="t('workbench.speakerPickCharacter')"
+                    class="dub-unassigned-select"
+                  />
+                  <button class="btn btn-sm is-primary" type="button" :disabled="speakerActionBusy" @click="onConfirmBindExisting">
+                    <Loader2 v-if="speakerActionBusy" :size="11" class="animate-spin" />
+                    {{ t('common.confirm') }}
+                  </button>
+                  <button class="btn btn-sm" type="button" @click="bindingSpeakerName = ''">{{ t('common.cancel') }}</button>
+                </template>
+                <template v-else>
+                  <button class="btn btn-sm is-primary" type="button" :disabled="speakerActionBusy" @click="onSetAsCharacter(speaker.name)">
+                    <Loader2 v-if="speakerActionBusy" :size="11" class="animate-spin" />
+                    <UserPlus v-else :size="11" />
+                    {{ t('workbench.setAsCharacter') }}
+                  </button>
+                  <button class="btn btn-sm" type="button" :disabled="speakerActionBusy" @click="onBindExisting(speaker.name)">
+                    {{ t('workbench.bindExisting') }}
+                  </button>
+                </template>
+              </div>
             </div>
           </template>
           <template v-else>
@@ -399,11 +439,20 @@
           :analyzing="analyzingLine"
           :activating-take-id="activatingTakeId"
           :removing-take-id="removingTakeId"
+          :voice-options="allVoiceOptions"
+          :voice-groups="voiceProfiles"
+          :voice-meta="voiceMetaById"
+          :narrator-voice="narratorVoice"
+          :capabilities="voiceCapabilities"
+          :cast-options="bindCharacterOptions"
           @preview="requestTakePreview"
           @analyze="analyzeTakeContext"
           @generate="generateActiveTake"
           @activate="activateTake"
           @remove="removeTake"
+          @assign-voice="onInspectorAssignVoice"
+          @bind-speaker="onInspectorBindSpeaker"
+          @bind-character="onInspectorBindCharacter"
         />
       </aside>
       <aside v-else class="dub-inspector">
@@ -508,11 +557,13 @@ import {
   RefreshCw,
   ScanSearch,
   SlidersHorizontal,
+  UserPlus,
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import type { MergeDecision, StoryboardLine, TakeOverrides } from '~/composables/useApi'
+import { episodeAPI, type MergeDecision, type StoryboardLine, type TakeOverrides } from '~/composables/useApi'
 import type { NewLinePayload } from '~/composables/useDubbingSession'
+import { useVoiceProfiles } from '~/composables/useVoiceProfiles'
 import BaseSelect from '~/components/BaseSelect.vue'
 import DialogueMergeDialog from '~/components/DialogueMergeDialog.vue'
 import ExportStage from '~/components/ExportStage.vue'
@@ -562,6 +613,8 @@ const {
   serviceBanner,
   serviceError,
   dialogueSpeakers,
+  unassignedSpeakers,
+  unassignedLineCount,
   narratorLineCount,
   voiceProfiles,
   narratorVoice,
@@ -599,6 +652,9 @@ const {
   assignLineVoice,
   assignVoiceToLines,
   generateMissingVoices,
+  bindSpeaker,
+  resetVoices,
+  detachSpeaker,
 } = session
 
 const exportDone = ref(false)
@@ -654,6 +710,130 @@ function goStep(index: number | string) {
 function nextStep() { goStep(currentStep.value + 1) }
 async function onVoiceChanged() {
   await Promise.all([load(), loadVoices()])
+}
+
+const castCharacters = ref<{ id: number; name: string }[]>([])
+const castLoadedFor = ref(0)
+async function loadCast() {
+  if (!props.episodeId || castLoadedFor.value === props.episodeId) return
+  try {
+    const rows = await episodeAPI.characters(props.episodeId)
+    castCharacters.value = (Array.isArray(rows) ? rows : [])
+      .map((row: any) => ({ id: Number(row.id), name: String(row.name || `#${row.id}`) }))
+    castLoadedFor.value = props.episodeId
+  } catch {
+    castCharacters.value = []
+  }
+}
+watch(currentStep, (step) => {
+  if (step === 1) void loadCast()
+}, { immediate: true })
+
+const bindingSpeakerName = ref('')
+const bindingCharacterId = ref('')
+const speakerActionBusy = ref(false)
+const bindCharacterOptions = computed(() => castCharacters.value.map(item => ({ label: item.name, value: String(item.id) })))
+
+async function onSetAsCharacter(speakerName: string) {
+  speakerActionBusy.value = true
+  try {
+    const result = await bindSpeaker(speakerName)
+    if (result) {
+      bindingSpeakerName.value = ''
+      await loadCast()
+    }
+  } finally {
+    speakerActionBusy.value = false
+  }
+}
+
+function onBindExisting(speakerName: string) {
+  bindingSpeakerName.value = speakerName
+  bindingCharacterId.value = ''
+}
+
+async function onConfirmBindExisting() {
+  const speakerName = bindingSpeakerName.value
+  const characterId = Number(bindingCharacterId.value) || null
+  if (!speakerName || !characterId) {
+    toast.error(t('workbench.speakerPickCharacter'))
+    return
+  }
+  speakerActionBusy.value = true
+  try {
+    const result = await bindSpeaker(speakerName, characterId)
+    if (result) {
+      bindingSpeakerName.value = ''
+      bindingCharacterId.value = ''
+      await loadCast()
+    }
+  } finally {
+    speakerActionBusy.value = false
+  }
+}
+
+async function onResetVoices() {
+  if (!window.confirm(t('workbench.voiceResetConfirm'))) return
+  await resetVoices()
+}
+
+async function onDetachSpeaker(characterId: number, name: string) {
+  speakerActionBusy.value = true
+  try {
+    await detachSpeaker(characterId, name)
+    castLoadedFor.value = 0
+    await loadCast()
+  } finally {
+    speakerActionBusy.value = false
+  }
+}
+
+const { capabilities: voiceCapabilities, loadCapabilities: loadVoiceCapabilities } = useVoiceProfiles({
+  dramaId: () => props.dramaId,
+  episodeId: () => props.episodeId ?? null,
+})
+onMounted(() => { void loadVoiceCapabilities() })
+
+const voiceMetaById = computed<Record<number, { name: string; isActive: boolean; hasInstruct: boolean }>>(() => {
+  const meta: Record<number, { name: string; isActive: boolean; hasInstruct: boolean }> = {}
+  for (const group of voiceProfiles.value) {
+    for (const voice of group.voices) {
+      meta[voice.id] = {
+        name: `${group.character_name} · ${voice.name}`,
+        isActive: voice.isActive,
+        hasInstruct: Boolean(voice.designInstruct),
+      }
+    }
+  }
+  if (narratorVoice.value) {
+    meta[narratorVoice.value.id] = {
+      name: `${t('workbench.narrator')} · ${narratorVoice.value.name}`,
+      isActive: true,
+      hasInstruct: Boolean(narratorVoice.value.designInstruct),
+    }
+  }
+  return meta
+})
+
+async function onInspectorAssignVoice(voiceId: number | null) {
+  if (!activeLine.value) return
+  await assignLineVoice(activeLine.value, voiceId)
+}
+
+async function onInspectorBindSpeaker() {
+  const name = activeLine.value?.speakerName
+  if (!name) return
+  await bindSpeaker(name)
+  castLoadedFor.value = 0
+  await loadCast()
+}
+
+async function onInspectorBindCharacter(characterId: number) {
+  const name = activeLine.value?.speakerName
+  if (!name) return
+  await bindSpeaker(name, characterId)
+  castLoadedFor.value = 0
+  await loadCast()
 }
 
 const lineFilter = ref<'all' | 'noVoice' | 'long' | 'empty'>('all')
@@ -1004,6 +1184,14 @@ watch(() => props.step, step => {
 .dub-next-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 2px; }
 .dub-next-copy { flex: 1; min-width: 0; font-size: 11px; color: var(--text-3); line-height: 1.5; }
 .dub-voice-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.dub-unassigned { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: var(--radius-lg); background: var(--bg-1); }
+.dub-unassigned-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.dub-unassigned-title { font-size: 12px; font-weight: 700; color: var(--text-1); }
+.dub-unassigned-desc { font-size: 10.5px; color: var(--text-3); line-height: 1.5; }
+.dub-unassigned-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 8px; border-radius: var(--radius-sm, 6px); background: var(--bg-2); }
+.dub-unassigned-name { font-size: 12px; font-weight: 600; color: var(--text-0); }
+.dub-unassigned-count { font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.dub-unassigned-select { width: 160px; }
 .dub-generation-summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-2); }
 .dub-hint { margin: 0; font-size: 11px; line-height: 1.6; color: var(--text-3); }
 .dub-progress { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-2); }

@@ -384,10 +384,21 @@ export async function generateTake(
 
   const voice = input.voiceId
     ? getVoice(input.voiceId)
-    : resolveVoiceForLine({ voiceId: line.voiceId, characterId: line.characterId, dramaId: line.dramaId })
+    : resolveVoiceForLine({ voiceId: line.voiceId, characterId: line.characterId, dramaId: line.dramaId, lineId: line.id })
   if (!voice || voice.dramaId !== line.dramaId) {
     markLineFailure(line.id, '没有可用音色，请先在角色面板生成或绑定旁白音色')
     throw new Error('没有可用音色，请先在角色面板生成或绑定旁白音色')
+  }
+
+  // 角色台词落到旁白音色 = 未激活音色或历史冻结绑定，明确报错而非静默用旁白；锁定行尊重用户选择
+  if (!input.voiceId && line.characterId && !line.voiceLocked && voice.scope === 'narrator') {
+    const character = db.select().from(schema.characters)
+      .where(eq(schema.characters.id, line.characterId))
+      .get()
+    const name = character?.name || `角色 #${line.characterId}`
+    const message = `角色「${name}」还没有激活的音色，请先在音色分配中激活或设计音色`
+    markLineFailure(line.id, message)
+    throw new Error(message)
   }
 
   const config = deps.config !== undefined ? deps.config : await getAudioConfig()

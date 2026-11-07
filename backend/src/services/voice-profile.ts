@@ -386,23 +386,51 @@ export function setNarratorVoice(dramaId: number, voiceId: number | null): Voice
  * 2. 角色激活音色
  * 3. 项目旁白音色
  */
+export function activeVoiceForCharacter(characterId: number): VoiceRow | null {
+  return db.select().from(schema.characterVoices)
+    .where(and(
+      eq(schema.characterVoices.characterId, characterId),
+      eq(schema.characterVoices.isActive, true),
+      isNull(schema.characterVoices.deletedAt),
+    ))
+    .get() || null
+}
+
 export function resolveVoiceForLine(line: {
   voiceId?: number | null
   characterId?: number | null
   dramaId: number
+  lineId?: number
 }): VoiceRow | null {
   if (line.voiceId) {
     const explicit = getVoice(line.voiceId)
-    if (explicit) return explicit
+    if (explicit) {
+      // 角色台词残留旁白绑定属于历史冻结（当年静默回退写入），自愈让位给角色激活音色
+      const narratorFrozen = line.characterId != null
+        && explicit.scope === 'narrator'
+        && !(line.lineId && db.select({ voiceLocked: schema.storyboardLines.voiceLocked })
+          .from(schema.storyboardLines)
+          .where(eq(schema.storyboardLines.id, line.lineId))
+          .get()?.voiceLocked)
+      if (!narratorFrozen) return explicit
+      if (line.lineId) {
+        db.update(schema.storyboardLines)
+          .set({ voiceId: null, updatedAt: now() })
+          .where(eq(schema.storyboardLines.id, line.lineId))
+          .run()
+      }
+    } else {
+      // 指向已删除音色的行级引用自愈清空，避免永久冻结在失效音色上
+      if (line.lineId) {
+        db.update(schema.storyboardLines)
+          .set({ voiceId: null, updatedAt: now() })
+          .where(eq(schema.storyboardLines.id, line.lineId))
+          .run()
+      }
+    }
   }
   if (line.characterId) {
-    const active = db.select().from(schema.characterVoices)
-      .where(and(
-        eq(schema.characterVoices.characterId, line.characterId),
-        eq(schema.characterVoices.isActive, true),
-        isNull(schema.characterVoices.deletedAt),
-      ))
-      .get()
+    const active = activeVoiceForCharacter(line.characterId)
     if (active) return active
   }
   return getNarratorVoice(line.dramaId)

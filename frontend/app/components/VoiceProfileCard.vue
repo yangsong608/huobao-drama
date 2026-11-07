@@ -14,6 +14,10 @@
         <select v-model="selectedId" v-if="versions.length > 1" class="vpc-version" :aria-label="t('voiceProfile.version')">
           <option v-for="voice in versions" :key="voice.id" :value="voice.id">{{ voiceOptionLabel(voice) }}</option>
         </select>
+        <button v-if="scope === 'character' && episodeId" type="button" class="btn btn-sm is-danger" @click="onDeleteCharacter">
+          <UserMinus :size="11" />
+          {{ t('workbench.deleteCharacter') }}
+        </button>
         <button type="button" class="btn btn-sm" @click="editOpen = !editOpen">
           <Pencil v-if="!editOpen" :size="11" />
           {{ editOpen ? t('voiceProfile.done') : t('voiceProfile.edit') }}
@@ -147,7 +151,7 @@
 </template>
 
 <script setup lang="ts">
-import { AudioLines, Check, Copy, Link2, Loader2, Mic, Pencil, Play, Sparkles, Trash2, Upload } from 'lucide-vue-next'
+import { AudioLines, Check, Copy, Link2, Loader2, Mic, Pencil, Play, Sparkles, Trash2, Upload, UserMinus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { CharacterVoice as CharacterVoiceAsset, VoiceProfile } from '~/composables/useApi'
@@ -176,6 +180,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   updated: []
   'reference-updated': [id: number, voice: CharacterVoiceAsset]
+  'delete-character': []
 }>()
 
 const { t } = useI18n()
@@ -391,6 +396,11 @@ async function removeNow() {
   if (!window.confirm(t('episode.voice.deleteConfirm', { name: voice.name }))) return
   await store.removeVoice(voice)
   editOpen.value = false
+}
+
+function onDeleteCharacter() {
+  if (!window.confirm(t('workbench.deleteCharacterConfirm', { name: displayName.value }))) return
+  emit('delete-character')
 }
 
 async function uploadClone(event: Event) {
