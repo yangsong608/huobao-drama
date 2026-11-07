@@ -206,12 +206,13 @@ export function normalizeSpeakText(input: string): string {
   return text
 }
 
-/** 内容寻址 key：任一影响音色的参数变化都会换新文件 */
+/** 内容寻址 key：任一影响音色的参数变化都会换新文件；nonce 用于显式生成绕开缓存 */
 export function buildCacheKey(
   params: SynthParams,
   model: string,
   provider = 'qwen3-tts',
   settings: TtsSettings = {},
+  nonce?: string,
 ): string {
   const parts = [
     provider,
@@ -231,6 +232,7 @@ export function buildCacheKey(
     String(settings.seed ?? ''),
     String(settings.maxNewTokens ?? ''),
     String(settings.maxInputChars ?? ''),
+    nonce || '',
   ]
   return crypto.createHash('sha256').update(parts.join('\u0001')).digest('hex')
 }
@@ -389,6 +391,8 @@ export interface SynthDeps {
   fetchImpl?: typeof fetch
   retryDelaysMs?: number[]
   cacheDir?: string
+  /** 显式生成（重合成为新 Take）：绕开文件缓存与并发去重，每次真实调用并写独立文件 */
+  noCache?: boolean
 }
 
 /** 合成一句；返回缓存地址与真实时长 */
@@ -400,16 +404,19 @@ export async function synthesize(params: SynthParams, deps: SynthDeps = {}): Pro
   if (!config) throw new TtsError('not_found', '未配置语音服务，请先在设置中添加并启用 audio 服务')
 
   const model = config.model || (config.provider === 'qwen3-tts' ? 'Qwen3-TTS-12Hz-1.7B-VoiceDesign' : config.provider)
-  const hash = buildCacheKey({ ...params, text }, model, config.provider, config.settings)
+  const nonce = deps.noCache ? crypto.randomUUID() : undefined
+  const hash = buildCacheKey({ ...params, text }, model, config.provider, config.settings, nonce)
   const file = cacheFile(hash, deps.cacheDir || config.settings.cacheDir)
   const chunks = splitSpeakText(text, config.settings.maxInputChars ?? ttsTextLimit(config.provider, model))
 
-  if (fs.existsSync(file)) {
+  if (!deps.noCache && fs.existsSync(file)) {
     return { url: cacheUrl(hash), durationMs: await readDuration(file), format: 'wav', hash, cached: true }
   }
 
-  const existing = inFlight.get(hash)
-  if (existing) return { ...(await existing), cached: true }
+  if (!deps.noCache) {
+    const existing = inFlight.get(hash)
+    if (existing) return { ...(await existing), cached: true }
+  }
 
   const opts: QwenTtsOptions = {
     baseUrl: config.baseUrl,

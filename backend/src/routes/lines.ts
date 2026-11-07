@@ -467,13 +467,15 @@ lines.post('/:id/synthesize', async (c) => {
   if (!row) return notFound(c, '台词不存在')
   const body = await c.req.json().catch(() => ({}))
   const voice = body?.voice_id ?? body?.voiceId
+  const force = Boolean(body?.force)
   try {
     const result = await generateTake({
       lineId: id,
       contextMode: 'light',
       voiceId: voice ? Number(voice) : undefined,
-      force: Boolean(body?.force),
-      reuse: !body?.force,
+      force,
+      reuse: !force,
+      varySeed: force,
       activate: true,
     })
     return success(c, {

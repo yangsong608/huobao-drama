@@ -41,6 +41,8 @@ export interface GenerateTakeInput {
   voiceId?: number | null
   force?: boolean
   reuse?: boolean
+  /** 显式重合成：已有同文本 ready Take 且未固定种子时换新种子，让音色有可听变化 */
+  varySeed?: boolean
   activate?: boolean
 }
 
@@ -61,6 +63,22 @@ export interface GenerateTakeResult {
 }
 
 const MAX_SEED = 2_147_483_647
+const VARIATION_SEED_MAX = 2_000_000_000
+
+function randomVariationSeed(): number {
+  return 1 + Math.floor(Math.random() * VARIATION_SEED_MAX)
+}
+
+function hasReadyTakeForText(lineId: number, text: string): boolean {
+  return db.select().from(schema.lineTakes)
+    .where(and(
+      eq(schema.lineTakes.lineId, lineId),
+      eq(schema.lineTakes.status, 'ready'),
+      isNull(schema.lineTakes.deletedAt),
+    ))
+    .all()
+    .some((row) => (row.speakText || '').trim() === text)
+}
 
 function textOrNull(value: unknown): string | null {
   if (value === null || value === undefined) return null
@@ -426,7 +444,13 @@ export async function generateTake(
   }
 
   const language = textOrNull(overrides?.language) ?? textOrNull(voice.language)
-  const seed = overrides?.seed !== undefined ? normalizeSeed(overrides.seed) : normalizeSeed(voice.seed)
+  const fixedSeed = overrides?.seed === undefined || overrides?.seed === null
+    ? null
+    : normalizeSeed(overrides.seed)
+  // 首次生成与文本改动后重生成沿用音色种子，保持角色跨台词一致；只有显式重合成才换种子
+  const varySeed = Boolean(input.varySeed) && !input.reuse && fixedSeed === null
+  const seed = fixedSeed
+    ?? (varySeed && hasReadyTakeForText(line.id, text) ? randomVariationSeed() : normalizeSeed(voice.seed))
   const capability = deps.capability ?? capabilitiesFor(config)
   const composed = composeRequest({
     config,
@@ -519,7 +543,7 @@ export async function generateTake(
 
   try {
     const synth = deps.synthesize ?? synthesize
-    const result = await synth(composed.synthParams)
+    const result = await synth(composed.synthParams, { noCache: !input.reuse })
     const ready = db.update(schema.lineTakes).set({
       audioUrl: result.url,
       durationMs: result.durationMs,
