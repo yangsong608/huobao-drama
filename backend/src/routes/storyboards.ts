@@ -4,10 +4,13 @@ import { db, getInsertId, schema } from '../db/index.js'
 import { success, created, now, badRequest } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import {
+  normalizeStoryboardTransition,
+  storyboardUpdateValues,
+} from '../services/storyboard-update.js'
 
 const app = new Hono()
-const TRANSITIONS = new Set(['cut', 'fade', 'dissolve', 'wipe'])
-const normalizeTransition = (value: unknown) => (TRANSITIONS.has(String(value)) ? String(value) : 'cut')
+const normalizeTransition = normalizeStoryboardTransition
 
 async function syncStoryboardCharacters(storyboardId: number, characterIds: number[]) {
   const uniqueIds = [...new Set((characterIds || []).filter(Boolean))]
@@ -142,20 +145,9 @@ app.put('/:id', async (c) => {
   })
   logTaskPayload('StoryboardAPI', 'update body', body)
 
-  const fieldMap: Record<string, string> = {
-    title: 'title', description: 'description', shot_type: 'shotType',
-    angle: 'angle', movement: 'movement', duration: 'duration',
-    video_prompt: 'videoPrompt',
-    image_prompt: 'imagePrompt', scene_id: 'sceneId', location: 'location',
-    time: 'time', atmosphere: 'atmosphere', result: 'result',
-    bgm_prompt: 'bgmPrompt', sound_effect: 'soundEffect',
-    transition: 'transition', continuity: 'continuity',
-    video_url: 'videoUrl',
-  }
-
-  const updates: Record<string, any> = { updatedAt: now() }
-  for (const [snakeKey, camelKey] of Object.entries(fieldMap)) {
-    if (snakeKey in body) updates[camelKey] = snakeKey === 'transition' ? normalizeTransition(body.transition) : body[snakeKey]
+  const updates: Record<string, any> = {
+    ...storyboardUpdateValues(body, { forceTransitionNormalize: true }),
+    updatedAt: now(),
   }
 
   const bindingError = await ensureStoryboardBindings(

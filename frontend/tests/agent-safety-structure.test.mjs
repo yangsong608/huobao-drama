@@ -132,13 +132,76 @@ test('工具展开显示纯文本参数与结果', () => {
   assert.match(dock, /agent-tool-result/)
 })
 
-test('不渲染提案或建议卡片，工具轨迹折叠且为纯文本', () => {
+test('工具轨迹折叠且为纯文本；提案卡一次一个、无批量与自动应用', () => {
   const dock = read('app/components/agent/AgentDock.vue')
-  assert.doesNotMatch(dock, /proposal/i)
-  assert.doesNotMatch(dock, /suggestion/i)
+  const card = read('app/components/agent/AgentProposalCard.vue')
   assert.match(dock, /<details[\s\S]*agent-tools/)
   assert.match(dock, /agent-tool-result/)
   assert.match(dock, /plainToolText/)
+  assert.match(dock, /<AgentProposalCard/)
+  assert.match(dock, /messageProposals\(message\)/)
+  assert.doesNotMatch(card, /v-html/)
+  assert.doesNotMatch(card, /applyAll|batchApply|apply_all|批量/)
+  assert.doesNotMatch(card, /watch\([\s\S]*applyProposal/)
+  assert.doesNotMatch(card, /onMounted\([\s\S]*applyProposal/)
+  assert.match(card, /confirmReject/)
+  assert.match(card, /proposal\.before/)
+  assert.match(card, /proposal\.after/)
+  assert.match(card, /assistant\.proposal\.expiredReasons/)
+  assert.match(card, /AGENT_PROPOSAL_CONFLICT/)
+  assert.match(card, /:disabled="disabled \|\| Boolean\(busy\)"/)
+  const assistant = read('app/composables/useAssistant.ts')
+  assert.match(assistant, /event === 'proposal'/)
+  for (const locale of ['zh', 'en', 'ja', 'ko']) {
+    const json = JSON.parse(read(`app/locales/${locale}.json`))
+    for (const key of ['apply', 'reject', 'viewRaw', 'conflictHint', 'expiredHint', 'applying']) {
+      assert.equal(typeof json.assistant.proposal?.[key], 'string', `${locale} missing assistant.proposal.${key}`)
+    }
+  }
+})
+
+test('建议卡只提供导航，不自动执行或批量执行', () => {
+  const dock = read('app/components/agent/AgentDock.vue')
+  const card = read('app/components/agent/AgentSuggestionCard.vue')
+  const adapter = read('app/composables/useAgentPageAdapter.ts')
+  const assistant = read('app/composables/useAssistant.ts')
+
+  assert.match(dock, /<AgentSuggestionCard/)
+  assert.match(dock, /messageSuggestions\(message\)/)
+  assert.match(dock, /activeAdapter\.value\?\.runSuggestion/)
+  assert.match(dock, /onSuggestionOpen/)
+  assert.match(dock, /suggestionMatchesScope\(suggestion, scope\.value\)/)
+  assert.match(dock, /const target = suggestionNavigation\(suggestion\)/)
+  assert.doesNotMatch(dock, /agentAPI|runAgent|createAgentProposal/)
+  const navigation = read('app/utils/agent-suggestion-navigation.ts')
+  assert.match(navigation, /prefill\.storyboard_id/)
+  assert.match(navigation, /focus_storyboard_id/)
+  assert.match(navigation, /query\.focus_line_id/)
+  assert.match(navigation, /{ open: page }/)
+  assert.doesNotMatch(card, /v-html/)
+  assert.doesNotMatch(card, /applyAll|batchApply|apply_all|runAll|批量/)
+  assert.doesNotMatch(card, /onMounted|watch\(/)
+  assert.match(card, /emit\('open', suggestion\)/)
+  assert.match(card, /assistant\.suggestion\.noAutoRun/)
+  assert.match(card, /action === 'agent\.run'/)
+  assert.match(assistant, /event === 'suggestion'/)
+  assert.match(adapter, /export interface AgentSuggestionPrefill/)
+  assert.match(adapter, /runSuggestion\?:/)
+
+  for (const locale of ['zh', 'en', 'ja', 'ko']) {
+    const json = JSON.parse(read(`app/locales/${locale}.json`))
+    const suggestion = json.assistant.suggestion
+    assert.equal(typeof suggestion?.title, 'string', `${locale} missing assistant.suggestion.title`)
+    assert.equal(typeof suggestion?.openAgent, 'string', `${locale} missing assistant.suggestion.openAgent`)
+    assert.equal(typeof suggestion?.openPage, 'string', `${locale} missing assistant.suggestion.openPage`)
+    assert.equal(typeof suggestion?.noAutoRun, 'string', `${locale} missing assistant.suggestion.noAutoRun`)
+    for (const target of ['script_rewriter', 'extractor', 'storyboard_breaker', 'prompt_generator', 'voice_designer']) {
+      assert.equal(typeof suggestion?.targets?.agents?.[target], 'string', `${locale} missing suggestion agent ${target}`)
+    }
+    for (const page of ['script', 'assets', 'videos', 'dubbing', 'edit', 'director', 'mix', 'delivery']) {
+      assert.equal(typeof suggestion?.targets?.pages?.[page], 'string', `${locale} missing suggestion page ${page}`)
+    }
+  }
 })
 
 test('稳定错误码映射四语文案，未知错误保留脱敏后的原文', () => {

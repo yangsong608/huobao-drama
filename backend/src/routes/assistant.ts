@@ -5,7 +5,7 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { success, badRequest, notFound } from '../utils/response.js'
-import { getAgentSettings } from '../services/app-settings.js'
+import { getAgentSettings, agentPageAllowsScope } from '../services/app-settings.js'
 import {
   AgentScopeError,
   parseWorkspaceKey,
@@ -39,6 +39,14 @@ import {
   subscribeAgentStream,
 } from '../services/agent-stream.js'
 import { runAssistantTurn } from '../services/agent-assistant.js'
+import {
+  AgentProposalError,
+  applyAgentProposal,
+  getAgentProposal,
+  isProposalStatus,
+  listAgentProposals,
+  rejectAgentProposal,
+} from '../services/agent-proposals.js'
 
 const app = new Hono()
 const HEARTBEAT_MS = Math.max(100, Number(process.env.AGENT_HEARTBEAT_MS || 15_000))
@@ -129,6 +137,14 @@ function serializeMessage(row: AgentMessageRow) {
 }
 
 function errorResponse(c: any, error: unknown) {
+  if (error instanceof AgentProposalError) {
+    return c.json({
+      code: error.status,
+      message: error.message,
+      error_code: error.code,
+      ...(error.details ? { details: error.details } : {}),
+    }, error.status)
+  }
   if (error instanceof AgentScopeError) {
     return c.json({ code: error.status, message: error.message, error_code: error.code }, error.status)
   }
@@ -284,16 +300,18 @@ app.post('/sessions/:id/messages', async (c) => {
       throw new AgentSessionError(`消息长度不能超过 ${settings.message.maxChars} 字`)
     }
 
+    // 预设按消息记录：同一线程可从助手切到导演专员，作用域校验在下面完成。
     const preset = parsePreset(body.preset) ?? ((session.preset === 'director' ? 'director' : 'assistant') as Preset)
-    if (session.preset && session.preset !== preset) {
-      throw new AgentSessionError('线程预设与请求预设不一致')
-    }
     const scope = validateAgentScope({
       workspaceKey: session.workspaceKey,
       scope: body.scope,
       preset,
       allowDirector: settings.director.enabled,
     })
+    // 页面绑定只能收窄作用域；未命中绑定或 allowedScopes 缺省时视为全集
+    if (!agentPageAllowsScope(scope, settings.pages)) {
+      throw new AgentScopeError('当前页面不允许该作用域', 403, 'AGENT_PAGE_SCOPE_DENIED')
+    }
 
     const requestModel = typeof body.model === 'string' ? body.model.trim() : ''
     const configId = parseConfigId(body.config_id)
@@ -509,6 +527,61 @@ app.delete('/sessions/:id', (c) => {
     stopLiveTurn(sessionId)
     const session = deleteSession(sessionId)
     return success(c, { session: serializeSession(session) })
+  } catch (error) {
+    return errorResponse(c, error)
+  }
+})
+
+// GET /assistant/proposals?session_id=&status= — 两个参数均可选
+app.get('/proposals', (c) => {
+  try {
+    const rawSession = c.req.query('session_id')
+    const sessionId = rawSession ? parseId(rawSession) : undefined
+    if (rawSession && !sessionId) throw new AgentSessionError('session_id 无效')
+    const status = c.req.query('status') || undefined
+    if (status && !isProposalStatus(status)) {
+      throw new AgentSessionError('status 必须是 proposed / applied / rejected / conflict / expired')
+    }
+    return success(c, {
+      items: listAgentProposals({
+        ...(sessionId ? { sessionId } : {}),
+        ...(status ? { status } : {}),
+      }),
+    })
+  } catch (error) {
+    return errorResponse(c, error)
+  }
+})
+
+// GET /assistant/proposals/:id — 详情（过期提案以 expired 状态返回）
+app.get('/proposals/:id', (c) => {
+  const proposalId = parseId(c.req.param('id'))
+  if (!proposalId) return badRequest(c, '提案编号无效')
+  try {
+    return success(c, { proposal: getAgentProposal(proposalId) })
+  } catch (error) {
+    return errorResponse(c, error)
+  }
+})
+
+// POST /assistant/proposals/:id/apply
+app.post('/proposals/:id/apply', (c) => {
+  const proposalId = parseId(c.req.param('id'))
+  if (!proposalId) return badRequest(c, '提案编号无效')
+  try {
+    const result = applyAgentProposal(proposalId)
+    return success(c, { applied: true, proposal: result.proposal, warnings: result.warnings })
+  } catch (error) {
+    return errorResponse(c, error)
+  }
+})
+
+// POST /assistant/proposals/:id/reject
+app.post('/proposals/:id/reject', (c) => {
+  const proposalId = parseId(c.req.param('id'))
+  if (!proposalId) return badRequest(c, '提案编号无效')
+  try {
+    return success(c, { proposal: rejectAgentProposal(proposalId) })
   } catch (error) {
     return errorResponse(c, error)
   }

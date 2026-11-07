@@ -80,6 +80,41 @@ export interface AssistantSendResult {
   status?: AssistantMessageStatus
 }
 
+export type AssistantProposalStatus = 'proposed' | 'applied' | 'rejected' | 'conflict' | 'expired'
+
+export interface AssistantProposal {
+  id: number
+  session_id: number
+  message_id: number
+  kind: 'storyboard.update' | 'asset.prompt.update' | 'line.update'
+  target_type: 'storyboard' | 'line' | 'character' | 'scene' | 'prop'
+  target_id: number
+  drama_id: number
+  episode_id: number | null
+  before: Record<string, unknown>
+  after: Record<string, unknown>
+  rationale: string
+  status: AssistantProposalStatus
+  proposed_by: string
+  applied_by: string | null
+  applied_at: string | null
+  error: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AssistantProposalWarning {
+  code: string
+  message: string
+}
+
+export interface AssistantProposalApplyResult {
+  applied: boolean
+  proposal: AssistantProposal
+  warnings: AssistantProposalWarning[]
+}
+
+
 const session = ref<AssistantSession | null>(null)
 const messages = ref<AssistantMessage[]>([])
 const hasMore = ref(false)
@@ -94,6 +129,7 @@ const streamState = ref<'idle' | 'connecting' | 'open' | 'reconnecting' | 'close
 const threads = ref<AssistantSession[]>([])
 const threadsHasMore = ref(false)
 const threadsLoading = ref(false)
+const proposals = ref<AssistantProposal[]>([])
 
 let resolvedWorkspaceKey = ''
 let activeReader: AbortController | null = null
@@ -123,6 +159,60 @@ function clearError(): void {
 function patchMessage(id: number, patch: Partial<AssistantMessage>): void {
   const current = messages.value.find(item => item.id === id)
   if (current) Object.assign(current, patch)
+}
+
+function upsertProposal(proposal: AssistantProposal): void {
+  const index = proposals.value.findIndex(item => item.id === proposal.id)
+  if (index >= 0) proposals.value[index] = proposal
+  else proposals.value.push(proposal)
+}
+
+function proposalFromEvent(data: Record<string, any>): AssistantProposal | null {
+  if (!data || !Number.isSafeInteger(Number(data.id)) || !Number.isSafeInteger(Number(data.message_id))) return null
+  const { seq: _seq, ...rest } = data
+  return rest as unknown as AssistantProposal
+}
+
+async function loadProposals(sessionId = session.value?.id): Promise<void> {
+  if (!sessionId) return
+  try {
+    const payload = await assistantAPI.proposals(sessionId)
+    proposals.value = payload.items
+  } catch {
+    // 提案加载失败不打断会话；打开卡片时会按需刷新
+  }
+}
+
+async function refreshProposal(id: number): Promise<AssistantProposal | null> {
+  try {
+    const payload = await assistantAPI.proposal(id)
+    upsertProposal(payload.proposal)
+    return payload.proposal
+  } catch {
+    return null
+  }
+}
+
+async function applyProposal(id: number): Promise<AssistantProposalApplyResult> {
+  try {
+    const result = await assistantAPI.applyProposal(id)
+    upsertProposal(result.proposal)
+    return result
+  } catch (err) {
+    await refreshProposal(id)
+    throw err
+  }
+}
+
+async function rejectProposal(id: number): Promise<AssistantProposal> {
+  try {
+    const payload = await assistantAPI.rejectProposal(id)
+    upsertProposal(payload.proposal)
+    return payload.proposal
+  } catch (err) {
+    await refreshProposal(id)
+    throw err
+  }
 }
 
 function appendToolCall(id: number, call: AssistantToolCall): void {
@@ -186,12 +276,25 @@ function handleStreamEvent(event: string, data: Record<string, any>, assistantId
     }
     return
   }
+  if (event === 'proposal') {
+    const proposal = proposalFromEvent(data)
+    if (proposal) upsertProposal(proposal)
+    return
+  }
+  if (event === 'suggestion') {
+    const suggestions = Array.isArray(data.suggestions)
+      ? data.suggestions
+      : data.suggestion ? [data.suggestion] : []
+    if (suggestions.length) patchMessage(assistantId, { suggestions })
+    return
+  }
   if (event === 'done') {
     patchMessage(assistantId, {
       content: String(data.text ?? ''),
       status: data.status === 'cancelled' ? 'cancelled' : 'completed',
       finished_at: new Date().toISOString(),
     })
+    if (data.status === 'cancelled') void loadProposals()
     finishStream()
     return
   }
@@ -202,6 +305,7 @@ function handleStreamEvent(event: string, data: Record<string, any>, assistantId
       error_code: data.code ? String(data.code) : null,
       finished_at: new Date().toISOString(),
     })
+    void loadProposals()
     finishStream()
   }
 }
@@ -303,9 +407,11 @@ function adoptSession(payload: AssistantResolvePayload | AssistantMessagePage): 
   session.value = payload.session
   messages.value = payload.messages
   hasMore.value = payload.has_more
+  proposals.value = []
   resolvedWorkspaceKey = payload.session.workspace_key
   streamCursor = 0
   reconnectAttempts = 0
+  void loadProposals(payload.session.id)
   const running = [...payload.messages].reverse().find(item => item.role === 'assistant' && item.status === 'running')
   if (running) {
     streaming.value = true
@@ -333,6 +439,7 @@ export function useAssistant() {
       setError(err)
       session.value = null
       messages.value = []
+      proposals.value = []
       hasMore.value = false
     } finally {
       loadingSession.value = false
@@ -422,7 +529,7 @@ export function useAssistant() {
     }
   }
 
-  async function send(content: string, scope: AgentScope): Promise<void> {
+  async function send(content: string, scope: AgentScope, preset: AgentPreset = 'assistant'): Promise<void> {
     const text = content.trim()
     if (!text || !session.value || busy.value) return
     sending.value = true
@@ -431,7 +538,7 @@ export function useAssistant() {
       const previousTitle = session.value.title
       const response = await assistantAPI.send(session.value.id, {
         message: text,
-        preset: session.value.preset,
+        preset,
         scope,
       })
       const now = new Date().toISOString()
@@ -508,6 +615,7 @@ export function useAssistant() {
     threads,
     threadsHasMore,
     threadsLoading,
+    proposals,
     latestAssistant,
     resolve,
     newSession,
@@ -517,5 +625,9 @@ export function useAssistant() {
     switchSession,
     send,
     cancel,
+    loadProposals,
+    refreshProposal,
+    applyProposal,
+    rejectProposal,
   }
 }

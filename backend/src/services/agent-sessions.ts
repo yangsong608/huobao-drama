@@ -5,6 +5,7 @@
 import { and, asc, desc, eq, isNull, lt, sql } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
+import { expireProposalsForMessage, expireProposalsForSession } from './agent-proposals.js'
 
 export class AgentSessionError extends Error {
   readonly code: string
@@ -196,13 +197,7 @@ export function deleteSession(sessionId: number): AgentSessionRow {
       .set({ status: 'archived', deletedAt: ts, updatedAt: ts })
       .where(eq(schema.agentSessions.id, session.id))
       .run()
-    tx.update(schema.agentProposals)
-      .set({ status: 'expired', updatedAt: ts })
-      .where(and(
-        eq(schema.agentProposals.sessionId, session.id),
-        eq(schema.agentProposals.status, 'proposed'),
-      ))
-      .run()
+    expireProposalsForSession(session.id, 'session_deleted', tx)
     const updated = tx.select().from(schema.agentSessions).where(eq(schema.agentSessions.id, session.id)).get()
     if (!updated) throw new AgentSessionNotFoundError()
     return updated
@@ -319,17 +314,27 @@ export function finishMessage(messageId: number, patch: {
   if (row.status !== 'running') throw new AgentSessionConflictError('消息已结束，不能重复写入')
 
   const ts = now()
-  db.update(schema.agentMessages).set({
-    ...(patch.content !== undefined ? { content: patch.content } : {}),
-    status,
-    ...(patch.toolCalls !== undefined ? { toolCallsJson: JSON.stringify(patch.toolCalls) } : {}),
-    ...(patch.toolResults !== undefined ? { toolResultsJson: JSON.stringify(patch.toolResults) } : {}),
-    ...(patch.suggestions !== undefined ? { suggestionsJson: JSON.stringify(patch.suggestions) } : {}),
-    ...(patch.error !== undefined ? { error: patch.error } : {}),
-    ...(patch.model !== undefined ? { model: patch.model } : {}),
-    ...(patch.textConfigId !== undefined ? { textConfigId: patch.textConfigId } : {}),
-    finishedAt: ts,
-  }).where(eq(schema.agentMessages.id, messageId)).run()
+  db.transaction((tx) => {
+    tx.update(schema.agentMessages).set({
+      ...(patch.content !== undefined ? { content: patch.content } : {}),
+      status,
+      ...(patch.toolCalls !== undefined ? { toolCallsJson: JSON.stringify(patch.toolCalls) } : {}),
+      ...(patch.toolResults !== undefined ? { toolResultsJson: JSON.stringify(patch.toolResults) } : {}),
+      ...(patch.suggestions !== undefined ? { suggestionsJson: JSON.stringify(patch.suggestions) } : {}),
+      ...(patch.error !== undefined ? { error: patch.error } : {}),
+      ...(patch.model !== undefined ? { model: patch.model } : {}),
+      ...(patch.textConfigId !== undefined ? { textConfigId: patch.textConfigId } : {}),
+      finishedAt: ts,
+    }).where(eq(schema.agentMessages.id, messageId)).run()
+    if (status !== 'completed') {
+      const reason = status === 'failed'
+        ? 'message_failed'
+        : status === 'cancelled'
+          ? 'message_cancelled'
+          : 'process_restart'
+      expireProposalsForMessage(messageId, reason, tx)
+    }
+  })
 
   const updated = db.select().from(schema.agentMessages).where(eq(schema.agentMessages.id, messageId)).get()
   if (!updated) throw new AgentSessionError('消息不存在', 'AGENT_MESSAGE_NOT_FOUND')
@@ -439,13 +444,7 @@ export function recoverInterruptedMessages(): number {
         .set({ status: 'interrupted', error: 'process_restart', suggestionsJson: null, finishedAt: ts })
         .where(eq(schema.agentMessages.id, row.id))
         .run()
-      tx.update(schema.agentProposals)
-        .set({ status: 'expired', error: 'process_restart', updatedAt: ts })
-        .where(and(
-          eq(schema.agentProposals.messageId, row.id),
-          eq(schema.agentProposals.status, 'proposed'),
-        ))
-        .run()
+      expireProposalsForMessage(row.id, 'process_restart', tx)
     }
   })
   return rows.length

@@ -242,7 +242,12 @@ export function addLine(episodeId: number, input: AddLineInput): LineRow {
 }
 
 export function updateLine(id: number, patch: UpdateLinePatch): LineRow {
-  const row = db.select().from(schema.storyboardLines).where(eq(schema.storyboardLines.id, id)).get()
+  return db.transaction((tx) => updateLineInTransaction(tx, id, patch))
+}
+
+/** 提案应用与普通编辑共用同一写库语义；调用方负责事务 */
+export function updateLineInTransaction(tx: Tx, id: number, patch: UpdateLinePatch): LineRow {
+  const row = tx.select().from(schema.storyboardLines).where(eq(schema.storyboardLines.id, id)).get()
   if (!row) throw new Error('台词不存在')
   if (row.deletedAt) throw new Error('台词已删除，请先恢复')
 
@@ -342,63 +347,62 @@ export function updateLine(id: number, patch: UpdateLinePatch): LineRow {
   const revisionBump = textChanged || speakerChanged || anchorChanged
 
   const ts = now()
-  return db.transaction((tx) => {
-    tx.update(schema.storyboardLines).set({
-      text,
-      ...(patch.text !== undefined ? { speakText: toSpeakText(text), subtitleText: text } : {}),
-      speakerType: nextSpeakerType,
+
+  tx.update(schema.storyboardLines).set({
+    text,
+    ...(patch.text !== undefined ? { speakText: toSpeakText(text), subtitleText: text } : {}),
+    speakerType: nextSpeakerType,
+    characterId: nextCharacterId,
+    speakerName: nextSpeakerName,
+    voiceId: nextVoiceId,
+    voiceLocked: nextVoiceLocked,
+    direction: patch.direction !== undefined
+      ? (patch.direction === null ? null : String(patch.direction))
+      : row.direction,
+    ...(patch.emotion !== undefined ? { emotion: patch.emotion === null ? null : String(patch.emotion) } : {}),
+    ...(patch.speed !== undefined ? { speed: Number(patch.speed) } : {}),
+    anchorType: nextAnchorType,
+    storyboardId: nextStoryboardId,
+    ...(patch.voiceStartMs !== undefined ? { voiceStartMs: nextVoiceStart } : {}),
+    ...(patch.voiceDurationMs !== undefined ? {
+      voiceDurationMs: patch.voiceDurationMs === null ? null : Math.max(0, Math.round(Number(patch.voiceDurationMs))),
+    } : {}),
+    ...(patch.locked !== undefined ? { locked: Boolean(patch.locked) } : {}),
+    ...(patch.needsReview !== undefined ? { needsReview: Boolean(patch.needsReview) } : {}),
+    ...(needsAudio ? { audioStale: Boolean(row.audioUrl) } : {}),
+    ...(revisionBump ? { textRevision: (row.textRevision ?? 1) + 1 } : {}),
+    ...(contentChanged ? { source: 'manual', error: null } : {}),
+    updatedAt: ts,
+  }).where(eq(schema.storyboardLines.id, id)).run()
+
+  if (revisionBump) {
+    const siblings = groupRows(tx, row.episodeId, nextStoryboardId).filter((entry) => entry.id !== id)
+    const normalized = normalizeLineText(text)
+    const speakerKey = speakerKeyOf({
       characterId: nextCharacterId,
       speakerName: nextSpeakerName,
-      voiceId: nextVoiceId,
-      voiceLocked: nextVoiceLocked,
-      direction: patch.direction !== undefined
-        ? (patch.direction === null ? null : String(patch.direction))
-        : row.direction,
-      ...(patch.emotion !== undefined ? { emotion: patch.emotion === null ? null : String(patch.emotion) } : {}),
-      ...(patch.speed !== undefined ? { speed: Number(patch.speed) } : {}),
-      anchorType: nextAnchorType,
-      storyboardId: nextStoryboardId,
-      ...(patch.voiceStartMs !== undefined ? { voiceStartMs: nextVoiceStart } : {}),
-      ...(patch.voiceDurationMs !== undefined ? {
-        voiceDurationMs: patch.voiceDurationMs === null ? null : Math.max(0, Math.round(Number(patch.voiceDurationMs))),
-      } : {}),
-      ...(patch.locked !== undefined ? { locked: Boolean(patch.locked) } : {}),
-      ...(patch.needsReview !== undefined ? { needsReview: Boolean(patch.needsReview) } : {}),
-      ...(needsAudio ? { audioStale: Boolean(row.audioUrl) } : {}),
-      ...(revisionBump ? { textRevision: (row.textRevision ?? 1) + 1 } : {}),
-      ...(contentChanged ? { source: 'manual', error: null } : {}),
-      updatedAt: ts,
-    }).where(eq(schema.storyboardLines.id, id)).run()
+      speakerType: nextSpeakerType,
+    })
+    const occurrence = siblings.filter((entry) => (
+      normalizeLineText(entry.text) === normalized && speakerKeyOf(entry) === speakerKey
+    )).length
+    tx.update(schema.storyboardLines)
+      .set({ originKey: computeOriginKey(nextStoryboardId, text, speakerKey, occurrence) })
+      .where(eq(schema.storyboardLines.id, id))
+      .run()
+  }
 
-    if (revisionBump) {
-      const siblings = groupRows(tx, row.episodeId, nextStoryboardId).filter((entry) => entry.id !== id)
-      const normalized = normalizeLineText(text)
-      const speakerKey = speakerKeyOf({
-        characterId: nextCharacterId,
-        speakerName: nextSpeakerName,
-        speakerType: nextSpeakerType,
-      })
-      const occurrence = siblings.filter((entry) => (
-        normalizeLineText(entry.text) === normalized && speakerKeyOf(entry) === speakerKey
-      )).length
-      tx.update(schema.storyboardLines)
-        .set({ originKey: computeOriginKey(nextStoryboardId, text, speakerKey, occurrence) })
-        .where(eq(schema.storyboardLines.id, id))
-        .run()
-    }
+  if (anchorChanged && nextStoryboardId !== row.storyboardId) {
+    const oldIds = groupRows(tx, row.episodeId, row.storyboardId).map((entry) => entry.id)
+    applyLineOrder(tx, oldIds)
+    const newIds = groupRows(tx, row.episodeId, nextStoryboardId)
+      .filter((entry) => entry.id !== id)
+      .map((entry) => entry.id)
+    newIds.push(id)
+    applyLineOrder(tx, newIds)
+  }
 
-    if (anchorChanged && nextStoryboardId !== row.storyboardId) {
-      const oldIds = groupRows(tx, row.episodeId, row.storyboardId).map((entry) => entry.id)
-      applyLineOrder(tx, oldIds)
-      const newIds = groupRows(tx, row.episodeId, nextStoryboardId)
-        .filter((entry) => entry.id !== id)
-        .map((entry) => entry.id)
-      newIds.push(id)
-      applyLineOrder(tx, newIds)
-    }
-
-    return tx.select().from(schema.storyboardLines).where(eq(schema.storyboardLines.id, id)).get()!
-  })
+  return tx.select().from(schema.storyboardLines).where(eq(schema.storyboardLines.id, id)).get()!
 }
 
 export function softDeleteLine(id: number): { deleted: true } {

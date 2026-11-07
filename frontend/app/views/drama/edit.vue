@@ -36,6 +36,7 @@ import EditWorkbench from '~/components/edit/EditWorkbench.vue'
 definePageMeta({ layout: 'studio' })
 
 const route = useRoute()
+const router = useRouter()
 const { t } = useI18n()
 const dramaId = Number(route.params.id)
 const episodeNumber = Number(route.params.episodeNumber)
@@ -170,6 +171,14 @@ function openFilm(filmId) {
 }
 
 watch([filmParam, projectParam], () => { if (!loading.value) load() })
+
+// 定位成功即从 URL 移除 focus_clip_id，避免刷新重复定位；工程参数保留
+watch(focusClipId, (clipId) => {
+  if (!clipId || !focusClipParam.value) return
+  const next = { ...route.query }
+  delete next.focus_clip_id
+  router.replace({ path: route.path, query: next, hash: route.hash })
+}, { immediate: true })
 
 function goBack() {
   navigateTo(`/drama/${dramaId}/episode/${episodeNumber}`)

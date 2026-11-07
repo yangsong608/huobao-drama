@@ -82,10 +82,12 @@
               <span>{{ t('workbench.voiceFallback') }}</span>
             </div>
             <LineList
+              ref="scriptLineListRef"
               :lines="filteredLines"
               :busy="busy"
               :saving="saving"
               :empty-text="t('workbench.empty')"
+              :active-line-id="focusLineId"
               show-issues
               mode="script"
               speaker-filter
@@ -533,11 +535,14 @@ const props = withDefaults(defineProps<{
   /** 助手定位：混音音轨 / 导出记录，找不到时组件忽略 */
   focusTrackId?: number | null
   focusExportId?: number | null
+  /** 助手定位：台词行，切到台词步骤并滚动高亮 */
+  focusLineId?: number | null
 }>(), {
   episodeNumber: 0,
   dramaAspect: '16:9',
   focusTrackId: null,
   focusExportId: null,
+  focusLineId: null,
 })
 
 const emit = defineEmits<{
@@ -685,6 +690,7 @@ const selectedLineIds = ref<number[]>([])
 const batchVoiceId = ref('')
 const batchAssigning = ref(false)
 const lineListRef = ref<{ clearSelection?: () => void } | null>(null)
+const scriptLineListRef = ref<{ scrollToLine?: (id: number) => void } | null>(null)
 async function applyBatchVoice() {
   if (!selectedLineIds.value.length) return
   batchAssigning.value = true
@@ -926,6 +932,13 @@ watch(() => props.episodeId, (id, previous) => {
 watch(() => props.step, step => {
   if (step === 3) void loadTimeline()
 })
+watch([() => props.focusLineId, lines], async ([lineId]) => {
+  if (!lineId) return
+  if (!lines.value.some(line => line.id === lineId)) return
+  lineFilter.value = 'all'
+  await nextTick()
+  scriptLineListRef.value?.scrollToLine?.(lineId)
+}, { immediate: true })
 </script>
 
 <style scoped>

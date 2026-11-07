@@ -6,7 +6,7 @@
         type="button"
         class="agent-dock-trigger"
         :aria-label="t('assistant.title')"
-        @click="openAgentDock"
+        @click="openAgentDock()"
       >
         <Sparkles :size="16" />
         <span>{{ t('assistant.trigger') }}</span>
@@ -34,7 +34,17 @@
             <div class="agent-dock-title-copy">
               <div class="agent-dock-title-text">{{ session?.title || t('assistant.newChat') }}</div>
               <div class="agent-dock-sub">
-                <span class="tag">{{ presetLabel }}</span>
+                <span v-if="!directorPresetAvailable || scope?.kind !== 'director'" class="tag">{{ presetLabel }}</span>
+                <select
+                  v-if="directorPresetAvailable && scope?.kind === 'director'"
+                  v-model="presetSelection"
+                  class="agent-preset-select"
+                  :aria-label="t('assistant.preset.switch')"
+                  :title="t('assistant.preset.switch')"
+                >
+                  <option value="director">{{ t('assistant.preset.director') }}</option>
+                  <option value="assistant">{{ t('assistant.preset.assistant') }}</option>
+                </select>
                 <span v-if="session?.status === 'archived'" class="tag">{{ t('assistant.archived') }}</span>
               </div>
             </div>
@@ -220,6 +230,21 @@
                 </div>
               </details>
 
+              <AgentProposalCard
+                v-for="proposal in messageProposals(message)"
+                :key="proposal.id"
+                :proposal="proposal"
+                :disabled="message.status === 'running'"
+                @applied="onProposalApplied"
+              />
+
+              <AgentSuggestionCard
+                v-for="(suggestion, index) in messageSuggestions(message)"
+                :key="`${suggestion.action}-${suggestion.target}-${index}`"
+                :suggestion="suggestion"
+                @open="onSuggestionOpen"
+              />
+
               <div
                 v-if="message.status === 'failed' || message.status === 'interrupted'"
                 class="agent-message-status"
@@ -273,10 +298,13 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { History, Loader2, Lock, Plus, Send, Sparkles, Square, X } from 'lucide-vue-next'
+import { toast } from 'vue-sonner'
 import AgentMarkdown from './AgentMarkdown.vue'
+import AgentProposalCard from './AgentProposalCard.vue'
+import AgentSuggestionCard from './AgentSuggestionCard.vue'
 import {
   DOCK_MAX_WIDTH,
   DOCK_MIN_WIDTH,
@@ -284,31 +312,61 @@ import {
   findAgentPageAdapter,
   openAgentDock,
   setAgentDockWidth,
+  setDockPreset,
   useAgentDockRegistry,
+  type AgentPreset,
   type AgentScopeKind,
+  type AgentSuggestion,
 } from '~/composables/useAgentPageAdapter'
 import { useAgentSettings } from '~/composables/useAgentSettings'
-import { sanitizeErrorText, useAssistant, type AssistantMessage } from '~/composables/useAssistant'
+import {
+  suggestionMatchesScope,
+  suggestionNavigation,
+} from '~/utils/agent-suggestion-navigation'
+import {
+  bindingStageForScope,
+  effectivePageEntries,
+  effectiveQuickPrompts,
+  effectiveSupportedScopes,
+  resolvePageBinding,
+} from '~/utils/agent-page-bindings'
+import {
+  sanitizeErrorText,
+  useAssistant,
+  type AssistantMessage,
+  type AssistantProposal,
+} from '~/composables/useAssistant'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 
-const { dockOpen, dockWidth } = useAgentDockRegistry()
+const { dockOpen, dockWidth, dockPreset } = useAgentDockRegistry()
 const { loadAgentSettings, dockEnabled, agentSettings, agentSettingsError } = useAgentSettings()
 
 const activeAdapter = computed(() => findAgentPageAdapter(route.name as string | null, route.path))
 const scope = computed(() => activeAdapter.value?.scope() ?? null)
-const visible = computed(() => dockEnabled.value && Boolean(activeAdapter.value) && Boolean(scope.value))
+const pagePattern = computed(() => {
+  const matched = route.matched[route.matched.length - 1]
+  return matched?.path || route.path
+})
+const pageBinding = computed(() => resolvePageBinding(
+  agentSettings.value?.pages?.bindings,
+  pagePattern.value,
+  bindingStageForScope(scope.value),
+))
+const supportedScopes = computed(() => effectiveSupportedScopes(activeAdapter.value?.supportedScopes ?? [], pageBinding.value))
+const visible = computed(() => dockEnabled.value && Boolean(activeAdapter.value) && Boolean(scope.value)
+  && supportedScopes.value.includes(scope.value!.kind))
 const open = computed(() => dockOpen.value && visible.value)
 const showFloatingEntry = computed(() => {
-  const entries = activeAdapter.value?.entries ?? []
+  const entries = effectivePageEntries(activeAdapter.value?.entries ?? [], pageBinding.value)
   return visible.value && entries.includes('floating')
 })
-const quickPrompts = computed(() => activeAdapter.value?.quickPrompts() ?? [])
+const quickPrompts = computed(() => effectiveQuickPrompts(activeAdapter.value?.quickPrompts() ?? [], pageBinding.value))
 const messageLimit = computed(() => agentSettings.value?.message.maxChars ?? 4000)
 const autoDetect = computed(() => agentSettings.value?.scope.autoDetect !== false)
 const settingsSettled = computed(() => agentSettings.value !== null || Boolean(agentSettingsError.value))
-const supportedScopes = computed(() => activeAdapter.value?.supportedScopes ?? [])
 const manualScopeKind = ref<AgentScopeKind | null>(null)
 const effectiveScope = computed(() => {
   if (!scope.value) return null
@@ -345,9 +403,45 @@ function messageScopeLabel(message: AssistantMessage): string {
   return t(`assistant.scopeKinds.${scopeKindKeys[kind as AgentScopeKind]}`)
 }
 
+function messageProposals(message: AssistantMessage) {
+  return proposals.value.filter(item => item.message_id === message.id)
+}
+
+async function onProposalApplied(_proposal: AssistantProposal): Promise<void> {
+  try {
+    await activeAdapter.value?.refresh?.()
+  } catch {
+    // 页面刷新失败不影响已落库的提案结果
+  }
+}
+
+function messageSuggestions(message: AssistantMessage): AgentSuggestion[] {
+  return Array.isArray(message.suggestions) ? message.suggestions : []
+}
+
+async function onSuggestionOpen(suggestion: AgentSuggestion): Promise<void> {
+  let runFailure: unknown = null
+  if (activeAdapter.value?.runSuggestion && suggestionMatchesScope(suggestion, scope.value)) {
+    try {
+      await activeAdapter.value.runSuggestion(suggestion)
+      return
+    } catch (error) {
+      runFailure = error
+    }
+  }
+  const target = suggestionNavigation(suggestion)
+  if (!target) {
+    toast.error(t(runFailure ? 'assistant.suggestion.runFailed' : 'assistant.suggestion.targetMissing'))
+    return
+  }
+  if (runFailure) toast.error(t('assistant.suggestion.runFailedFallback'))
+  await router.push(target)
+}
+
 const {
   session,
   messages,
+  proposals,
   hasMore,
   loadingSession,
   loadingMore,
@@ -371,7 +465,32 @@ const {
 } = useAssistant()
 
 const sendReady = computed(() => canSend.value && Boolean(effectiveScope.value))
-const presetLabel = computed(() => t(`assistant.preset.${session.value?.preset === 'director' ? 'director' : 'assistant'}`))
+const directorPresetAvailable = computed(() => agentSettings.value?.director.enabled === true)
+const scopeIsDirector = computed(() => scope.value?.kind === 'director')
+// 页面绑定的 defaultPreset 决定进入该页时的默认输入预设；用户仍可手动切换。
+const pageDefaultPreset = computed<AgentPreset>(() => (
+  scopeIsDirector.value && directorPresetAvailable.value && pageBinding.value?.defaultPreset === 'director'
+    ? 'director'
+    : 'assistant'
+))
+const activePreset = computed<AgentPreset>(() => (
+  scopeIsDirector.value && directorPresetAvailable.value && dockPreset.value === 'director'
+    ? 'director'
+    : 'assistant'
+))
+const presetSelection = computed<AgentPreset>({
+  get: () => activePreset.value,
+  set: (value) => setDockPreset(value === 'director' ? 'director' : 'assistant'),
+})
+const presetLabel = computed(() => t(`assistant.preset.${activePreset.value}`))
+
+watch(
+  [scopeIsDirector, directorPresetAvailable, pageDefaultPreset],
+  () => {
+    setDockPreset(pageDefaultPreset.value)
+  },
+  { immediate: true },
+)
 
 const ASSISTANT_ERROR_CODES = [
   'AGENT_DISABLED',
@@ -411,7 +530,8 @@ watch(
   () => [visible.value, settingsSettled.value, scope.value?.workspace_key ?? ''] as const,
   async ([isVisible, settingsReady, workspaceKey]) => {
     if (!isVisible || !settingsReady || !workspaceKey || !scope.value) return
-    await resolve(scope.value)
+    setDockPreset(pageDefaultPreset.value)
+    await resolve(scope.value, activePreset.value)
     if (!open.value) return
     stickToBottom = true
     await nextTick()
@@ -429,6 +549,15 @@ watch(open, async (isOpen) => {
 
 watch(
   () => [messages.value.length, messages.value[messages.value.length - 1]?.content, messages.value[messages.value.length - 1]?.status] as const,
+  async () => {
+    if (!stickToBottom) return
+    await nextTick()
+    scrollToBottom(true)
+  },
+)
+
+watch(
+  () => proposals.value.length,
   async () => {
     if (!stickToBottom) return
     await nextTick()
@@ -454,7 +583,7 @@ async function sendDraft(): Promise<void> {
   if (!text || !target || !sendReady.value) return
   draft.value = ''
   stickToBottom = true
-  await send(text, target)
+  await send(text, target, activePreset.value)
   await nextTick()
   scrollToBottom(true)
 }
@@ -474,7 +603,7 @@ async function createNewSession(): Promise<void> {
   if (!scope.value) return
   historyOpen.value = false
   draft.value = ''
-  await newSession(scope.value)
+  await newSession(scope.value, activePreset.value)
 }
 
 async function toggleHistory(): Promise<void> {
@@ -633,6 +762,17 @@ function beginResize(event: PointerEvent): void {
   text-overflow: ellipsis;
 }
 .agent-dock-sub { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+.agent-preset-select {
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.agent-preset-select:focus { outline: none; border-color: var(--accent); }
 .agent-dock-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .agent-history-wrap { position: relative; }
 

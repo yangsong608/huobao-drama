@@ -31,11 +31,26 @@ export interface AgentScope {
   focus?: Record<string, number | string>
 }
 
+export interface AgentSuggestionPrefill {
+  workspace_key?: string
+  drama_id?: number
+  episode_id?: number
+  episode_number?: number
+  storyboard_id?: number
+  line_id?: number
+  clip_id?: string
+  track_id?: number
+  export_id?: number
+  edit_project_id?: number
+}
+
 export interface AgentSuggestion {
   action: 'agent.run' | 'page.open'
-  label?: string
-  prompt?: string
-  route?: string
+  target: string
+  label: string
+  reason: string
+  impact: string
+  prefill: AgentSuggestionPrefill
 }
 
 export interface AgentRouteMatch {
@@ -52,6 +67,8 @@ export interface AgentPageAdapter {
   entries: AgentEntryType[]
   quickPrompts: () => string[]
   supportedScopes: AgentScopeKind[]
+  /** 提案应用成功后重载页面数据；只读刷新，不触发生产动作 */
+  refresh?: () => void | Promise<void>
   runSuggestion?: (suggestion: AgentSuggestion) => void | Promise<void>
 }
 
@@ -62,6 +79,7 @@ export const DOCK_MAX_WIDTH = 520
 const adapters = ref<AgentPageAdapter[]>([])
 const dockOpen = ref(false)
 const dockWidth = ref(DOCK_DEFAULT_WIDTH)
+const dockPreset = ref<AgentPreset>('assistant')
 
 export function matchesAgentRoute(match: AgentRouteMatch, routeName: string | null | undefined, routePath: string): boolean {
   if (match.name && routeName === match.name) return true
@@ -89,10 +107,15 @@ export function findAgentPageAdapter(routeName: string | null | undefined, route
 }
 
 export function useAgentDockRegistry() {
-  return { adapters, dockOpen, dockWidth }
+  return { adapters, dockOpen, dockWidth, dockPreset }
 }
 
-export function openAgentDock(): void {
+export function setDockPreset(preset: AgentPreset): void {
+  dockPreset.value = preset
+}
+
+export function openAgentDock(preset?: AgentPreset): void {
+  if (preset) dockPreset.value = preset
   dockOpen.value = true
 }
 

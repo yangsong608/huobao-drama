@@ -2,6 +2,9 @@ import type { AgentSettings } from './useAgentSettings'
 import type {
   AssistantMessage,
   AssistantMessagePage,
+  AssistantProposal,
+  AssistantProposalApplyResult,
+  AssistantProposalStatus,
   AssistantResolvePayload,
   AssistantSendResult,
   AssistantThreadListPayload,
@@ -30,11 +33,13 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
         code?: string
         errorCode?: string
         data?: any
+        details?: any
       }
       error.status = resp.status || json.code
       error.code = json.code
       error.errorCode = typeof json.error_code === 'string' ? json.error_code : undefined
       error.data = json.data
+      error.details = json.details
       throw error
     }
 
@@ -164,6 +169,112 @@ export const editAPI = {
       [key: string]: unknown
     }>(`/episodes/${episodeId}/edit/render/${exportId}`)
   },
+}
+
+export interface DirectorPlanShot {
+  storyboard_id: number
+  shot_number: number
+  scene_id: number | null
+  duration_sec: number
+  camera: {
+    shot_type: string
+    angle: string
+    movement: string
+    lens_mm: number
+    height_m: number
+    position: { x: number; y: number; z: number }
+    look_at: { x: number; y: number; z: number }
+  }
+  blocking: Array<{ character_id: number; name: string; x: number; y: number; z: number; rotation: number }>
+  subshots: Array<{ no: number; description: string; duration_sec: number; path_index: number }>
+  notes: string
+  dirty_fields: string[]
+}
+
+export interface DirectorPlanPayload {
+  mode: 'off' | 'readonly' | 'on'
+  can_edit: boolean
+  view3d_enabled: boolean
+  plan: {
+    version: number
+    doc_version: number
+    based_on: { storyboard_hash: string; storyboard_count: number }
+    view: { mode: '2d' | '3d'; zoom: number }
+    shots: DirectorPlanShot[]
+  }
+  current_based_on: { storyboard_hash: string; storyboard_count: number }
+  storyboards: Array<{
+    id: number
+    storyboard_number: number
+    duration: number
+    shot_type: string | null
+    angle: string | null
+    movement: string | null
+    has_video: boolean
+    updated_at: string
+  }>
+  warnings: string[]
+}
+
+export interface DirectorSaveResult {
+  version: number
+  doc_version: number
+  can_apply: boolean
+  apply_blocked_reason: string | null
+  warnings: string[]
+  revision_no: number
+  updated_at: string
+}
+
+export interface DirectorRevisionSummary {
+  id: number
+  revision_no: number
+  note: string | null
+  is_current: boolean
+  created_at: string
+}
+
+export interface DirectorRevisionList {
+  plan_version: number
+  revisions: DirectorRevisionSummary[]
+}
+
+export type DirectorApplyField = 'shot_type' | 'angle' | 'movement' | 'duration'
+
+export interface DirectorApplySnapshot {
+  storyboard_id: number
+  storyboard_number: number
+  before: Record<string, unknown>
+  after: Record<string, unknown>
+}
+
+export interface DirectorApplyResult {
+  applied: number[]
+  skipped: number[]
+  stale: number[]
+  snapshots: DirectorApplySnapshot[]
+  skipped_details: Array<{ storyboard_id: number; storyboard_number: number; reason: string }>
+  warnings: string[]
+  plan_version: number
+  based_on: { storyboard_hash: string; storyboard_count: number }
+  plan_updated_at: string
+}
+
+export const directorAPI = {
+  get: (episodeId: number) => api.get<DirectorPlanPayload>(`/episodes/${episodeId}/director`),
+  save: (episodeId: number, input: { base_version: number; doc: unknown; note?: string }) =>
+    api.put<DirectorSaveResult>(`/episodes/${episodeId}/director`, input),
+  apply: (episodeId: number, input: {
+    base_version: number
+    storyboard_ids: number[]
+    fields: DirectorApplyField[]
+    append_prompt: boolean
+    sync_subshots: boolean
+  }) => api.post<DirectorApplyResult>(`/episodes/${episodeId}/director/apply`, input),
+  revisions: (episodeId: number) =>
+    api.get<DirectorRevisionList>(`/episodes/${episodeId}/director/revisions`),
+  restore: (episodeId: number, revisionId: number) =>
+    api.post<DirectorSaveResult>(`/episodes/${episodeId}/director/revisions/${revisionId}/restore`),
 }
 
 // 全自动流水线：改写 → 提取 → 资产生图 → 分镜 → 视频提示词 → 视频
@@ -1408,6 +1519,32 @@ export const assistantAPI = {
     api.post<{ message: AssistantMessage }>(`/assistant/sessions/${sessionId}/cancel`),
   streamUrl: (sessionId: number, messageId: number, afterSeq = 0) =>
     `/assistant/sessions/${sessionId}/stream?message_id=${messageId}&after_seq=${afterSeq}`,
+  proposals: (sessionId?: number, status?: AssistantProposalStatus) => {
+    const search = new URLSearchParams()
+    if (sessionId) search.set('session_id', String(sessionId))
+    if (status) search.set('status', status)
+    const qs = search.toString()
+    return api.get<{ items: AssistantProposal[] }>(`/assistant/proposals${qs ? `?${qs}` : ''}`)
+  },
+  proposal: (id: number) => api.get<{ proposal: AssistantProposal }>(`/assistant/proposals/${id}`),
+  applyProposal: (id: number) =>
+    api.post<AssistantProposalApplyResult>(`/assistant/proposals/${id}/apply`),
+  rejectProposal: (id: number) =>
+    api.post<{ proposal: AssistantProposal }>(`/assistant/proposals/${id}/reject`),
+}
+
+export interface DirectorSettings {
+  mode: 'off' | 'readonly' | 'on'
+  view: { default: '2d' | '3d' }
+  view3d: { enabled: boolean }
+  apply: {
+    fields: ('shot_type' | 'angle' | 'movement' | 'duration')[]
+    promptAppend: boolean
+    subshotSync: boolean
+  }
+  duration: { min: number; max: number; fps: string }
+  stage: { maxShots: number }
+  previs: { maxAssets: number }
 }
 
 export interface EditSettings {
@@ -1433,6 +1570,8 @@ export const settingsAPI = {
   saveNovel: (patch: Partial<NovelSettings>) => api.put<{ settings: NovelSettings }>('/settings/novel', patch),
   media: () => api.get<MediaSettingsPayload>('/settings/media'),
   saveMedia: (ffmpegDir: string) => api.put<MediaSettingsPayload>('/settings/media', { ffmpegDir }),
+  director: () => api.get<{ settings: DirectorSettings }>('/settings/director'),
+  saveDirector: (patch: Partial<DirectorSettings>) => api.put<{ settings: DirectorSettings }>('/settings/director', patch),
   edit: () => api.get<{ settings: EditSettings }>('/settings/edit'),
   saveEdit: (patch: Partial<EditSettings>) => api.put<{ settings: EditSettings }>('/settings/edit', patch),
   agent: () => api.get<{ settings: AgentSettings }>('/settings/agent'),

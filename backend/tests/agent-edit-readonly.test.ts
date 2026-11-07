@@ -319,9 +319,18 @@ const deliveryScope = {
 }
 
 test('A2-2 工具注册：按作用域严格隔离，不跨页暴露', () => {
-  assert.deepEqual(Object.keys(toolsFor(editScope)).sort(), ['read_edit_clips', 'read_edit_state'])
-  assert.deepEqual(Object.keys(toolsFor(mixScopeFor(toolEpisode.id))).sort(), ['read_mix_state', 'read_mix_tracks'])
-  assert.deepEqual(Object.keys(toolsFor(deliveryScope)), ['read_export_history'])
+  assert.deepEqual(
+    Object.keys(toolsFor(editScope)).sort(),
+    ['propose_change', 'read_edit_clips', 'read_edit_state', 'suggest_action'],
+  )
+  assert.deepEqual(
+    Object.keys(toolsFor(mixScopeFor(toolEpisode.id))).sort(),
+    ['propose_change', 'read_mix_state', 'read_mix_tracks', 'suggest_action'],
+  )
+  assert.deepEqual(
+    Object.keys(toolsFor(deliveryScope)).sort(),
+    ['propose_change', 'read_export_history', 'suggest_action'],
+  )
   assert.deepEqual(Object.keys(toolsFor({ workspace_key: 'novel-library', kind: 'novel-library' })), ['read_novel_list'])
   assert.equal((toolsFor(editScope) as any).read_mix_state, undefined)
   assert.equal((toolsFor(mixScopeFor(toolEpisode.id)) as any).read_edit_state, undefined)

@@ -12,8 +12,9 @@ import {
   getAssistantBudget,
   summarizeGraphMeta,
 } from '../assistant-context.js'
-import { getAssistantScope } from '../context.js'
+import { getAgentPreset, getAssistantScope } from '../context.js'
 import type { AgentScope } from '../agent-scope.js'
+import { getAgentSettings, resolveAgentPageBinding } from '../../services/app-settings.js'
 import { parseChapterBlueprint } from '../../services/novel/blueprint.js'
 import {
   narrativePersonLabel,
@@ -22,6 +23,9 @@ import {
   parseWorldMap,
 } from '../../services/novel/story-atlas.js'
 import { DELIVERY_READ_TOOLS, EDIT_READ_TOOLS, MIX_READ_TOOLS } from './edit-read-tools.js'
+import { DIRECTOR_READ_TOOLS } from './director-read-tools.js'
+import { PROPOSAL_TOOLS } from './proposal-tools.js'
+import { SUGGESTION_TOOLS } from './suggestion-tools.js'
 
 const NOVEL_LIST_LIMIT = 50
 const NOVEL_CHAPTER_LIMIT = 50
@@ -403,14 +407,44 @@ const NOVEL_TOOLS: Record<string, any> = {
   read_novel_atlas: readNovelAtlas,
 }
 
-/** 按请求上下文解析当前作用域可用的只读工具；未知作用域返回空集 */
+const PROPOSAL_SCOPE_KINDS = new Set(['drama', 'episode', 'director', 'edit', 'mix', 'delivery'])
+
+/** 提案工具按配置与作用域注册；项目页只允许资产提示词提案（服务层再校验） */
+function withProposalTools(tools: Record<string, any>, scope: AgentScope, preset: string | null): Record<string, any> {
+  if (!getAgentSettings().proposals.enabled) return tools
+  if (!PROPOSAL_SCOPE_KINDS.has(scope.kind)) return tools
+  if (preset === 'director' && scope.kind !== 'director') return tools
+  return { ...tools, ...PROPOSAL_TOOLS }
+}
+
+const SUGGESTION_SCOPE_KINDS = new Set(['episode', 'director', 'edit', 'mix', 'delivery'])
+
+function withSuggestionTools(tools: Record<string, any>, scope: AgentScope, preset: string | null): Record<string, any> {
+  if (preset === 'director') return tools
+  if (!SUGGESTION_SCOPE_KINDS.has(scope.kind)) return tools
+  if (!getAgentSettings().suggestions.enabled) return tools
+  return { ...tools, ...SUGGESTION_TOOLS }
+}
+
+/** 页面绑定 allowedTools 只收窄只读工具；propose_change / suggest_action 仍按配置与预设注册 */
+function withPageToolScope(tools: Record<string, any>, scope: AgentScope): Record<string, any> {
+  const binding = resolveAgentPageBinding(scope, getAgentSettings().pages)
+  if (!binding?.allowedTools) return tools
+  const allowed = new Set(binding.allowedTools)
+  return Object.fromEntries(Object.entries(tools).filter(([name]) => allowed.has(name)))
+}
+
+/** 按请求上下文解析当前作用域可用的工具；未知作用域返回空集 */
 export function getPresetTools(requestContext: RequestContext | undefined): Record<string, any> {
   const scope = getAssistantScope(requestContext)
   if (!scope) return {}
-  if (scope.kind === 'novel-library') return { ...NOVEL_LIBRARY_TOOLS }
-  if (scope.kind === 'novel') return { ...NOVEL_TOOLS }
-  if (scope.kind === 'edit') return { ...EDIT_READ_TOOLS }
-  if (scope.kind === 'mix') return { ...MIX_READ_TOOLS }
-  if (scope.kind === 'delivery') return { ...DELIVERY_READ_TOOLS }
-  return {}
+  const preset = getAgentPreset(requestContext)
+  let tools: Record<string, any> = {}
+  if (scope.kind === 'novel-library') tools = { ...NOVEL_LIBRARY_TOOLS }
+  else if (scope.kind === 'novel') tools = { ...NOVEL_TOOLS }
+  else if (scope.kind === 'director') tools = { ...DIRECTOR_READ_TOOLS }
+  else if (scope.kind === 'edit') tools = { ...EDIT_READ_TOOLS }
+  else if (scope.kind === 'mix') tools = { ...MIX_READ_TOOLS }
+  else if (scope.kind === 'delivery') tools = { ...DELIVERY_READ_TOOLS }
+  return withSuggestionTools(withProposalTools(withPageToolScope(tools, scope), scope, preset), scope, preset)
 }

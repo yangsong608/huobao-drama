@@ -999,6 +999,19 @@
             </div>
           </div>
 
+          <!-- Sub: Director Stage（并列第二种导演方式，不改现有分镜与视频页签） -->
+          <div v-if="prodTab === 'director'" class="director-pane">
+            <DirectorTab
+              :episode-id="episode?.id || 0"
+              :characters="chars"
+              :scenes="scenes"
+              :initial-view="directorInitialView"
+              :focus-storyboard-id="focusStoryboardId"
+              @open-videos="prodTab = 'videos'"
+              @back-to-drama="navigateTo(`/drama/${dramaId}`)"
+            />
+          </div>
+
           <!-- Production Navigator -->
         </template>
       </div>
@@ -1013,6 +1026,7 @@
           :drama-aspect="dramaAspectRatio"
           :focus-track-id="focusTrackId || null"
           :focus-export-id="focusExportId || null"
+          :focus-line-id="focusLineId || null"
           @update:step="dubStep = $event"
           @open-preview="dubOpen = true"
           @open-settings="goDubbingSettings"
@@ -2092,9 +2106,9 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import {
   Users, FileText, FolderKanban, Clapperboard, Download, Loader2,
-  Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors,
+  Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors, Compass,
 } from 'lucide-vue-next'
-import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI } from '~/composables/useApi'
+import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, settingsAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
 import { useAgent } from '~/composables/useAgent'
 import { useAgentPageAdapter } from '~/composables/useAgentPageAdapter'
@@ -2105,6 +2119,8 @@ import { createStoryboardUpdateQueue } from '~/utils/storyboard-update-queue'
 import { toastError, mapError, MODERATION_RE } from '~/composables/useToast'
 import LocaleSwitcher from '~/components/LocaleSwitcher.vue'
 import EpisodeDeliveryDialog from '~/components/EpisodeDeliveryDialog.vue'
+
+const DirectorTab = defineAsyncComponent(() => import('~/components/director/DirectorTab.vue'))
 
 definePageMeta({ layout: 'studio' })
 
@@ -2141,6 +2157,12 @@ const storedPanel = (() => {
 // 首个 refresh 时若已恢复面板位置，跳过按内容自动重置 scriptStep
 let panelRestored = !!storedPanel
 const panel = ref(['production', 'export', 'dubbing'].includes(storedPanel?.panel) ? storedPanel.panel : 'script')
+// 导演台页签：设置异步读取；失败按 off 处理，不阻塞现有制作区
+const directorMode = ref('off')
+const directorModeLoaded = ref(false)
+const directorInitialView = ref(undefined)
+let directorLinkPending = false
+let directorClosedNoticeShown = false
 const { running: rn, runningType: rt, run: runAgent } = useAgent()
 // 拆分是同步长请求：运行期间定时刷新，Agent 已写入的分镜能逐步出现；失败也会在 onSettled 刷新
 const breakdownElapsed = ref(0)
@@ -2226,13 +2248,56 @@ function applyRoutePanelQuery() {
     const step = Number(q.step)
     if (Number.isInteger(step) && step >= 0 && step < DUB_STEP_KEYS.length) dubStep.value = step
   }
+  if (q.panel === 'director') {
+    if (q.view === '3d' || q.view === '2d') directorInitialView.value = q.view
+    if (directorModeLoaded.value && directorMode.value === 'off') {
+      if (prodTab.value === 'director') prodTab.value = 'videos'
+      notifyDirectorClosed()
+      return
+    }
+    panel.value = 'production'
+    prodTab.value = 'director'
+    if (!directorModeLoaded.value) directorLinkPending = true
+  }
+}
+
+function notifyDirectorClosed() {
+  if (directorClosedNoticeShown) return
+  directorClosedNoticeShown = true
+  toast.info(t('director.tab.closedHint'))
+}
+
+async function loadDirectorMode() {
+  try {
+    const result = await settingsAPI.director()
+    const mode = result?.settings?.mode
+    directorMode.value = ['off', 'readonly', 'on'].includes(mode) ? mode : 'off'
+  } catch {
+    directorMode.value = 'off'
+  }
+  directorModeLoaded.value = true
+  if (directorMode.value !== 'off') {
+    if (restoreDirectorTab && panel.value === 'production' && prodTab.value === 'assets') {
+      prodTab.value = 'director'
+    }
+    return
+  }
+  if (directorLinkPending) {
+    directorLinkPending = false
+    notifyDirectorClosed()
+  }
+  if (prodTab.value === 'director') {
+    prodTab.value = 'videos'
+    panel.value = 'production'
+  }
 }
 
 const scriptStep = ref(storedPanel ? (storedPanel.scriptStep === 0 ? 0 : 1) : 0)
 // 旧版本地存储的 'storyboard' 子步骤已并入 'videos'（视频制作）
 const storedProdTab = storedPanel?.prodTab === 'storyboard' ? 'videos' : storedPanel?.prodTab
 // 旧的独立「音色」生产页已并入配音阶段的音色分配，历史本地状态迁移到该步骤。
-const legacyVoicePanel = Boolean(storedProdTab) && !['assets', 'videos'].includes(String(storedProdTab))
+const legacyVoicePanel = Boolean(storedProdTab) && !['assets', 'videos', 'director'].includes(String(storedProdTab))
+const restoreDirectorTab = storedProdTab === 'director'
 const prodTab = ref(['assets', 'videos'].includes(storedProdTab) ? storedProdTab : 'assets')
 // 配音阶段的 5 个子步骤（与 DubbingStage 内部顺序一致）
 const DUB_STEP_KEYS = ['lines', 'voices', 'generate', 'preview', 'export']
@@ -2246,6 +2311,8 @@ applyRoutePanelQuery()
 // ===== 助手页面适配器：分集 / 混音 / 交付作用域（智能体规格 §4.2、§4.3） =====
 const focusTrackId = ref(null)
 const focusExportId = ref(null)
+const focusStoryboardId = ref(null)
+const focusLineId = ref(null)
 const agentScope = computed(() => {
   const episodeId = Number(episode.value?.id) || 0
   if (!episodeId) return null
@@ -2268,15 +2335,30 @@ const agentScope = computed(() => {
       ...(focusTrackId.value != null ? { focus: { track_id: focusTrackId.value } } : {}),
     }
   }
+  if (panel.value === 'production' && prodTab.value === 'director' && directorMode.value !== 'off') {
+    return {
+      ...base,
+      kind: 'director',
+      ...(focusStoryboardId.value != null ? { focus: { storyboard_id: focusStoryboardId.value } } : {}),
+    }
+  }
   const stage = panel.value === 'script'
     ? 'script'
     : panel.value === 'production'
-      ? (prodTab.value === 'videos' ? 'videos' : 'assets')
+      ? (prodTab.value === 'videos' || prodTab.value === 'director' ? 'videos' : 'assets')
       : 'dubbing'
-  return { ...base, kind: 'episode', stage }
+  return {
+    ...base,
+    kind: 'episode',
+    stage,
+    ...(focusLineId.value != null && panel.value === 'dubbing' && dubStep.value === 0
+      ? { focus: { line_id: focusLineId.value } }
+      : {}),
+  }
 })
 function agentPrompts() {
   const kind = agentScope.value?.kind
+  if (kind === 'director') return [t('assistant.prompts.director1'), t('assistant.prompts.director2')]
   if (kind === 'mix') return [t('assistant.prompts.mix1'), t('assistant.prompts.mix2')]
   if (kind === 'delivery') return [t('assistant.prompts.delivery1'), t('assistant.prompts.delivery2')]
   return [t('assistant.prompts.episode1'), t('assistant.prompts.episode2')]
@@ -2287,7 +2369,8 @@ useAgentPageAdapter({
   scope: () => agentScope.value,
   entries: ['floating'],
   quickPrompts: agentPrompts,
-  supportedScopes: ['episode', 'mix', 'delivery'],
+  supportedScopes: ['episode', 'director', 'mix', 'delivery'],
+  refresh: () => refresh(),
 })
 
 // 消费助手建议的 open/focus_* 参数：只做导航与定位，不执行生产动作
@@ -2311,6 +2394,15 @@ function applyAgentQuery() {
   } else if (open === 'videos') {
     panel.value = 'production'
     prodTab.value = 'videos'
+  } else if (open === 'director') {
+    if (directorModeLoaded.value && directorMode.value === 'off') {
+      notifyDirectorClosed()
+    } else {
+      panel.value = 'production'
+      prodTab.value = 'director'
+      directorInitialView.value = q.view === '3d' ? '3d' : q.view === '2d' ? '2d' : undefined
+      if (!directorModeLoaded.value) directorLinkPending = true
+    }
   } else if (open === 'dubbing') {
     panel.value = 'dubbing'
     dubStep.value = 0
@@ -2325,12 +2417,20 @@ function applyAgentQuery() {
   focusTrackId.value = Number.isSafeInteger(trackId) && trackId > 0 ? trackId : null
   const exportId = Number(q.focus_export_id)
   focusExportId.value = Number.isSafeInteger(exportId) && exportId > 0 ? exportId : null
-  if (open || q.focus_track_id || q.focus_export_id) {
+  const storyboardId = Number(q.focus_storyboard_id)
+  focusStoryboardId.value = Number.isSafeInteger(storyboardId) && storyboardId > 0 ? storyboardId : null
+  const lineApplies = open === 'dubbing' || (!open && panel.value === 'dubbing' && dubStep.value === 0)
+  const lineId = Number(q.focus_line_id)
+  focusLineId.value = lineApplies && Number.isSafeInteger(lineId) && lineId > 0 ? lineId : null
+  if (open || q.focus_track_id || q.focus_export_id || q.focus_storyboard_id || q.focus_line_id) {
     const next = { ...route.query }
     delete next.open
     delete next.project_id
     delete next.focus_track_id
     delete next.focus_export_id
+    delete next.focus_storyboard_id
+    delete next.focus_line_id
+    delete next.view
     router.replace({ path: route.path, query: next, hash: route.hash })
   }
 }
@@ -3702,10 +3802,16 @@ const pendingAssetImageCount = computed(() => pendingCharacterImageCount.value +
 const assetTotalCount = computed(() => visualCharTotal.value + scenes.value.length + propItems.value.length)
 const assetReadyCount = computed(() => charImgCount.value + sceneImgCount.value + propImgCount.value)
 
-const prodTabDefs = computed(() => [
-  { id: 'assets', label: t('episode.prod.assets'), icon: FolderKanban, badge: assetTotalCount.value ? `${assetReadyCount.value}/${assetTotalCount.value}` : '' },
-  { id: 'videos', label: t('episode.prod.videos'), icon: Clapperboard, badge: sbs.value.length ? `${shotVidCount.value}/${sbs.value.length}` : '' },
-])
+const prodTabDefs = computed(() => {
+  const defs = [
+    { id: 'assets', label: t('episode.prod.assets'), icon: FolderKanban, badge: assetTotalCount.value ? `${assetReadyCount.value}/${assetTotalCount.value}` : '' },
+    { id: 'videos', label: t('episode.prod.videos'), icon: Clapperboard, badge: sbs.value.length ? `${shotVidCount.value}/${sbs.value.length}` : '' },
+  ]
+  if (directorMode.value !== 'off') {
+    defs.push({ id: 'director', label: t('director.tab.label'), icon: Compass, badge: '' })
+  }
+  return defs
+})
 
 const mainStageDefs = computed(() => ([
   { id: 'script', label: t('episode.stage.script'), desc: t('episode.stage.scriptDesc'), icon: FileText },
@@ -3730,6 +3836,9 @@ const sidebarSections = computed(() => ([
     items: [
       { key: 'prod:assets', label: t('episode.prod.assets'), desc: '', icon: Users },
       { key: 'prod:videos', label: t('episode.prod.videos'), desc: '', icon: Clapperboard },
+      ...(directorMode.value !== 'off'
+        ? [{ key: 'prod:director', label: t('director.tab.label'), desc: '', icon: Compass }]
+        : []),
     ],
   },
   {
@@ -5497,6 +5606,7 @@ onMounted(async () => {
   syncExtractStatus()
   loadPipelineRules()
   loadDubbingEnabled()
+  loadDirectorMode()
   if (isComfyVideoMode.value) {
     void loadComfyPreview()
     void loadComfyUiSession()
@@ -6010,6 +6120,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 /* ===== Main Content ===== */
 .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; min-height: 0; border-radius: var(--radius); }
 .content-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; min-height: 0; }
+.director-pane { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .stage-subnav {
   align-self: flex-start;
   margin: 4px 12px 0;

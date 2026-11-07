@@ -1230,29 +1230,93 @@
               </p>
             </template>
 
-            <!-- 2. 页面绑定（骨架） -->
+            <!-- 2. 页面绑定 -->
             <template v-else-if="agentCenterSection === 'pages'">
               <div class="settings-head agent-center-head">
                 <div class="skills-head-copy">
                   <h2 class="settings-title">{{ t('settings.agentCenter.pages.title') }}</h2>
                   <p class="settings-desc">{{ t('settings.agentCenter.pages.desc') }}</p>
                 </div>
-                <span class="tag ml-auto">{{ t('settings.agentCenter.pages.source') }}</span>
+                <button class="btn btn-primary btn-sm ml-auto" :disabled="agentBindingsSaving" @click="saveAgentBindings">
+                  <Loader2 v-if="agentBindingsSaving" :size="12" class="animate-spin" />
+                  {{ t('common.save') }}
+                </button>
               </div>
-              <div v-if="pageBindingRoutes.length" class="card agent-binding-card">
-                <div class="agent-binding-head">
-                  <span>{{ t('settings.agentCenter.pages.bindings') }}</span>
-                  <span class="skill-count-badge">{{ pageBindingRoutes.length }}</span>
-                </div>
-                <div class="agent-binding-list">
-                  <code v-for="route in pageBindingRoutes" :key="route" class="agent-binding-route">{{ route }}</code>
-                </div>
+              <p class="field-hint">{{ t('settings.agentCenter.pages.effectHint') }}</p>
+              <p v-if="agentBindingsNotice" class="field-hint gw-error">{{ agentBindingsNotice }}</p>
+              <div v-if="agentBindingGroups.length" class="agent-binding-groups">
+                <section v-for="group in agentBindingGroups" :key="group.route" class="card agent-binding-card">
+                  <div class="agent-binding-head">
+                    <code class="agent-binding-route">{{ group.route }}</code>
+                    <button class="btn btn-ghost btn-sm ml-auto" @click="addAgentBindingStage(group.route)">
+                      <Plus :size="12" /> {{ t('settings.agentCenter.pages.addStage') }}
+                    </button>
+                  </div>
+                  <div v-for="binding in group.items" :key="`${binding.route}-${binding.stage || 'default'}`" class="agent-binding-row">
+                    <div class="agent-binding-row-head">
+                      <select v-if="binding.stage" v-model="binding.stage" class="input agent-binding-stage">
+                        <option v-for="stage in agentStageOptions" :key="stage.value" :value="stage.value">{{ stage.label }}</option>
+                      </select>
+                      <span v-else class="tag">{{ t('settings.agentCenter.pages.routeDefault') }}</span>
+                      <span class="dim agent-binding-scope-note">{{ t('settings.agentCenter.pages.bindingScopeHint') }}</span>
+                      <button class="btn btn-ghost btn-icon btn-sm ml-auto" :title="t('common.delete')" @click="removeAgentBinding(binding)">
+                        <Trash2 :size="12" />
+                      </button>
+                    </div>
+                    <div class="agent-binding-grid">
+                      <div class="field">
+                        <span class="field-label">{{ t('settings.agentCenter.pages.entriesLabel') }}</span>
+                        <div class="agent-check-row">
+                          <label v-for="entry in agentEntryOptions" :key="entry.value" class="agent-check">
+                            <input v-model="binding.entries" type="checkbox" :value="entry.value" /> {{ entry.label }}
+                          </label>
+                        </div>
+                      </div>
+                      <label class="field">
+                        <span class="field-label">{{ t('settings.agentCenter.pages.defaultPresetLabel') }}</span>
+                        <select v-model="binding.defaultPreset" class="input">
+                          <option value="assistant">{{ t('assistant.preset.assistant') }}</option>
+                          <option value="director">{{ t('assistant.preset.director') }}</option>
+                        </select>
+                        <span v-if="defaultPresetBlocked(binding)" class="field-hint gw-error">{{ t('settings.agentCenter.pages.directorFallbackHint') }}</span>
+                      </label>
+                      <div class="field agent-binding-span-2">
+                        <span class="field-label">{{ t('settings.agentCenter.pages.quickPromptsLabel') }}</span>
+                        <textarea
+                          v-model="binding.quickPromptsText"
+                          class="textarea"
+                          rows="3"
+                          :placeholder="t('settings.agentCenter.pages.quickPromptsPlaceholder')"
+                        />
+                      </div>
+                      <div class="field">
+                        <label class="agent-check">
+                          <input v-model="binding.scopesLimited" type="checkbox" /> {{ t('settings.agentCenter.pages.limitScopes') }}
+                        </label>
+                        <div v-if="binding.scopesLimited" class="agent-check-row">
+                          <label v-for="scope in agentScopeOptions" :key="scope.value" class="agent-check">
+                            <input v-model="binding.allowedScopes" type="checkbox" :value="scope.value" /> {{ scope.label }}
+                          </label>
+                        </div>
+                      </div>
+                      <div class="field">
+                        <label class="agent-check">
+                          <input v-model="binding.toolsLimited" type="checkbox" /> {{ t('settings.agentCenter.pages.limitTools') }}
+                        </label>
+                        <div v-if="binding.toolsLimited" class="agent-check-row agent-tool-check-row">
+                          <label v-for="tool in AGENT_READ_TOOLS" :key="tool" class="agent-check">
+                            <input v-model="binding.allowedTools" type="checkbox" :value="tool" /> {{ tool }}
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
               </div>
               <div v-else class="card agent-empty">
-                <div class="agent-empty-title">{{ t('settings.agentCenter.futureTitle') }}</div>
-                <div class="agent-empty-desc">{{ t('settings.agentCenter.futureHint') }}</div>
+                <div class="agent-empty-title">{{ t('settings.agentCenter.pages.emptyTitle') }}</div>
+                <div class="agent-empty-desc">{{ t('settings.agentCenter.pages.emptyHint') }}</div>
               </div>
-              <p class="field-hint">{{ t('settings.agentCenter.futureNote') }}</p>
             </template>
 
             <!-- 3/4. 生产智能体与两个预设 -->
@@ -1411,8 +1475,80 @@
                 <span class="tag ml-auto">{{ t('settings.agentCenter.dataSourcePrefix') }}{{ agentCenterSectionSource }}</span>
               </div>
 
-              <div v-if="agentCenterSection === 'models'" class="card agent-model-card">
-                <template v-if="editLang === 'zh'">
+              <template v-if="agentCenterSection === 'tools'">
+                <div class="card agent-model-card">
+                  <div class="agent-binding-head">
+                    <Wrench :size="14" />
+                    {{ t('settings.agentCenter.tools.scopeMatrix') }}
+                  </div>
+                  <table class="agent-matrix">
+                    <thead>
+                      <tr>
+                        <th>{{ t('settings.agentCenter.tools.scopeColumn') }}</th>
+                        <th>{{ t('settings.agentCenter.tools.assistantColumn') }}</th>
+                        <th>{{ t('settings.agentCenter.tools.directorColumn') }}</th>
+                        <th>{{ t('settings.agentCenter.tools.toolsColumn') }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in agentScopeMatrix" :key="row.kind">
+                        <td>{{ row.label }}</td>
+                        <td>{{ row.assistant ? '✓' : '—' }}</td>
+                        <td>{{ row.director ? '✓' : '—' }}</td>
+                        <td>
+                          <span v-if="row.tools.length" class="agent-matrix-tools">
+                            <code v-for="tool in row.tools" :key="tool">{{ tool }}</code>
+                          </span>
+                          <span v-else class="dim">{{ t('settings.agentCenter.tools.noTools') }}</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p class="field-hint">{{ t('settings.agentCenter.tools.scopeHint') }}</p>
+                </div>
+
+                <div class="card agent-model-card">
+                  <div class="agent-binding-head">
+                    <span>{{ t('settings.agentCenter.tools.readTools') }}</span>
+                    <span class="skill-count-badge">{{ AGENT_READ_TOOLS.length }}</span>
+                  </div>
+                  <div class="agent-tool-chips">
+                    <code v-for="tool in AGENT_READ_TOOLS" :key="tool">{{ tool }}</code>
+                  </div>
+                  <p class="field-hint">{{ t('settings.agentCenter.tools.readToolsHint') }}</p>
+                </div>
+
+                <div class="card agent-model-card">
+                  <div class="agent-binding-head">{{ t('settings.agentCenter.tools.policyTitle') }}</div>
+                  <div class="field">
+                    <span class="field-label">{{ t('settings.agentCenter.tools.proposalsLabel') }}</span>
+                    <div class="agent-check-row">
+                      <label v-for="type in AGENT_PROPOSAL_TYPES" :key="type" class="agent-check">
+                        <input v-model="agentPolicy.proposals" type="checkbox" :value="type" /> {{ type }}
+                      </label>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <span class="field-label">{{ t('settings.agentCenter.tools.suggestionsLabel') }}</span>
+                    <div class="agent-check-row">
+                      <label v-for="action in AGENT_SUGGESTION_ACTIONS" :key="action" class="agent-check">
+                        <input v-model="agentPolicy.suggestions" type="checkbox" :value="action" /> {{ action }}
+                      </label>
+                    </div>
+                  </div>
+                  <p class="field-hint">{{ t('settings.agentCenter.tools.policyHint') }}</p>
+                  <div class="agent-card-foot">
+                    <button class="btn btn-primary btn-sm ml-auto" :disabled="agentPolicySaving" @click="saveAgentPolicy">
+                      <Loader2 v-if="agentPolicySaving" :size="12" class="animate-spin" />
+                      {{ t('common.save') }}
+                    </button>
+                  </div>
+                </div>
+              </template>
+
+              <div v-else-if="agentCenterSection === 'models'" class="card agent-model-card">
+                <div class="agent-binding-head">{{ t('settings.agentCenter.models.presetTitle') }}</div>
+                <div class="agent-binding-grid">
                   <label class="field">
                     <span class="field-label">{{ t('settings.agentCenter.models.assistantModel') }}</span>
                     <input v-model="agentModels.model" class="input" :placeholder="t('settings.agentCenter.models.modelPlaceholder')" />
@@ -1421,19 +1557,43 @@
                     <span class="field-label">{{ t('settings.agentCenter.models.directorModel') }}</span>
                     <input v-model="agentModels.directorModel" class="input" :placeholder="t('settings.agentCenter.models.modelPlaceholder')" />
                   </label>
-                  <p class="field-hint">{{ t('settings.agentCenter.models.modelHint') }}</p>
-                  <p class="field-hint">{{ agentBudgetHint }}</p>
-                  <div class="agent-card-foot">
-                    <span v-if="agentModelsSaved" class="tag tag-success"><Check :size="10" /> {{ t('common.saved') }}</span>
-                    <button class="btn btn-primary btn-sm ml-auto" :disabled="agentModelsSaving" @click="saveAgentModels">
-                      <Loader2 v-if="agentModelsSaving" :size="12" class="animate-spin" />
-                      {{ t('common.save') }}
-                    </button>
-                  </div>
-                </template>
-                <div v-else class="agent-empty">
-                  <div class="agent-empty-title">{{ t('settings.agentCenter.models.nonZhTitle') }}</div>
-                  <div class="agent-empty-desc">{{ t('settings.agentCenter.models.nonZhHint') }}</div>
+                </div>
+                <p class="field-hint">{{ t('settings.agentCenter.models.modelHint') }}</p>
+
+                <div class="agent-binding-head">{{ t('settings.agentCenter.models.budgetTitle') }}</div>
+                <div class="agent-binding-grid">
+                  <label class="field">
+                    <span class="field-label">{{ t('settings.agentCenter.models.maxSteps') }}</span>
+                    <input v-model.number="agentModels.maxSteps" class="input" type="number" min="4" max="16" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">{{ t('settings.agentCenter.models.timeoutSec') }}</span>
+                    <input v-model.number="agentModels.timeoutSec" class="input" type="number" min="30" max="600" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">{{ t('settings.agentCenter.models.contextMaxChars') }}</span>
+                    <input v-model.number="agentModels.contextMaxChars" class="input" type="number" min="4000" max="32000" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">{{ t('settings.agentCenter.models.messageMaxChars') }}</span>
+                    <input v-model.number="agentModels.messageMaxChars" class="input" type="number" min="500" max="12000" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">{{ t('settings.agentCenter.models.toolsMaxResultChars') }}</span>
+                    <input v-model.number="agentModels.toolsMaxResultChars" class="input" type="number" min="1000" max="12000" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">{{ t('settings.agentCenter.models.historyMaxMessages') }}</span>
+                    <input v-model.number="agentModels.historyMaxMessages" class="input" type="number" min="5" max="50" />
+                  </label>
+                </div>
+                <p class="field-hint">{{ t('settings.agentCenter.models.rangeHint') }}</p>
+                <div class="agent-card-foot">
+                  <span v-if="agentModelsSaved" class="tag tag-success"><Check :size="10" /> {{ t('common.saved') }}</span>
+                  <button class="btn btn-primary btn-sm ml-auto" :disabled="agentModelsSaving" @click="saveAgentModels">
+                    <Loader2 v-if="agentModelsSaving" :size="12" class="animate-spin" />
+                    {{ t('common.save') }}
+                  </button>
                 </div>
               </div>
 
@@ -1441,7 +1601,7 @@
                 <div class="agent-empty-title">{{ t('settings.agentCenter.futureTitle') }}</div>
                 <div class="agent-empty-desc">{{ t('settings.agentCenter.futureHint') }}</div>
               </div>
-              <p v-if="agentCenterSection !== 'models'" class="field-hint">{{ t('settings.agentCenter.futureNote') }}</p>
+              <p v-if="agentCenterSection === 'sessions' || agentCenterSection === 'diagnostics'" class="field-hint">{{ t('settings.agentCenter.futureNote') }}</p>
             </template>
           </div>
         </div>
@@ -2006,6 +2166,15 @@ import { useI18n } from 'vue-i18n'
 import { aiConfigAPI, promptAPI, skillsAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, bgmAPI } from '~/composables/useApi'
 import { useDesktopBridge } from '~/composables/useDesktopBridge'
 import { useAgentSettings, applyAgentSettings } from '~/composables/useAgentSettings'
+import {
+  AGENT_PAGE_ENTRIES,
+  AGENT_PAGE_STAGES,
+  AGENT_PROPOSAL_TYPES,
+  AGENT_READ_TOOLS,
+  AGENT_SCOPES,
+  AGENT_SUGGESTION_ACTIONS,
+  canUseDirectorDefaultPreset,
+} from '~/utils/agent-page-bindings'
 import { useMigrateState } from '~/composables/useMigrateState'
 import { useTheme } from '~/composables/useTheme'
 import { providerIconUrl } from '~/composables/useProviderIcon'
@@ -2671,7 +2840,22 @@ const agentModelsSaved = ref(false)
 const agentForcedFlags = ref([])
 const agentForcedKeys = ref([])
 const agentToggles = reactive({ dock: true, director: true, stream: true, proposals: true, suggestions: true, autoDetect: true })
-const agentModels = reactive({ model: '', directorModel: '' })
+const agentModels = reactive({
+  model: '',
+  directorModel: '',
+  maxSteps: 8,
+  timeoutSec: 120,
+  contextMaxChars: 12000,
+  messageMaxChars: 4000,
+  toolsMaxResultChars: 6000,
+  historyMaxMessages: 20,
+})
+const agentBindings = ref([])
+const agentBindingsSaving = ref(false)
+const agentBindingsSaved = ref(false)
+const agentBindingsNotice = ref('')
+const agentPolicy = reactive({ proposals: [], suggestions: [] })
+const agentPolicySaving = ref(false)
 
 const agentToggleDefs = computed(() => [
   { key: 'dock', label: t('settings.agentCenter.overview.switches.dock'), hint: t('settings.agentCenter.overview.switches.dockHint') },
@@ -2681,16 +2865,124 @@ const agentToggleDefs = computed(() => [
   { key: 'suggestions', label: t('settings.agentCenter.overview.switches.suggestions'), hint: t('settings.agentCenter.overview.switches.suggestionsHint') },
   { key: 'autoDetect', label: t('settings.agentCenter.overview.switches.autoDetect'), hint: t('settings.agentCenter.overview.switches.autoDetectHint') },
 ])
-const pageBindingRoutes = computed(() =>
-  (agentSettingsForm.value?.pages?.bindings ?? []).map((binding) =>
-    binding.stage ? `${binding.route} · ${binding.stage}` : binding.route))
-const agentBudgetHint = computed(() => t('settings.agentCenter.models.budgetHint', {
-  context: agentSettingsForm.value?.context?.maxChars ?? 12000,
-  message: agentSettingsForm.value?.message?.maxChars ?? 4000,
-  tools: agentSettingsForm.value?.tools?.maxResultChars ?? 6000,
-  history: agentSettingsForm.value?.history?.maxMessages ?? 20,
-  retention: agentSettingsForm.value?.session?.retentionDays ?? 30,
-}))
+
+const AGENT_SCOPE_LABEL_KEYS = {
+  home: 'home',
+  'novel-library': 'novelLibrary',
+  novel: 'novel',
+  drama: 'drama',
+  episode: 'episode',
+  director: 'director',
+  edit: 'edit',
+  mix: 'mix',
+  delivery: 'delivery',
+}
+const AGENT_SCOPE_TOOLS = {
+  home: [],
+  'novel-library': ['read_novel_list'],
+  novel: ['read_novel_context', 'read_novel_chapters', 'read_novel_chapter_content', 'read_novel_atlas'],
+  drama: [],
+  episode: [],
+  director: ['read_director_plan', 'read_episode_context', 'read_assets', 'read_asset_detail', 'read_storyboards', 'read_storyboard_detail'],
+  edit: ['read_edit_state', 'read_edit_clips'],
+  mix: ['read_mix_state', 'read_mix_tracks'],
+  delivery: ['read_export_history'],
+}
+const agentScopeMatrix = computed(() => AGENT_SCOPES.map(kind => ({
+  kind,
+  label: t(`assistant.scopeKinds.${AGENT_SCOPE_LABEL_KEYS[kind]}`),
+  assistant: true,
+  director: kind === 'director',
+  tools: AGENT_SCOPE_TOOLS[kind] ?? [],
+})))
+const agentEntryOptions = computed(() => AGENT_PAGE_ENTRIES.map(entry => ({
+  value: entry,
+  label: t(`settings.agentCenter.pages.entries.${entry}`),
+})))
+const agentStageOptions = computed(() => AGENT_PAGE_STAGES.map(stage => ({
+  value: stage,
+  label: t(`settings.agentCenter.pages.stages.${stage}`),
+})))
+const agentScopeOptions = computed(() => AGENT_SCOPES.map(kind => ({
+  value: kind,
+  label: t(`assistant.scopeKinds.${AGENT_SCOPE_LABEL_KEYS[kind]}`),
+})))
+
+const agentBindingGroups = computed(() => {
+  const groups = []
+  const index = new Map()
+  for (const binding of agentBindings.value) {
+    if (!index.has(binding.route)) {
+      const group = { route: binding.route, items: [] }
+      index.set(binding.route, group)
+      groups.push(group)
+    }
+    index.get(binding.route).items.push(binding)
+  }
+  return groups
+})
+
+function cloneAgentBindings(bindings) {
+  return (bindings ?? []).map(binding => ({
+    route: binding.route,
+    stage: binding.stage || '',
+    entries: [...(binding.entries ?? [])],
+    defaultPreset: binding.defaultPreset === 'director' ? 'director' : 'assistant',
+    quickPromptsText: (binding.quickPrompts ?? []).join('\n'),
+    scopesLimited: Array.isArray(binding.allowedScopes),
+    allowedScopes: [...(binding.allowedScopes ?? AGENT_SCOPES)],
+    toolsLimited: Array.isArray(binding.allowedTools),
+    allowedTools: [...(binding.allowedTools ?? AGENT_READ_TOOLS)],
+  }))
+}
+
+function parseQuickPrompts(value) {
+  return String(value || '').split('\n').map(item => item.trim()).filter(Boolean).slice(0, 6)
+}
+
+function defaultPresetBlocked(binding) {
+  return binding.defaultPreset === 'director' && !canUseDirectorDefaultPreset(
+    binding.route,
+    binding.stage || undefined,
+    binding.scopesLimited ? binding.allowedScopes : undefined,
+  )
+}
+
+function addAgentBindingStage(route) {
+  const used = new Set(agentBindings.value.filter(binding => binding.route === route).map(binding => binding.stage))
+  const stage = AGENT_PAGE_STAGES.find(item => !used.has(item))
+  if (!stage) {
+    toast.warning(t('settings.agentCenter.pages.stageExhausted'))
+    return
+  }
+  agentBindings.value.push({
+    route,
+    stage,
+    entries: ['stage'],
+    defaultPreset: 'assistant',
+    quickPromptsText: '',
+    scopesLimited: false,
+    allowedScopes: [...AGENT_SCOPES],
+    toolsLimited: false,
+    allowedTools: [...AGENT_READ_TOOLS],
+  })
+}
+
+function removeAgentBinding(target) {
+  agentBindings.value = agentBindings.value.filter(binding => binding !== target)
+}
+
+function serializeAgentBindings() {
+  return agentBindings.value.map(binding => ({
+    route: binding.route,
+    ...(binding.stage ? { stage: binding.stage } : {}),
+    entries: [...binding.entries],
+    defaultPreset: binding.defaultPreset,
+    quickPrompts: parseQuickPrompts(binding.quickPromptsText),
+    ...(binding.scopesLimited ? { allowedScopes: [...binding.allowedScopes] } : {}),
+    ...(binding.toolsLimited ? { allowedTools: [...binding.allowedTools] } : {}),
+  }))
+}
 
 function applyAgentToggles(settings) {
   agentToggles.dock = settings.dock.enabled !== false
@@ -2706,7 +2998,17 @@ async function loadAgentCenter(force = false) {
   if (!settings) return
   agentSettingsForm.value = settings
   agentModels.model = settings.model || ''
-  agentModels.directorModel = settings.director.model || ''
+  agentModels.directorModel = settings.director?.model || ''
+  agentModels.maxSteps = settings.maxSteps ?? 8
+  agentModels.timeoutSec = settings.timeoutSec ?? 120
+  agentModels.contextMaxChars = settings.context?.maxChars ?? 12000
+  agentModels.messageMaxChars = settings.message?.maxChars ?? 4000
+  agentModels.toolsMaxResultChars = settings.tools?.maxResultChars ?? 6000
+  agentModels.historyMaxMessages = settings.history?.maxMessages ?? 20
+  agentBindings.value = cloneAgentBindings(settings.pages?.bindings)
+  agentBindingsNotice.value = ''
+  agentPolicy.proposals = [...(settings.proposals?.types ?? [])]
+  agentPolicy.suggestions = [...(settings.suggestions?.actions ?? [])]
   applyAgentToggles(settings)
 }
 
@@ -2749,16 +3051,101 @@ async function saveAgentToggles() {
   }
 }
 
+async function saveAgentBindings() {
+  // entries 为空表示隐藏入口；只有收窄后的作用域/工具列表不允许为空。
+  const invalid = agentBindings.value.find(binding => (binding.scopesLimited && !binding.allowedScopes.length)
+    || (binding.toolsLimited && !binding.allowedTools.length))
+  if (invalid) {
+    toast.warning(t('settings.agentCenter.pages.invalidBinding'))
+    return
+  }
+  const keys = agentBindings.value.map(binding => `${binding.route}|${binding.stage || ''}`)
+  if (new Set(keys).size !== keys.length) {
+    toast.warning(t('settings.agentCenter.pages.duplicateBinding'))
+    return
+  }
+  const requestedDirector = agentBindings.value
+    .filter(binding => binding.defaultPreset === 'director')
+    .map(binding => `${binding.route}|${binding.stage || ''}`)
+  agentBindingsSaving.value = true
+  agentBindingsSaved.value = false
+  agentBindingsNotice.value = ''
+  try {
+    const res = await settingsAPI.saveAgent({ pages: { version: 1, bindings: serializeAgentBindings() } })
+    applyAgentSettings(res.settings)
+    agentSettingsForm.value = res.settings
+    agentBindings.value = cloneAgentBindings(res.settings.pages?.bindings)
+    const returned = new Map(agentBindings.value.map(binding => [`${binding.route}|${binding.stage || ''}`, binding.defaultPreset]))
+    if (requestedDirector.some(key => returned.get(key) === 'assistant')) {
+      agentBindingsNotice.value = t('settings.agentCenter.pages.directorFallback')
+    }
+    agentBindingsSaved.value = true
+    toast.success(t('settings.agentCenter.pages.saved'))
+    setTimeout(() => { agentBindingsSaved.value = false }, 3000)
+  } catch (e) {
+    toastError(e)
+  } finally {
+    agentBindingsSaving.value = false
+  }
+}
+
+async function saveAgentPolicy() {
+  agentPolicySaving.value = true
+  try {
+    const res = await settingsAPI.saveAgent({
+      proposals: { types: agentPolicy.proposals.filter(type => AGENT_PROPOSAL_TYPES.includes(type)) },
+      suggestions: { actions: agentPolicy.suggestions.filter(action => AGENT_SUGGESTION_ACTIONS.includes(action)) },
+    })
+    applyAgentSettings(res.settings)
+    agentSettingsForm.value = res.settings
+    agentPolicy.proposals = [...(res.settings.proposals?.types ?? [])]
+    agentPolicy.suggestions = [...(res.settings.suggestions?.actions ?? [])]
+    toast.success(t('settings.agentCenter.tools.saved'))
+  } catch (e) {
+    toastError(e)
+  } finally {
+    agentPolicySaving.value = false
+  }
+}
+
 async function saveAgentModels() {
-  if (editLang.value !== 'zh') return
+  const maxSteps = Number(agentModels.maxSteps)
+  const timeoutSec = Number(agentModels.timeoutSec)
+  const contextMaxChars = Number(agentModels.contextMaxChars)
+  const messageMaxChars = Number(agentModels.messageMaxChars)
+  const toolsMaxResultChars = Number(agentModels.toolsMaxResultChars)
+  const historyMaxMessages = Number(agentModels.historyMaxMessages)
+  if (![maxSteps, timeoutSec, contextMaxChars, messageMaxChars, toolsMaxResultChars, historyMaxMessages].every(Number.isFinite)) {
+    toast.warning(t('settings.agentCenter.models.numericInvalid'))
+    return
+  }
+  if (messageMaxChars > contextMaxChars) {
+    toast.warning(t('settings.agentCenter.models.messageOverContext'))
+    return
+  }
   agentModelsSaving.value = true
   agentModelsSaved.value = false
   try {
-    const res = await settingsAPI.saveAgent({ model: agentModels.model, director: { model: agentModels.directorModel } })
+    const res = await settingsAPI.saveAgent({
+      model: agentModels.model,
+      director: { model: agentModels.directorModel },
+      maxSteps,
+      timeoutSec,
+      context: { maxChars: contextMaxChars },
+      message: { maxChars: messageMaxChars },
+      tools: { maxResultChars: toolsMaxResultChars },
+      history: { maxMessages: historyMaxMessages },
+    })
     applyAgentSettings(res.settings)
     agentSettingsForm.value = res.settings
     agentModels.model = res.settings.model || ''
-    agentModels.directorModel = res.settings.director.model || ''
+    agentModels.directorModel = res.settings.director?.model || ''
+    agentModels.maxSteps = res.settings.maxSteps
+    agentModels.timeoutSec = res.settings.timeoutSec
+    agentModels.contextMaxChars = res.settings.context.maxChars
+    agentModels.messageMaxChars = res.settings.message.maxChars
+    agentModels.toolsMaxResultChars = res.settings.tools.maxResultChars
+    agentModels.historyMaxMessages = res.settings.history.maxMessages
     agentModelsSaved.value = true
     toast.success(t('settings.agentCenter.models.saved'))
     setTimeout(() => { agentModelsSaved.value = false }, 3000)
@@ -4309,5 +4696,27 @@ onBeforeUnmount(stopUsagePoll)
   font-family: var(--font-mono); font-size: 11px; padding: 4px 8px;
   border-radius: 6px; background: var(--bg-sunken); color: var(--text-2);
 }
+.agent-binding-groups { display: flex; flex-direction: column; gap: 12px; }
+.agent-binding-row { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.agent-binding-row:first-of-type { border-top: 0; padding-top: 0; }
+.agent-binding-row-head { display: flex; align-items: center; gap: 8px; }
+.agent-binding-stage { width: 140px; }
+.agent-binding-scope-note { font-size: 11px; }
+.agent-binding-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.agent-binding-span-2 { grid-column: 1 / -1; }
+.agent-check-row { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 6px; }
+.agent-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-1); cursor: pointer; }
+.agent-check input { accent-color: var(--accent); }
+.agent-tool-check-row { max-height: 220px; overflow: auto; padding-right: 4px; }
+.agent-tool-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.agent-tool-chips code, .agent-matrix-tools code {
+  font-family: var(--font-mono); font-size: 11px; padding: 3px 7px;
+  border-radius: 5px; background: var(--bg-sunken); color: var(--text-2);
+}
+.agent-matrix { width: 100%; border-collapse: collapse; font-size: 12px; }
+.agent-matrix th, .agent-matrix td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.agent-matrix th { color: var(--text-3); font-weight: 600; }
+.agent-matrix td:first-child { color: var(--text-0); font-weight: 600; white-space: nowrap; }
+.agent-matrix-tools { display: flex; flex-wrap: wrap; gap: 4px; }
 .agent-model-card { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 </style>

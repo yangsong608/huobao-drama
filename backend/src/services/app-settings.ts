@@ -1092,6 +1092,8 @@ export const AGENT_SUGGESTION_ACTIONS = ['agent.run', 'page.open'] as const
 export const AGENT_PAGE_ENTRIES = ['floating', 'topbar', 'stage'] as const
 export const AGENT_PAGE_STAGES = ['script', 'assets', 'videos', 'dubbing', 'mix', 'delivery'] as const
 export const AGENT_PRESETS = ['assistant', 'director'] as const
+export const AGENT_EPISODE_ROUTE = '/drama/:id/episode/:episodeNumber'
+export const AGENT_EDIT_ROUTE = '/drama/:id/episode/:episodeNumber/edit'
 /** 只读工具白名单（智能体规格 §7.1） */
 export const AGENT_READ_TOOLS = [
   'read_project_list',
@@ -1158,10 +1160,10 @@ export const AGENT_PAGES_DEFAULTS: AgentPagesConfig = {
     { route: '/novels', entries: ['floating'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['novel-library'] },
     { route: '/novels/:id', entries: ['topbar', 'floating'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['novel'] },
     { route: '/drama/:id', entries: ['topbar', 'floating'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['drama'] },
-    { route: '/drama/:id/episode/:episodeNumber', entries: ['floating', 'stage'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['episode'] },
-    { route: '/drama/:id/episode/:episodeNumber', stage: 'mix', entries: ['stage'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['mix'] },
-    { route: '/drama/:id/episode/:episodeNumber', stage: 'delivery', entries: ['stage'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['delivery'] },
-    { route: '/drama/:id/episode/:episodeNumber/edit', entries: ['topbar', 'floating'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['edit'] },
+    { route: AGENT_EPISODE_ROUTE, entries: ['floating', 'stage'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['episode'] },
+    { route: AGENT_EPISODE_ROUTE, stage: 'mix', entries: ['stage'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['mix'] },
+    { route: AGENT_EPISODE_ROUTE, stage: 'delivery', entries: ['stage'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['delivery'] },
+    { route: AGENT_EDIT_ROUTE, entries: ['topbar', 'floating'], defaultPreset: 'assistant', quickPrompts: [], allowedScopes: ['edit'] },
   ],
 }
 
@@ -1202,7 +1204,67 @@ function sanitizeAllowedList(value: unknown, min: 1): string[] | null | undefine
   return filtered.length === value.length && filtered.length > 0 ? [...new Set(filtered)] : null
 }
 
-function sanitizeAgentPages(raw: unknown): AgentPagesConfig {
+/** 作用域对应的页面路由（用于按页面绑定收窄作用域与只读工具） */
+export function agentPageRouteForScope(scope: { kind: (typeof AGENT_SCOPES)[number]; stage?: string }): string | null {
+  switch (scope.kind) {
+    case 'home': return '/'
+    case 'novel-library': return '/novels'
+    case 'novel': return '/novels/:id'
+    case 'drama': return '/drama/:id'
+    case 'edit': return AGENT_EDIT_ROUTE
+    case 'episode':
+    case 'director':
+    case 'mix':
+    case 'delivery':
+      return AGENT_EPISODE_ROUTE
+    default:
+      return null
+  }
+}
+
+function bindingStageForScope(scope: { kind: (typeof AGENT_SCOPES)[number]; stage?: string }): string | undefined {
+  if (scope.kind === 'episode') return scope.stage
+  if (scope.kind === 'mix' || scope.kind === 'delivery') return scope.kind
+  return undefined
+}
+
+/** 按最具体的 (route, stage) 命中；阶段未配置时继承路由默认绑定 */
+export function resolveAgentPageBinding(
+  scope: { kind: (typeof AGENT_SCOPES)[number]; stage?: string },
+  pages: AgentPagesConfig = getAgentSettings().pages,
+): AgentPageBinding | undefined {
+  const route = agentPageRouteForScope(scope)
+  if (!route) return undefined
+  const stage = bindingStageForScope(scope)
+  if (stage) {
+    const exact = pages.bindings.find(b => b.route === route && b.stage === stage)
+    if (exact) return exact
+  }
+  return pages.bindings.find(b => b.route === route && b.stage === undefined)
+}
+
+/** defaultPreset=director 只允许分集路由的默认绑定，且该绑定允许 director 作用域 */
+export function canUseDirectorDefaultPreset(
+  route: string,
+  stage: string | undefined,
+  allowedScopes: readonly string[] | undefined,
+): boolean {
+  if (route !== AGENT_EPISODE_ROUTE || stage !== undefined) return false
+  return allowedScopes === undefined || allowedScopes.includes('director')
+}
+
+export function agentPageAllowsScope(
+  scope: { kind: (typeof AGENT_SCOPES)[number]; stage?: string },
+  pages: AgentPagesConfig = getAgentSettings().pages,
+): boolean {
+  const binding = resolveAgentPageBinding(scope, pages)
+  if (!binding?.allowedScopes) return true
+  // 导演台页签由适配器按 panel=director 判定，不写入 stage 绑定；分集路由始终允许导演作用域
+  if (scope.kind === 'director') return binding.route === AGENT_EPISODE_ROUTE
+  return (binding.allowedScopes as readonly string[]).includes(scope.kind)
+}
+
+export function sanitizeAgentPages(raw: unknown): AgentPagesConfig {
   if (raw === undefined || raw === null) return AGENT_PAGES_DEFAULTS
   const input = raw as Record<string, unknown>
   if (!input || typeof input !== 'object' || Array.isArray(input)) return AGENT_PAGES_DEFAULTS
@@ -1225,7 +1287,8 @@ function sanitizeAgentPages(raw: unknown): AgentPagesConfig {
     if (seen.has(key)) return AGENT_PAGES_DEFAULTS
     seen.add(key)
     const entries = whitelistSubset(b.entries, AGENT_PAGE_ENTRIES)
-    if (!entries || entries.length === 0) return AGENT_PAGES_DEFAULTS
+    // 空数组表示隐藏入口；但非数组、未知值或重复值视为非法结构。
+    if (!entries || !Array.isArray(b.entries) || entries.length !== b.entries.length) return AGENT_PAGES_DEFAULTS
     const preset = foundationEnum(b.defaultPreset, AGENT_PRESETS, 'assistant')
     if (typeof b.defaultPreset === 'string' && !(AGENT_PRESETS as readonly string[]).includes(b.defaultPreset)) {
       return AGENT_PAGES_DEFAULTS
@@ -1245,11 +1308,15 @@ function sanitizeAgentPages(raw: unknown): AgentPagesConfig {
     if (allowedTools && !allowedTools.every(t => (AGENT_READ_TOOLS as readonly string[]).includes(t))) {
       return AGENT_PAGES_DEFAULTS
     }
+    // 导演预设只属于导演台页签（分集路由默认绑定且允许 director 作用域）；其余回退 assistant
+    const defaultPreset = preset === 'director' && !canUseDirectorDefaultPreset(b.route, stage, allowedScopes)
+      ? 'assistant'
+      : preset
     bindings.push({
       route: b.route,
       ...(stage ? { stage } : {}),
       entries: entries as AgentPageBinding['entries'],
-      defaultPreset: preset,
+      defaultPreset,
       quickPrompts,
       ...(allowedScopes ? { allowedScopes: allowedScopes as AgentPageBinding['allowedScopes'] } : {}),
       ...(allowedTools ? { allowedTools } : {}),

@@ -250,7 +250,13 @@ function clearSelection() {
   selectedIds.value = []
   emit('selectionChange', [])
 }
-defineExpose({ clearSelection })
+function scrollToLine(id: number) {
+  if (!viewport.value) return
+  const index = filteredLines.value.findIndex(line => line.id === id)
+  if (index < 0) return
+  viewport.value.scrollTop = Math.max(0, index * ROW_HEIGHT - ROW_HEIGHT)
+}
+defineExpose({ clearSelection, scrollToLine })
 
 function voiceById(id: number | null | undefined): VoiceProfile | null {
   if (!id) return null

@@ -57,7 +57,7 @@
             type="button"
             class="btn btn-ghost btn-sm"
             :title="t('assistant.title')"
-            @click="openAgentDock"
+            @click="openAgentDock()"
           >
             <Sparkles :size="14" :stroke-width="1.8" />
             {{ t('assistant.trigger') }}
