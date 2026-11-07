@@ -107,7 +107,7 @@
                     :min="DURATION_RANGES[category][0]"
                     :max="DURATION_RANGES[category][1]"
                     step="1"
-                    :disabled="!preview"
+                    :disabled="starting"
                   />
                   <i>s</i>
                 </span>

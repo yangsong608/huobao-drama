@@ -2663,7 +2663,10 @@
       "title": "声音素材库（可选）",
       "intro": "从原声中提取人声、伴奏等声音素材，方便单独调整或替换。提取不会自动改变当前混音；需要使用时，把素材放入时间线。插入声音时，如果没有合适的可用轨道，会自动新建一条轨道。",
       "extract": "提取声音素材",
-      "importAudio": "导入音频"
+      "importAudio": "导入音频",
+      "prevPage": "上一页",
+      "nextPage": "下一页",
+      "pageInfo": "第 {x} / {y} 页"
     },
     "advanced": {
       "title": "高级"
@@ -2847,6 +2850,7 @@
     "copyToTrack": "复制到轨道",
     "copyToTrackMenuTitle": "选择目标轨道（副本粘贴在相同时间点）",
     "copyToTrackEmpty": "暂无可选目标轨道，请先添加一条普通轨道",
+    "contextCopyTo": "复制到「{name}」",
     "deleteClip": "删除片段",
     "locateMissing": "该片段未关联台词或时间轴中没有对应位置",
     "trackSection": "轨道",
@@ -2953,6 +2957,11 @@
     "restoreLine": "恢复",
     "excludedLineEmpty": "（无文本）",
     "assetKindImport": "导入",
+    "assetKindSoundscape": "生成素材",
+    "assetKindSoundscapeAmbience": "生成·环境声",
+    "assetKindSoundscapeSfx": "生成·音效",
+    "assetKindSoundscapeCrowd": "生成·群众声",
+    "assetKindSoundscapeBgm": "生成·配乐",
     "importDone": "已导入音频：{name}",
     "importFailed": "导入音频失败"
   },

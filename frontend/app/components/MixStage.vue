@@ -184,6 +184,8 @@
           @begin-change="beginChange"
           @end-change="endChange"
           @locate="onLocateClip"
+          @context-clip="onContextClip"
+          @context-track="onContextTrack"
           @zoom="setZoom"
           @scroll-top="scrollTop = $event"
         />
@@ -393,6 +395,13 @@
       @confirm="runConfirm"
     />
 
+    <ContextMenu
+      v-model:show="ctxMenu.show"
+      :x="ctxMenu.x"
+      :y="ctxMenu.y"
+      :items="ctxMenu.items"
+    />
+
     <MixSoundscapeDialog
       :open="soundscapeOpen"
       :episode-id="episodeId"
@@ -467,6 +476,7 @@ import { useExportSession } from '~/composables/useExportSession'
 import { useMixPlayback } from '~/composables/useMixPlayback'
 import { useMixStage, type StageClip, type StageTrack } from '~/composables/useMixStage'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
+import ContextMenu, { type MenuItem } from '~/components/ContextMenu.vue'
 import AppMenu from '~/components/AppMenu.vue'
 import AppMenuItem from '~/components/AppMenuItem.vue'
 import FilmPicker from '~/components/FilmPicker.vue'
@@ -1094,6 +1104,56 @@ function onDuplicateClip(clip: StageClip) {
 function onDuplicateClipTo(clip: StageClip, track: StageTrack) {
   const copy = duplicateClip(clip, track)
   if (copy) selectClip(track, copy)
+}
+
+const ctxMenu = ref<{ show: boolean; x: number; y: number; items: MenuItem[] }>({ show: false, x: 0, y: 0, items: [] })
+
+function openContextMenu(x: number, y: number, items: MenuItem[]) {
+  if (!items.length) return
+  ctxMenu.value = { show: true, x, y, items }
+}
+function onContextClip(track: StageTrack, clip: StageClip, x: number, y: number) {
+  const items: MenuItem[] = []
+  if (clip.lineId) {
+    items.push({ key: 'locate', label: t('mix.locateLine'), action: () => onLocateClip(clip) })
+    items.push({ key: 'regen', label: t('mix.regenerateLine'), action: () => emit('regenerate-line', clip.lineId!) })
+  }
+  if (!track.virtual) {
+    items.push(
+      { key: 'split', label: t('mix.splitClip'), action: () => onSplitClip(clip) },
+      { key: 'dup', label: t('mix.duplicateClip'), action: () => onDuplicateClip(clip) },
+    )
+    const targets = tracks.value.filter(item => !item.virtual && !item.locked && !item.hidden && item._uid !== track._uid)
+    if (targets.length) {
+      items.push({ key: 'copy-sep', label: '', separator: true })
+      for (const target of targets) {
+        items.push({
+          key: `copy-${target._uid}`,
+          label: t('mix.contextCopyTo', { name: target.name }),
+          action: () => onDuplicateClipTo(clip, target),
+        })
+      }
+    } else {
+      items.push({ key: 'copy-none', label: t('mix.copyToTrack'), disabled: true, reason: t('mix.copyToTrackEmpty') })
+    }
+    items.push(
+      { key: 'del-sep', label: '', separator: true },
+      { key: 'del', label: t('mix.deleteClip'), danger: true, action: () => removeClip(clip) },
+    )
+  }
+  openContextMenu(x, y, items)
+}
+function onContextTrack(track: StageTrack, x: number, y: number) {
+  const items: MenuItem[] = [
+    { key: 'mute', label: t('mix.trackMute'), action: () => onTrackUpdate(track, { muted: !track.muted }) },
+    { key: 'solo', label: t('mix.trackSolo'), action: () => onTrackUpdate(track, { solo: !track.solo }) },
+  ]
+  if (!track.virtual) {
+    items.push({ key: 'lock', label: t('mix.trackLock'), action: () => onTrackUpdate(track, { locked: !track.locked }) })
+    items.push({ key: 'remove-sep', label: '', separator: true })
+    items.push({ key: 'remove', label: t('mix.trackRemove'), danger: true, action: () => requestRemoveTrack(track) })
+  }
+  openContextMenu(x, y, items)
 }
 function splitSelected() {
   if (selectedClip.value) onSplitClip(selectedClip.value)

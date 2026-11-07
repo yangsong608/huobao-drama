@@ -2663,7 +2663,10 @@
       "title": "音声素材ライブラリ（任意）",
       "intro": "原音からボーカルや伴奏などの音声素材を取り出し、個別に調整や差し替えができます。抽出しても現在のミックスは自動では変わりません。使うときは素材をタイムラインに置いてください。音を挿入する際、利用できる適切なトラックがない場合は自動的に新しいトラックを作成します。",
       "extract": "音声素材を抽出",
-      "importAudio": "オーディオを読み込む"
+      "importAudio": "オーディオを読み込む",
+      "prevPage": "前へ",
+      "nextPage": "次へ",
+      "pageInfo": "{x} / {y} ページ"
     },
     "advanced": {
       "title": "詳細"
@@ -2832,6 +2835,7 @@
     "copyToTrack": "トラックへコピー",
     "copyToTrackMenuTitle": "コピー先のトラックを選択（同じ位置に貼り付け）",
     "copyToTrackEmpty": "コピー先のトラックがありません。通常トラックを追加してください",
+    "contextCopyTo": "「{name}」へコピー",
     "deleteClip": "クリップ削除",
     "locateMissing": "このクリップはセリフに関連付いていないか、タイムラインに位置がありません",
     "trackSection": "トラック",
@@ -2953,6 +2957,11 @@
     "restoreLine": "復元",
     "excludedLineEmpty": "（テキストなし）",
     "assetKindImport": "読み込み",
+    "assetKindSoundscape": "生成素材",
+    "assetKindSoundscapeAmbience": "生成・環境音",
+    "assetKindSoundscapeSfx": "生成・効果音",
+    "assetKindSoundscapeCrowd": "生成・群衆",
+    "assetKindSoundscapeBgm": "生成・音楽",
     "importDone": "オーディオを取り込みました：{name}",
     "importFailed": "オーディオの読み込みに失敗しました"
   },

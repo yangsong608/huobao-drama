@@ -2663,7 +2663,10 @@
       "title": "Sound stem library (optional)",
       "intro": "Extract vocals, accompaniment and other sound stems from the original audio so you can adjust or replace them separately. Extracting won't change the current mix automatically; place stems on the timeline when you need them.When inserting a sound without a suitable available track, a new track is created automatically.",
       "extract": "Extract sound stems",
-      "importAudio": "Import audio"
+      "importAudio": "Import audio",
+      "prevPage": "Prev",
+      "nextPage": "Next",
+      "pageInfo": "Page {x} / {y}"
     },
     "advanced": {
       "title": "Advanced"
@@ -2832,6 +2835,7 @@
     "copyToTrack": "Copy to track",
     "copyToTrackMenuTitle": "Choose target track (paste at the same time)",
     "copyToTrackEmpty": "No eligible target track — add a normal track first",
+    "contextCopyTo": "Copy to “{name}”",
     "deleteClip": "Delete clip",
     "locateMissing": "This clip is not linked to a line on the timeline",
     "trackSection": "Track",
@@ -2953,6 +2957,11 @@
     "restoreLine": "Restore",
     "excludedLineEmpty": "(no text)",
     "assetKindImport": "Imported",
+    "assetKindSoundscape": "Generated",
+    "assetKindSoundscapeAmbience": "Generated · Ambience",
+    "assetKindSoundscapeSfx": "Generated · SFX",
+    "assetKindSoundscapeCrowd": "Generated · Crowd",
+    "assetKindSoundscapeBgm": "Generated · Music",
     "importDone": "Audio imported: {name}",
     "importFailed": "Failed to import audio"
   },

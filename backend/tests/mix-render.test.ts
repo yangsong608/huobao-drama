@@ -107,6 +107,18 @@ test('原声与 BGM 同时存在时可实际渲染', async () => {
   assert.ok(Math.abs(result.durationMs - 3000) <= 100, `duration=${result.durationMs}`)
 })
 
+test('声像滤镜增益必须写在声道前且实际可渲染', async () => {
+  // ffmpeg pan 语法只接受 "增益*声道"（如 c0=1*c0），"声道*增益"（c0=c0*1）是语法错误
+  const plan = planWith([clip({ pan: 0.5 })]) as any
+  plan.tracks[0].pan = -0.3
+  const { graph } = buildMixFilterGraph(plan as any)
+  assert.doesNotMatch(graph, /c\d=c\d\*/, 'pan 滤镜不得出现 声道*增益 形式')
+  assert.match(graph, /pan=stereo\|c0=[\d.]+\*c0\|c1=[\d.]+\*c1/)
+  const outputPath = path.join(root, 'panned.m4a')
+  const result = await renderMixAudio(plan as any, { outputPath, format: 'm4a' })
+  assert.ok(Math.abs(result.durationMs - 3000) <= 100, `duration=${result.durationMs}`)
+})
+
 test('无可用片段时拒绝渲染', async () => {
   const plan = planWith([clip({ usable: false, reason: '音频文件不存在' })])
   assert.throws(() => buildMixFilterGraph(plan as any), /没有可渲染的音频片段/)

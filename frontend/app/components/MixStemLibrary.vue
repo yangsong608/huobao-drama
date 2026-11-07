@@ -18,7 +18,24 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const importInput = ref<HTMLInputElement | null>(null)
 
+const SOUNDSCAPE_CATEGORY_KEYS: Record<string, string> = {
+  ambience: 'SoundscapeAmbience',
+  sfx: 'SoundscapeSfx',
+  crowd: 'SoundscapeCrowd',
+  bgm: 'SoundscapeBgm',
+}
+
+function soundscapeMeta(asset: { kind: string; metadataJson?: string | null }): Record<string, unknown> | null {
+  if (asset.kind !== 'soundscape') return null
+  try { return JSON.parse(asset.metadataJson || '{}') } catch { return null }
+}
+
 function assetLabel(asset: { kind: string; metadataJson?: string | null }): string {
+  if (asset.kind === 'soundscape') {
+    const category = soundscapeMeta(asset)?.category
+    const key = typeof category === 'string' ? SOUNDSCAPE_CATEGORY_KEYS[category] : undefined
+    return key ? t(`mix.assetKind${key}`) : t('mix.assetKindSoundscape')
+  }
   if (asset.kind !== 'import') return t(`mix.assetKind${asset.kind}`)
   try {
     const name = JSON.parse(asset.metadataJson || '{}')?.name
@@ -26,6 +43,19 @@ function assetLabel(asset: { kind: string; metadataJson?: string | null }): stri
   } catch {}
   return t('mix.assetKindImport')
 }
+
+function assetTitle(asset: { kind: string; metadataJson?: string | null }): string {
+  const prompt = soundscapeMeta(asset)?.prompt
+  return typeof prompt === 'string' && prompt ? prompt : assetLabel(asset)
+}
+
+const PAGE_SIZE = 8
+const page = ref(1)
+const pageCount = computed(() => Math.max(1, Math.ceil(props.assets.length / PAGE_SIZE)))
+const pagedAssets = computed(() => props.assets.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+watch(() => props.assets.length, () => {
+  if (page.value > pageCount.value) page.value = pageCount.value
+})
 
 function onImportChange(event: Event) {
   const input = event.target as HTMLInputElement
@@ -61,14 +91,19 @@ function onImportChange(event: Event) {
     </button>
     <input ref="importInput" type="file" accept=".mp3,.wav,.m4a,.aac" class="mx-import-input" @change="onImportChange">
     <ul v-if="assets.length" class="mx-stem-list">
-      <li v-for="asset in assets" :key="asset.id">
-        <span>{{ assetLabel(asset) }}</span>
+      <li v-for="asset in pagedAssets" :key="asset.id">
+        <span :title="assetTitle(asset)">{{ assetLabel(asset) }}</span>
         <span class="mx-muted">{{ Math.round((asset.durationMs || 0) / 1000) }}s</span>
         <button class="mx-icon" type="button" @click="emit('preview-asset', asset)"><Play :size="12" /></button>
         <button class="mx-icon" type="button" @click="emit('insert-asset', asset)"><Plus :size="12" /></button>
         <button class="mx-icon is-danger" type="button" @click="emit('remove-asset', asset)"><Trash2 :size="12" /></button>
       </li>
     </ul>
+    <div v-if="pageCount > 1" class="mx-stem-pager">
+      <button class="mx-icon" type="button" :disabled="page <= 1" @click="page -= 1">{{ t('mix.stems.prevPage') }}</button>
+      <span class="mx-muted">{{ t('mix.stems.pageInfo', { x: page, y: pageCount }) }}</span>
+      <button class="mx-icon" type="button" :disabled="page >= pageCount" @click="page += 1">{{ t('mix.stems.nextPage') }}</button>
+    </div>
   </section>
 </template>
 
@@ -95,5 +130,8 @@ function onImportChange(event: Event) {
 .mx-stem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .mx-stem-list li { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-1); font-size: 10px; color: var(--text-1); }
 .mx-stem-list li > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mx-stem-pager { display: flex; align-items: center; gap: 6px; font-size: 9.5px; }
+.mx-stem-pager .mx-icon { width: auto; padding: 0 6px; height: 20px; font-size: 9.5px; }
+.mx-stem-pager .mx-muted { margin-left: 0; }
 .mx-import-input { display: none; }
 </style>

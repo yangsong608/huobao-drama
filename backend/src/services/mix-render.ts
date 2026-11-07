@@ -69,7 +69,8 @@ function panFilter(value: number): string {
   const pan = Math.max(-1, Math.min(1, value))
   const left = pan > 0 ? 1 - pan : 1
   const right = pan < 0 ? 1 + pan : 1
-  return `pan=stereo|c0=c0*${linear(left)}|c1=c1*${linear(right)}`
+  // ffmpeg pan 语法要求增益写在声道前：c0=1*c0 合法，c0=c0*1 是语法错误
+  return `pan=stereo|c0=${linear(left)}*c0|c1=${linear(right)}*c1`
 }
 
 /** MixPlan 里存逻辑路径（static/projects/...），渲染前解析成物理路径 */

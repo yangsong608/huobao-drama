@@ -12,6 +12,7 @@
         @pointercancel="onPointerUp"
         @pointerleave="onPointerLeave"
         @dblclick="onDoubleClick"
+        @contextmenu.prevent="onContextMenu"
       />
     </div>
     <div
@@ -62,6 +63,8 @@ const emit = defineEmits<{
   'begin-change': []
   'end-change': []
   locate: [clip: StageClip]
+  'context-clip': [track: StageTrack, clip: StageClip, x: number, y: number]
+  'context-track': [track: StageTrack, x: number, y: number]
   zoom: [value: number]
   'scroll-top': [value: number]
 }>()
@@ -882,6 +885,21 @@ function onDoubleClick(event: MouseEvent) {
   if (!hit) return
   emit('select', hit.track, hit.clip)
   if (hit.clip.lineId) emit('locate', hit.clip)
+}
+
+function onContextMenu(event: MouseEvent) {
+  const { x, y } = pointOf(event)
+  const hit = clipAt(x, y)
+  if (hit) {
+    emit('select', hit.track, hit.clip)
+    emit('context-clip', hit.track, hit.clip, event.clientX, event.clientY)
+    return
+  }
+  const lane = laneAt(y)
+  if (lane) {
+    emit('select-track', lane.track)
+    emit('context-track', lane.track, event.clientX, event.clientY)
+  }
 }
 
 function updateHover(x: number, y: number) {

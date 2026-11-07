@@ -93,6 +93,14 @@ test('soundscape dialog only sends overrides for user-edited prompts', () => {
   )
 })
 
+test('soundscape dialog duration inputs stay editable before any preview', () => {
+  const dialog = read('app/components/MixSoundscapeDialog.vue')
+  assert.doesNotMatch(dialog, /:disabled="!preview"/,
+    '时长输入不得以“未预览”为由禁用，否则首次打开弹窗无法修改生成时长')
+  assert.match(dialog, /v-model\.number="durationDraft\[category\]"/)
+  assert.match(dialog, /:disabled="starting"/, '仅生成启动中锁定时长输入')
+})
+
 test('soundscape dialog scrolls start errors into view inside the scrollable body', () => {
   const dialog = read('app/components/MixSoundscapeDialog.vue')
   assert.match(dialog, /<p v-if="error" ref="errorRef" class="ss-error">/)
@@ -243,7 +251,7 @@ test('soundscape dialog supports adjustable per-category seconds with defaults',
     /const seconds = clampDuration\(item\.category\)/,
     'buildRequest 必须把归一后的时长放进覆盖项',
   )
-  assert.match(dialog, /:disabled="!preview"/, '未预览前时长输入应禁用（覆盖项需要预览的 itemId）')
+  assert.match(dialog, /:disabled="starting"/, '仅生成启动中锁定时长输入，未预览前必须可编辑')
 })
 
 test('soundscape duration copy exists in all four locales', () => {
