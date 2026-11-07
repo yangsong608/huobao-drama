@@ -1,6 +1,7 @@
 {
   "app": {
-    "title": "화바오 숏드라마",
+    "title": "MossHuobao",
+    "brandSub": "AI 드라마 스튜디오",
     "updateAvailable": "새 버전 v{version}을 사용할 수 있습니다. 「설정 → 업데이트 정보」에서 업그레이드하세요"
   },
   "characterVoice": {
@@ -810,7 +811,7 @@
     },
     "mcp": {
       "title": "MCP 서버",
-      "desc": "화바오 단편극의 모든 엔드포인트를 MCP 도구로 Claude Code, Cursor, WorkBuddy 등에 제공합니다. 로컬 루프백에만 바인딩되며 호출에는 Bearer 토큰이 필요합니다.",
+      "desc": "MossHuobao의 모든 엔드포인트를 MCP 도구로 Claude Code, Cursor, WorkBuddy 등에 제공합니다. 로컬 루프백에만 바인딩되며 호출에는 Bearer 토큰이 필요합니다.",
       "service": "서비스",
       "running": "실행 중 · 포트 {port}",
       "stopped": "중지됨",
@@ -1521,7 +1522,7 @@
     "helpTitle": "가이드",
     "index": {
       "welcome": {
-        "title": "👋 휘바오 숏드라마에 오신 것을 환영합니다",
+        "title": "👋 MossHuobao에 오신 것을 환영합니다",
         "desc": "소설 → 대본 → 에셋 → 스토리보드 → 영상 → 완성, 모두 한곳에서. 먼저 AI 서비스를 설정하고 첫 프로젝트를 만들어 보세요."
       },
       "create": {

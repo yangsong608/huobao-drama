@@ -159,7 +159,7 @@ process.on('unhandledRejection', (reason) => {
 const port = Number(process.env.PORT || 5679)
 // 桌面版只监听回环（无鉴权，绝不能暴露到局域网）；服务器/Docker 默认仍为 0.0.0.0
 const hostname = process.env.HOST || (process.env.HUOBAO_DESKTOP === '1' ? '127.0.0.1' : '0.0.0.0')
-console.log(`🚀 Huobao Drama TS server on http://${hostname === '0.0.0.0' ? 'localhost' : hostname}:${port}`)
+console.log(`🚀 MossHuobao TS server on http://${hostname === '0.0.0.0' ? 'localhost' : hostname}:${port}`)
 
 await resumeInterruptedTasks()
 // 上次进程遗留的自动化标为中断（生成任务恢复后再判断，避免与 recover 冲突）

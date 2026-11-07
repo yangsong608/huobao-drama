@@ -1,6 +1,6 @@
 # 本地 UVR 音频分离服务
 
-火宝短剧「预览与混音」的可选 sidecar：把合片原声分离成 `vocals`（人物声）和
+MossHuobao「预览与混音」的可选 sidecar：把合片原声分离成 `vocals`（人物声）和
 `instrumental`（原声背景），替代内置的 FFmpeg 中置提取。
 
 后端只通过 `AUDIO_ENGINE_URL` 访问它，接口契约见

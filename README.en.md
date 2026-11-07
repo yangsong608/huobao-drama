@@ -1,4 +1,4 @@
-# 🎬 Huobao Drama - AI Short Drama Generation Platform
+# 🎬 MossHuobao - AI Short Drama Generation Platform
 
 <div align="center">
 
@@ -28,7 +28,7 @@ After deploying, paste the key in "Settings → Huobao Quick Setup" to write thr
 
 ## 📖 Overview
 
-Huobao Drama is an AI-powered short-drama production platform that automates the entire pipeline: script generation, character design, storyboard breakdown, and video compositing.
+MossHuobao is an AI-powered short-drama production platform that automates the entire pipeline: script generation, character design, storyboard breakdown, and video compositing.
 
 ### 🎯 Core Value
 
@@ -183,7 +183,7 @@ Visit: `http://localhost:5679`
 
 ### 🗄️ Database
 
-Bundled SQLite (`better-sqlite3` + WAL mode). Tables are created automatically on first launch (idempotent DDL replay + seed data). Default file: `data/huobao.sqlite3`, overridable via `SQLITE_PATH`. The desktop app stores data in the user-data directory (`~/Library/Application Support/HuobaoDrama/data/`).
+Bundled SQLite (`better-sqlite3` + WAL mode). Tables are created automatically on first launch (idempotent DDL replay + seed data). Default file: `data/huobao.sqlite3`, overridable via `SQLITE_PATH`. The desktop app stores data in the user-data directory (`~/Library/Application Support/MossHuobao/data/`).
 
 Migrating data from a legacy MySQL deployment:
 
@@ -288,19 +288,19 @@ The episode list shows the production status of every episode — click "Enter S
 
 | Platform | File to download |
 |---|---|
-| macOS (Apple Silicon, M-series) | `HuobaoDrama-4.0.5-arm64.dmg` |
-| macOS (Intel) | `HuobaoDrama-4.0.5.dmg` |
-| Windows | `HuobaoDrama.Setup.4.0.5.exe` |
+| macOS (Apple Silicon, M-series) | `MossHuobao-4.0.5-arm64.dmg` |
+| macOS (Intel) | `MossHuobao-4.0.5.dmg` |
+| Windows | `MossHuobao.Setup.4.0.5.exe` |
 
 > China users: use the COS mirror above (GitHub is slow/unreachable in mainland China). The in-app updater also checks the COS mirror first, then falls back to GitHub.
 
 **Command-line install (recommended, no Gatekeeper fix needed)**: downloading via curl never sets macOS's quarantine attribute, so the app opens cleanly with no "damaged" prompt (use the `-arm64.dmg` for Apple Silicon, the plain dmg for Intel):
 
 ```bash
-curl -L -o /tmp/HuobaoDrama.dmg https://installer.chatfire.site/huobao-drama/v4.0.5/HuobaoDrama-4.0.5-arm64.dmg \
-  && hdiutil attach -nobrowse /tmp/HuobaoDrama.dmg \
-  && cp -R /Volumes/HuobaoDrama*/HuobaoDrama.app /Applications/ \
-  && hdiutil detach /Volumes/HuobaoDrama*
+curl -L -o /tmp/MossHuobao.dmg https://installer.chatfire.site/huobao-drama/v4.0.5/MossHuobao-4.0.5-arm64.dmg \
+  && hdiutil attach -nobrowse /tmp/MossHuobao.dmg \
+  && cp -R /Volumes/MossHuobao*/MossHuobao.app /Applications/ \
+  && hdiutil detach /Volumes/MossHuobao*
 ```
 
 No build required — download the dmg/exe and install. Installed clients auto-update via the built-in updater. (To package from source instead, see the commands below.)
@@ -313,20 +313,20 @@ npm run dist        # macOS dmg (arm64 + Intel)
 npm run dist:win    # Windows NSIS installer (win-x64, cross-buildable on macOS)
 
 # Artifacts
-# desktop/release/HuobaoDrama-<version>-arm64.dmg     (Apple Silicon)
-# desktop/release/HuobaoDrama-<version>.dmg           (Intel)
-# desktop/release/HuobaoDrama Setup <version>.exe     (Windows)
+# desktop/release/MossHuobao-<version>-arm64.dmg     (Apple Silicon)
+# desktop/release/MossHuobao-<version>.dmg           (Intel)
+# desktop/release/MossHuobao Setup <version>.exe     (Windows)
 ```
 
 Installation notes:
 
 - The macOS build is unsigned — on first launch you may see "App is damaged and can't be opened" (common on Apple Silicon). This is Gatekeeper's quarantine attribute, not actual file damage. Two ways to fix it:
   1. **The dmg bundles a fix script**: after dragging the app into Applications, double-click the "如提示已损坏请双击我.command" script at the bottom of the dmg window — it removes the quarantine attribute automatically;
-  2. Or run `sudo xattr -cr /Applications/HuobaoDrama.app` in Terminal.
+  2. Or run `sudo xattr -cr /Applications/MossHuobao.app` in Terminal.
 
   The fix is one-time only — the app then launches normally, and in-app auto-updates are not affected.
 - The Windows build is unsigned — SmartScreen will prompt "More info → Run anyway"
-- User-data directory: `~/Library/Application Support/HuobaoDrama/` (database, generated media, writable copies of online-edited skills)
+- User-data directory: `~/Library/Application Support/MossHuobao/` (database, generated media, writable copies of online-edited skills)
 - FFmpeg/FFprobe binaries are bundled — no system install needed
 - Electron is pinned to 37.x: better-sqlite3's win32 prebuilds max out at that ABI (the key to compilation-free cross-packaging)
 - External links open in the system browser (e.g. "Get a key at api.firemux.com")
@@ -479,7 +479,7 @@ HUOBAO_VERSION=4.0.5 docker compose up -d --build
 
 ### Q: Where does the desktop app store data?
 
-A: `~/Library/Application Support/HuobaoDrama/data/` (SQLite database + generated images/videos); writable copies of online-edited skills live in the sibling `workspace/` directory. In development mode the repo's `data/` directory is used instead.
+A: `~/Library/Application Support/MossHuobao/data/` (SQLite database + generated images/videos); writable copies of online-edited skills live in the sibling `workspace/` directory. In development mode the repo's `data/` directory is used instead.
 
 ### Q: How do I migrate legacy MySQL data to SQLite?
 

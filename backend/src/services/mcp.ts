@@ -1231,7 +1231,7 @@ async function handleRpc(payload: RpcRequest): Promise<object | null> {
         protocolVersion: negotiateProtocol(params?.protocolVersion),
         capabilities: { tools: { listChanged: false } },
         serverInfo: SERVER_INFO,
-        instructions: '火宝短剧本地 API。优先使用语义化工具；未封装的能力用 list_api_endpoints 查路径后用 api_request 调用。',
+        instructions: 'MossHuobao 本地 API。优先使用语义化工具；未封装的能力用 list_api_endpoints 查路径后用 api_request 调用。',
       })
     case 'notifications/initialized':
     case 'notifications/cancelled':

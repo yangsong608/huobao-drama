@@ -19,6 +19,7 @@ import { registerUpdater, markQuitting } from './updater'
 import { createStartupLog, redactStartupLog, waitForBackend } from './startup'
 import { resolveRuntimeResources } from './runtime-resources'
 import { migrateLegacyAudioInstructions } from './workspace-template'
+import { prepareUserDataDir } from './user-data'
 
 // 主进程打 CJS 产物，__dirname 天然可用（import.meta.url 在 CJS 下为 undefined）
 declare const __dirname: string
@@ -45,21 +46,24 @@ let fatalReported = false
 let backendStartupTail = ''
 
 // userData 显式按模式区分：打包版 / dev 版互不干扰（数据库、上传文件、单实例锁均隔离），
-// 不依赖 package.json 命名（打包后与 dev 同名会导致单实例锁误杀）
-const userDataDir = path.join(
-  app.getPath('appData'),
-  app.isPackaged ? 'HuobaoDrama' : 'HuobaoDrama-Dev',
-)
+// 不依赖 package.json 命名（打包后与 dev 同名会导致单实例锁误杀）。
+// 首次以 MossHuobao 启动时，把旧 HuobaoDrama 目录整体迁移过来，避免已有项目数据丢失。
+let userDataDir = ''
+let userDataNote = ''
 try {
-  fs.mkdirSync(userDataDir, { recursive: true })
+  const prepared = prepareUserDataDir(app.getPath('appData'), app.isPackaged)
+  userDataDir = prepared.dir
+  if (prepared.migratedFrom) userDataNote = ` migratedFrom=${prepared.migratedFrom}`
+  else if (prepared.retainedLegacy) userDataNote = ` legacyRetained=${prepared.retainedLegacy}`
   app.setPath('userData', userDataDir)
 } catch (error) {
-  dialog.showErrorBox('火宝短剧启动失败', `无法准备用户目录：${userDataDir}\n${(error as Error).message}`)
+  dialog.showErrorBox('MossHuobao 启动失败', `无法准备用户目录：${(error as Error).message}`)
   app.exit(1)
 }
 
 const startupLog = createStartupLog(path.join(app.getPath('userData'), 'logs'))
 startupLog.write(`launch version=${app.getVersion()} platform=${process.platform} arch=${process.arch} electron=${process.versions.electron} pid=${process.pid}`)
+if (userDataNote) startupLog.write(`userData=${userDataDir}${userDataNote}`)
 
 function failStartup(error: unknown) {
   if (fatalReported || quitting) return
@@ -67,7 +71,7 @@ function failStartup(error: unknown) {
   const message = redactStartupLog(error instanceof Error ? error.message : error)
   startupLog.write(`fatal: ${error instanceof Error ? error.stack : error}`)
   showMainWindow()
-  dialog.showErrorBox('火宝短剧启动失败', `${message}\n\n启动日志：${startupLog.file}\n请将此日志发给技术支持，无需删除项目数据。`)
+  dialog.showErrorBox('MossHuobao 启动失败', `${message}\n\n启动日志：${startupLog.file}\n请将此日志发给技术支持，无需删除项目数据。`)
   app.quit()
 }
 process.on('uncaughtException', failStartup)
@@ -257,7 +261,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
-    title: '火宝短剧',
+    title: 'MossHuobao',
     show: true,
     backgroundColor: '#f6f7fb',
     webPreferences: {

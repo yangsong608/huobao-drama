@@ -1,6 +1,7 @@
 {
   "app": {
-    "title": "火宝短剧",
+    "title": "MossHuobao",
+    "brandSub": "AI 短剧工坊",
     "updateAvailable": "发现新版本 v{version}，可在「设置 → 关于更新」中升级"
   },
   "characterVoice": {
@@ -810,7 +811,7 @@
     },
     "mcp": {
       "title": "MCP 服务",
-      "desc": "把火宝短剧的全部接口以 MCP 工具开放给 Claude Code、Cursor、WorkBuddy 等客户端。服务独立监听本机回环端口，调用需要 Bearer token。",
+      "desc": "把 MossHuobao 的全部接口以 MCP 工具开放给 Claude Code、Cursor、WorkBuddy 等客户端。服务独立监听本机回环端口，调用需要 Bearer token。",
       "service": "服务开关",
       "running": "运行中 · 端口 {port}",
       "stopped": "已停止",
@@ -1521,7 +1522,7 @@
     "helpTitle": "使用引导",
     "index": {
       "welcome": {
-        "title": "👋 欢迎使用火宝短剧",
+        "title": "👋 欢迎使用 MossHuobao",
         "desc": "小说 → 剧本 → 资产 → 分镜 → 视频 → 成片，一站式 AI 短剧制作。先配置 AI 服务，再创建第一个项目。"
       },
       "create": {
@@ -2511,7 +2512,7 @@
     },
     "legacy": {
       "title": "小说工具已合并",
-      "desc": "正在跳转到火宝短剧的小说工坊…",
+      "desc": "正在跳转到 MossHuobao 的小说工坊…",
       "action": "立即前往"
     },
     "genres": {

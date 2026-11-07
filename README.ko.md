@@ -1,4 +1,4 @@
-# 🎬 Huobao Drama - AI 숏드라마 생성 플랫폼
+# 🎬 MossHuobao - AI 숏드라마 생성 플랫폼
 
 <div align="center">
 
@@ -28,7 +28,7 @@
 
 ## 📖 프로젝트 소개
 
-Huobao Drama는 AI 기반 숏드라마 자동 제작 플랫폼으로, 각본 생성, 캐릭터 디자인, 스토리보드 제작부터 영상 합성까지 전 과정을 자동화합니다.
+MossHuobao는 AI 기반 숏드라마 자동 제작 플랫폼으로, 각본 생성, 캐릭터 디자인, 스토리보드 제작부터 영상 합성까지 전 과정을 자동화합니다.
 
 ### 🎯 핵심 가치
 
@@ -183,7 +183,7 @@ cd ../backend && npm start
 
 ### 🗄️ 데이터베이스
 
-SQLite 내장(`better-sqlite3` + WAL 모드). 최초 시작 시 테이블 자동 생성(멱등 DDL 재생 + 시드 데이터). 기본 파일은 `data/huobao.sqlite3`이며 `SQLITE_PATH`로 변경 가능. 데스크톱 버전의 데이터는 사용자 데이터 디렉터리(`~/Library/Application Support/HuobaoDrama/data/`)에 저장됩니다.
+SQLite 내장(`better-sqlite3` + WAL 모드). 최초 시작 시 테이블 자동 생성(멱등 DDL 재생 + 시드 데이터). 기본 파일은 `data/huobao.sqlite3`이며 `SQLITE_PATH`로 변경 가능. 데스크톱 버전의 데이터는 사용자 데이터 디렉터리(`~/Library/Application Support/MossHuobao/data/`)에 저장됩니다.
 
 구버전 MySQL에서 데이터 마이그레이션:
 
@@ -288,19 +288,19 @@ cd backend && npx tsx scripts/import-mysql-to-sqlite.ts
 
 | 플랫폼 | 다운로드 파일 |
 |---|---|
-| macOS(Apple Silicon, M 시리즈) | `HuobaoDrama-4.0.5-arm64.dmg` |
-| macOS(Intel) | `HuobaoDrama-4.0.5.dmg` |
-| Windows | `HuobaoDrama.Setup.4.0.5.exe` |
+| macOS(Apple Silicon, M 시리즈) | `MossHuobao-4.0.5-arm64.dmg` |
+| macOS(Intel) | `MossHuobao-4.0.5.dmg` |
+| Windows | `MossHuobao.Setup.4.0.5.exe` |
 
 > 중국 본토에서는 GitHub이 불안정하므로 Tencent COS 미러를 이용하세요. 앱 내 업데이터도 COS를 우선하고 GitHub으로 폴백합니다.
 
 **커맨드라인 설치(권장, 복구 불필요)**: curl로 다운로드하면 macOS 격리 속성이 붙지 않아 "손상됨" 경고 없이 바로 실행됩니다(Apple Silicon은 `-arm64.dmg`, Intel은 일반 dmg 사용):
 
 ```bash
-curl -L -o /tmp/HuobaoDrama.dmg https://installer.chatfire.site/huobao-drama/v4.0.5/HuobaoDrama-4.0.5-arm64.dmg \
-  && hdiutil attach -nobrowse /tmp/HuobaoDrama.dmg \
-  && cp -R /Volumes/HuobaoDrama*/HuobaoDrama.app /Applications/ \
-  && hdiutil detach /Volumes/HuobaoDrama*
+curl -L -o /tmp/MossHuobao.dmg https://installer.chatfire.site/huobao-drama/v4.0.5/MossHuobao-4.0.5-arm64.dmg \
+  && hdiutil attach -nobrowse /tmp/MossHuobao.dmg \
+  && cp -R /Volumes/MossHuobao*/MossHuobao.app /Applications/ \
+  && hdiutil detach /Volumes/MossHuobao*
 ```
 
 빌드 불필요 — dmg/exe를 다운로드해 바로 설치하면 됩니다. 설치된 클라이언트는 내장 업데이터로 자동 업데이트됩니다. (소스에서 직접 패키징하려면 아래 명령을 참조하세요.)
@@ -313,20 +313,20 @@ npm run dist        # macOS dmg(arm64 + Intel)
 npm run dist:win    # Windows NSIS 설치 프로그램(win-x64, macOS에서 크로스 빌드 가능)
 
 # 산출물
-# desktop/release/HuobaoDrama-<버전>-arm64.dmg        (Apple Silicon)
-# desktop/release/HuobaoDrama-<버전>.dmg              (Intel)
-# desktop/release/HuobaoDrama Setup <버전>.exe        (Windows)
+# desktop/release/MossHuobao-<버전>-arm64.dmg        (Apple Silicon)
+# desktop/release/MossHuobao-<버전>.dmg              (Intel)
+# desktop/release/MossHuobao Setup <버전>.exe        (Windows)
 ```
 
 설치 안내:
 
 - macOS 미서명 패키지는 첫 실행 시 "App이 손상되어 열 수 없습니다"라는 메시지가 뜰 수 있습니다(Apple Silicon에서 흔함). 이는 Gatekeeper 격리 속성 때문이며 파일이 실제로 손상된 것은 아닙니다. 복구 방법은 두 가지입니다:
   1. **dmg에 복구 스크립트 포함**: 앱을 "응용 프로그램"으로 드래그한 후 dmg 창 하단의 "如提示已损坏请双击我.command"를 더블클릭하면 자동으로 복구됩니다;
-  2. 또는 터미널에서 `sudo xattr -cr /Applications/HuobaoDrama.app` 실행.
+  2. 또는 터미널에서 `sudo xattr -cr /Applications/MossHuobao.app` 실행.
 
   복구는 처음 한 번만 필요하며, 이후에는 정상 실행되고 앱 내 자동 업데이트에도 영향이 없습니다.
 - Windows 미서명 패키지는 SmartScreen에서 「추가 정보 → 실행」 선택
-- 사용자 데이터 디렉터리: `~/Library/Application Support/HuobaoDrama/`(데이터베이스, 생성된 미디어, 온라인 편집한 스킬 복사본)
+- 사용자 데이터 디렉터리: `~/Library/Application Support/MossHuobao/`(데이터베이스, 생성된 미디어, 온라인 편집한 스킬 복사본)
 - FFmpeg/FFprobe 바이너리 내장, 시스템 설치 불필요
 - Electron은 37.x로 고정: better-sqlite3의 win32 프리빌드가 해당 ABI까지만 지원(크로스 패키징 시 컴파일 불필요의 핵심)
 - 앱 내 외부 링크(「api.firemux.com에서 Key 받기」 등)는 시스템 브라우저로 바로 열립니다
@@ -479,7 +479,7 @@ HUOBAO_VERSION=4.0.5 docker compose up -d --build
 
 ### Q: 데스크톱 버전의 데이터는 어디에 저장되나요?
 
-A: `~/Library/Application Support/HuobaoDrama/data/`(SQLite 데이터베이스 + 생성된 이미지/영상)에 저장되며, 온라인 편집한 스킬의 복사본은 같은 수준의 `workspace/` 디렉터리에 있습니다. 개발 모드에서는 저장소의 `data/` 디렉터리를 사용합니다.
+A: `~/Library/Application Support/MossHuobao/data/`(SQLite 데이터베이스 + 생성된 이미지/영상)에 저장되며, 온라인 편집한 스킬의 복사본은 같은 수준의 `workspace/` 디렉터리에 있습니다. 개발 모드에서는 저장소의 `data/` 디렉터리를 사용합니다.
 
 ### Q: 구버전 MySQL 데이터를 SQLite로 마이그레이션하려면?
 

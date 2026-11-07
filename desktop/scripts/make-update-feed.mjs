@@ -48,9 +48,9 @@ function sha256(file) {
 // 平台键（与更新器 process.platform-process.arch 一致）→ 产物文件名
 // （electron-builder 的 mac zip 命名带 -mac 后缀）
 const targets = [
-  { key: 'darwin-arm64', file: `HuobaoDrama-${version}-arm64-mac.zip` },
-  { key: 'darwin-x64', file: `HuobaoDrama-${version}-mac.zip` },
-  { key: 'win32-x64', file: `HuobaoDrama Setup ${version}.exe` },
+  { key: 'darwin-arm64', file: `MossHuobao-${version}-arm64-mac.zip` },
+  { key: 'darwin-x64', file: `MossHuobao-${version}-mac.zip` },
+  { key: 'win32-x64', file: `MossHuobao Setup ${version}.exe` },
 ]
 
 const platforms = {}

@@ -1,4 +1,4 @@
-# 🎬 Huobao Drama — AI 短剧生成平台 / AI Short Drama Generation Platform
+# 🎬 MossHuobao — AI 短剧生成平台 / AI Short Drama Generation Platform
 
 <div align="center">
 
@@ -41,8 +41,8 @@ After deploying, paste the key in "Settings → Huobao Quick Setup" to write thr
 
 ## 📖 项目简介 / Overview
 
-Huobao Drama 是一个基于 AI 的短剧自动化生产平台，实现从剧本生成、角色设计、分镜制作到视频合成的全流程自动化。<br>
-Huobao Drama is an AI-powered short-drama production platform that automates the entire pipeline: script generation, character design, storyboard breakdown, and video compositing.
+MossHuobao 是一个基于 AI 的短剧自动化生产平台，实现从剧本生成、角色设计、分镜制作到视频合成的全流程自动化。<br>
+MossHuobao is an AI-powered short-drama production platform that automates the entire pipeline: script generation, character design, storyboard breakdown, and video compositing.
 
 ### 🎯 核心价值 / Core Value
 
@@ -279,8 +279,8 @@ Visit: `http://localhost:5679`
 
 ### 🗄️ 数据库 / Database
 
-内置 SQLite（`better-sqlite3` + WAL 模式），数据库表在首次启动时自动创建（幂等重放 DDL 与种子数据），默认文件位于 `data/huobao.sqlite3`，可通过 `SQLITE_PATH` 重定向。桌面版数据存放在用户数据目录（`~/Library/Application Support/HuobaoDrama/data/`）。<br>
-Bundled SQLite (`better-sqlite3` + WAL mode). Tables are created automatically on first launch (idempotent DDL replay + seed data). Default file: `data/huobao.sqlite3`, overridable via `SQLITE_PATH`. The desktop app stores data in the user-data directory (`~/Library/Application Support/HuobaoDrama/data/`).
+内置 SQLite（`better-sqlite3` + WAL 模式），数据库表在首次启动时自动创建（幂等重放 DDL 与种子数据），默认文件位于 `data/huobao.sqlite3`，可通过 `SQLITE_PATH` 重定向。桌面版数据存放在用户数据目录（`~/Library/Application Support/MossHuobao/data/`）。<br>
+Bundled SQLite (`better-sqlite3` + WAL mode). Tables are created automatically on first launch (idempotent DDL replay + seed data). Default file: `data/huobao.sqlite3`, overridable via `SQLITE_PATH`. The desktop app stores data in the user-data directory (`~/Library/Application Support/MossHuobao/data/`).
 
 从旧版 MySQL 迁移数据：<br>
 Migrating data from a legacy MySQL deployment:
@@ -413,9 +413,9 @@ The episode list shows the production status of every episode — click "Enter S
 
 |平台<br>Platform|下载文件<br>File to download|
 |---|---|
-|macOS（Apple Silicon，M 系列）<br>macOS (Apple Silicon, M-series)| `HuobaoDrama-4.0.5-arm64.dmg` |
-|macOS（Intel）<br>macOS (Intel)| `HuobaoDrama-4.0.5.dmg` |
-| Windows | `HuobaoDrama.Setup.4.0.5.exe` |
+|macOS（Apple Silicon，M 系列）<br>macOS (Apple Silicon, M-series)| `MossHuobao-4.0.5-arm64.dmg` |
+|macOS（Intel）<br>macOS (Intel)| `MossHuobao-4.0.5.dmg` |
+| Windows | `MossHuobao.Setup.4.0.5.exe` |
 
 > 国内用户请用腾讯云镜像直链下载（GitHub 在国内访问不稳定）。应用内更新器同样国内源优先、GitHub 兜底。<br>
 > China users: use the COS mirror above (GitHub is slow/unreachable in mainland China). The in-app updater also checks the COS mirror first, then falls back to GitHub.
@@ -424,10 +424,10 @@ The episode list shows the production status of every episode — click "Enter S
 **Command-line install (recommended, no Gatekeeper fix needed)**: downloading via curl never sets macOS's quarantine attribute, so the app opens cleanly with no "damaged" prompt (use the `-arm64.dmg` for Apple Silicon, the plain dmg for Intel):
 
 ```bash
-curl -L -o /tmp/HuobaoDrama.dmg https://installer.chatfire.site/huobao-drama/v4.0.5/HuobaoDrama-4.0.5-arm64.dmg \
-  && hdiutil attach -nobrowse /tmp/HuobaoDrama.dmg \
-  && cp -R /Volumes/HuobaoDrama*/HuobaoDrama.app /Applications/ \
-  && hdiutil detach /Volumes/HuobaoDrama*
+curl -L -o /tmp/MossHuobao.dmg https://installer.chatfire.site/huobao-drama/v4.0.5/MossHuobao-4.0.5-arm64.dmg \
+  && hdiutil attach -nobrowse /tmp/MossHuobao.dmg \
+  && cp -R /Volumes/MossHuobao*/MossHuobao.app /Applications/ \
+  && hdiutil detach /Volumes/MossHuobao*
 ```
 
 无需构建 —— 下载 dmg/exe 直接安装即可，已安装客户端会通过内置更新器自动升级。（如需从源码自行打包，见下方命令。）<br>
@@ -442,9 +442,9 @@ npm run dist        # macOS dmg（arm64 + Intel） / macOS dmg (arm64 + Intel)
 npm run dist:win    # Windows NSIS 安装器（win-x64，可在 macOS 上交叉打包） / Windows NSIS installer (win-x64, cross-buildable on macOS)
 
 # 产物 / Artifacts
-# desktop/release/HuobaoDrama-<版本>-arm64.dmg        (Apple Silicon) / desktop/release/HuobaoDrama-<version>-arm64.dmg     (Apple Silicon)
-# desktop/release/HuobaoDrama-<版本>.dmg              (Intel) / desktop/release/HuobaoDrama-<version>.dmg           (Intel)
-# desktop/release/HuobaoDrama Setup <版本>.exe        (Windows) / desktop/release/HuobaoDrama Setup <version>.exe     (Windows)
+# desktop/release/MossHuobao-<版本>-arm64.dmg        (Apple Silicon) / desktop/release/MossHuobao-<version>-arm64.dmg     (Apple Silicon)
+# desktop/release/MossHuobao-<版本>.dmg              (Intel) / desktop/release/MossHuobao-<version>.dmg           (Intel)
+# desktop/release/MossHuobao Setup <版本>.exe        (Windows) / desktop/release/MossHuobao Setup <version>.exe     (Windows)
 ```
 
 安装说明：<br>
@@ -456,8 +456,8 @@ Installation notes:
   1. **dmg 内自带修复脚本**：把 app 拖入「应用程序」后，双击 dmg 窗口底部的「如提示已损坏请双击我.command」，自动完成修复；<br>
      **The dmg bundles a fix script**: after dragging the app into Applications, double-click the "如提示已损坏请双击我.command" script at the bottom of the dmg window — it removes the quarantine attribute automatically;
 
-  2. 或终端执行 `sudo xattr -cr /Applications/HuobaoDrama.app`。<br>
-     Or run `sudo xattr -cr /Applications/HuobaoDrama.app` in Terminal.
+  2. 或终端执行 `sudo xattr -cr /Applications/MossHuobao.app`。<br>
+     Or run `sudo xattr -cr /Applications/MossHuobao.app` in Terminal.
 
   修复只需一次，之后双击图标即可启动，应用内自动更新也不受影响。<br>
   The fix is one-time only — the app then launches normally, and in-app auto-updates are not affected.
@@ -465,8 +465,8 @@ Installation notes:
 - Windows 未签名包 SmartScreen 会提示「更多信息 → 仍要运行」<br>
   The Windows build is unsigned — SmartScreen will prompt "More info → Run anyway"
 
-- 用户数据目录：`~/Library/Application Support/HuobaoDrama/`（数据库、生成的媒体、技能在线编辑的副本）<br>
-  User-data directory: `~/Library/Application Support/HuobaoDrama/` (database, generated media, writable copies of online-edited skills)
+- 用户数据目录：`~/Library/Application Support/MossHuobao/`（数据库、生成的媒体、技能在线编辑的副本）<br>
+  User-data directory: `~/Library/Application Support/MossHuobao/` (database, generated media, writable copies of online-edited skills)
 
 - 内置 FFmpeg/FFprobe 二进制，无需系统安装<br>
   FFmpeg/FFprobe binaries are bundled — no system install needed
@@ -666,8 +666,8 @@ HUOBAO_VERSION=4.0.5 docker compose up -d --build
 
 ### Q: 桌面版数据存在哪里？ / Q: Where does the desktop app store data?
 
-A: `~/Library/Application Support/HuobaoDrama/data/`（SQLite 数据库 + 生成的图片/视频），技能在线编辑的副本在同级 `workspace/` 目录。开发模式下则使用仓库 `data/` 目录。<br>
-A: `~/Library/Application Support/HuobaoDrama/data/` (SQLite database + generated images/videos); writable copies of online-edited skills live in the sibling `workspace/` directory. In development mode the repo's `data/` directory is used instead.
+A: `~/Library/Application Support/MossHuobao/data/`（SQLite 数据库 + 生成的图片/视频），技能在线编辑的副本在同级 `workspace/` 目录。开发模式下则使用仓库 `data/` 目录。<br>
+A: `~/Library/Application Support/MossHuobao/data/` (SQLite database + generated images/videos); writable copies of online-edited skills live in the sibling `workspace/` directory. In development mode the repo's `data/` directory is used instead.
 
 ### Q: 旧版 MySQL 数据怎么迁移到 SQLite？ / Q: How do I migrate legacy MySQL data to SQLite?
 

@@ -3,12 +3,12 @@
     <div class="header-left">
       <button class="brand" @click="navigateTo('/')">
         <div class="brand-mark">
-          <img v-if="showBrandImage" :src="brandLogo" alt="火宝短剧" class="brand-logo" @error="showBrandImage = false" />
-          <span v-else class="brand-fallback">火</span>
+          <img v-if="showBrandImage" :src="brandLogo" alt="MossHuobao" class="brand-logo" @error="showBrandImage = false" />
+          <span v-else class="brand-fallback">M</span>
         </div>
         <div class="brand-text">
-          <span class="brand-name">火宝短剧</span>
-          <span class="brand-sub">Huobao Shorts</span>
+          <span class="brand-name">MossHuobao</span>
+          <span class="brand-sub">{{ t('app.brandSub') }}</span>
         </div>
       </button>
     </div>
@@ -138,8 +138,8 @@ watch(locale, checkAiConfigs)
 .brand-text { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
 .brand-name {
   font-size: 15px; font-weight: 700;
-  /* ChatFire 签名：品牌字标火焰橙渐变 */
-  background: var(--accent-gradient);
+  /* MossHuobao 字标：苔绿到余烬金渐变 */
+  background: linear-gradient(135deg, #66906a 0%, #9dbe8a 45%, #e8a33d 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;

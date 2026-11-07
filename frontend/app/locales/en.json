@@ -1,6 +1,7 @@
 {
   "app": {
-    "title": "Huobao Shorts",
+    "title": "MossHuobao",
+    "brandSub": "AI Drama Studio",
     "updateAvailable": "New version v{version} is available. Upgrade in Settings → About."
   },
   "characterVoice": {
@@ -810,7 +811,7 @@
     },
     "mcp": {
       "title": "MCP server",
-      "desc": "Expose every Huobao Drama endpoint as MCP tools for Claude Code, Cursor, WorkBuddy and similar clients. The server binds to a local loopback port and requires a bearer token.",
+      "desc": "Expose every MossHuobao endpoint as MCP tools for Claude Code, Cursor, WorkBuddy and similar clients. The server binds to a local loopback port and requires a bearer token.",
       "service": "Service",
       "running": "Running · port {port}",
       "stopped": "Stopped",
@@ -1521,7 +1522,7 @@
     "helpTitle": "Guide",
     "index": {
       "welcome": {
-        "title": "👋 Welcome to Huobao Drama",
+        "title": "👋 Welcome to MossHuobao",
         "desc": "Novel → script → assets → storyboard → video → final cut, all in one place. Configure AI services first, then create your first project."
       },
       "create": {

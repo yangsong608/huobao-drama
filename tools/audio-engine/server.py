@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""本地 UVR 音频分离服务（火宝短剧 sidecar）。
+"""本地 UVR 音频分离服务（MossHuobao sidecar）。
 
 实现 backend/src/services/audio-engine.ts 使用的 HTTP 契约：
   GET  /v1/health

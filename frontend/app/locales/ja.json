@@ -1,6 +1,7 @@
 {
   "app": {
-    "title": "火宝ショートドラマ",
+    "title": "MossHuobao",
+    "brandSub": "AI ドラマスタジオ",
     "updateAvailable": "新バージョン v{version} があります。「設定 → 更新について」でアップグレードできます"
   },
   "characterVoice": {
@@ -810,7 +811,7 @@
     },
     "mcp": {
       "title": "MCP サーバー",
-      "desc": "火宝短剧の全エンドポイントを MCP ツールとして Claude Code / Cursor / WorkBuddy などに公開します。ローカルループバックのみで待ち受け、呼び出しには Bearer トークンが必要です。",
+      "desc": "MossHuobao の全エンドポイントを MCP ツールとして Claude Code / Cursor / WorkBuddy などに公開します。ローカルループバックのみで待ち受け、呼び出しには Bearer トークンが必要です。",
       "service": "サービス",
       "running": "稼働中 · ポート {port}",
       "stopped": "停止中",
@@ -1521,7 +1522,7 @@
     "helpTitle": "ガイド",
     "index": {
       "welcome": {
-        "title": "👋 火宝短劇へようこそ",
+        "title": "👋 MossHuobao へようこそ",
         "desc": "小説 → 脚本 → アセット → 絵コンテ → 動画 → 完成、すべてワンストップ。まず AI サービスを設定し、最初のプロジェクトを作成しましょう。"
       },
       "create": {

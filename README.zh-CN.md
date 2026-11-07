@@ -1,4 +1,4 @@
-# 🎬 Huobao Drama - AI 短剧生成平台
+# 🎬 MossHuobao - AI 短剧生成平台
 
 <div align="center">
 
@@ -28,7 +28,7 @@
 
 ## 📖 项目简介
 
-Huobao Drama 是一个基于 AI 的短剧自动化生产平台，实现从剧本生成、角色设计、分镜制作到视频合成的全流程自动化。
+MossHuobao 是一个基于 AI 的短剧自动化生产平台，实现从剧本生成、角色设计、分镜制作到视频合成的全流程自动化。
 
 ### 🎯 核心价值
 
@@ -182,7 +182,7 @@ cd ../backend && npm start
 
 ### 🗄️ 数据库
 
-内置 SQLite（`better-sqlite3` + WAL 模式），数据库表在首次启动时自动创建（幂等重放 DDL 与种子数据），默认文件位于 `data/huobao.sqlite3`，可通过 `SQLITE_PATH` 重定向。桌面版数据存放在用户数据目录（`~/Library/Application Support/HuobaoDrama/data/`）。
+内置 SQLite（`better-sqlite3` + WAL 模式），数据库表在首次启动时自动创建（幂等重放 DDL 与种子数据），默认文件位于 `data/huobao.sqlite3`，可通过 `SQLITE_PATH` 重定向。桌面版数据存放在用户数据目录（`~/Library/Application Support/MossHuobao/data/`）。
 
 从旧版 MySQL 迁移数据：
 
@@ -289,19 +289,19 @@ cd backend && npx tsx scripts/import-mysql-to-sqlite.ts
 
 | 平台 | 下载文件 |
 |---|---|
-| macOS（Apple Silicon，M 系列） | `HuobaoDrama-4.0.5-arm64.dmg` |
-| macOS（Intel） | `HuobaoDrama-4.0.5.dmg` |
-| Windows | `HuobaoDrama.Setup.4.0.5.exe` |
+| macOS（Apple Silicon，M 系列） | `MossHuobao-4.0.5-arm64.dmg` |
+| macOS（Intel） | `MossHuobao-4.0.5.dmg` |
+| Windows | `MossHuobao.Setup.4.0.5.exe` |
 
 > 国内用户请用腾讯云镜像直链下载（GitHub 在国内访问不稳定）。应用内更新器同样国内源优先、GitHub 兜底。
 
 **命令行安装（推荐，免修复）**：用 curl 下载不会触发 macOS 隔离属性，安装后双击即开，不会遇到「已损坏」提示（Apple Silicon 把 `arm64` 文件名换成对应版本，Intel 用无后缀 dmg）：
 
 ```bash
-curl -L -o /tmp/HuobaoDrama.dmg https://installer.chatfire.site/huobao-drama/v4.0.5/HuobaoDrama-4.0.5-arm64.dmg \
-  && hdiutil attach -nobrowse /tmp/HuobaoDrama.dmg \
-  && cp -R /Volumes/HuobaoDrama*/HuobaoDrama.app /Applications/ \
-  && hdiutil detach /Volumes/HuobaoDrama*
+curl -L -o /tmp/MossHuobao.dmg https://installer.chatfire.site/huobao-drama/v4.0.5/MossHuobao-4.0.5-arm64.dmg \
+  && hdiutil attach -nobrowse /tmp/MossHuobao.dmg \
+  && cp -R /Volumes/MossHuobao*/MossHuobao.app /Applications/ \
+  && hdiutil detach /Volumes/MossHuobao*
 ```
 
 无需构建 —— 下载 dmg/exe 直接安装即可，已安装客户端会通过内置更新器自动升级。（如需从源码自行打包，见下方命令。）
@@ -314,20 +314,20 @@ npm run dist        # macOS dmg（arm64 + Intel）
 npm run dist:win    # Windows NSIS 安装器（win-x64，可在 macOS 上交叉打包）
 
 # 产物
-# desktop/release/HuobaoDrama-<版本>-arm64.dmg        (Apple Silicon)
-# desktop/release/HuobaoDrama-<版本>.dmg              (Intel)
-# desktop/release/HuobaoDrama Setup <版本>.exe        (Windows)
+# desktop/release/MossHuobao-<版本>-arm64.dmg        (Apple Silicon)
+# desktop/release/MossHuobao-<版本>.dmg              (Intel)
+# desktop/release/MossHuobao Setup <版本>.exe        (Windows)
 ```
 
 安装说明：
 
 - macOS 未签名包首次打开可能提示「App 已损坏，无法打开」（Apple Silicon 常见），这是 Gatekeeper 隔离属性导致，并非文件损坏。两种修复方式任选：
   1. **dmg 内自带修复脚本**：把 app 拖入「应用程序」后，双击 dmg 窗口底部的「如提示已损坏请双击我.command」，自动完成修复；
-  2. 或终端执行 `sudo xattr -cr /Applications/HuobaoDrama.app`。
+  2. 或终端执行 `sudo xattr -cr /Applications/MossHuobao.app`。
 
   修复只需一次，之后双击图标即可启动，应用内自动更新也不受影响。
 - Windows 未签名包 SmartScreen 会提示「更多信息 → 仍要运行」
-- 用户数据目录：`~/Library/Application Support/HuobaoDrama/`（数据库、生成的媒体、技能在线编辑的副本）
+- 用户数据目录：`~/Library/Application Support/MossHuobao/`（数据库、生成的媒体、技能在线编辑的副本）
 - 内置 FFmpeg/FFprobe 二进制，无需系统安装
 - Electron 锁定 37.x：better-sqlite3 的 win32 预编译最高覆盖到该版本的 ABI（交叉打包免编译的关键）
 - 应用内点击外部链接（如「前往 api.firemux.cn 获取 Key」）直接用系统浏览器打开
@@ -478,7 +478,7 @@ HUOBAO_VERSION=4.0.5 docker compose up -d --build
 
 ### Q: 桌面版数据存在哪里？
 
-A: `~/Library/Application Support/HuobaoDrama/data/`（SQLite 数据库 + 生成的图片/视频），技能在线编辑的副本在同级 `workspace/` 目录。开发模式下则使用仓库 `data/` 目录。
+A: `~/Library/Application Support/MossHuobao/data/`（SQLite 数据库 + 生成的图片/视频），技能在线编辑的副本在同级 `workspace/` 目录。开发模式下则使用仓库 `data/` 目录。
 
 ### Q: 旧版 MySQL 数据怎么迁移到 SQLite？
 

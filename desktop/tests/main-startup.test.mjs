@@ -31,7 +31,7 @@ async function boot(mode = 'pending', options = {}) {
       ? callback(null, options.shortPath, '')
       : callback(new Error('short path unavailable'), '', ''))
   } }
-  const filesystem = { existsSync: p => !/storage-config|template-version|startup.log/.test(p), mkdirSync() {}, cpSync() {}, writeFileSync() {}, appendFileSync: (_p, s) => logs.push(s) }
+  const filesystem = { existsSync: p => !/storage-config|template-version|startup.log/.test(p), mkdirSync() {}, renameSync() {}, cpSync() {}, writeFileSync() {}, appendFileSync: (_p, s) => logs.push(s) }
   const fakeProcess = new EventEmitter()
   Object.assign(fakeProcess, { platform: 'win32', arch: 'x64', env: {}, versions: { electron: '37.10.3' }, pid: 123, resourcesPath: options.resourcesPath || '/mock/resources', stdout: new EventEmitter(), stderr: new EventEmitter() })
   fakeProcess.stdout.write = fakeProcess.stderr.write = () => true
@@ -81,7 +81,7 @@ test('page load failure reports a visible error instead of leaving a hidden wind
 test('non-ASCII Windows install resources use one short path for backend and media tools', async () => {
   const shortPath = 'C:\\HUOBAO~1\\resources'
   const p = await boot('healthy', {
-    resourcesPath: 'C:\\用户\\HuobaoDrama\\resources',
+    resourcesPath: 'C:\\用户\\MossHuobao\\resources',
     shortPath,
   })
   assert.ok(p.forkArgs()[0].startsWith(shortPath))
