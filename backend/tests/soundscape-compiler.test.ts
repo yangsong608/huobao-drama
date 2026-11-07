@@ -8,6 +8,7 @@ import {
   buildSoundscapeDraft,
   clampSeconds,
   decorateSoundscapePlan,
+  formatCategoryHints,
   parseSoundscapeRequest,
   translateSoundscapeHints,
   type BuildSoundscapeDraftInput,
@@ -467,8 +468,21 @@ test('categoryHints 解析：去空白、丢空串、拒绝非法结构', () => 
   )
 })
 
-test('用户声音描述进入降级提示词（各类别）', () => {
-  const plan = buildSoundscapeDraft(draftInput({
+test('声音描述指令以用户主导：内容放最前，场景设定仅少量补充，不再要求融入', () => {
+  const text = formatCategoryHints({ ambience: '海水拍打甲板', bgm: '  ' })!
+  assert.match(text, /用户描述/)
+  assert.match(text, /最前/)
+  assert.match(text, /少量/)
+  assert.match(text, /氛围/)
+  assert.doesNotMatch(text, /融入/)
+  assert.match(text, /- 环境声：海水拍打甲板/)
+  // 空白描述被丢弃，不产生多余行
+  assert.doesNotMatch(text, /配乐/)
+  assert.equal(formatCategoryHints({ bgm: '   ' }), '')
+  assert.equal(formatCategoryHints(undefined), '')
+})
+
+test('用户声音描述进入降级提示词（各类别）', () => {  const plan = buildSoundscapeDraft(draftInput({
     categoryHints: {
       ambience: '海水拍打甲板',
       sfx: '木门吱呀作响',

@@ -823,7 +823,7 @@ function formatSceneForPrompt(scene: ScenePromptScene): string {
   ].join('\n')
 }
 
-function formatCategoryHints(hints: Partial<Record<SoundscapeCategory, string>> | undefined): string {
+export function formatCategoryHints(hints: Partial<Record<SoundscapeCategory, string>> | undefined): string {
   if (!hints) return ''
   const labels: Record<SoundscapeCategory, string> = {
     ambience: '环境声',
@@ -834,7 +834,9 @@ function formatCategoryHints(hints: Partial<Record<SoundscapeCategory, string>> 
   const lines = (Object.entries(hints) as Array<[SoundscapeCategory, string]>)
     .filter(([, text]) => text.trim())
     .map(([category, text]) => `- ${labels[category]}：${text.trim()}`)
-  return lines.length ? `\n\n用户补充要求（必须融入对应类别的英文提示词，不要照抄中文）：\n${lines.join('\n')}` : ''
+  return lines.length
+    ? `\n\n用户描述（最高优先级：对应用户描述的内容必须放在该类别英文提示词的最前面，围绕它展开并作为核心内容；场景设定只作少量氛围补充，不要照抄中文）：\n${lines.join('\n')}`
+    : ''
 }
 
 export function parseScenePromptResponse(data: unknown): Record<number, ScenePromptSet> {
