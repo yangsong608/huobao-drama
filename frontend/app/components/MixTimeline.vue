@@ -56,7 +56,7 @@ const emit = defineEmits<{
   select: [track: StageTrack, clip: StageClip]
   'select-track': [track: StageTrack | null]
   seek: [ms: number]
-  move: [clip: StageClip, startMs: number]
+  move: [clip: StageClip, startMs: number, targetTrack: StageTrack | null]
   'trim-start': [clip: StageClip, ms: number]
   'trim-end': [clip: StageClip, ms: number]
   'begin-change': []
@@ -95,6 +95,12 @@ const viewportWidth = ref(800)
 const scrollTop = ref(0)
 const cursor = ref('default')
 const hover = ref<{ x: number; y: number; title: string; time: string } | null>(null)
+const moveTarget = ref<StageTrack | null>(null)
+
+function canDropOnTrack(track: StageTrack | null, source: StageTrack | null, clip: StageClip): boolean {
+  return Boolean(track && source && !track.virtual && !track.locked && !track.hidden
+    && !source.virtual && !source.locked && !clip.locked)
+}
 
 const peaksCache = new Map<string, PeaksPayload | null>()
 const peaksInflight = new Set<string>()
@@ -423,6 +429,15 @@ function draw() {
     if (track.virtual) {
       ctx.fillStyle = hexToRgba(colorOf(track), 0.04)
       ctx.fillRect(0, top, width, laneH)
+    }
+    if (moveTarget.value && track._uid === moveTarget.value._uid) {
+      const color = colorOf(track)
+      ctx.fillStyle = hexToRgba(color, 0.16)
+      ctx.fillRect(0, top, width, laneH)
+      ctx.strokeStyle = hexToRgba(color, 0.65)
+      ctx.lineWidth = 2
+      ctx.strokeRect(1, top + 1, width - 2, laneH - 2)
+      ctx.lineWidth = 1
     }
     ctx.strokeStyle = border
     ctx.beginPath()
@@ -819,7 +834,13 @@ function onPointerMove(event: PointerEvent) {
   if (interaction.kind === 'move') {
     const duration = interaction.originalEnd - interaction.originalStart
     const next = snapMove(interaction.originalStart + deltaMs, duration, clip)
-    emit('move', clip, next)
+    const lane = laneAt(y)
+    const target = lane && lane.track !== interaction.track && canDropOnTrack(lane.track, interaction.track, clip) ? lane.track : null
+    if (moveTarget.value?._uid !== target?._uid) {
+      moveTarget.value = target
+      scheduleDraw()
+    }
+    emit('move', clip, next, target)
     return
   }
   if (interaction.kind === 'trim-start') {
@@ -840,6 +861,10 @@ function onPointerUp(event: PointerEvent) {
   if (canvas?.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId)
   stopEdgeScroll()
   if (interaction && interaction.kind !== 'seek') emit('end-change')
+  if (moveTarget.value) {
+    moveTarget.value = null
+    scheduleDraw()
+  }
   interaction = null
   cursor.value = 'default'
 }

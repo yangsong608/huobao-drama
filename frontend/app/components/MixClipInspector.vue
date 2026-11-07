@@ -147,6 +147,14 @@
             <button v-if="clip.lineId" class="mx-btn is-plain" type="button" @click="emit('regenerate-line', clip.lineId)">{{ t('mix.regenerateLine') }}</button>
             <button class="mx-btn is-plain" type="button" :disabled="!clipEditable" @click="emit('split-clip', clip)">{{ t('mix.splitClip') }}</button>
             <button class="mx-btn is-plain" type="button" :disabled="virtual" @click="emit('duplicate-clip', clip)">{{ t('mix.duplicateClip') }}</button>
+            <AppMenu v-if="!virtual" placement="top-start" :min-width="200">
+              <template #trigger>
+                <button class="mx-btn is-plain" type="button" :disabled="!clipEditable">{{ t('mix.copyToTrack') }}</button>
+              </template>
+              <span class="mx-menu-title">{{ t('mix.copyToTrackMenuTitle') }}</span>
+              <AppMenuItem v-for="target in copyTargetTracks" :key="target._uid" @click="emit('duplicate-clip-to', clip, target)">{{ target.name }}</AppMenuItem>
+              <p v-if="!copyTargetTracks.length" class="mx-hint">{{ t('mix.copyToTrackEmpty') }}</p>
+            </AppMenu>
             <button class="mx-btn is-danger" type="button" :disabled="!clipEditable" @click="emit('remove-clip', clip)">{{ t('mix.deleteClip') }}</button>
           </div>
         </template>
@@ -361,6 +369,8 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { SlidersHorizontal } from 'lucide-vue-next'
 import BaseSelect from '~/components/BaseSelect.vue'
+import AppMenu from '~/components/AppMenu.vue'
+import AppMenuItem from '~/components/AppMenuItem.vue'
 import type {
   EpisodeAudioAsset,
   MixBus,
@@ -374,6 +384,7 @@ import type { StageClip, StageTrack } from '~/composables/useMixStage'
 const props = defineProps<{
   clip: StageClip | null
   track: StageTrack | null
+  tracks?: StageTrack[]
   buses: MixBus[]
   assets: EpisodeAudioAsset[]
   revisions: MixRevision[]
@@ -394,6 +405,7 @@ const emit = defineEmits<{
   'remove-clip': [clip: StageClip]
   'split-clip': [clip: StageClip]
   'duplicate-clip': [clip: StageClip]
+  'duplicate-clip-to': [clip: StageClip, track: StageTrack]
   'locate-line': [lineId: number]
   'regenerate-line': [lineId: number]
   'exclude-line': [lineId: number]
@@ -474,6 +486,7 @@ const curveOptions = computed(() => [
 ])
 
 const virtual = computed(() => Boolean(props.track?.virtual))
+const copyTargetTracks = computed(() => (props.tracks || []).filter(item => !item.virtual && !item.locked && !item.hidden && item._uid !== props.track?._uid))
 const virtualVoice = computed(() => virtual.value && props.track?.role === 'voice')
 const virtualDialogue = computed(() => virtualVoice.value && props.clip?.lineId != null)
 const trackLocked = computed(() => Boolean(props.track?.locked))
@@ -643,6 +656,7 @@ function setBusNumber(bus: MixBus, key: 'duckRatio' | 'duckAttackMs' | 'duckRele
 .mx-note.is-warning { background: var(--warning-bg); color: var(--warning); }
 .mx-note.is-danger { background: var(--action-danger-bg); color: var(--action-danger); }
 .mx-hint { margin: 0; font-size: 9.5px; line-height: 1.5; color: var(--text-3); }
+.mx-menu-title { display: block; padding: 4px 10px; font-size: 9.5px; color: var(--text-3); }
 .mx-hint.is-warning { color: var(--warning); }
 .mx-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .mx-field > span { font-size: 9.5px; color: var(--text-3); }

@@ -237,6 +237,7 @@
         v-show="inspectorOpen"
         :clip="selectedClip"
         :track="inspectorTrack"
+        :tracks="tracks"
         :buses="buses"
         :assets="assets"
         :revisions="revisions"
@@ -254,6 +255,7 @@
         @remove-clip="removeClip"
         @split-clip="onSplitClip"
         @duplicate-clip="onDuplicateClip"
+        @duplicate-clip-to="onDuplicateClipTo"
         @locate-line="emit('locate-line', $event)"
         @regenerate-line="emit('regenerate-line', $event)"
         @exclude-line="requestExcludeLine"
@@ -874,7 +876,7 @@ function endChange() {
   }
   stage.endChange()
 }
-function onMoveClip(clip: StageClip, startMs: number) {
+function onMoveClip(clip: StageClip, startMs: number, targetTrack?: StageTrack | null) {
   const track = tracks.value.find(item => item.clips.some(entry => entry._uid === clip._uid))
   if (track?.virtual && track.role === 'voice' && clip.lineId != null) {
     const duration = clip.endMs - clip.startMs
@@ -883,7 +885,12 @@ function onMoveClip(clip: StageClip, startMs: number) {
     if (moveVirtualClip(clip, next)) pendingRetime = { lineId: clip.lineId, startMs: clip.startMs }
     return
   }
-  moveClip(clip, startMs)
+  const wasSelected = selectedClip.value?._uid === clip._uid
+  moveClip(clip, startMs, targetTrack ?? null)
+  if (targetTrack) {
+    const newTrack = tracks.value.find(item => item.clips.some(entry => entry._uid === clip._uid))
+    if (wasSelected && newTrack && newTrack !== track) selectClip(newTrack, clip)
+  }
 }
 async function commitRetime(lineId: number, startMs: number) {
   try {
@@ -1083,6 +1090,10 @@ function onSplitClip(clip: StageClip) {
 function onDuplicateClip(clip: StageClip) {
   const copy = duplicateClip(clip)
   if (copy && selectedTrack.value) selectClip(selectedTrack.value, copy)
+}
+function onDuplicateClipTo(clip: StageClip, track: StageTrack) {
+  const copy = duplicateClip(clip, track)
+  if (copy) selectClip(track, copy)
 }
 function splitSelected() {
   if (selectedClip.value) onSplitClip(selectedClip.value)

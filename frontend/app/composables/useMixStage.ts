@@ -957,20 +957,28 @@ export function useMixStage(options: UseMixStageOptions) {
     return second
   }
 
-  function duplicateClip(clip: StageClip): StageClip | null {
+  function canDropClipOn(track: StageTrack | null | undefined): boolean {
+    return Boolean(track && !track.virtual && !track.locked && !track.hidden)
+  }
+
+  function duplicateClip(clip: StageClip, targetTrack?: StageTrack | null): StageClip | null {
     const track = trackOfClip(clip)
     if (!track || track.virtual) return null
+    const target = targetTrack && targetTrack !== track && canDropClipOn(targetTrack) ? targetTrack : track
+    const sameTrack = target === track
     const duration = clip.endMs - clip.startMs
     const copy: StageClip = {
       ...clone(clip),
       id: null,
-      startMs: clip.endMs,
-      endMs: clip.endMs + duration,
+      // 同轨副本紧跟原片段之后；跨轨副本保持相同时间点
+      ...(sameTrack
+        ? { startMs: clip.endMs, endMs: clip.endMs + duration }
+        : { startMs: clip.startMs, endMs: clip.endMs }),
       _uid: newUid('c'),
     }
     mutate(() => {
-      track.clips.push(copy)
-      sortClips(track)
+      target.clips.push(copy)
+      sortClips(target)
     })
     return copy
   }
@@ -988,15 +996,21 @@ export function useMixStage(options: UseMixStageOptions) {
     return true
   }
 
-  function moveClip(clip: StageClip, startMs: number) {
+  function moveClip(clip: StageClip, startMs: number, targetTrack?: StageTrack | null) {
     const track = trackOfClip(clip)
     if (!track || track.virtual || track.locked || clip.locked) return
     const duration = clip.endMs - clip.startMs
     const start = Math.max(0, Math.round(startMs))
+    const target = targetTrack && targetTrack !== track && canDropClipOn(targetTrack) ? targetTrack : null
     mutate(() => {
+      if (target) {
+        track.clips = track.clips.filter((item) => item._uid !== clip._uid)
+        target.clips.push(clip)
+      }
       clip.startMs = start
       clip.endMs = start + duration
-      sortClips(track)
+      if (target) sortClips(track)
+      sortClips(target || track)
     })
   }
 
