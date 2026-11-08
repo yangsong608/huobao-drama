@@ -875,6 +875,7 @@
                       @commit="v => updateField(selectedSb, 'video_prompt', v)"
                     />
                     <p class="voice-reference-hint">{{ t('characterVoice.referenceHint') }}</p>
+                    <p v-if="previousShotFrameRef" class="voice-reference-hint">{{ t('episode.frameAssets.autoPromptHint', { token: previousShotFrameRef.token }) }}</p>
                   </section>
               </div>
               </div>
@@ -1005,6 +1006,13 @@
                       <span class="tag mono">{{ t('episode.frameAssets.onlyThisEpisode') }}</span>
                     </div>
                     <p class="voice-reference-hint">{{ t('episode.frameAssets.scopeHint') }}</p>
+                    <div v-if="previousShotFrameRef" class="frame-asset-current">
+                      <img :src="videoSourceUrl(previousShotFrameRef.url)" class="frame-asset-current-thumb" alt="" loading="lazy" />
+                      <div class="frame-asset-current-meta">
+                        <span>{{ t('episode.frameAssets.previousRef') }}</span>
+                        <span class="dim">@{{ previousShotFrameRef.token }}</span>
+                      </div>
+                    </div>
                     <div class="frame-asset-current">
                       <template v-if="currentShotFirstFrame">
                         <img :src="videoSourceUrl(currentShotFirstFrame)" class="frame-asset-current-thumb" alt="" loading="lazy" />
@@ -4776,21 +4784,43 @@ function formatHistoryTime(iso) {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-function getShotReferenceImages(sb) {
-  const refs = []
-  const pushRef = (value) => {
-    if (!value || refs.includes(value) || refs.length >= refImageLimit.value) return
-    refs.push(value)
+// 上一分镜末帧（本集资产）：作为当前镜参考图，并可用 @镜头N末帧 在提示词里引用
+function getPreviousShotFrameRef(sb) {
+  const index = sbs.value.findIndex(item => Number(item.id) === Number(sb?.id))
+  if (index <= 0) return null
+  const prevShot = sbs.value[index - 1]
+  const asset = frameAssets.value.find(item =>
+    Number(item?.storyboard_id ?? item?.storyboardId) === Number(prevShot.id))
+  const url = asset?.url || ''
+  if (!url) return null
+  const shotNumber = storyboardNumberOf(prevShot) || index
+  return { asset, url, token: `镜头${shotNumber}末帧`, shotNumber }
+}
+
+// 生成参考图顺序：上一镜末帧置顶（保证占位），随后场景、角色、道具
+function getShotReferenceEntries(sb) {
+  const entries = []
+  const seen = new Set()
+  const push = (name, url) => {
+    if (!url || seen.has(url) || entries.length >= refImageLimit.value) return
+    seen.add(url)
+    entries.push({ name, url })
   }
+  const previous = getPreviousShotFrameRef(sb)
+  if (previous) push(previous.token, previous.url)
   const scene = getStoryboardScene(sb)
-  pushRef(scene?.image_url || scene?.imageUrl)
+  push(scene?.location || '', scene?.image_url || scene?.imageUrl)
   for (const char of getStoryboardCharacters(sb)) {
-    pushRef(char?.image_url || char?.imageUrl)
+    push(char.name || '', char?.image_url || char?.imageUrl)
   }
   for (const prop of getStoryboardProps(sb)) {
-    pushRef(prop?.image_url || prop?.imageUrl)
+    push(prop.name || '', prop?.image_url || prop?.imageUrl)
   }
-  return refs
+  return entries
+}
+
+function getShotReferenceImages(sb) {
+  return getShotReferenceEntries(sb).map(entry => entry.url)
 }
 
 // ===== 分镜末帧资产：只在本集生效，可设为镜头首帧作为下一镜转场开头 =====
@@ -4803,6 +4833,7 @@ const currentShotFirstFrame = computed(() => {
   return sb?.first_frame_image || sb?.firstFrameImage || ''
 })
 const episodeFrameAssets = computed(() => frameAssets.value)
+const previousShotFrameRef = computed(() => getPreviousShotFrameRef(selectedSb.value))
 const canExtractLastFrame = computed(() => {
   if (isComfyVideoMode.value || previewVideoUrl.value) return false
   const url = String(selectedSb.value?.video_url || selectedSb.value?.videoUrl || '')
@@ -4840,10 +4871,8 @@ async function extractShotLastFrame(sb = selectedSb.value) {
   try {
     const result = await frameAssetAPI.extractLast(sb.id)
     const asset = result?.asset
-    const boundNext = result?.bound_next ?? result?.boundNext
-    const nextId = result?.next_storyboard_id ?? result?.nextStoryboardId
     const previousUrl = frameAssets.value.find(item => item.id === asset?.id)?.url
-    // 重新抽帧后地址会变：本集引用旧地址的首帧同步换新
+    // 重新抽帧后地址会变：本集手工引用旧地址的首帧同步换新
     if (previousUrl && asset?.url && previousUrl !== asset.url) {
       for (const item of sbs.value) {
         if ((item.first_frame_image || item.firstFrameImage) === previousUrl) {
@@ -4851,11 +4880,8 @@ async function extractShotLastFrame(sb = selectedSb.value) {
         }
       }
     }
-    if (boundNext && nextId && asset?.url) {
-      setStoryboardFirstFrameLocal(nextId, asset.url)
-    }
     await loadFrameAssets()
-    toast.success(boundNext ? t('episode.frameAssets.boundNext') : t('episode.frameAssets.extracted'))
+    toast.success(t('episode.frameAssets.extracted'))
   } catch (e) {
     toastError(e, { fallback: 'episode.frameAssets.extractFailed' })
   } finally {
@@ -5003,7 +5029,15 @@ const mentionOptions = computed(() => {
   const sb = selectedSb.value
   if (!sb) return []
   const scene = getStoryboardScene(sb)
+  const previous = previousShotFrameRef.value
   return [
+    ...(previous ? [{
+      label: previous.token,
+      value: previous.token,
+      kind: 'frame',
+      group: t('episode.frameAssets.previousRef'),
+      image: thumbOf(videoSourceUrl(previous.url)),
+    }] : []),
     ...getStoryboardCharacters(sb).map(c => ({
       label: c.name,
       value: c.name,
@@ -5036,31 +5070,28 @@ const mentionOptions = computed(() => {
   ]
 })
 
-// 按参考图顺序（场景图在前、角色图居中、道具图在后）为 @名字 建立索引映射，供视频提示词引用替换
+// 按参考图顺序（上一镜末帧、场景图、角色图、道具图）为 @名字 建立索引映射，供视频提示词引用替换
 function getShotReferenceIndexMap(sb) {
-  const ordered = []
-  const seen = new Set()
-  const push = (name, url) => {
-    if (!url || seen.has(url) || ordered.length >= refImageLimit.value) return
-    seen.add(url)
-    ordered.push({ name, imageUrl: url })
-  }
-  const scene = getStoryboardScene(sb)
-  push(scene?.location || '', scene?.image_url || scene?.imageUrl)
-  for (const char of getStoryboardCharacters(sb)) {
-    push(char.name || '', char?.image_url || char?.imageUrl)
-  }
-  for (const prop of getStoryboardProps(sb)) {
-    push(prop.name || '', prop?.image_url || prop?.imageUrl)
-  }
   const nameToIndex = {}
-  ordered.forEach((a, i) => { if (a.name && !(a.name in nameToIndex)) nameToIndex[a.name] = i + 1 })
+  getShotReferenceEntries(sb).forEach((entry, i) => {
+    if (entry.name && !(entry.name in nameToIndex)) nameToIndex[entry.name] = i + 1
+  })
   return nameToIndex
+}
+
+// 上一镜末帧作为延续参考：提示词自动带一行 @镜头N末帧；用户已手写该引用时不重复
+function appendPreviousFramePrompt(sb, prompt) {
+  const previous = getPreviousShotFrameRef(sb)
+  if (!previous) return prompt
+  const token = `@${previous.token}`
+  if (prompt.includes(token)) return prompt
+  const line = t('episode.frameAssets.promptLine', { token: previous.token })
+  return prompt.trim() ? `${line}\n${prompt}` : line
 }
 
 // 将视频提示词里的 @名字 替换为 @图片N名字（N 为参考图序号，1 起），生成时使用
 function resolveVideoPromptRefs(sb) {
-  const prompt = sb.video_prompt || sb.videoPrompt || ''
+  const prompt = appendPreviousFramePrompt(sb, sb.video_prompt || sb.videoPrompt || '')
   const map = getShotReferenceIndexMap(sb)
   const names = Object.keys(map).sort((a, b) => b.length - a.length)
   if (!names.length) return prompt

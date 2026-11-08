@@ -2,11 +2,12 @@
  * 分镜末帧资产 — 抽出的末帧只在本集生效
  *
  * 文件落在项目 storyboards/frames/ep-<剧集>/，资产行写 assets(category=storyboard_frame)。
- * 同一来源分镜重复抽取只保留一条资产；地址变化时同步本集已引用该资产的首帧。
+ * 同一来源分镜重复抽取只保留一条资产；地址变化时同步本集已手工引用该资产的首帧。
+ * 抽取不再自动改写下一镜首帧：末帧作为下一镜的参考图与提示词 @ 引用使用。
  * 来源分镜删除/重建后资产随剧集清理，列表只返回来源仍存活的资产。
  */
 import fs from 'node:fs'
-import { and, asc, desc, eq, gt, isNull } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { extractVideoFrame } from './video-frames.js'
@@ -18,8 +19,6 @@ type DbExecutor = Pick<typeof db, 'select' | 'update' | 'insert' | 'delete'>
 
 export interface ExtractLastFrameResult {
   asset: AssetRow
-  nextStoryboardId: number | null
-  boundNext: boolean
 }
 
 function assetSubDir(episodeId: number): string {
@@ -93,8 +92,10 @@ export async function extractLastFrameAsset(storyboardId: number): Promise<Extra
       .get()
 
     let assetId: number
+    const assetName = `镜头${storyboard.storyboardNumber}末帧`
     if (existing) {
       tx.update(schema.assets).set({
+        name: assetName,
         url: frame.relativePath,
         thumbnailUrl: frame.relativePath,
         localPath: frame.absolutePath,
@@ -119,7 +120,7 @@ export async function extractLastFrameAsset(storyboardId: number): Promise<Extra
         episodeId: storyboard.episodeId,
         storyboardId: storyboard.id,
         storyboardNum: storyboard.storyboardNumber,
-        name: `镜头 ${storyboard.storyboardNumber} 末帧`,
+        name: assetName,
         description: '仅本集可用',
         type: 'image',
         category: FRAME_ASSET_CATEGORY,
@@ -136,27 +137,8 @@ export async function extractLastFrameAsset(storyboardId: number): Promise<Extra
       }).run())
     }
 
-    const next = tx.select().from(schema.storyboards)
-      .where(and(
-        eq(schema.storyboards.episodeId, storyboard.episodeId),
-        isNull(schema.storyboards.deletedAt),
-        gt(schema.storyboards.storyboardNumber, storyboard.storyboardNumber || 0),
-      ))
-      .orderBy(asc(schema.storyboards.storyboardNumber), asc(schema.storyboards.id))
-      .limit(1)
-      .get()
-
-    let boundNext = false
-    if (next && !String(next.firstFrameImage || '').trim()) {
-      tx.update(schema.storyboards)
-        .set({ firstFrameImage: frame.relativePath, updatedAt: ts })
-        .where(eq(schema.storyboards.id, next.id))
-        .run()
-      boundNext = true
-    }
-
     const asset = tx.select().from(schema.assets).where(eq(schema.assets.id, assetId)).get()!
-    return { asset, nextStoryboardId: next?.id ?? null, boundNext }
+    return { asset }
   })
 }
 

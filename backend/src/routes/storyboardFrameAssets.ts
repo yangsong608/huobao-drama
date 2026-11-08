@@ -32,17 +32,13 @@ app.get('/episodes/:id/frame-assets', async (c) => {
   return success(c, rows.map(row => publicAsset(row)))
 })
 
-// POST /storyboards/:id/frame-assets/last — 抽末帧并自动补下一镜首帧
+// POST /storyboards/:id/frame-assets/last — 抽末帧作为本集参考图资产（不改写首帧）
 app.post('/storyboards/:id/frame-assets/last', async (c) => {
   const storyboardId = parseId(c.req.param('id'))
   if (!storyboardId) return badRequest(c, '镜头 ID 非法')
   try {
     const result = await extractLastFrameAsset(storyboardId)
-    return success(c, {
-      asset: publicAsset(result.asset),
-      next_storyboard_id: result.nextStoryboardId,
-      bound_next: result.boundNext,
-    })
+    return success(c, { asset: publicAsset(result.asset) })
   } catch (error) {
     return badRequest(c, errorMessage(error, '抽取末帧失败'))
   }

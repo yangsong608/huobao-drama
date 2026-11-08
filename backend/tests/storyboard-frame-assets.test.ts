@@ -1,6 +1,6 @@
 /**
- * 分镜末帧资产：抽帧落盘到本集目录、自动设置下一镜首帧、已有首帧不覆盖、
- * 重复抽取同步引用、跨集拒绝、删除资产/来源分镜清理引用。
+ * 分镜末帧资产：抽帧落盘到本集目录、不改动任何分镜首帧、重复抽取同步手工引用、
+ * 跨集拒绝、删除资产/来源分镜清理引用。
  */
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -107,7 +107,7 @@ async function getStoryboard(id: number) {
   return row
 }
 
-test('抽取末帧生成本集资产并自动设为下一分镜首帧', { skip: !suite.ffmpeg || !suite.ffprobe }, async () => {
+test('抽取末帧生成本集资产，不改动下一分镜首帧', { skip: !suite.ffmpeg || !suite.ffprobe }, async () => {
   const dramaId = await insertDrama()
   const episodeId = await insertEpisode(dramaId)
   const shot1 = await insertStoryboard(episodeId, 1)
@@ -124,9 +124,10 @@ test('抽取末帧生成本集资产并自动设为下一分镜首帧', { skip: 
   )
   assert.ok(fsSync.existsSync(path.join(root, asset.url)), '末帧文件应落在本集目录')
   assert.equal(asset.local_path, undefined, '接口不应暴露本地绝对路径')
-  assert.equal(res.body.data.bound_next, true)
-  assert.equal(res.body.data.next_storyboard_id, shot2)
-  assert.equal((await getStoryboard(shot2)).firstFrameImage, asset.url)
+  assert.equal(asset.name, '镜头1末帧', '资产名可直接作为 @ 引用名')
+  assert.equal(res.body.data.bound_next, undefined)
+  assert.equal(res.body.data.next_storyboard_id, undefined)
+  assert.equal((await getStoryboard(shot2)).firstFrameImage, null, '抽帧不再自动写下一镜首帧')
 
   const [row] = await db.select().from(schema.assets).where(eq(schema.assets.id, asset.id))
   assert.equal(row.category, 'storyboard_frame')
@@ -141,7 +142,7 @@ test('抽取末帧生成本集资产并自动设为下一分镜首帧', { skip: 
   assert.equal(list.body.data[0].local_path, undefined, '列表不应暴露本地绝对路径')
 })
 
-test('下一分镜已有首帧时不覆盖，只加入资产列表', { skip: !suite.ffmpeg || !suite.ffprobe }, async () => {
+test('下一分镜已有首帧时抽帧也不改动分镜首帧', { skip: !suite.ffmpeg || !suite.ffprobe }, async () => {
   const dramaId = await insertDrama()
   const episodeId = await insertEpisode(dramaId)
   const shot1 = await insertStoryboard(episodeId, 1)
@@ -151,13 +152,12 @@ test('下一分镜已有首帧时不覆盖，只加入资产列表', { skip: !su
 
   const res = await request('POST', `/api/v1/storyboards/${shot1}/frame-assets/last`)
   assert.equal(res.status, 200)
-  assert.equal(res.body.data.bound_next, false)
   assert.equal((await getStoryboard(shot2)).firstFrameImage, 'static/existing-first.jpg')
   const list = await request('GET', `/api/v1/episodes/${episodeId}/frame-assets`)
   assert.equal(list.body.data.length, 1)
 })
 
-test('重新抽取更新同一资产并同步已引用的首帧', { skip: !suite.ffmpeg || !suite.ffprobe }, async () => {
+test('重新抽取更新同一资产并同步手工引用的首帧', { skip: !suite.ffmpeg || !suite.ffprobe }, async () => {
   const dramaId = await insertDrama()
   const episodeId = await insertEpisode(dramaId)
   const shot1 = await insertStoryboard(episodeId, 1)
@@ -168,6 +168,9 @@ test('重新抽取更新同一资产并同步已引用的首帧', { skip: !suite
   const first = await request('POST', `/api/v1/storyboards/${shot1}/frame-assets/last`)
   assert.equal(first.status, 200)
   const firstUrl = first.body.data.asset.url
+  await db.update(schema.storyboards)
+    .set({ firstFrameImage: firstUrl })
+    .where(eq(schema.storyboards.id, shot2))
 
   await new Promise(resolve => setTimeout(resolve, 30))
   makeVideo(`static/projects/${dramaId}/videos/shot-${shot1}.mp4`, 2)
