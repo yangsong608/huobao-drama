@@ -173,20 +173,47 @@ test('Drizzle breakdownMethods 与 episodes 定义包含契约字段', () => {
   assert.ok('breakdownMethod' in episodeColumns, 'Drizzle episodes 缺少 breakdownMethod')
 })
 
-test('首次播种补齐五条内置方案，重复播种不覆盖编辑', async () => {
+test('首次播种补齐六条内置方案，重复播种不覆盖编辑', async () => {
   await svc.ensureBreakdownMethodsSeeded()
   const list = svc.listBreakdownMethods()
   assert.deepEqual(list.map(item => item.key), [
-    'standard', 'hook-beat', 'director-board', 'h3-compact', 'trailer-cut',
+    'standard', 'hook-beat', 'hook-beat-extended', 'director-board', 'h3-compact', 'trailer-cut',
   ])
   assert.ok(list.every(item => item.builtin === 1))
 
   db.update(breakdownMethods).set({ name: '改过的钩子' }).where(eq(breakdownMethods.key, 'hook-beat')).run()
+  db.update(breakdownMethods).set({ name: '改过的扩展版' }).where(eq(breakdownMethods.key, 'hook-beat-extended')).run()
   await svc.ensureBreakdownMethodsSeeded()
   assert.equal(svc.getBreakdownMethod('hook-beat')?.name, '改过的钩子')
+  assert.equal(svc.getBreakdownMethod('hook-beat-extended')?.name, '改过的扩展版')
 
   svc.resetBreakdownMethod('hook-beat')
+  svc.resetBreakdownMethod('hook-beat-extended')
   assert.equal(svc.getBreakdownMethod('hook-beat')?.name, '爆款钩子节拍')
+  assert.equal(svc.getBreakdownMethod('hook-beat-extended')?.name, '爆款钩子节拍·扩展版')
+})
+
+test('扩展版预置方案覆盖开场、钩子节点、机位、台词与自检', async () => {
+  await svc.ensureBreakdownMethodsSeeded()
+  const extended = svc.getBreakdownMethod('hook-beat-extended')!
+  assert.equal(extended.builtin, 1)
+  assert.equal(extended.sortOrder, 25)
+  assert.ok(extended.description.includes('参考'))
+  for (const word of [
+    '外力施压', '开场 0–3 秒', '段尾钩子', '6–12 秒', '2–3 个子镜头',
+    'A 主镜', 'B 反打', 'C 特写', 'D 环境', '台词', '自检',
+  ]) {
+    assert.ok(extended.skill.includes(word), `扩展版 Skill 缺少 ${word}`)
+  }
+  assert.ok(extended.prompt.includes('钩子'))
+  assert.ok(extended.prompt.includes('外力施压'))
+
+  const ep = newEpisode('hook-beat-extended')
+  const block = svc.getEpisodeBreakdownBlock(ep)!
+  assert.ok(block.includes('## 当前分镜拆分方案：爆款钩子节拍·扩展版'))
+  assert.ok(block.includes('### 方案提示词'))
+  assert.ok(block.includes('### 方案 Skill'))
+  assert.ok(block.includes('A 主镜'))
 })
 
 test('内置方案文本符合内容要求，standard 两段为空', () => {
@@ -387,8 +414,9 @@ test('方案接口覆盖列表、详情、创建、更新、复制、恢复、�
   assert.equal(res.status, 200)
   let payload = await readJson(res)
   assert.equal(payload.code, 200)
-  assert.equal(payload.data.list.length, 5)
+  assert.equal(payload.data.list.length, 6)
   assert.equal(payload.data.list[0].key, 'standard')
+  assert.equal(payload.data.list[2].key, 'hook-beat-extended')
   assert.ok('usage_count' in payload.data.list[0])
   assert.ok(!('prompt' in payload.data.list[0]))
   assert.ok(!('skill' in payload.data.list[0]))

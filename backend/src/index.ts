@@ -175,7 +175,7 @@ await markInterruptedAutomations()
 markInterruptedNovelJobs()
 // V1 已上传的角色音色迁移为 character_voices（幂等，失败不影响启动）
 migrateUploadedVoices()
-// 分镜拆分方案：内置五条按 key 幂等补齐，已有编辑不覆盖；失败不影响启动
+// 分镜拆分方案：内置方案按 key 幂等补齐，已有编辑不覆盖；失败不影响启动
 try {
   await ensureBreakdownMethodsSeeded()
 } catch (error) {
