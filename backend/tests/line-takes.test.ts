@@ -57,9 +57,11 @@ const cloudLine = addLine(3, '小雨，你听我解释。')
 const reuseLine = addLine(4, '雨更大了。')
 
 const calls: any[] = []
+const synthDeps: any[] = []
 let synthCount = 0
-const fakeSynth = (async (params: any) => {
+const fakeSynth = (async (params: any, deps?: any) => {
   calls.push(params)
+  synthDeps.push(deps)
   synthCount += 1
   return {
     url: `static/tts/fake-${synthCount}.wav`,
@@ -215,4 +217,58 @@ test('reuse=true 命中同 renderHash 的 ready Take，不新建；reuse=false �
   assert.equal(fresh.cached, false)
   assert.equal(fresh.take.takeNo, 2)
   assert.equal(synthCount, countAfterFirst + 1)
+})
+
+test('varySeed：首次生成沿用音色种子，重合成换新种子并记录实际值', async () => {
+  const resLine = addLine(5, '这一次必须是另一个声音。')
+  const first = await generateTake(
+    { lineId: resLine.id, reuse: false, varySeed: true },
+    { config: qwen191Config, synthesize: fakeSynth },
+  )
+  const firstSent = calls[calls.length - 1]
+  assert.equal(firstSent.seed, 42, '首次生成保持角色音色种子')
+  const firstParams = JSON.parse(first.take.paramsJson || '{}')
+  assert.equal(firstParams.seed, 42)
+  assert.equal(firstParams.requested_seed, 42)
+
+  const second = await generateTake(
+    { lineId: resLine.id, reuse: false, varySeed: true },
+    { config: qwen191Config, synthesize: fakeSynth },
+  )
+  const secondSent = calls[calls.length - 1]
+  assert.ok(Number.isInteger(secondSent.seed), `seed=${secondSent.seed}`)
+  assert.ok(secondSent.seed >= 1 && secondSent.seed <= 2_000_000_000, `seed=${secondSent.seed}`)
+  assert.notEqual(secondSent.seed, 42, '重合成必须换种子，音色才有变化')
+  const secondParams = JSON.parse(second.take.paramsJson || '{}')
+  assert.equal(secondParams.seed, secondSent.seed)
+  assert.equal(secondParams.requested_seed, secondSent.seed)
+  assert.equal(second.take.takeNo, 2)
+})
+
+test('varySeed 不覆盖检查器固定种子', async () => {
+  const fixedLine = addLine(6, '固定种子必须复现。')
+  const first = await generateTake(
+    { lineId: fixedLine.id, overrides: { seed: 777 }, reuse: false, varySeed: true },
+    { config: qwen191Config, synthesize: fakeSynth },
+  )
+  const firstSent = calls[calls.length - 1]
+  const second = await generateTake(
+    { lineId: fixedLine.id, overrides: { seed: 777 }, reuse: false, varySeed: true },
+    { config: qwen191Config, synthesize: fakeSynth },
+  )
+  const secondSent = calls[calls.length - 1]
+  assert.equal(firstSent.seed, 777)
+  assert.equal(secondSent.seed, 777)
+  assert.equal(JSON.parse(first.take.paramsJson || '{}').requested_seed, 777)
+  assert.equal(JSON.parse(second.take.paramsJson || '{}').requested_seed, 777)
+})
+
+test('显式生成以 noCache 调 synthesize，复用路径仍允许缓存', async () => {
+  const cacheLine = addLine(7, '显式生成必须真实合成。')
+  await generateTake({ lineId: cacheLine.id, reuse: false }, { config: mainConfig, synthesize: fakeSynth })
+  assert.equal(synthDeps[synthDeps.length - 1]?.noCache, true)
+
+  const reuseMiss = addLine(8, '复用未命中时允许缓存。')
+  await generateTake({ lineId: reuseMiss.id, reuse: true }, { config: mainConfig, synthesize: fakeSynth })
+  assert.notEqual(synthDeps[synthDeps.length - 1]?.noCache, true)
 })

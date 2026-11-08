@@ -496,4 +496,32 @@ describe('合成与缓存', () => {
     assert.notEqual(base, buildCacheKey(params, 'qwen3-tts-customvoice', 'qwen3-tts', { maxNewTokens: 2048 }))
     assert.notEqual(base, buildCacheKey(params, 'qwen3-tts-customvoice', 'qwen3-tts', { maxInputChars: 400 }))
   })
+
+  it('noCache 真实合成：跳过文件缓存与并发去重，各自写独立文件', async () => {
+    const cfg = { ...config, baseUrl }
+    const params = { text: '重合成必须真的调用语音服务。', voice: { externalVoiceId: 'preset:female' } }
+    const before = speechCalls
+
+    const [first, second] = await Promise.all([
+      synthesize(params, { config: cfg, cacheDir: tmpDir, noCache: true }),
+      synthesize(params, { config: cfg, cacheDir: tmpDir, noCache: true }),
+    ])
+
+    assert.equal(first.cached, false)
+    assert.equal(second.cached, false)
+    assert.notEqual(second.hash, first.hash, '两条 noCache 结果必须是独立文件')
+    assert.equal(speechCalls - before, 2, 'noCache 不得命中文件缓存或并发去重')
+    assert.ok(fs.existsSync(path.join(tmpDir, first.hash.slice(0, 2), `${first.hash}.wav`)))
+    assert.ok(fs.existsSync(path.join(tmpDir, second.hash.slice(0, 2), `${second.hash}.wav`)))
+  })
+
+  it('noCache 的 nonce 不污染普通缓存键', () => {
+    const params = { text: '你好', voice: {} }
+    const base = buildCacheKey(params, 'm')
+    assert.notEqual(buildCacheKey(params, 'm', 'qwen3-tts', {}, 'nonce-1'), base)
+    assert.notEqual(
+      buildCacheKey(params, 'm', 'qwen3-tts', {}, 'nonce-1'),
+      buildCacheKey(params, 'm', 'qwen3-tts', {}, 'nonce-2'),
+    )
+  })
 })

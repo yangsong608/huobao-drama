@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { isAutomationRunning } from './automation.js'
@@ -64,6 +64,15 @@ export function reworkEpisode(episodeId: number): ReworkResult {
         ))
         .run()
     }
+    // 挂载台词随分镜软删：绝对锚点台词（无分镜）保留，重做后重新抽取
+    tx.update(schema.storyboardLines)
+      .set({ deletedAt: ts, updatedAt: ts })
+      .where(and(
+        eq(schema.storyboardLines.episodeId, episodeId),
+        isNotNull(schema.storyboardLines.storyboardId),
+        isNull(schema.storyboardLines.deletedAt),
+      ))
+      .run()
     tx.update(schema.episodes)
       .set({
         scriptContent: null,

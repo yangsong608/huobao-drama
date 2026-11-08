@@ -46,7 +46,6 @@ export interface StartBatchOptions {
   lineIds?: number[] | null
   filter?: 'pending' | 'failed' | 'audio_stale' | 'all'
   contextMode?: 'off' | 'light' | 'deep'
-  force?: boolean
   concurrency?: number
 }
 
@@ -283,7 +282,6 @@ export function useLineTakes(options: UseLineTakesOptions) {
         ...(opts.lineIds ? { line_ids: opts.lineIds } : {}),
         filter: opts.filter || 'pending',
         context_mode: opts.contextMode || 'light',
-        force: Boolean(opts.force),
         ...(opts.concurrency ? { concurrency: opts.concurrency } : {}),
       })
       batchJob.value = {
@@ -295,7 +293,6 @@ export function useLineTakes(options: UseLineTakesOptions) {
         ok: 0,
         failed: 0,
         skipped: 0,
-        cached: 0,
         currentLineId: null,
         errors: [],
         cancelRequested: false,

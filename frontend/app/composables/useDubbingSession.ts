@@ -19,7 +19,6 @@ import { useLineTakes } from '~/composables/useLineTakes'
 import { useVoiceProfiles } from '~/composables/useVoiceProfiles'
 
 export interface SynthesizeAllOptions {
-  force?: boolean
   filter?: 'pending' | 'failed' | 'audio_stale' | 'all'
   contextMode?: 'off' | 'light' | 'deep'
   concurrency?: number
@@ -161,6 +160,23 @@ export function useDubbingSession(options: {
   })
 
   const narratorLineCount = computed(() => lines.value.filter(line => line.speakerType !== 'dialogue').length)
+
+  /** 未分配角色的对白按说话人名分组，供音色分配页「设为角色/绑定现有」 */
+  const unassignedSpeakers = computed(() => {
+    const map = new Map<string, { name: string; lineCount: number }>()
+    for (const line of lines.value) {
+      if (line.speakerType !== 'dialogue' || line.characterId) continue
+      const name = (line.speakerName || '').trim() || t('workbench.unnamedSpeaker')
+      const current = map.get(name)
+      if (current) {
+        current.lineCount += 1
+        continue
+      }
+      map.set(name, { name, lineCount: 1 })
+    }
+    return [...map.values()].sort((a, b) => b.lineCount - a.lineCount)
+  })
+  const unassignedLineCount = computed(() => unassignedSpeakers.value.reduce((sum, speaker) => sum + speaker.lineCount, 0))
   const narratorReady = computed(() => Boolean(narratorVoice.value?.id))
   const narratorMissingVoice = computed(() => narratorLineCount.value > 0 && !narratorReady.value)
   const missingVoiceSpeakers = computed(() => dialogueSpeakers.value.filter(speaker => !speaker.voice))
@@ -479,9 +495,8 @@ export function useDubbingSession(options: {
     synthesizing.value = true
     try {
       const job = await takeStore.startBatch({
-        filter: optionsBatch.filter ?? (optionsBatch.force ? 'all' : 'pending'),
+        filter: optionsBatch.filter ?? 'pending',
         contextMode: optionsBatch.contextMode ?? 'light',
-        force: Boolean(optionsBatch.force),
         ...(optionsBatch.concurrency ? { concurrency: optionsBatch.concurrency } : {}),
         ...(optionsBatch.lineIds ? { lineIds: optionsBatch.lineIds } : {}),
       })
@@ -595,6 +610,46 @@ export function useDubbingSession(options: {
     await load()
   }
 
+  async function bindSpeaker(speakerName: string, characterId?: number | null) {
+    const episodeId = options.episodeId()
+    if (!episodeId) return null
+    try {
+      const result = await dubbingAPI.bindSpeaker(episodeId, { speaker_name: speakerName, character_id: characterId || null })
+      await Promise.all([load(), voiceStore.load(true)])
+      toast.success(t('workbench.speakerBound', { name: speakerName, n: result.bound }))
+      return result
+    } catch (error) {
+      toastError(error)
+      return null
+    }
+  }
+
+  async function resetVoices() {
+    const episodeId = options.episodeId()
+    if (!episodeId) return
+    try {
+      const result = await dubbingAPI.resetVoices(episodeId)
+      await load()
+      toast.success(t('workbench.voicesReset', { n: result.cleared }))
+    } catch (error) {
+      toastError(error)
+    }
+  }
+
+  async function detachSpeaker(characterId: number, name: string) {
+    const episodeId = options.episodeId()
+    if (!episodeId) return null
+    try {
+      const result = await dubbingAPI.detachSpeaker(episodeId, characterId)
+      await Promise.all([load(), voiceStore.load(true)])
+      toast.success(t(result.mode === 'deleted' ? 'workbench.speakerDeleted' : 'workbench.speakerUnbound', { name, n: result.cleared_lines }))
+      return result
+    } catch (error) {
+      toastError(error)
+      return null
+    }
+  }
+
   function dispose() {
     if (timer) clearTimeout(timer)
     timer = null
@@ -643,6 +698,8 @@ export function useDubbingSession(options: {
     activeAudioCfgs,
     serviceBanner,
     dialogueSpeakers,
+    unassignedSpeakers,
+    unassignedLineCount,
     narratorLineCount,
     narratorReady,
     narratorMissingVoice,
@@ -680,6 +737,9 @@ export function useDubbingSession(options: {
     stopDub,
     exportSubtitle,
     generateMissingVoices,
+    bindSpeaker,
+    resetVoices,
+    detachSpeaker,
     dispose,
   }
 }

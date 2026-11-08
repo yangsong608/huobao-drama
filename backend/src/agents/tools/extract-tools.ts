@@ -54,14 +54,33 @@ function normalizeName(name: string): string {
   return (name || '')
     .replace(/[（(][^（()）]*[）)]/g, '') // 去掉成对的中/英文括号内容（角色定位/别名）
     .replace(/[（(].*$/, '')              // 兜底：未闭合括号从首个括号截断
+    .replace(/[·•・,，、。.!！?？:：;；\-—_|｜/／\\]/g, '') // 分隔标点：不同集提取的书写差异
     .replace(/[\s　]+/g, '')          // 去空白与全角空格
     .toLowerCase()
     .trim()
 }
 
-// 场景地点只做空白归一化（不删括号：如「火车站（候车厅）」与「火车站（站台）」是不同场景）
+// 场景地点归一化：去掉间隔标点与括号字符，但保留括号内容
+// （「火车站（候车厅）」与「火车站（站台）」仍不同，但「海边·码头」与「海边码头」相同）
 function normalizeLocation(loc: string): string {
-  return (loc || '').replace(/[\s　]+/g, '').toLowerCase().trim()
+  return (loc || '')
+    .replace(/[·•・,，、。.!！?？:：;；\-—_|｜/／\\]/g, '')
+    .replace(/[（(）)【】\[\]]/g, '')
+    .replace(/[\s　]+/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+// 时段归并到视觉等价的标准桶：不同集提取「夜/夜晚/夜间」应命中同一场景
+//（场景 = 地点 × 大时段，昼/夜视觉不同必须分开，桶内措辞差异归并）
+function normalizeTimeOfDay(time: string): string {
+  const t = (time || '').replace(/[\s　]/g, '')
+  if (!t) return ''
+  if (/夜|晚|深夜|午夜|凌晨|黎明前/.test(t)) return '夜'
+  if (/晨|清晨|早上|早晨|拂晓|黎明/.test(t)) return '晨'
+  if (/黄昏|傍晚|日落|夕阳|擦黑/.test(t)) return '黄昏'
+  if (/昼|白天|白日|日间|午后|下午|中午|正午|晌午|日/.test(t)) return '昼'
+  return t.toLowerCase()
 }
 
 type ToolContext = ToolExecutionContext | undefined
@@ -151,7 +170,8 @@ const readExistingScenes = createTool({
       time: s.time || '',
       prompt: s.prompt || '',
       lighting: s.lighting || '',
-      normalized_location: normalizeLocation(s.location), // 用于判断近名复用（仅空白/大小写）
+      normalized_location: normalizeLocation(s.location), // 用于判断近名复用（去标点/空白）
+      normalized_time: normalizeTimeOfDay(s.time || ''),  // 时段标准桶（夜/昼/晨/黄昏）
     }))
     const payload = {
       count: visibleScenes.length,
@@ -268,13 +288,16 @@ const saveDedupScenes = createTool({
     })
 
     for (const scene of scenes) {
-      // 按地点+时间段精确匹配；地点仅做空白/大小写归一化（不删括号，避免误合并）
+      // 归一化匹配：地点去标点/空白，时段归并标准桶；措辞差异（夜/夜晚、海边·码头/海边码头）复用同一场景
       const scenesInProject = (await db.select().from(schema.scenes)
         .where(eq(schema.scenes.dramaId, dramaId)))
         .filter(s => !s.deletedAt)
       const normLocation = normalizeLocation(scene.location)
+      const normTime = normalizeTimeOfDay(scene.time || '')
       const existing = scenesInProject.find(s => s.location === scene.location && s.time === (scene.time || ''))
-        || (normLocation ? scenesInProject.find(s => normalizeLocation(s.location) === normLocation && s.time === (scene.time || '')) : undefined)
+        || (normLocation
+          ? scenesInProject.find(s => normalizeLocation(s.location) === normLocation && normalizeTimeOfDay(s.time || '') === normTime)
+          : undefined)
 
       if (existing) {
         // 已存在完全匹配的场景：关联并补齐描述/光影

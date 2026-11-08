@@ -48,8 +48,9 @@ test('extraction tools dedupe by normalized name so near-names reuse existing as
   // 道具同样按归一化名字复用
   assert.match(tools, /normalizeName\(p\.name\) === normName/)
   assert.match(tools, /save-props-reuse/)
-  // 场景按 地点+时间 匹配，地点仅做空白/大小写归一化（不删括号）
+  // 场景按 地点+时间 匹配：地点去标点/空白（保留括号内容），时段归并标准桶（夜/昼/晨/黄昏）
   assert.match(tools, /normalizeLocation\(loc: string\)/)
+  assert.match(tools, /normalizeTimeOfDay\(time: string\)/)
   assert.match(tools, /normalizeLocation\(s\.location\) === normLocation/)
   // read_existing_* 返回归一化字段供 Agent 判断复用
   assert.match(tools, /normalized_name: normalizeName/)

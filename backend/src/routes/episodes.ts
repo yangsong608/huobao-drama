@@ -285,8 +285,23 @@ app.get('/:id/characters', async (c) => {
 })
 
 // GET /episodes/:id/scenes — scenes linked to this episode
+// ?scope=all — 全剧场景直接展示（in_episode 标记本集归属，本集排前），无需手动关联
 app.get('/:id/scenes', async (c) => {
   const episodeId = Number(c.req.param('id'))
+  const scope = c.req.query('scope')
+  if (scope === 'all') {
+    const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
+    if (!ep || ep.deletedAt) return notFound(c, '剧集不存在')
+    const allScenes = await db.select().from(schema.scenes)
+      .where(and(eq(schema.scenes.dramaId, ep.dramaId), isNull(schema.scenes.deletedAt)))
+    const links = await db.select().from(schema.episodeScenes)
+      .where(eq(schema.episodeScenes.episodeId, episodeId))
+    const linked = new Set(links.map(l => l.sceneId))
+    const result = allScenes
+      .map(sc => ({ ...sc, inEpisode: linked.has(sc.id) || sc.episodeId === episodeId }))
+      .sort((a, b) => (a.inEpisode === b.inEpisode ? a.id - b.id : a.inEpisode ? -1 : 1))
+    return success(c, toSnakeCaseArray(result))
+  }
   const links = await db.select().from(schema.episodeScenes)
     .where(eq(schema.episodeScenes.episodeId, episodeId))
   const sceneIds = links.map(l => l.sceneId)
@@ -297,8 +312,23 @@ app.get('/:id/scenes', async (c) => {
 })
 
 // GET /episodes/:id/props — props linked to this episode
+// ?scope=all — 全剧道具直接展示（in_episode 标记本集归属，本集排前）
 app.get('/:id/props', async (c) => {
   const episodeId = Number(c.req.param('id'))
+  const scope = c.req.query('scope')
+  if (scope === 'all') {
+    const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
+    if (!ep || ep.deletedAt) return notFound(c, '剧集不存在')
+    const allProps = await db.select().from(schema.props)
+      .where(and(eq(schema.props.dramaId, ep.dramaId), isNull(schema.props.deletedAt)))
+    const links = await db.select().from(schema.episodeProps)
+      .where(eq(schema.episodeProps.episodeId, episodeId))
+    const linked = new Set(links.map(l => l.propId))
+    const result = allProps
+      .map(p => ({ ...p, inEpisode: linked.has(p.id) }))
+      .sort((a, b) => (a.inEpisode === b.inEpisode ? a.id - b.id : a.inEpisode ? -1 : 1))
+    return success(c, toSnakeCaseArray(result))
+  }
   const links = await db.select().from(schema.episodeProps)
     .where(eq(schema.episodeProps.episodeId, episodeId))
   const propIds = links.map(l => l.propId)

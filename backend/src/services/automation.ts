@@ -212,6 +212,18 @@ async function episodeAssets(episodeId: number) {
   }
 }
 
+/** 全剧资产池：分镜拆分用它，跨集场景/道具可直接绑定（保存分镜时自动关联本集） */
+export async function dramaAssets(dramaId: number) {
+  const allChars = await db.select().from(schema.characters)
+  const allScenes = await db.select().from(schema.scenes)
+  const allProps = await db.select().from(schema.props)
+  return {
+    characters: allChars.filter(c => c.dramaId === dramaId && !c.deletedAt),
+    scenes: allScenes.filter(s => s.dramaId === dramaId && !s.deletedAt),
+    props: allProps.filter(p => p.dramaId === dramaId && !p.deletedAt),
+  }
+}
+
 async function episodeStoryboards(episodeId: number) {
   const rows = await db.select().from(schema.storyboards)
     .where(eq(schema.storyboards.episodeId, episodeId))
@@ -451,19 +463,20 @@ async function stepStoryboards(episodeId: number, dramaId: number, opts: RunOpti
     logTaskProgress('Automation', 'skip-storyboards', { episodeId, count: existing.length })
     return
   }
-  const assets = await episodeAssets(episodeId)
+  // 分镜拆分绑定全剧资产：跨集场景/道具可直接绑定（保存分镜时自动关联到本集）
+  const assets = await dramaAssets(dramaId)
   const ep = await loadEpisode(episodeId)
   if (!ep) throw new Error('剧集不存在')
   const { label } = await videoConfigInfo(ep)
   const charList = assets.characters.length
     ? assets.characters.map(c => `${c.name}(ID:${c.id})`).join('、')
-    : '（当前集还没有角色）'
+    : '（当前项目还没有角色）'
   const sceneList = assets.scenes.length
     ? assets.scenes.map(s => `${s.location} · ${s.time || '未设时间'}(ID:${s.id})`).join('、')
-    : '（当前集还没有场景）'
+    : '（当前项目还没有场景）'
   const propList = assets.props.length
     ? assets.props.map(p => `${p.name}(ID:${p.id})`).join('、')
-    : '（当前集还没有道具）'
+    : '（当前项目还没有道具）'
 
   const agent = mastra.getAgent('storyboard_breaker')
   if (!agent) throw new Error('分镜 Agent 不可用')

@@ -71,6 +71,44 @@
 
       <section class="take-card">
         <header class="take-card-head">
+          <h4>{{ t('take.voiceTitle') }}</h4>
+          <span v-if="voiceInactive" class="take-badge is-generating">{{ t('take.voiceInactiveBadge') }}</span>
+        </header>
+        <BaseSelect v-model="selectedVoiceId" :options="voiceOptions" />
+        <p class="take-hint">{{ voiceHint }}</p>
+        <p v-if="characterVoiceMissing" class="take-warn">{{ t('take.characterVoiceMissing') }}</p>
+        <p v-if="instructUnsupported" class="take-warn">{{ t('take.instructUnsupported') }}</p>
+        <div v-if="needsSpeakerBinding" class="take-bind">
+          <p class="take-hint">{{ t('take.speakerUnassigned') }}</p>
+          <div v-if="bindingInline" class="take-bind-row">
+            <BaseSelect
+              v-model="inlineCharacterId"
+              :options="castOptions"
+              :placeholder="t('workbench.speakerPickCharacter')"
+              class="take-bind-select"
+            />
+            <button class="btn btn-sm is-primary" type="button" :disabled="!inlineCharacterId" @click="confirmBindInline">
+              {{ t('common.confirm') }}
+            </button>
+            <button class="btn btn-sm" type="button" @click="bindingInline = false">{{ t('common.cancel') }}</button>
+          </div>
+          <template v-else>
+            <div class="take-bind-row">
+              <button class="btn btn-sm is-primary" type="button" :disabled="!line.speakerName" @click="emit('bind-speaker')">
+                <UserPlus :size="11" />
+                {{ t('workbench.setAsCharacter') }}
+              </button>
+              <button class="btn btn-sm" type="button" :disabled="!line.speakerName || !castOptions.length" @click="bindingInline = true">
+                {{ t('workbench.bindExisting') }}
+              </button>
+            </div>
+            <p v-if="!line.speakerName" class="take-hint">{{ t('take.speakerNameMissing') }}</p>
+          </template>
+        </div>
+      </section>
+
+      <section class="take-card">
+        <header class="take-card-head">
           <h4>{{ t('take.paramsTitle') }}</h4>
           <span v-if="sourceLabel" class="take-source">{{ sourceLabel }}</span>
         </header>
@@ -198,9 +236,16 @@
 </template>
 
 <script setup lang="ts">
-import { AudioLines, GitCompare, Loader2, Sparkles } from 'lucide-vue-next'
+import { AudioLines, GitCompare, Loader2, Sparkles, UserPlus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
-import type { LineContextPreview, LineTake, StoryboardLine, TakeOverrides } from '~/composables/useApi'
+import type { LineContextPreview, LineTake, StoryboardLine, TakeOverrides, TtsCapabilities, VoiceProfile, VoiceProfileList } from '~/composables/useApi'
+import BaseSelect from '~/components/BaseSelect.vue'
+
+interface VoiceMetaEntry {
+  name: string
+  isActive: boolean
+  hasInstruct: boolean
+}
 
 const props = withDefaults(defineProps<{
   line: StoryboardLine | null
@@ -210,11 +255,23 @@ const props = withDefaults(defineProps<{
   analyzing?: boolean
   activatingTakeId?: number | null
   removingTakeId?: number | null
+  voiceOptions?: { label: string; value: string }[]
+  voiceGroups?: VoiceProfileList[]
+  voiceMeta?: Record<number, VoiceMetaEntry>
+  narratorVoice?: VoiceProfile | null
+  capabilities?: TtsCapabilities | null
+  castOptions?: { label: string; value: string }[]
 }>(), {
   generating: false,
   analyzing: false,
   activatingTakeId: null,
   removingTakeId: null,
+  voiceOptions: () => [],
+  voiceGroups: () => [],
+  voiceMeta: () => ({}),
+  narratorVoice: null,
+  capabilities: null,
+  castOptions: () => [],
 })
 
 const emit = defineEmits<{
@@ -223,6 +280,9 @@ const emit = defineEmits<{
   generate: [payload: { mode: 'off' | 'light' | 'deep'; overrides: TakeOverrides }]
   activate: [takeId: number]
   remove: [takeId: number]
+  'assign-voice': [voiceId: number | null]
+  'bind-speaker': []
+  'bind-character': [characterId: number]
 }>()
 
 const { t } = useI18n()
@@ -281,11 +341,56 @@ const takesWithAudio = computed(() => props.takes.filter(item => item.audioUrl))
 const canCompare = computed(() =>
   Boolean(compareAId.value && compareBId.value && compareAId.value !== compareBId.value))
 
+const selectedVoiceId = computed({
+  get: () => (props.line?.voiceId ? String(props.line.voiceId) : ''),
+  set: (value: string) => emit('assign-voice', value ? Number(value) : null),
+})
+const resolvedVoiceId = computed(() => {
+  if (!props.line) return null
+  if (props.line.voiceId) return props.line.voiceId
+  const group = props.voiceGroups.find(item => item.character_id === props.line?.characterId)
+  if (group?.active_voice_id) return group.active_voice_id
+  if (props.narratorVoice?.id) return props.narratorVoice.id
+  return null
+})
+const resolvedMeta = computed(() =>
+  resolvedVoiceId.value ? props.voiceMeta[resolvedVoiceId.value] ?? null : null)
+const voiceInactive = computed(() =>
+  Boolean(props.line?.voiceId && resolvedMeta.value && !resolvedMeta.value.isActive))
+const characterVoiceMissing = computed(() => Boolean(
+  props.line
+  && props.line.characterId
+  && !props.line.voiceId
+  && !props.voiceGroups.some(item => item.character_id === props.line?.characterId && item.active_voice_id)))
+const instructUnsupported = computed(() => Boolean(
+  resolvedMeta.value?.hasInstruct && props.capabilities && !props.capabilities.designInstruct))
+const voiceHint = computed(() => {
+  if (!props.line) return ''
+  if (props.line.voiceId) return resolvedMeta.value ? t('take.voiceManualHint') : t('take.voiceUnknown')
+  const group = props.voiceGroups.find(item => item.character_id === props.line?.characterId)
+  if (group?.active_voice_id) return t('take.voiceAutoHint', { name: group.character_name })
+  return t('take.voiceNarratorHint')
+})
+const needsSpeakerBinding = computed(() =>
+  Boolean(props.line && props.line.speakerType === 'dialogue' && !props.line.characterId))
+const bindingInline = ref(false)
+const inlineCharacterId = ref('')
+
+function confirmBindInline() {
+  const characterId = Number(inlineCharacterId.value)
+  if (!characterId) return
+  emit('bind-character', characterId)
+  bindingInline.value = false
+  inlineCharacterId.value = ''
+}
+
 watch(() => props.line?.id, () => {
   mode.value = 'light'
   analyzedLineId.value = null
   playingTakeId.value = null
   compareNextId = null
+  bindingInline.value = false
+  inlineCharacterId.value = ''
   audio.value?.pause()
   resetForm()
 }, { immediate: true })
@@ -461,6 +566,9 @@ function formatTime(value: string) {
 .take-field input[type="range"] { padding: 0; accent-color: var(--accent); border: none; background: transparent; }
 .mono { font-family: var(--font-mono); color: var(--text-2); }
 .take-analyze, .take-generate { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.take-bind { display: flex; flex-direction: column; gap: 5px; padding-top: 6px; border-top: 1px dashed var(--border); }
+.take-bind-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.take-bind-select { width: 170px; }
 .take-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; max-height: 260px; overflow-y: auto; }
 .take-item { display: flex; flex-direction: column; gap: 4px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-0); }
 .take-item.is-active { border-color: var(--accent-glow); background: var(--accent-bg); }

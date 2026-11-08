@@ -1,5 +1,5 @@
 /**
- * 重新设计音色：必须创建新版本，旧版本与激活状态保持不变（设计 6.5）。
+ * 重新设计音色：创建新版本并自动激活，旧版本保留可切回（2026-11-08 用户决策）。
  */
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -35,7 +35,7 @@ db.update(schema.characterVoices).set({ isActive: true }).where(eq(schema.charac
 
 after(async () => { await fs.rm(root, { recursive: true, force: true }) })
 
-test('重新设计创建新版本，旧版本保留且仍激活', async () => {
+test('重新设计创建新版本并自动激活，旧版本保留可切回', async () => {
   const created = await redesignVoice(old.id, {})
   assert.notEqual(created.id, old.id)
   assert.equal(created.characterId, 1)
@@ -47,9 +47,10 @@ test('重新设计创建新版本，旧版本保留且仍激活', async () => {
   const versions = listVoiceRows(1).filter(row => row.characterId === 1)
   assert.equal(versions.length, 2)
   const oldAfter = versions.find(row => row.id === old.id)!
-  assert.equal(oldAfter.isActive, true)
+  assert.equal(oldAfter.isActive, false)
+  assert.equal(oldAfter.status, 'ready')
   assert.equal(oldAfter.voicePrompt, '旧版提示词')
-  assert.equal(versions.find(row => row.id === created.id)!.isActive, false)
+  assert.equal(versions.find(row => row.id === created.id)!.isActive, true)
 })
 
 test('POST /voices/:id/design 返回新版本', async () => {

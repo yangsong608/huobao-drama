@@ -6,7 +6,7 @@
  * - 手工/锁定行永远保留；命中墓碑的自动行不重建；未匹配旧行标 stale 而非删除。
  */
 import crypto from 'crypto'
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { parseVideoPrompt, toSpeakText, type CastMember, type ParsedLine } from './dialogue-lines.js'
@@ -82,6 +82,8 @@ export interface MergeResult {
   kept: number
   tombstoned: number
   skipped: number
+  /** 锚点失效（分镜已删除）被一并软删的孤儿台词数 */
+  orphansCleaned: number
 }
 
 export interface MergeOptions {
@@ -399,7 +401,7 @@ export function applyEpisodeMerge(
     .filter((decision) => decision.action === 'skip')
     .map((decision) => decisionItemKey(decision.storyboardId, decision.kind, decision.lineId, decision.text)))
 
-  const result: MergeResult = { inserted: 0, updated: 0, removed: 0, kept: 0, tombstoned: 0, skipped: 0 }
+  const result: MergeResult = { inserted: 0, updated: 0, removed: 0, kept: 0, tombstoned: 0, skipped: 0, orphansCleaned: 0 }
   const ts = now()
 
   db.transaction((tx) => {
@@ -505,6 +507,28 @@ export function applyEpisodeMerge(
       tx.update(schema.storyboards).set({ sourceHash: group.sourceHash, updatedAt: ts })
         .where(eq(schema.storyboards.id, group.storyboardId)).run()
     }
+
+    // 清理锚点已失效的孤儿台词（分镜被删除/软删）：否则选音色报「镜头不存在」、时间轴丢 cue
+    const liveStoryboardIds = new Set(
+      tx.select({ id: schema.storyboards.id }).from(schema.storyboards)
+        .where(isNull(schema.storyboards.deletedAt))
+        .all()
+        .map((row) => row.id),
+    )
+    const orphanRows = tx.select({ id: schema.storyboardLines.id, storyboardId: schema.storyboardLines.storyboardId })
+      .from(schema.storyboardLines)
+      .where(and(
+        eq(schema.storyboardLines.episodeId, episodeId),
+        isNotNull(schema.storyboardLines.storyboardId),
+        isNull(schema.storyboardLines.deletedAt),
+      ))
+      .all()
+      .filter((row) => !liveStoryboardIds.has(row.storyboardId!))
+    for (const orphan of orphanRows) {
+      tx.update(schema.storyboardLines).set({ deletedAt: ts, updatedAt: ts })
+        .where(eq(schema.storyboardLines.id, orphan.id)).run()
+    }
+    result.orphansCleaned = orphanRows.length
 
     tx.update(schema.episodes).set({ lastExtractAt: ts, updatedAt: ts })
       .where(eq(schema.episodes.id, episodeId)).run()

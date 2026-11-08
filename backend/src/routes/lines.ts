@@ -11,9 +11,9 @@
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { and, asc, eq, isNull } from 'drizzle-orm'
-import { db, schema } from '../db/index.js'
-import { badRequest, notFound, success } from '../utils/response.js'
+import { and, asc, eq, isNull, or, sql } from 'drizzle-orm'
+import { db, getInsertId, schema } from '../db/index.js'
+import { badRequest, notFound, now, success } from '../utils/response.js'
 import { extractEpisodeLines } from '../services/dialogue-extract.js'
 import { synthesizeEpisodeLines, getDubbingState } from '../services/dubbing.js'
 import { generateTake } from '../services/line-takes.js'
@@ -34,6 +34,7 @@ import {
   type MergeDecision,
   type MergePlan,
 } from '../services/dialogue-merge.js'
+import { deleteVoice } from '../services/voice-profile.js'
 
 const lines = new Hono()
 const episodeLines = new Hono()
@@ -284,6 +285,160 @@ episodeLines.get('/:id/lines/status', (c) => {
   })
 })
 
+/** 未分配台词设为角色/绑定现有：按说话人名建角色或挂到已有角色（需求 1/4） */
+episodeLines.post('/:id/lines/bind-speaker', async (c) => {
+  const episodeId = parseId(c.req.param('id'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  const episode = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
+  if (!episode) return notFound(c, '集不存在')
+  const body = await c.req.json().catch(() => ({}))
+  const speakerName = String(body?.speaker_name ?? body?.speakerName ?? '').trim()
+  if (!speakerName) return badRequest(c, '说话人名不能为空')
+
+  let characterId = Number(body?.character_id ?? body?.characterId ?? 0) || null
+  if (characterId) {
+    const character = db.select().from(schema.characters)
+      .where(and(eq(schema.characters.id, characterId), isNull(schema.characters.deletedAt)))
+      .get()
+    if (!character) return notFound(c, '角色不存在')
+    if (character.dramaId !== episode.dramaId) return badRequest(c, '角色不属于该剧集')
+  } else {
+    const existing = db.select().from(schema.characters)
+      .where(and(
+        eq(schema.characters.dramaId, episode.dramaId),
+        eq(schema.characters.name, speakerName),
+        isNull(schema.characters.deletedAt),
+      ))
+      .get()
+    if (existing) {
+      characterId = existing.id
+    } else {
+      const inserted = db.insert(schema.characters)
+        .values({ dramaId: episode.dramaId, name: speakerName, createdAt: now(), updatedAt: now() })
+        .run()
+      characterId = getInsertId(inserted)
+    }
+  }
+
+  const character = db.select().from(schema.characters).where(eq(schema.characters.id, characterId)).get()!
+  const baseConditions = [
+    eq(schema.storyboardLines.episodeId, episodeId),
+    isNull(schema.storyboardLines.deletedAt),
+    eq(schema.storyboardLines.speakerName, speakerName),
+    isNull(schema.storyboardLines.characterId),
+  ]
+  const bound = db.update(schema.storyboardLines)
+    .set({ characterId, speakerName: character.name, updatedAt: now() })
+    .where(and(...baseConditions))
+    .run().changes
+  // 绑定后跟随角色激活音色；用户显式锁定的行不动
+  db.update(schema.storyboardLines)
+    .set({ voiceId: null, updatedAt: now() })
+    .where(and(
+      ...baseConditions,
+      or(eq(schema.storyboardLines.voiceLocked, false), isNull(schema.storyboardLines.voiceLocked)),
+    ))
+    .run()
+
+  const cast = db.select().from(schema.episodeCharacters)
+    .where(and(eq(schema.episodeCharacters.episodeId, episodeId), eq(schema.episodeCharacters.characterId, characterId)))
+    .get()
+  if (!cast) {
+    db.insert(schema.episodeCharacters)
+      .values({ episodeId, characterId, createdAt: now() })
+      .run()
+  }
+
+  return success(c, { character_id: characterId, bound })
+})
+
+/** 清空本集行级音色：让台词重新跟随角色激活音色（需求 2） */
+episodeLines.post('/:id/lines/reset-voices', async (c) => {
+  const episodeId = parseId(c.req.param('id'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  const episode = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
+  if (!episode) return notFound(c, '集不存在')
+  const body = await c.req.json().catch(() => ({}))
+  const characterId = Number(body?.character_id ?? body?.characterId ?? 0) || null
+
+  const conditions = [
+    eq(schema.storyboardLines.episodeId, episodeId),
+    isNull(schema.storyboardLines.deletedAt),
+    or(eq(schema.storyboardLines.voiceLocked, false), isNull(schema.storyboardLines.voiceLocked)),
+  ]
+  if (characterId) conditions.push(eq(schema.storyboardLines.characterId, characterId))
+
+  const cleared = db.update(schema.storyboardLines)
+    .set({
+      voiceId: null,
+      audioStale: sql`case when ${schema.storyboardLines.audioUrl} is not null then 1 else 0 end`,
+      updatedAt: now(),
+    })
+    .where(and(...conditions))
+    .run().changes
+  return success(c, { cleared })
+})
+
+/** 删除音色分配中的角色：有分镜绑定只解除本集台词绑定，无绑定整删角色与音色（需求 1） */
+episodeLines.post('/:id/lines/detach-speaker', async (c) => {
+  const episodeId = parseId(c.req.param('id'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  const episode = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
+  if (!episode) return notFound(c, '集不存在')
+  const body = await c.req.json().catch(() => ({}))
+  const characterId = Number(body?.character_id ?? body?.characterId ?? 0)
+  if (!characterId) return badRequest(c, '角色编号无效')
+  const character = db.select().from(schema.characters)
+    .where(and(eq(schema.characters.id, characterId), isNull(schema.characters.deletedAt)))
+    .get()
+  if (!character) return notFound(c, '角色不存在')
+
+  const unbind = (episodeOnly: boolean) => {
+    const conditions = [
+      isNull(schema.storyboardLines.deletedAt),
+      eq(schema.storyboardLines.characterId, characterId),
+    ]
+    if (episodeOnly) conditions.push(eq(schema.storyboardLines.episodeId, episodeId))
+    return db.update(schema.storyboardLines)
+      .set({
+        characterId: null,
+        voiceId: null,
+        voiceLocked: false,
+        audioStale: sql`case when ${schema.storyboardLines.audioUrl} is not null then 1 else 0 end`,
+        updatedAt: now(),
+      })
+      .where(and(...conditions))
+      .run().changes
+  }
+
+  const storyboardBound = db.select({ storyboardId: schema.storyboardCharacters.storyboardId })
+    .from(schema.storyboardCharacters)
+    .innerJoin(schema.storyboards, eq(schema.storyboards.id, schema.storyboardCharacters.storyboardId))
+    .innerJoin(schema.episodes, eq(schema.episodes.id, schema.storyboards.episodeId))
+    .where(and(
+      eq(schema.storyboardCharacters.characterId, characterId),
+      eq(schema.episodes.dramaId, character.dramaId),
+      isNull(schema.storyboards.deletedAt),
+    ))
+    .get()
+
+  if (storyboardBound) {
+    const cleared = unbind(true)
+    return success(c, { mode: 'unbound', character_id: characterId, cleared_lines: cleared })
+  }
+
+  const voices = db.select().from(schema.characterVoices)
+    .where(and(eq(schema.characterVoices.characterId, characterId), isNull(schema.characterVoices.deletedAt)))
+    .all()
+  for (const voice of voices) deleteVoice(voice.id)
+  db.update(schema.characters)
+    .set({ deletedAt: now(), updatedAt: now() })
+    .where(eq(schema.characters.id, characterId))
+    .run()
+  const cleared = unbind(false)
+  return success(c, { mode: 'deleted', character_id: characterId, cleared_lines: cleared })
+})
+
 lines.put('/:id', async (c) => {
   const id = parseId(c.req.param('id'))
   if (!id) return badRequest(c, '台词编号无效')
@@ -312,13 +467,15 @@ lines.post('/:id/synthesize', async (c) => {
   if (!row) return notFound(c, '台词不存在')
   const body = await c.req.json().catch(() => ({}))
   const voice = body?.voice_id ?? body?.voiceId
+  const force = Boolean(body?.force)
   try {
     const result = await generateTake({
       lineId: id,
       contextMode: 'light',
       voiceId: voice ? Number(voice) : undefined,
-      force: Boolean(body?.force),
-      reuse: !body?.force,
+      force,
+      reuse: !force,
+      varySeed: force,
       activate: true,
     })
     return success(c, {

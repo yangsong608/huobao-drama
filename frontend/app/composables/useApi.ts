@@ -81,8 +81,9 @@ export const episodeAPI = {
   del: (id: number) => api.del(`/episodes/${id}`),
   rework: (id: number) => api.post(`/episodes/${id}/rework`),
   characters: (id: number) => api.get(`/episodes/${id}/characters`),
-  scenes: (id: number) => api.get(`/episodes/${id}/scenes`),
-  props: (id: number) => api.get(`/episodes/${id}/props`),
+  // scope=all：返回全剧场景/道具并带 in_episode 标记（资产制作页直接展示全剧共享资产）
+  scenes: (id: number, opts?: { scope?: 'all' }) => api.get(`/episodes/${id}/scenes${opts?.scope === 'all' ? '?scope=all' : ''}`),
+  props: (id: number, opts?: { scope?: 'all' }) => api.get(`/episodes/${id}/props${opts?.scope === 'all' ? '?scope=all' : ''}`),
   storyboards: (id: number) => api.get(`/episodes/${id}/storyboards`),
   pipelineStatus: (id: number) => api.get(`/episodes/${id}/pipeline-status`),
   extract: (id: number, target: string, model?: string, configId?: number) => api.post(`/episodes/${id}/extract`, { target, model: model || undefined, config_id: configId || undefined }),
@@ -565,7 +566,6 @@ export interface TakeBatchJob {
   ok: number
   failed: number
   skipped: number
-  cached: number
   currentLineId: number | null
   errors: { lineId: number; message: string }[]
   cancelRequested: boolean
@@ -1274,6 +1274,12 @@ export const dubbingAPI = {
     anchor: { type: 'shot' | 'absolute'; storyboard_id?: number | null; start_ms?: number; after_line_id?: number | null }
   }) => api.post<StoryboardLine>(`/episodes/${episodeId}/lines`, data),
   reorderLines: (episodeId: number, ids: number[]) => api.post<{ updated: number }>(`/episodes/${episodeId}/lines/reorder`, { ids }),
+  bindSpeaker: (episodeId: number, data: { speaker_name: string; character_id?: number | null }) =>
+    api.post<{ character_id: number; bound: number }>(`/episodes/${episodeId}/lines/bind-speaker`, data),
+  resetVoices: (episodeId: number, characterId?: number | null) =>
+    api.post<{ cleared: number }>(`/episodes/${episodeId}/lines/reset-voices`, characterId ? { character_id: characterId } : {}),
+  detachSpeaker: (episodeId: number, characterId: number) =>
+    api.post<{ mode: 'unbound' | 'deleted'; character_id: number; cleared_lines: number }>(`/episodes/${episodeId}/lines/detach-speaker`, { character_id: characterId }),
   restoreLine: (lineId: number) => api.post<StoryboardLine>(`/lines/${lineId}/restore`),
   updateLine: (lineId: number, data: Record<string, any>) => api.put(`/lines/${lineId}`, data),
   synthesizeLine: (lineId: number) => api.post(`/lines/${lineId}/synthesize`),
@@ -1322,7 +1328,6 @@ export const takeAPI = {
     line_ids?: number[] | null
     filter?: 'pending' | 'failed' | 'audio_stale' | 'all'
     context_mode?: 'off' | 'light' | 'deep'
-    force?: boolean
     concurrency?: number
   } = {}) => api.post<{ job_id: string }>(`/episodes/${episodeId}/takes/batch`, body),
   batchStatus: (episodeId: number, jobId: string) =>

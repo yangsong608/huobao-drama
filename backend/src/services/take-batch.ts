@@ -23,7 +23,6 @@ export interface TakeBatchInput {
   lineIds?: number[] | null
   filter?: TakeBatchFilter
   contextMode?: ContextMode
-  force?: boolean
   concurrency?: number
 }
 
@@ -36,7 +35,6 @@ export interface TakeBatchJob {
   ok: number
   failed: number
   skipped: number
-  cached: number
   currentLineId: number | null
   errors: { lineId: number; message: string }[]
   cancelRequested: boolean
@@ -127,7 +125,6 @@ export function startTakeBatch(
     ok: 0,
     failed: 0,
     skipped: 0,
-    cached: 0,
     currentLineId: null,
     errors: [],
     cancelRequested: false,
@@ -155,7 +152,6 @@ export async function runTakeBatch(
 
     const generate = deps.generate ?? generateTake
     const concurrency = clampConcurrency(input.concurrency)
-    const force = Boolean(input.force)
     const contextMode = input.contextMode === 'off' || input.contextMode === 'deep'
       ? input.contextMode
       : 'light'
@@ -178,21 +174,15 @@ export async function runTakeBatch(
           job.done += 1
           continue
         }
-        if (!force && line.status === 'ready' && !line.audioStale && line.audioUrl) {
-          job.skipped += 1
-          job.done += 1
-          continue
-        }
 
         try {
+          // 批量不缓存：每条台词都真实合成（reuse: false 不走渲染哈希复用）
           const result = await generate({
             lineId: line.id,
             contextMode,
-            force,
-            reuse: !force,
+            reuse: false,
           }, { config: deps.config })
           job.ok += 1
-          if (result.cached) job.cached += 1
         } catch (error: any) {
           job.failed += 1
           if (job.errors.length < MAX_ERRORS) {

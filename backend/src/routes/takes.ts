@@ -146,14 +146,18 @@ takes.post('/lines/:id/takes', async (c) => {
   if (!lineId) return badRequest(c, '台词编号无效')
   const body = await c.req.json().catch(() => ({}))
   const voice = body?.voice_id ?? body?.voiceId
+  const overrides = mapOverrides(body)
+  const reuse = body?.reuse === undefined ? false : Boolean(body.reuse)
+  const fixedSeed = overrides?.seed !== undefined && overrides.seed !== null
   try {
     const result = await generateTake({
       lineId,
       contextMode: contextModeOf(body),
-      overrides: mapOverrides(body),
+      overrides,
       voiceId: voice ? Number(voice) : undefined,
       force: Boolean(body?.force),
-      reuse: body?.reuse === undefined ? false : Boolean(body.reuse),
+      reuse,
+      varySeed: !fixedSeed && !reuse,
       activate: body?.activate === undefined ? true : Boolean(body.activate),
     })
     return success(c, {
@@ -232,7 +236,6 @@ takes.post('/episodes/:id/takes/batch', async (c) => {
     lineIds: Array.isArray(rawIds) ? rawIds.map(Number) : null,
     filter: filter === 'all' || filter === 'failed' || filter === 'audio_stale' ? filter : 'pending',
     contextMode: contextModeOf(body),
-    force: Boolean(body?.force),
     concurrency: body?.concurrency !== undefined ? Number(body.concurrency) : undefined,
   })
   return success(c, { job_id: job.id })

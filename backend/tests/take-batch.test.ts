@@ -76,11 +76,13 @@ async function waitJob(jobId: string, timeoutMs = 4000) {
 
 function silentGenerate() {
   const calls: number[] = []
-  const generate = (async ({ lineId }: any) => {
-    calls.push(lineId)
+  const inputs: any[] = []
+  const generate = (async (input: any) => {
+    calls.push(input.lineId)
+    inputs.push(input)
     return { cached: false }
   }) as any
-  return { generate, calls }
+  return { generate, calls, inputs }
 }
 
 test('pending/failed/audio_stale/all 与 line_ids 筛选正确', async () => {
@@ -103,8 +105,10 @@ test('pending/failed/audio_stale/all 与 line_ids 筛选正确', async () => {
   const all = silentGenerate()
   const allJob = await waitJob(startTakeBatch(filterSet.episode.id, { filter: 'all' }, { generate: all.generate }).id)
   assert.equal(allJob.total, 4)
-  assert.equal(allJob.skipped, 1)
-  assert.equal(allJob.ok, 3)
+  assert.equal(allJob.skipped, 0)
+  assert.equal(allJob.ok, 4)
+  // 彻底不缓存：批量对每条台词都真实合成，不允许带 reuse 走渲染哈希复用
+  assert.ok(all.inputs.every((input) => input.reuse === false))
 
   const limited = silentGenerate()
   const limitedJob = await waitJob(startTakeBatch(filterSet.episode.id, {
@@ -112,11 +116,12 @@ test('pending/failed/audio_stale/all 与 line_ids 筛选正确', async () => {
     lineIds: [filterSet.lines[2].id, 999999],
   }, { generate: limited.generate }).id)
   assert.equal(limitedJob.total, 1)
-  assert.equal(limitedJob.skipped, 1)
-  assert.equal(limited.calls.length, 0)
+  assert.equal(limitedJob.skipped, 0)
+  assert.equal(limitedJob.ok, 1)
+  assert.equal(limited.calls.length, 1)
 })
 
-test('并发不超过 2，失败不中断并汇总成功/缓存', async () => {
+test('并发不超过 2，失败不中断并汇总成功', async () => {
   let active = 0
   let maxActive = 0
   let calls = 0
@@ -142,7 +147,6 @@ test('并发不超过 2，失败不中断并汇总成功/缓存', async () => {
   assert.equal(job.ok, 5)
   assert.equal(job.failed, 1)
   assert.equal(job.skipped, 0)
-  assert.equal(job.cached, 1)
   assert.equal(job.errors.length, 1)
   assert.equal(job.errors[0].lineId, failId)
   assert.equal(job.status, 'done')
