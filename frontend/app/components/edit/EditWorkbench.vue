@@ -53,7 +53,7 @@
         @remove="removeFilm"
         @set-current="setCurrentFilm"
         @open-mix="openFilmInMix"
-        @open-exports="$emit('back')"
+        @open-exports="openExports"
         @new-concat="goNewConcat"
       />
 
@@ -82,8 +82,13 @@
             :audio-mode="audioMode"
             :audio-banner="audioBanner"
             :playback-rate="playbackRate"
+            :preview-speed="previewSpeed"
+            :clip-filter="previewFilterCss"
+            :clip-transform="previewTransformCss"
+            :volume="previewVolume"
             :layout="layout"
             :selected-cue-id="selectedCueId"
+            :selected-overlay-id="selectedOverlayId"
             :show-safe-area="showSafeArea"
             @toggle="togglePlayback"
             @seek="seek"
@@ -91,6 +96,8 @@
             @ended="onClipEnded"
             @error="onPreviewError"
             @select-cue="selectCue"
+            @select-overlay="selectOverlay"
+            @speed-set="setPreviewSpeed"
           />
           <EditTimeline
             ref="timelineRef"
@@ -99,17 +106,25 @@
             :current-ms="currentMs"
             :selected-clip-id="selectedClipId"
             :selected-cue-id="selectedCueId"
+            :selected-overlay-id="selectedOverlayId"
             :readonly="!canEdit"
             :audio-mode="audioMode === 'mix' ? 'video' : audioMode"
             :show-subtitles="showSubtitles"
+            :episode-id="state.episode_id"
             @seek="seek"
             @select-clip="selectClip"
             @select-cue="selectCue"
+            @select-overlay="selectOverlay"
+            @move-overlay="moveOverlayTo"
+            @trim-overlay="trimOverlayTo"
+            @remove-overlay="removeOverlayById"
+            @overlay-insert="onOverlayInsert"
             @move-clip="moveClipTo"
             @trim-clip="trimClip"
             @split-clip="splitAt"
             @move-cue="moveCueTo"
             @remove-transition="removeTransitionById"
+            @apply-transition="applyTransition"
             @frame-op="onFrameOp"
             @cue-op="onCueOp"
             @toggle-subtitles="showSubtitles = !showSubtitles"
@@ -120,6 +135,7 @@
             @add-marker="addMarkerAt"
             @delete-marker="deleteMarkerById"
             @close-gaps="closeAllGaps"
+            @clip-volume="setClipVolumeById"
           />
         </template>
       </section>
@@ -134,6 +150,7 @@
         :current-ms="currentMs"
         :readonly="!canEdit"
         :cue="selectedCue"
+        :overlay="selectedOverlay"
         @trim-start="trimSelectedStart"
         @trim-end="trimSelectedEnd"
         @speed="setSelectedSpeed"
@@ -150,6 +167,23 @@
         @cue-align-start="alignCueStart"
         @cue-align-end="alignCueEnd"
         @cue-follow="toggleCueFollow"
+        @transition-set="setSelectedTransition"
+        @transition-remove="removeSelectedTransition"
+        @transform-set="setSelectedTransform"
+        @filter-set="setSelectedFilter"
+        @volume-set="setSelectedVolume"
+        @audio-fades="setSelectedAudioFades"
+        @project-audio-fades="setProjectFades"
+        @pitch-set="setSelectedPitch"
+        @effect-set="setSelectedAudioEffect"
+        @overlay-time="setSelectedOverlayTime"
+        @overlay-align-start="alignOverlayStart"
+        @overlay-align-end="alignOverlayEnd"
+        @overlay-transform="setSelectedOverlayTransform"
+        @overlay-opacity="setSelectedOverlayOpacity"
+        @overlay-fades="setSelectedOverlayFades"
+        @overlay-text="setSelectedOverlayText"
+        @overlay-remove="removeSelectedOverlay"
       />
     </div>
 
@@ -183,13 +217,20 @@
       @copy="copyConflict"
     />
 
-    <!-- 帧操作图片选择器：插入图片片段（Task 22 遗留的 insert-image 分支在这里落地） -->
+    <!-- 素材插入选择器：图片与视频都从素材库挑选，插入点由打开时的播放头决定 -->
     <EditImagePicker
       :open="imagePickerOpen"
       :episode-id="Number(props.state.episode_id)"
       :project-id="stateProjectId"
-      @close="imagePickerOpen = false"
+      @close="imagePickerOpen = false; pendingOverlayKind = ''"
       @insert="insertImage"
+    />
+    <EditVideoPicker
+      :open="videoPickerOpen"
+      :episode-id="Number(props.state.episode_id)"
+      :project-id="stateProjectId"
+      @close="videoPickerOpen = false; pendingOverlayKind = ''"
+      @insert="insertVideo"
     />
 
     <!-- 剪辑导出确认：只读展示降级清单，导出以保存后的服务端计划为准 -->
@@ -238,6 +279,7 @@ import EditEmptyState from '~/components/edit/EditEmptyState.vue'
 import EditRevisionsDrawer from '~/components/edit/EditRevisionsDrawer.vue'
 import EditConflictDialog from '~/components/edit/EditConflictDialog.vue'
 import EditImagePicker from '~/components/edit/EditImagePicker.vue'
+import EditVideoPicker from '~/components/edit/EditVideoPicker.vue'
 import EditExportDialog from '~/components/edit/EditExportDialog.vue'
 import { editAPI, filmAPI } from '~/composables/useApi'
 import { useEditClock } from '~/composables/useEditClock'
@@ -256,20 +298,41 @@ import {
   moveCue,
   removeClip,
   removeTransition,
+  setClipAudioEffect,
+  setClipAudioFades,
   setClipFades,
+  setClipFilter,
   setClipGap,
+  setClipPitch,
   setClipSpeed,
+  setClipVolume,
   setCueAppearance,
   setCueFollow,
   setCueText,
   setCueTime,
+  setProjectAudioFades,
   setSubtitleProjectDefaults,
+  setTransform,
+  setTransition,
   splitClip,
   splitCueAt,
   trimClipEnd,
   trimClipStart,
 } from '~/utils/edit-commands'
-import { insertFreezeFrame, insertImageClip, rippleDeleteFrame } from '~/utils/edit-frame-commands'
+import { insertImageClip, insertVideoClip, rippleDeleteFrame } from '~/utils/edit-frame-commands'
+import {
+  createImageOverlay,
+  createTextOverlay,
+  createVideoOverlay,
+  moveOverlay,
+  removeOverlay,
+  setOverlayFades,
+  setOverlayOpacity,
+  setOverlayText,
+  setOverlayTransform,
+  trimOverlay,
+} from '~/utils/edit-overlay-commands'
+import { cssFilterFor, cssTransformFor } from '~/utils/edit-filter-presets'
 import { activeClipIndex, sourceTimeAt } from '~/utils/edit-layout'
 import { framesToMs, msToFrames } from '~/utils/edit-timecode'
 import { mediaUrl } from '~/utils/edit-plan'
@@ -378,10 +441,12 @@ function openFilmInMix(film) {
   })
 }
 
-// 回剧集页拼接导出条，新建拼接成片。
-function goNewConcat() {
-  navigateTo(`${route.path.replace(/\/edit$/, '')}#exports`)
+// 回剧集页拼接导出条，新建拼接成片 / 查看导出记录（episode 页 export 阶段 = 成片列表 + 导出记录）。
+function goEpisodeExports() {
+  navigateTo({ path: route.path.replace(/\/edit$/, ''), query: { panel: 'export' } })
 }
+const goNewConcat = goEpisodeExports
+const openExports = goEpisodeExports
 
 const previewRef = ref(null)
 const timelineRef = ref(null)
@@ -398,10 +463,12 @@ const revisions = ref([])
 const revisionsLoading = ref(false)
 const revisionBusy = ref(false)
 const conflictBusy = ref(false)
-// 帧操作 UI（Task 23）：图片选择器与定格抽帧；导出确认弹窗。
+// 素材插入 UI：图片/视频选择器与导出确认弹窗。
 const imagePickerOpen = ref(false)
+const videoPickerOpen = ref(false)
 const pendingInsertAt = ref(null)
-const freezeBusy = ref(false)
+// 选择器复用：同一弹窗既服务主轨插入也服务叠加轨插入（「必须一套」），pendingOverlayKind 区分落点
+const pendingOverlayKind = ref('')
 const exportOpen = ref(false)
 const stateProjectId = computed(() => Number(props.state.project?.id) || 0)
 
@@ -430,6 +497,12 @@ const selectedCueId = computed(() => (
 ))
 const selectedCue = computed(() => (
   plan.value.subtitles.find((cue) => cue.id === selectedCueId.value) ?? null
+))
+const selectedOverlayId = computed(() => (
+  selection.value?.type === 'overlay' ? selection.value.id : ''
+))
+const selectedOverlay = computed(() => (
+  plan.value.overlays?.find((overlay) => overlay.id === selectedOverlayId.value) ?? null
 ))
 const showSafeArea = ref(false)
 const subtitlesOpen = ref(false)
@@ -480,7 +553,24 @@ const sourceMs = computed(() => {
   if (activeClip.value) return sourceTimeAt(plan.value, layout.value, currentMs.value)
   return previewClip.value ? Math.max(0, Number(previewClip.value.sourceOutMs) || 0) : 0
 })
-const playbackRate = computed(() => Number((activeClip.value ?? previewClip.value)?.speed) || 1)
+// 预览倍速与片段变速叠加：实际播放速率夹取到浏览器/导出支持的 0.25–4×
+const previewSpeed = ref(1)
+const playbackRate = computed(() => {
+  const clipSpeed = Number((activeClip.value ?? previewClip.value)?.speed) || 1
+  return Math.min(4, Math.max(0.25, clipSpeed * previewSpeed.value))
+})
+// 预览画面的滤镜/画面调整 CSS 近似与音量（音量预览上限 1，导出上限 2）
+const previewFilterCss = computed(() => {
+  const clip = previewClip.value
+  return clip?.filter && clip.filter.preset !== 'none'
+    ? cssFilterFor(clip.filter.preset, clip.filter.intensity)
+    : ''
+})
+const previewTransformCss = computed(() => cssTransformFor(previewClip.value?.transform ?? null))
+const previewVolume = computed(() => {
+  const volume = Number(previewClip.value?.volume)
+  return Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 1
+})
 const previewSrc = computed(() => mediaUrl(previewClip.value?.source?.url || ''))
 const poster = computed(() => mediaUrl(previewClip.value?.source?.thumbnailUrl || ''))
 const clipKey = computed(() => {
@@ -640,6 +730,13 @@ function selectCue(cueId) {
   selection.value = cueId ? { type: 'cue', id: cueId } : null
 }
 
+function selectOverlay(overlayId) {
+  selection.value = overlayId ? { type: 'overlay', id: overlayId } : null
+  // 选中即把播放头带到窗口起点，预览立刻能看到叠加内容（与字幕选中行为一致）
+  const overlay = plan.value.overlays?.find((item) => item.id === overlayId)
+  if (overlay) seek(Math.round(overlay.startMs))
+}
+
 // 命令工厂必须由 applyCommand 代入 toRaw 计划：Task 9 的命令内部 structuredClone，
 // 直接传 plan.value（深层代理）会抛 DataCloneError。
 function runCommand(factory, options = {}) {
@@ -654,6 +751,8 @@ function runCommand(factory, options = {}) {
     if (issue) notify(issue.message)
     return false
   }
+  const warned = result?.issues?.find((item) => item.severity === 'warning')
+  if (warned) notify(warned.message)
   if (
     options.selectFocus !== false
     && result.focusClipId
@@ -714,6 +813,38 @@ function removeTransitionById(transitionId) {
   )
 }
 
+function applyTransition(payload) {
+  if (!payload?.fromClipId || !payload?.toClipId) return
+  runCommand(
+    (value) => setTransition(value, payload.fromClipId, payload.toClipId, {
+      type: payload.type,
+      durationMs: payload.durationMs,
+    }),
+    { selectFocus: false },
+  )
+}
+
+function selectedBoundary() {
+  const index = plan.value.clips.findIndex((clip) => clip.id === selectedClipId.value)
+  if (index < 0) return null
+  return { from: plan.value.clips[index], to: plan.value.clips[index + 1] ?? null }
+}
+
+function setSelectedTransition(payload) {
+  const boundary = selectedBoundary()
+  if (!boundary?.to) return
+  applyTransition({ fromClipId: boundary.from.id, toClipId: boundary.to.id, ...payload })
+}
+
+function removeSelectedTransition() {
+  const boundary = selectedBoundary()
+  if (!boundary?.to) return
+  const transition = plan.value.transitions.find(
+    (item) => item.fromClipId === boundary.from.id && item.toClipId === boundary.to.id,
+  )
+  if (transition) removeTransitionById(transition.id)
+}
+
 // ---- 时间线帧操作 / 字幕块右键（EditTimeline frame-op / cue-op 事件，spec 6.8） ----
 function fpsOfPlan(p) {
   return Number(p?.project?.fps) || 30
@@ -724,63 +855,33 @@ function onFrameOp({ kind, clipId, atMs }) {
   if (kind === 'delete-frame') {
     // 帧级涟漪删除；片段过短时命令返回 FRAME_DELETE_TOO_SHORT，runCommand 会把错误原文提示出来
     runCommand((value) => rippleDeleteFrame(value, atMs, fpsOfPlan(value)), { selectFocus: false })
-  } else if (kind === 'duplicate-frame') {
-    insertFreezeAt(clipId, atMs)
   } else if (kind === 'extend-1s') {
     extendClipByMs(clipId, 1000)
-  } else if (kind === 'insert-image') {
-    // 插入图片：先记住插入点，打开图片选择器，选中图片后在 insertImage 里落命令
-    pendingInsertAt.value = { clipId, atMs: Math.round(Number(atMs) || 0) }
-    imagePickerOpen.value = true
+  } else if (kind === 'insert-image' || kind === 'insert-video') {
+    // 插入素材：先记住插入点，打开对应选择器，选中后在 insertImage / insertVideo 里落命令
+    pendingInsertAt.value = { atMs: Math.round(Number(atMs) || 0) }
+    if (kind === 'insert-image') imagePickerOpen.value = true
+    else videoPickerOpen.value = true
   }
 }
 
-/**
- * 定格插入（复制这一帧）：按片段内容内偏移调抽帧接口取 PNG，
- * 再用 insertFreezeFrame 在播放头处插入 1 秒定格片段。
- * 抽帧/命令失败都会把后端错误原文提示出来（不静默失败）。
- */
-async function insertFreezeAt(clipId, atMs) {
-  if (!canEdit.value || freezeBusy.value) return
-  const item = layout.value.clips.find((entry) => entry.clip_id === clipId)
-  if (!clipId || !item) {
-    notify(t('edit.actionFailed'))
+// 图片选择器选中图片：主轨插入在记住的插入点落图片片段；叠加插入在播放头落图片叠加
+function insertImage(img) {
+  imagePickerOpen.value = false
+  if (pendingOverlayKind.value === 'image') {
+    pendingOverlayKind.value = ''
+    const ok = runCommand(
+      (value) => createImageOverlay(
+        value,
+        overlayAssetSource('image', img),
+        Math.round(currentMs.value),
+      ),
+      { selectFocus: false },
+    )
+    if (ok) selection.value = { type: 'overlay', id: plan.value.overlays?.at(-1)?.id ?? '' }
     return
   }
-  freezeBusy.value = true
-  try {
-    // offset_ms 是「片段内容内偏移」（后端 Task 19 定义），必须用时间线绝对时间减片段起点换算
-    const body = {
-      clip_id: clipId,
-      offset_ms: Math.max(0, Math.round(Number(atMs) || 0) - item.timeline_start_ms),
-    }
-    if (stateProjectId.value > 0) body.project_id = stateProjectId.value
-    const frame = await editAPI.extractFrame(props.state.episode_id, body)
-    const ok = runCommand((value) => insertFreezeFrame(
-      value,
-      atMs,
-      fpsOfPlan(value),
-      {
-        url: frame.url,
-        width: frame.width,
-        height: frame.height,
-        fingerprint: frame.fingerprint,
-        label: t('edit.freezeFrameName'),
-      },
-      1000,
-    ), { selectFocus: false })
-    if (ok) notify(t('edit.frameFreezeInserted'))
-  } catch (cause) {
-    notify(cause?.message || t('edit.actionFailed'))
-  } finally {
-    freezeBusy.value = false
-  }
-}
-
-// 图片选择器选中图片：在记住的插入点落图片片段命令（片段内部会先分割再插入）
-function insertImage(img) {
   const at = pendingInsertAt.value || { atMs: Math.round(currentMs.value) }
-  imagePickerOpen.value = false
   runCommand((value) => insertImageClip(
     value,
     at.atMs,
@@ -793,6 +894,32 @@ function insertImage(img) {
       label: img.label,
     },
     3000,
+  ), { selectFocus: false })
+}
+
+// 视频选择器选中视频：主轨插入完整素材（先分割再插入）；叠加插入为静音画中画
+function insertVideo(video) {
+  videoPickerOpen.value = false
+  const source = video?.source
+  if (!source) {
+    notify(t('edit.actionFailed'))
+    return
+  }
+  if (pendingOverlayKind.value === 'video') {
+    pendingOverlayKind.value = ''
+    const ok = runCommand(
+      (value) => createVideoOverlay(value, source, Math.round(currentMs.value)),
+      { selectFocus: false },
+    )
+    if (ok) selection.value = { type: 'overlay', id: plan.value.overlays?.at(-1)?.id ?? '' }
+    return
+  }
+  const at = pendingInsertAt.value || { atMs: Math.round(currentMs.value) }
+  runCommand((value) => insertVideoClip(
+    value,
+    at.atMs,
+    fpsOfPlan(value),
+    source,
   ), { selectFocus: false })
 }
 
@@ -818,6 +945,126 @@ function onCueOp({ kind, cueId }) {
   } else if (kind === 'delete') {
     runCommand((value) => deleteCue(value, cueId), { selectFocus: false })
   }
+}
+
+// ---- 叠加轨命令（时间线叠加轨 / 检查器 overlay 页 / 画中画菜单） ----
+function onOverlayInsert(kind) {
+  if (!canEdit.value) return
+  if (kind === 'text') {
+    const ok = runCommand(
+      (value) => createTextOverlay(value, Math.round(currentMs.value), {
+        text: t('edit.overlayDefaultText'),
+      }),
+      { selectFocus: false },
+    )
+    if (ok) selection.value = { type: 'overlay', id: plan.value.overlays?.at(-1)?.id ?? '' }
+    return
+  }
+  // 视频/图片与主轨插入共用同一个选择器，落点由 pendingOverlayKind 决定
+  pendingOverlayKind.value = kind
+  if (kind === 'image') imagePickerOpen.value = true
+  else videoPickerOpen.value = true
+}
+
+function overlayAssetSource(kind, payload) {
+  if (kind === 'image') {
+    return {
+      kind: 'asset',
+      id: payload.fingerprint,
+      url: payload.url,
+      durationMs: 0,
+      width: payload.width,
+      height: payload.height,
+      fps: null,
+      hasAudio: false,
+      fingerprint: payload.fingerprint,
+      label: payload.label,
+    }
+  }
+  return payload.source
+}
+
+function moveOverlayTo(payload) {
+  runCommand((value) => moveOverlay(value, payload.overlayId, payload.startMs), { selectFocus: false })
+}
+
+function trimOverlayTo(payload) {
+  runCommand(
+    (value) => trimOverlay(value, payload.overlayId, {
+      startMs: payload.startMs,
+      endMs: payload.endMs,
+    }),
+    { selectFocus: false },
+  )
+}
+
+function removeOverlayById(overlayId) {
+  if (!overlayId || !canEdit.value) return
+  const ok = runCommand((value) => removeOverlay(value, overlayId), { selectFocus: false })
+  if (ok && selection.value?.type === 'overlay' && selection.value.id === overlayId) {
+    selection.value = null
+  }
+}
+
+function removeSelectedOverlay() {
+  if (!selectedOverlayId.value) return
+  removeOverlayById(selectedOverlayId.value)
+}
+
+function setSelectedOverlayTime(patch) {
+  if (!selectedOverlayId.value) return
+  runCommand(
+    (value) => trimOverlay(value, selectedOverlayId.value, {
+      startMs: Math.round(patch.startMs),
+      endMs: Math.round(patch.endMs),
+    }),
+    { selectFocus: false },
+  )
+}
+
+function alignOverlayStart() {
+  if (!selectedOverlayId.value) return
+  runCommand(
+    (value) => trimOverlay(value, selectedOverlayId.value, {
+      startMs: Math.round(currentMs.value),
+      endMs: Math.round(value.overlays.find((item) => item.id === selectedOverlayId.value)?.endMs ?? currentMs.value),
+    }),
+    { selectFocus: false },
+  )
+}
+
+function alignOverlayEnd() {
+  if (!selectedOverlayId.value) return
+  runCommand(
+    (value) => trimOverlay(value, selectedOverlayId.value, {
+      startMs: Math.round(value.overlays.find((item) => item.id === selectedOverlayId.value)?.startMs ?? 0),
+      endMs: Math.round(currentMs.value),
+    }),
+    { selectFocus: false },
+  )
+}
+
+function setSelectedOverlayTransform(patch) {
+  if (!selectedOverlayId.value) return
+  runCommand((value) => setOverlayTransform(value, selectedOverlayId.value, patch), { selectFocus: false })
+}
+
+function setSelectedOverlayOpacity(opacity) {
+  if (!selectedOverlayId.value) return
+  runCommand((value) => setOverlayOpacity(value, selectedOverlayId.value, opacity), { selectFocus: false })
+}
+
+function setSelectedOverlayFades(patch) {
+  if (!selectedOverlayId.value) return
+  runCommand(
+    (value) => setOverlayFades(value, selectedOverlayId.value, patch.inMs, patch.outMs),
+    { selectFocus: false },
+  )
+}
+
+function setSelectedOverlayText(patch) {
+  if (!selectedOverlayId.value) return
+  runCommand((value) => setOverlayText(value, selectedOverlayId.value, patch), { selectFocus: false })
 }
 
 function fitView() {
@@ -881,6 +1128,55 @@ function setSelectedFades(payload) {
   )
 }
 
+function setPreviewSpeed(rate) {
+  previewSpeed.value = Math.min(4, Math.max(0.25, Number(rate) || 1))
+}
+
+function setSelectedTransform(payload) {
+  if (!selectedClipId.value) return
+  runCommand((value) => setTransform(value, selectedClipId.value, payload))
+}
+
+function setSelectedFilter(payload) {
+  if (!selectedClipId.value) return
+  runCommand(
+    (value) => setClipFilter(value, selectedClipId.value, payload.preset, payload.intensity),
+  )
+}
+
+function setSelectedVolume(volume) {
+  if (!selectedClipId.value) return
+  runCommand((value) => setClipVolume(value, selectedClipId.value, volume))
+}
+
+// 时间线右键快捷静音/取消静音：按被点片段定位，不走选中态
+function setClipVolumeById(payload) {
+  const clipId = payload?.clipId
+  if (!clipId) return
+  runCommand((value) => setClipVolume(value, clipId, payload.volume))
+}
+
+function setSelectedAudioFades(payload) {
+  if (!selectedClipId.value) return
+  runCommand(
+    (value) => setClipAudioFades(value, selectedClipId.value, payload.inMs, payload.outMs),
+  )
+}
+
+function setProjectFades(payload) {
+  runCommand((value) => setProjectAudioFades(value, payload.inMs, payload.outMs))
+}
+
+function setSelectedPitch(semitones) {
+  if (!selectedClipId.value) return
+  runCommand((value) => setClipPitch(value, selectedClipId.value, semitones))
+}
+
+function setSelectedAudioEffect(preset) {
+  if (!selectedClipId.value) return
+  runCommand((value) => setClipAudioEffect(value, selectedClipId.value, preset))
+}
+
 function removeSelected(payload = { ripple: true }) {
   if (!selectedClipId.value) return
   runCommand(
@@ -898,6 +1194,10 @@ function removeSelection() {
   }
   if (current.type === 'clip') {
     runCommand((value) => removeClip(value, current.id, { ripple: true }))
+    return
+  }
+  if (current.type === 'overlay') {
+    removeOverlayById(current.id)
   }
 }
 
@@ -1051,7 +1351,10 @@ function openRevisions() {
 async function loadRevisions() {
   revisionsLoading.value = true
   try {
-    revisions.value = (await editAPI.revisions(props.state.episode_id)).items
+    revisions.value = (await editAPI.revisions(
+      props.state.episode_id,
+      stateProjectId.value || undefined,
+    )).items
   } catch (cause) {
     notify(cause?.message || t('edit.versionLoadFailed'))
   } finally {
@@ -1250,6 +1553,13 @@ function onKeydown(event) {
     splitAtPlayhead()
     return
   }
+  if (key === 'd') {
+    if (!canEdit.value) return
+    event.preventDefault()
+    const at = Math.round(currentMs.value)
+    runCommand((value) => rippleDeleteFrame(value, at, fpsOfPlan(value)), { selectFocus: false })
+    return
+  }
   if (event.key === 'Delete' || event.key === 'Backspace') {
     if (rangeFocused) return
     event.preventDefault()
@@ -1268,6 +1578,9 @@ watch(plan, (value) => {
     selection.value = null
   }
   if (current.type === 'cue' && !value.subtitles.some((cue) => cue.id === current.id)) {
+    selection.value = null
+  }
+  if (current.type === 'overlay' && !value.overlays?.some((overlay) => overlay.id === current.id)) {
     selection.value = null
   }
 })

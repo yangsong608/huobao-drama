@@ -1,10 +1,16 @@
 import {
+  AUDIO_EFFECT_PRESETS,
+  MAX_CLIP_VOLUME,
   MAX_FADE_MS,
   MAX_GAP_MS,
+  MAX_IMAGE_CLIP_MS,
+  MAX_PROJECT_FADE_MS,
+  MAX_PITCH_SEMITONES,
   MAX_TRANSITION_MS,
   MIN_TRANSITION_MS,
 } from './edit-plan.ts'
 import type {
+  EditAudioEffectPreset,
   EditClip,
   EditClipSource,
   EditIssue,
@@ -175,9 +181,14 @@ export function createClipFromSource(
     sourceInMs: 0,
     sourceOutMs: duration,
     speed: 1,
+    volume: 1,
     gapBeforeMs: 0,
     videoFadeInMs: 0,
     videoFadeOutMs: 0,
+    audioFadeInMs: 0,
+    audioFadeOutMs: 0,
+    pitchSemitones: 0,
+    audioEffect: { preset: 'none' },
     transform: { scale: 1, x: 0, y: 0, rotation: 0, flipH: false, flipV: false },
     filter: { preset: 'none', intensity: 100 },
     lineId: null,
@@ -339,7 +350,10 @@ export function trimClipEnd(
   const clip = plan.clips[index]
   const speed = Number(clip.speed) || 1
   const minRange = minSourceRangeFor(plan, clip, speed)
-  const maxOut = Math.max(0, Math.round(Number(clip.source.durationMs)))
+  // 图片可无限循环渲染：出点上限 30 秒而非素材时长（与后端 normalize 同口径）
+  const maxOut = clip.kind === 'image'
+    ? MAX_IMAGE_CLIP_MS
+    : Math.max(0, Math.round(Number(clip.source.durationMs)))
   const target = clamp(
     Math.round(Number(clip.sourceOutMs) + (Number(deltaMs) || 0)),
     Number(clip.sourceInMs) + minRange,
@@ -408,6 +422,7 @@ export function splitClip(
     ...next.clips[index],
     sourceOutMs: sourceSplit,
     videoFadeOutMs: 0,
+    audioFadeOutMs: 0,
   }, issues)
   const second: EditClip = clampClipFades({
     ...structuredClone(clip),
@@ -415,6 +430,7 @@ export function splitClip(
     sourceInMs: sourceSplit,
     gapBeforeMs: 0,
     videoFadeInMs: 0,
+    audioFadeInMs: 0,
     videoTakeAssetId: null,
   }, issues)
   next.clips[index] = first
@@ -550,6 +566,141 @@ export function setClipFades(
   return { plan: sync(next, issues), issues, focusClipId: clipId }
 }
 
+/** 独立音频淡入淡出：与视频淡入淡出互不影响，各自 0–1500ms */
+export function setClipAudioFades(
+  plan: EditPlanV1,
+  clipId: string,
+  audioFadeInMs: number,
+  audioFadeOutMs: number,
+): EditCommandResult {
+  const index = plan.clips.findIndex((clip) => clip.id === clipId)
+  if (index < 0) {
+    return unchanged(plan, error('CLIP_NOT_FOUND', `clip:${clipId}`, '片段不存在'))
+  }
+  const next = clonePlan(plan)
+  next.clips[index] = {
+    ...next.clips[index],
+    audioFadeInMs: clamp(Math.round(Number(audioFadeInMs) || 0), 0, MAX_FADE_MS),
+    audioFadeOutMs: clamp(Math.round(Number(audioFadeOutMs) || 0), 0, MAX_FADE_MS),
+  }
+  const issues: EditCommandIssue[] = []
+  return { plan: sync(next, issues), issues, focusClipId: clipId }
+}
+
+/** 工程级片头/片尾音频淡入淡出：0–3000ms，导出末遍 afade 生效 */
+export function setProjectAudioFades(
+  plan: EditPlanV1,
+  audioFadeInMs: number,
+  audioFadeOutMs: number,
+): EditCommandResult {
+  const next = clonePlan(plan)
+  next.project = {
+    ...next.project,
+    audioFadeInMs: clamp(Math.round(Number(audioFadeInMs) || 0), 0, MAX_PROJECT_FADE_MS),
+    audioFadeOutMs: clamp(Math.round(Number(audioFadeOutMs) || 0), 0, MAX_PROJECT_FADE_MS),
+  }
+  const issues: EditCommandIssue[] = []
+  return { plan: sync(next, issues), issues, focusClipId: null }
+}
+
+/** 音调升降半音：−12..+12，导出 asetrate+atempo 真实合成，时长不变；预览不模拟 */
+export function setClipPitch(
+  plan: EditPlanV1,
+  clipId: string,
+  pitchSemitones: number,
+): EditCommandResult {
+  const index = plan.clips.findIndex((clip) => clip.id === clipId)
+  if (index < 0) {
+    return unchanged(plan, error('CLIP_NOT_FOUND', `clip:${clipId}`, '片段不存在'))
+  }
+  const next = clonePlan(plan)
+  const target = clamp(Math.round(Number(pitchSemitones) || 0), -MAX_PITCH_SEMITONES, MAX_PITCH_SEMITONES) || 0
+  next.clips[index] = { ...next.clips[index], pitchSemitones: target }
+  const issues: EditCommandIssue[] = []
+  return { plan: sync(next, issues), issues, focusClipId: clipId }
+}
+
+/** 片段音频特效预设：白名单外回落 none；导出生效，预览不模拟 */
+export function setClipAudioEffect(
+  plan: EditPlanV1,
+  clipId: string,
+  preset: string,
+): EditCommandResult {
+  const index = plan.clips.findIndex((clip) => clip.id === clipId)
+  if (index < 0) {
+    return unchanged(plan, error('CLIP_NOT_FOUND', `clip:${clipId}`, '片段不存在'))
+  }
+  const next = clonePlan(plan)
+  const safePreset = AUDIO_EFFECT_PRESETS.includes(preset as EditAudioEffectPreset)
+    ? preset as EditAudioEffectPreset
+    : 'none'
+  next.clips[index] = { ...next.clips[index], audioEffect: { preset: safePreset } }
+  const issues: EditCommandIssue[] = []
+  return { plan: sync(next, issues), issues, focusClipId: clipId }
+}
+
+/** 画面调整：缩放 0.5–2×，位移画布比例 -1..1，旋转 90° 步进，双轴翻转 */
+export function setTransform(
+  plan: EditPlanV1,
+  clipId: string,
+  transform: Partial<EditTransform>,
+): EditCommandResult {
+  const index = plan.clips.findIndex((clip) => clip.id === clipId)
+  if (index < 0) {
+    return unchanged(plan, error('CLIP_NOT_FOUND', `clip:${clipId}`, '片段不存在'))
+  }
+  const current = plan.clips[index].transform
+  const scale = clamp(Math.round((Number(transform.scale ?? current.scale) || 1) * 100) / 100, 0.5, 2)
+  const x = clamp(Math.round((Number(transform.x ?? current.x) || 0) * 100) / 100, -1, 1)
+  const y = clamp(Math.round((Number(transform.y ?? current.y) || 0) * 100) / 100, -1, 1)
+  const rotationRaw = Math.round(Number(transform.rotation ?? current.rotation) || 0)
+  const rotation = (rotationRaw === 90 || rotationRaw === 180 || rotationRaw === 270 ? rotationRaw : 0) as 0 | 90 | 180 | 270
+  const next = clonePlan(plan)
+  next.clips[index] = {
+    ...next.clips[index],
+    transform: { scale, x, y, rotation, flipH: Boolean(transform.flipH ?? current.flipH), flipV: Boolean(transform.flipV ?? current.flipV) },
+  }
+  const issues: EditCommandIssue[] = []
+  return { plan: sync(next, issues), issues, focusClipId: clipId }
+}
+
+/** 滤镜预设与强度（强度 0 = 原画面，100 = 标准效果） */
+export function setClipFilter(
+  plan: EditPlanV1,
+  clipId: string,
+  preset: string,
+  intensity: number,
+): EditCommandResult {
+  const index = plan.clips.findIndex((clip) => clip.id === clipId)
+  if (index < 0) {
+    return unchanged(plan, error('CLIP_NOT_FOUND', `clip:${clipId}`, '片段不存在'))
+  }
+  const next = clonePlan(plan)
+  next.clips[index] = {
+    ...next.clips[index],
+    filter: { preset: preset || 'none', intensity: clamp(Math.round(Number(intensity) || 0), 0, 100) },
+  }
+  const issues: EditCommandIssue[] = []
+  return { plan: sync(next, issues), issues, focusClipId: clipId }
+}
+
+/** 片段音量倍率：0 = 静音，1 = 原声，最大 2 */
+export function setClipVolume(
+  plan: EditPlanV1,
+  clipId: string,
+  volume: number,
+): EditCommandResult {
+  const index = plan.clips.findIndex((clip) => clip.id === clipId)
+  if (index < 0) {
+    return unchanged(plan, error('CLIP_NOT_FOUND', `clip:${clipId}`, '片段不存在'))
+  }
+  const next = clonePlan(plan)
+  const target = Math.round(clamp(Number(volume) || 0, 0, MAX_CLIP_VOLUME) * 100) / 100
+  next.clips[index] = { ...next.clips[index], volume: target }
+  const issues: EditCommandIssue[] = []
+  return { plan: sync(next, issues), issues, focusClipId: clipId }
+}
+
 export function setTransition(
   plan: EditPlanV1,
   fromClipId: string,
@@ -562,6 +713,9 @@ export function setTransition(
   }
   const from = plan.clips[fromIndex]
   const to = plan.clips[fromIndex + 1]
+  if (Number(to.gapBeforeMs) > 0) {
+    return unchanged(plan, error('TRANSITION_GAP_BLOCKED', 'transitions', '两段之间有间隙，请先删除间隙再添加转场'))
+  }
   const available = transitionAvailableMs(plan, from, to)
   if (available < MIN_TRANSITION_MS) {
     return unchanged(plan, error('TRANSITION_TOO_SHORT', 'transitions', '片段太短，无法添加转场'))

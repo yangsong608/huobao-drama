@@ -105,3 +105,70 @@ export function buildEditSrt(plan: EditPlanV1): string {
     kind: 'dialogue' as const,
   })))
 }
+
+/**
+ * 叠加轨文字 → 独立 ASS：任何字幕模式都必须烧录（文字属于画面而非字幕轨）。
+ * 位置 \an5+\pos（中心锚点，与预览一致）；透明度 \alpha；淡入淡出 \fad；
+ * 背景盒按背景色生成 BorderStyle=4 样式（libass 已验证的 Boxed 机制）。
+ */
+export function buildOverlayAss(plan: EditPlanV1): string {
+  const { width, height } = plan.project
+  const textOverlays = plan.overlays.filter(
+    (overlay) => overlay.kind === 'text' && overlay.text && overlay.text.text.trim(),
+  )
+  if (!textOverlays.length) return ''
+
+  const styleNames = new Map<string, string>()
+  const styles: string[] = []
+  for (const overlay of textOverlays) {
+    const bg = overlay.text!.backgroundColor ?? ''
+    if (bg && !styleNames.has(bg)) {
+      const name = `OvlBG${styleNames.size + 1}`
+      styleNames.set(bg, name)
+      styles.push(
+        `Style: ${name},sans-serif,48,&H00FFFFFF,&H000000FF,&H00141414,&H${hexToBgr(bg)},0,0,0,0,100,100,0,0,4,0,0,5,10,10,10,1`,
+      )
+    }
+  }
+
+  const header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${width}`,
+    `PlayResY: ${height}`,
+    'WrapStyle: 0',
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: Default,sans-serif,48,&H00FFFFFF,&H000000FF,&H00141414,&H00000000,0,0,0,0,100,100,0,0,1,2,0,5,10,10,10,1`,
+    ...styles,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ].join('\n')
+
+  const events = textOverlays.map((overlay) => {
+    const style = overlay.text!
+    const alpha = Math.round(255 - Math.max(0, Math.min(1, overlay.opacity)) * 255)
+      .toString(16).toUpperCase().padStart(2, '0')
+    const parts = [
+      'an5',
+      `pos(${Math.round(style.x * width)},${Math.round(style.y * height)})`,
+      `fn${style.fontFamily}`,
+      `fs${Math.round(style.fontSize)}`,
+      `1c&H${hexToBgr(style.color)}&`,
+      `3c&H${hexToBgr(style.strokeColor)}&`,
+      `bord${style.strokeWidth}`,
+      'shad0',
+      `alpha&H${alpha}&`,
+    ]
+    if (overlay.fadeInMs > 0 || overlay.fadeOutMs > 0) {
+      parts.push(`fad(${Math.round(overlay.fadeInMs)},${Math.round(overlay.fadeOutMs)})`)
+    }
+    const text = style.text.replace(/\\/g, '＼').replace(/\{/g, '（').replace(/\}/g, '）').replace(/\r?\n/g, '\\N')
+    const styleName = style.backgroundColor ? styleNames.get(style.backgroundColor) ?? 'Default' : 'Default'
+    return `Dialogue: 0,${formatAssTime(overlay.startMs)},${formatAssTime(overlay.endMs)},${styleName},,0,0,0,,{\\${parts.join('\\')}}${text}`
+  })
+  return `${header}\n${events.join('\n')}\n`
+}

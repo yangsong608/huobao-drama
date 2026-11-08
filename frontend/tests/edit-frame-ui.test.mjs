@@ -9,20 +9,20 @@ test('时间线右键菜单覆盖帧操作与字幕操作', () => {
   const timeline = read('app/components/edit/EditTimeline.vue')
   assert.match(timeline, /ContextMenu/)
   assert.match(timeline, /delete-frame/)
-  assert.match(timeline, /duplicate-frame/)
+  assert.match(timeline, /insert-video/)
   assert.match(timeline, /insert-image/)
   assert.match(timeline, /extend-1s/)
   assert.match(timeline, /cue-op/)
   assert.match(timeline, /merge-next/)
 })
 
-test('工具栏可见按钮：帧操作、字幕、分割、删除、适应画幅', () => {
+test('工具栏可见按钮：帧操作、插入素材、字幕、分割、删除、适应画幅', () => {
   const timeline = read('app/components/edit/EditTimeline.vue')
   for (const key of [
-    'edit.frameOps', 'edit.frameDelete', 'edit.frameDuplicate',
-    'edit.frameInsertImage', 'edit.frameExtend', 'edit.subtitleMenu',
-    'edit.subtitleNew', 'edit.subtitleToggle', 'edit.subtitleOpenList',
-    'edit.fitView',
+    'edit.frameOps', 'edit.insertMenu', 'edit.insertVideo',
+    'edit.frameDelete', 'edit.frameInsertImage', 'edit.frameExtend',
+    'edit.subtitleMenu', 'edit.subtitleNew', 'edit.subtitleToggle',
+    'edit.subtitleOpenList', 'edit.fitView',
   ]) {
     assert.match(timeline, new RegExp(key.replace('.', '\\.')))
   }
@@ -37,15 +37,17 @@ test('工作台接线帧操作与字幕菜单事件', () => {
   assert.match(workbench, /@toggle-subtitles/)
   assert.match(workbench, /@fit-view/)
   assert.match(workbench, /rippleDeleteFrame/)
-  assert.match(workbench, /insertFreezeFrame/)
+  assert.match(workbench, /insertVideoClip/)
 })
 
-test('工作台接线图片选择器与定格插入', () => {
+test('工作台接线图片与视频选择器（不再提供定格抽帧）', () => {
   const workbench = read('app/components/edit/EditWorkbench.vue')
   assert.match(workbench, /EditImagePicker/)
+  assert.match(workbench, /EditVideoPicker/)
   assert.match(workbench, /insertImageClip/)
-  assert.match(workbench, /insertFreezeFrame/)
-  assert.match(workbench, /editAPI\.extractFrame/)
+  assert.match(workbench, /insertVideoClip/)
+  assert.doesNotMatch(workbench, /insertFreezeFrame/)
+  assert.doesNotMatch(workbench, /editAPI\.extractFrame/)
 })
 
 test('Task 22 UI 引用的 edit.* 键在四语言 locale 中存在（键位一致）', () => {
@@ -62,7 +64,7 @@ test('Task 22 UI 引用的 edit.* 键在四语言 locale 中存在（键位一�
 
   // Task 22 明确要求的键（报告 16 键 + brief 模板引用的 subtitleToggle/delete）
   const required = [
-    'frameOps', 'frameDelete', 'frameDuplicate', 'frameInsertImage', 'frameExtend',
+    'frameOps', 'insertMenu', 'insertVideo', 'frameDelete', 'frameInsertImage', 'frameExtend',
     'subtitleMenu', 'subtitleNew', 'subtitleShow', 'subtitleHide', 'subtitleToggle',
     'subtitleOpenList', 'fitView', 'cueEdit', 'cueSplit', 'cueMerge', 'cueMergeNone', 'delete',
   ]

@@ -165,3 +165,145 @@ test('旧计划（无 subtitleAppearance/appearance）归一化不报错且默�
   assert.equal(normalized.subtitles[0].appearance, undefined)
   assert.ok(!issues.some((i) => i.severity === 'error'))
 })
+
+test('图片片段出点截断到 30 秒、音量夹取 0–2、新转场类型保留', () => {
+  const plan = dirtyPlan()
+  const imageSource = { ...source, kind: 'asset' as const, url: 'static/projects/1/images/1.png', fps: null, hasAudio: false }
+  const imageClip = {
+    ...plan.clips[0],
+    kind: 'image',
+    source: imageSource,
+    sourceInMs: 0,
+    sourceOutMs: 120_000,
+    speed: 1,
+    gapBeforeMs: 0,
+    videoFadeInMs: 0,
+    videoFadeOutMs: 0,
+    volume: 5,
+  }
+  const second = { ...imageClip, id: 'clp_b' }
+  delete (second as Record<string, unknown>).volume
+  plan.clips = [imageClip, second]
+  plan.transitions = [{ id: 'tr_1', fromClipId: 'clp_a', toClipId: 'clp_b', type: 'circle-open', durationMs: 600 }]
+  const { plan: normalized, issues } = normalizeEditPlan(plan, { episodeId: 7, project })
+  assert.equal(normalized.clips[0].sourceOutMs, 30_000, '图片出点截断到 30 秒上限')
+  assert.equal(normalized.clips[0].volume, 2, '音量夹取到 0–2')
+  assert.equal(normalized.clips[1].volume, 1, '缺省音量为原声 1')
+  assert.ok(issues.some((i) => i.code === 'CLIP_SOURCE_OUT' && i.severity === 'warning'))
+  assert.ok(issues.some((i) => i.code === 'CLIP_VOLUME' && i.severity === 'warning'))
+  assert.equal(normalized.transitions[0]?.type, 'circle-open', 'circle-open 属于支持的 16 种转场')
+})
+
+test('叠加窗口截断到主轨末尾并给出警告', () => {
+  const plan = dirtyPlan()
+  plan.overlays = [{
+    id: 'ov_1',
+    kind: 'video',
+    source,
+    startMs: 1000,
+    endMs: 5000,
+    transform: { scale: 1, x: 0, y: 0, rotation: 0, flipH: false, flipV: false },
+    opacity: 1,
+    fadeInMs: 0,
+    fadeOutMs: 0,
+    track: 0,
+  }]
+  const { plan: normalized, issues } = normalizeEditPlan(plan, { episodeId: 7, project })
+  assert.equal(normalized.overlays.length, 1)
+  assert.equal(normalized.overlays[0].startMs, 1000)
+  assert.equal(normalized.overlays[0].endMs, 2500, '叠加终点截断到主轨末尾（速度夹取后内容 2.5 秒）')
+  assert.ok(issues.some((i) => i.code === 'OVERLAY_RANGE' && i.severity === 'warning'))
+})
+
+test('主轨为空与窗口过短的叠加被移除', () => {
+  const emptyMain = dirtyPlan()
+  emptyMain.clips = []
+  emptyMain.overlays = [{
+    id: 'ov_1', kind: 'text', text: {
+      text: '标题', preset: 'title', fontFamily: 'PingFang SC', fontSize: 48,
+      color: '#FFFFFF', strokeColor: '#000000', strokeWidth: 2, backgroundColor: null,
+      align: 'center', x: 0.5, y: 0.5,
+    }, startMs: 0, endMs: 1000, transform: { scale: 1, x: 0, y: 0, rotation: 0, flipH: false, flipV: false },
+    opacity: 1, fadeInMs: 0, fadeOutMs: 0, track: 0,
+  }]
+  const emptyResult = normalizeEditPlan(emptyMain, { episodeId: 7, project })
+  assert.equal(emptyResult.plan.overlays.length, 0)
+  assert.ok(emptyResult.issues.some((i) => i.code === 'OVERLAY_RANGE' && i.severity === 'warning'))
+
+  const tooShort = dirtyPlan()
+  tooShort.overlays = [{
+    id: 'ov_2', kind: 'text', text: {
+      text: '标题', preset: 'title', fontFamily: 'PingFang SC', fontSize: 48,
+      color: '#FFFFFF', strokeColor: '#000000', strokeWidth: 2, backgroundColor: null,
+      align: 'center', x: 0.5, y: 0.5,
+    }, startMs: 0, endMs: 10, transform: { scale: 1, x: 0, y: 0, rotation: 0, flipH: false, flipV: false },
+    opacity: 1, fadeInMs: 0, fadeOutMs: 0, track: 0,
+  }]
+  const shortResult = normalizeEditPlan(tooShort, { episodeId: 7, project })
+  assert.equal(shortResult.plan.overlays.length, 0)
+  assert.ok(shortResult.issues.some((i) => i.code === 'OVERLAY_RANGE' && i.severity === 'warning'))
+})
+
+test('视频/图片叠加缺少素材直接拒绝保存', () => {
+  const plan = dirtyPlan()
+  plan.overlays = [{
+    id: 'ov_1', kind: 'video',
+    startMs: 0, endMs: 1000,
+    transform: { scale: 1, x: 0, y: 0, rotation: 0, flipH: false, flipV: false },
+    opacity: 1, fadeInMs: 0, fadeOutMs: 0, track: 0,
+  }]
+  assert.throws(
+    () => normalizeEditPlan(plan, { episodeId: 7, project }),
+    (error: unknown) => error instanceof EditPlanRejectedError && error.code === 'OVERLAY_SOURCE',
+  )
+})
+
+test('独立音频淡入淡出：旧计划回退视频淡入淡出，显式值截断并提示', () => {
+  // 旧计划缺省 audioFadeInMs/audioFadeOutMs → 回退视频淡入淡出，保持既有导出行为
+  const legacyResult = normalizeEditPlan(dirtyPlan(), { episodeId: 7, project })
+  const legacyClip = legacyResult.plan.clips[0]
+  assert.equal(legacyClip.audioFadeInMs, legacyClip.videoFadeInMs)
+  assert.equal(legacyClip.audioFadeOutMs, legacyClip.videoFadeOutMs)
+  assert.ok(!legacyResult.issues.some((issue) => issue.code === 'CLIP_AUDIO_FADE'))
+
+  const clamped = dirtyPlan()
+  clamped.clips[0].videoFadeInMs = 0
+  clamped.clips[0].videoFadeOutMs = 0
+  clamped.clips[0].audioFadeInMs = 99_999
+  clamped.clips[0].audioFadeOutMs = -5
+  const clampedResult = normalizeEditPlan(clamped, { episodeId: 7, project })
+  assert.equal(clampedResult.plan.clips[0].audioFadeInMs, 1500)
+  assert.equal(clampedResult.plan.clips[0].audioFadeOutMs, 0)
+  assert.ok(clampedResult.issues.filter((issue) => issue.code === 'CLIP_AUDIO_FADE').length === 2)
+
+  // 工程级片头/片尾淡：缺省回退 0，越界截断到 3000
+  const projectFade = dirtyPlan()
+  projectFade.project.audioFadeInMs = 99_999
+  const projectResult = normalizeEditPlan(projectFade, { episodeId: 7, project })
+  assert.equal(projectResult.plan.project.audioFadeInMs, 3000)
+  assert.equal(projectResult.plan.project.audioFadeOutMs, 0)
+})
+
+test('音调与音频特效：缺省回退 0/none，越界截断，白名单外回落', () => {
+  const legacyResult = normalizeEditPlan(dirtyPlan(), { episodeId: 7, project })
+  assert.equal(legacyResult.plan.clips[0].pitchSemitones, 0)
+  assert.equal(legacyResult.plan.clips[0].audioEffect.preset, 'none')
+  assert.ok(!legacyResult.issues.some((issue) => issue.code === 'CLIP_PITCH'))
+  assert.ok(!legacyResult.issues.some((issue) => issue.code === 'CLIP_AUDIO_EFFECT'))
+
+  const clamped = dirtyPlan()
+  clamped.clips[0].pitchSemitones = 99
+  clamped.clips[0].audioEffect = { preset: 'bogus' }
+  const clampedResult = normalizeEditPlan(clamped, { episodeId: 7, project })
+  assert.equal(clampedResult.plan.clips[0].pitchSemitones, 12)
+  assert.equal(clampedResult.plan.clips[0].audioEffect.preset, 'none')
+  assert.ok(clampedResult.issues.some((issue) => issue.code === 'CLIP_PITCH'))
+  assert.ok(clampedResult.issues.some((issue) => issue.code === 'CLIP_AUDIO_EFFECT'))
+
+  const valid = dirtyPlan()
+  valid.clips[0].pitchSemitones = -5
+  valid.clips[0].audioEffect = { preset: 'telephone' }
+  const validResult = normalizeEditPlan(valid, { episodeId: 7, project })
+  assert.equal(validResult.plan.clips[0].pitchSemitones, -5)
+  assert.equal(validResult.plan.clips[0].audioEffect.preset, 'telephone')
+})

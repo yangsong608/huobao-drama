@@ -11,6 +11,18 @@
           @click="openMenuFromButton($event, frameMenuItems())"
         >{{ t('edit.frameOps') }} ▾</button>
         <button
+          class="ed-tool is-text" type="button" :disabled="readonly"
+          @click="openMenuFromButton($event, insertMenuItems())"
+        >{{ t('edit.insertMenu') }} ▾</button>
+        <button
+          class="ed-tool is-text" type="button" :disabled="readonly"
+          @click="openMenuFromButton($event, transitionMenuItems())"
+        >{{ t('edit.transition') }} ▾</button>
+        <button
+          class="ed-tool is-text" type="button" :disabled="readonly"
+          @click="openMenuFromButton($event, overlayMenuItems())"
+        >{{ t('edit.overlayMenu') }} ▾</button>
+        <button
           class="ed-tool is-text" type="button"
           @click="openMenuFromButton($event, subtitleMenuItems())"
         >{{ t('edit.subtitleMenu') }} ▾</button>
@@ -43,6 +55,7 @@
     <div class="ed-timeline-body">
       <div class="ed-tl-heads">
         <span class="ed-head is-ruler"></span>
+        <span class="ed-head">{{ t('edit.overlayTrack') }}</span>
         <span class="ed-head">{{ t('edit.videoTrack') }}</span>
         <span class="ed-head">{{ t('edit.subtitleTrack') }}</span>
         <span class="ed-head">{{ t('edit.audioTrack') }}</span>
@@ -57,6 +70,35 @@
               class="ed-tick"
               :style="{ left: `${tick.left}px` }"
             >{{ tick.label }}</span>
+          </div>
+
+          <div class="ed-tl-track is-overlay">
+            <div
+              v-for="view in overlayViews"
+              :key="view.id"
+              class="ed-tl-overlay"
+              :class="[`is-${view.kind}`, {
+                'is-selected': view.id === selectedOverlayId,
+                'is-dragging': drag?.kind === 'overlay-move' && drag?.overlayId === view.id,
+              }]"
+              :style="overlayStyle(view)"
+              :title="view.title"
+              @pointerdown.stop="startDrag($event, 'overlay-move', { overlayId: view.id, startMs: view.startMs, endMs: view.endMs })"
+              @contextmenu.prevent.stop="openOverlayMenu($event, view)"
+            >
+              <span class="ed-tl-clip-label">{{ view.label }}</span>
+              <span
+                v-if="!readonly"
+                class="ed-trim is-start"
+                @pointerdown.stop="startDrag($event, 'overlay-trim-start', { overlayId: view.id, startMs: view.startMs, endMs: view.endMs, edgeMs: view.startMs })"
+              ></span>
+              <span
+                v-if="!readonly"
+                class="ed-trim is-end"
+                @pointerdown.stop="startDrag($event, 'overlay-trim-end', { overlayId: view.id, startMs: view.startMs, endMs: view.endMs, edgeMs: view.endMs })"
+              ></span>
+            </div>
+            <p v-if="!overlayViews.length" class="ed-tl-empty">{{ t('edit.overlayEmpty') }}</p>
           </div>
 
           <div class="ed-tl-track is-video" @pointerdown.self="onTrackDown">
@@ -104,10 +146,27 @@
           </div>
 
           <div class="ed-tl-track is-audio">
-            <div v-if="audioMode === 'video'" class="ed-tl-audio-bar">
-              <Link2 :size="11" />
-              <span>{{ t('edit.audioModeVideo') }}</span>
-            </div>
+            <template v-if="audioMode === 'video'">
+              <div
+                v-for="view in audioClipViews"
+                :key="`audio-${view.clip_id}`"
+                class="ed-tl-audio-clip"
+                :class="{ 'is-muted': view.muted }"
+                :style="{ left: `${view.left}px`, width: `${view.width}px` }"
+                :title="view.title"
+              >
+                <EditAudioWave
+                  :episode-id="episodeId"
+                  :src="view.src"
+                  :fingerprint="view.fingerprint"
+                  :width="Math.max(4, Math.round(view.width))"
+                  :height="18"
+                  :muted="view.muted"
+                />
+                <span v-if="view.flags" class="ed-tl-audio-flags">{{ view.flags }}</span>
+              </div>
+              <p v-if="!audioClipViews.length" class="ed-tl-empty">{{ t('edit.audioTrackEmpty') }}</p>
+            </template>
             <p v-else class="ed-tl-empty">{{ t('edit.audioModeNone') }}</p>
           </div>
 
@@ -116,7 +175,8 @@
             :key="transition.id"
             class="ed-tl-transition"
             :style="{ left: `${transition.left}px` }"
-            :title="t('edit.transition')"
+            :title="`${t('edit.transition')} · ${t(transitionLabelKey(transition))}`"
+            @click.stop="openTransitionMenu($event, transition)"
           >
             <span>⇄</span>
             <button
@@ -163,10 +223,12 @@
 
 <script setup>
 import { useI18n } from 'vue-i18n'
-import { Link2, Magnet, Scissors, ZoomIn, ZoomOut } from 'lucide-vue-next'
+import { Magnet, Scissors, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import ContextMenu from '~/components/ContextMenu.vue'
+import EditAudioWave from './EditAudioWave.vue'
 import { formatClock } from '~/utils/edit-plan'
 import { formatPrecise } from '~/utils/edit-timecode'
+import { DEFAULT_TRANSITION_MS, TRANSITION_TYPES } from '~/utils/edit-transition-types'
 import { activeClipIndex } from '~/utils/edit-layout'
 import { collectSnapPoints, snapTime } from '~/utils/edit-snap'
 
@@ -176,15 +238,19 @@ const props = defineProps({
   currentMs: { type: Number, default: 0 },
   selectedClipId: { type: String, default: '' },
   selectedCueId: { type: String, default: '' },
+  selectedOverlayId: { type: String, default: '' },
   readonly: { type: Boolean, default: false },
   audioMode: { type: String, default: 'none' },
   showSubtitles: { type: Boolean, default: true },
+  episodeId: { type: Number, default: 0 },
 })
 const emit = defineEmits([
   'seek', 'select-clip', 'select-cue', 'move-clip', 'trim-clip',
-  'split-clip', 'move-cue', 'remove-transition',
+  'split-clip', 'move-cue', 'remove-transition', 'apply-transition',
   'frame-op', 'cue-op', 'toggle-subtitles', 'fit-view', 'open-subtitles', 'remove-clip',
   'duplicate-clip', 'add-marker', 'delete-marker', 'close-gaps',
+  'select-overlay', 'move-overlay', 'trim-overlay', 'remove-overlay', 'overlay-insert',
+  'clip-volume',
 ])
 const { t } = useI18n()
 
@@ -227,6 +293,33 @@ const clipViews = computed(() => props.layout.clips.map((item) => {
   }
 }))
 
+// 音频轨：原声模式下逐片段画真实波形（后端 audio-peaks 缓存共享），并标注音量/淡入淡出
+const audioClipViews = computed(() => props.plan.clips
+  .filter((clip) => clip.kind === 'video' && clip.source?.hasAudio && clip.source?.url)
+  .map((clip) => {
+    const item = props.layout.clips.find((entry) => entry.clip_id === clip.id)
+    if (!item) return null
+    const volume = Math.max(0, Number(clip.volume ?? 1))
+    const fadeInMs = Number(clip.audioFadeInMs ?? clip.videoFadeInMs) || 0
+    const fadeOutMs = Number(clip.audioFadeOutMs ?? clip.videoFadeOutMs) || 0
+    const flags = [
+      volume === 0 ? t('edit.audioMuted') : volume !== 1 ? `${Math.round(volume * 100)}%` : '',
+      fadeInMs > 0 ? t('edit.audioFadeInShort') : '',
+      fadeOutMs > 0 ? t('edit.audioFadeOutShort') : '',
+    ].filter(Boolean).join(' · ')
+    return {
+      clip_id: clip.id,
+      left: pad + item.timeline_start_ms * pxPerMs.value,
+      width: Math.max(4, (item.timeline_end_ms - item.timeline_start_ms) * pxPerMs.value),
+      src: clip.source.url,
+      fingerprint: clip.source.fingerprint || '',
+      muted: volume === 0,
+      flags,
+      title: `${clip.source.label || t('edit.clip')} · ${flags || t('edit.audioTitle')}`,
+    }
+  })
+  .filter(Boolean))
+
 // 隐藏字幕轨时只隐藏字幕块本身，轨道槽位保留，避免轨头/轨道错位
 const cueViews = computed(() => (
   props.showSubtitles
@@ -237,6 +330,25 @@ const cueViews = computed(() => (
     }))
     : []
 ))
+
+const overlayKindLabelKey = {
+  video: 'edit.overlayKindVideo',
+  image: 'edit.overlayKindImage',
+  text: 'edit.overlayKindText',
+}
+
+const overlayViews = computed(() => (props.plan.overlays ?? []).map((overlay) => {
+  const label = overlay.kind === 'text'
+    ? (overlay.text?.text?.trim() || t('edit.overlayKindText'))
+    : (overlay.source?.label || t(overlayKindLabelKey[overlay.kind] || 'edit.overlayKindVideo'))
+  return {
+    ...overlay,
+    label,
+    title: `${t(overlayKindLabelKey[overlay.kind] || 'edit.overlayKindVideo')} · ${formatPrecise(overlay.startMs)}`,
+    left: pad + Math.max(0, overlay.startMs) * pxPerMs.value,
+    width: Math.max(6, (overlay.endMs - overlay.startMs) * pxPerMs.value),
+  }
+}))
 
 const transitionViews = computed(() => props.layout.transitions.map((transition) => {
   const to = props.layout.clips.find((clip) => clip.clip_id === transition.to_clip_id)
@@ -277,6 +389,24 @@ function clipStyle(view) {
   if (drag.value?.kind === 'trim-end' && drag.value.clipId === view.clip_id) {
     const delta = drag.value.currentX - drag.value.startX
     return { left: `${view.left}px`, width: `${Math.max(4, view.width + delta)}px` }
+  }
+  return { left: `${view.left}px`, width: `${view.width}px` }
+}
+
+function overlayStyle(view) {
+  const dragKind = drag.value?.kind
+  const dragOverlayId = drag.value?.overlayId
+  if (dragKind === 'overlay-move' && dragOverlayId === view.id) {
+    const delta = drag.value.currentX - drag.value.startX
+    return { left: `${view.left + delta}px`, width: `${view.width}px` }
+  }
+  if (dragKind === 'overlay-trim-start' && dragOverlayId === view.id) {
+    const delta = drag.value.currentX - drag.value.startX
+    return { left: `${view.left + delta}px`, width: `${Math.max(6, view.width - delta)}px` }
+  }
+  if (dragKind === 'overlay-trim-end' && dragOverlayId === view.id) {
+    const delta = drag.value.currentX - drag.value.startX
+    return { left: `${view.left}px`, width: `${Math.max(6, view.width + delta)}px` }
   }
   return { left: `${view.left}px`, width: `${view.width}px` }
 }
@@ -335,6 +465,12 @@ function dragSnap(state) {
   if (state.kind === 'cue') {
     return snapTarget(state.startMs + deltaMs, { excludeCueId: state.cueId })
   }
+  if (state.kind === 'overlay-move') {
+    return snapTarget(state.startMs + deltaMs, {})
+  }
+  if (state.kind === 'overlay-trim-start' || state.kind === 'overlay-trim-end') {
+    return snapTarget(state.edgeMs + deltaMs, {})
+  }
   return null
 }
 
@@ -363,6 +499,7 @@ function startDrag(event, kind, payload = {}) {
   if (props.readonly && kind !== 'playhead') {
     if (payload.clipId) emit('select-clip', payload.clipId)
     if (payload.cueId) emit('select-cue', payload.cueId)
+    if (payload.overlayId) emit('select-overlay', payload.overlayId)
     return
   }
   event.preventDefault()
@@ -375,6 +512,7 @@ function startDrag(event, kind, payload = {}) {
   }
   if (payload.clipId) emit('select-clip', payload.clipId)
   if (payload.cueId) emit('select-cue', payload.cueId)
+  if (payload.overlayId) emit('select-overlay', payload.overlayId)
 }
 
 function onPointerMove(event) {
@@ -429,6 +567,23 @@ function onPointerUp() {
       cueId: state.cueId,
       startMs: Math.max(0, Math.min(maxStart, Math.round(snapped.ms))),
     })
+    return
+  }
+  if (state.kind === 'overlay-move') {
+    if (Math.abs(deltaPx) < 2) return
+    const snapped = dragSnap(state)
+    emit('move-overlay', { overlayId: state.overlayId, startMs: Math.max(0, Math.round(snapped.ms)) })
+    return
+  }
+  if (state.kind === 'overlay-trim-start' || state.kind === 'overlay-trim-end') {
+    if (Math.abs(deltaPx) < 2) return
+    const snapped = dragSnap(state)
+    // 命令层负责最短一帧与主轨范围收敛；这里只提交绝对起止
+    emit('trim-overlay', {
+      overlayId: state.overlayId,
+      startMs: state.kind === 'overlay-trim-start' ? Math.round(snapped.ms) : Math.round(state.startMs),
+      endMs: state.kind === 'overlay-trim-end' ? Math.round(snapped.ms) : Math.round(state.endMs),
+    })
   }
 }
 
@@ -465,12 +620,18 @@ function openMenuFromButton(event, items) {
 function frameMenuItems(view) {
   const at = view ? Math.round(view.timeline_start_ms) : Math.round(props.currentMs)
   const clipId = view?.clip_id ?? clipIdAt(props.currentMs)
+  const clipIndex = props.plan.clips.findIndex((clip) => clip.id === clipId)
+  const muted = clipId ? clipVolumeOf(clipId) === 0 : false
   return [
     { key: 'split-clip', label: t('edit.split'), shortcut: 'S', disabled: !canSplit.value, action: () => splitAtPlayhead() },
     { key: 'duplicate-clip', label: t('edit.clipDuplicate'), disabled: !clipId, action: () => emit('duplicate-clip', clipId) },
+    { key: 'move-prev', label: t('edit.movePrev'), disabled: clipIndex <= 0, action: () => emit('move-clip', { clipId, targetIndex: clipIndex - 1 }) },
+    { key: 'move-next', label: t('edit.moveNext'), disabled: clipIndex < 0 || clipIndex >= props.plan.clips.length - 1, action: () => emit('move-clip', { clipId, targetIndex: clipIndex + 1 }) },
+    { separator: true, key: 'sep-audio', label: '' },
+    { key: 'mute-toggle', label: muted ? t('edit.audioUnmute') : t('edit.audioMute'), disabled: !clipId, action: () => emit('clip-volume', { clipId, volume: muted ? 1 : 0 }) },
     { separator: true, key: 'sep0', label: '' },
     { key: 'delete-frame', label: t('edit.frameDelete'), shortcut: 'D', action: () => emit('frame-op', { kind: 'delete-frame', clipId, atMs: at }) },
-    { key: 'duplicate-frame', label: t('edit.frameDuplicate'), action: () => emit('frame-op', { kind: 'duplicate-frame', clipId, atMs: at }) },
+    { key: 'insert-video', label: t('edit.insertVideo'), action: () => emit('frame-op', { kind: 'insert-video', clipId, atMs: at }) },
     { key: 'insert-image', label: t('edit.frameInsertImage'), action: () => emit('frame-op', { kind: 'insert-image', clipId, atMs: at }) },
     { separator: true, key: 'sep', label: '' },
     { key: 'extend-1s', label: t('edit.frameExtend'), action: () => emit('frame-op', { kind: 'extend-1s', clipId, atMs: at }) },
@@ -485,10 +646,98 @@ function clipIdAt(ms) {
   return props.layout.clips[index]?.clip_id ?? ''
 }
 
+function clipVolumeOf(clipId) {
+  const clip = props.plan.clips.find((item) => item.id === clipId)
+  return Math.max(0, Number(clip?.volume ?? 1))
+}
+
+// 插入素材菜单：视频/图片按播放头落点插入，复制分段基于当前选中片段
+function insertMenuItems() {
+  const at = Math.round(props.currentMs)
+  return [
+    { key: 'insert-video', label: t('edit.insertVideo'), action: () => emit('frame-op', { kind: 'insert-video', atMs: at }) },
+    { key: 'insert-image', label: t('edit.frameInsertImage'), action: () => emit('frame-op', { kind: 'insert-image', atMs: at }) },
+    { separator: true, key: 'sep', label: '' },
+    { key: 'duplicate-clip', label: t('edit.clipDuplicate'), disabled: !props.selectedClipId, action: () => emit('duplicate-clip', props.selectedClipId) },
+  ]
+}
+
+// 画中画菜单：视频/图片复用素材选择器（由 workbench 打开），文字直接在播放头创建
+function overlayMenuItems() {
+  return [
+    { key: 'overlay-video', label: t('edit.overlayInsertVideo'), action: () => emit('overlay-insert', 'video') },
+    { key: 'overlay-image', label: t('edit.overlayInsertImage'), action: () => emit('overlay-insert', 'image') },
+    { key: 'overlay-text', label: t('edit.overlayInsertText'), action: () => emit('overlay-insert', 'text') },
+  ]
+}
+
+function openOverlayMenu(event, view) {
+  if (props.readonly) return
+  emit('select-overlay', view.id)
+  openMenuAt(event, [
+    { key: 'seek', label: t('edit.overlayGoto'), action: () => emit('seek', Math.round(view.startMs)) },
+    { separator: true, key: 'sep', label: '' },
+    { key: 'delete', label: t('edit.overlayDelete'), danger: true, action: () => emit('remove-overlay', view.id) },
+  ])
+}
+
 function openClipMenu(event, view) {
   if (props.readonly) return
   emit('select-clip', view.clip_id)
   openMenuAt(event, frameMenuItems(view))
+}
+
+// 转场菜单：工具栏按选中片段/播放头找交界，时间线转场块按自身两端点定位
+function planTransition(fromClipId, toClipId) {
+  return props.plan.transitions.find(
+    (item) => item.fromClipId === fromClipId && item.toClipId === toClipId,
+  ) ?? null
+}
+
+function transitionLabelKey(transition) {
+  const type = planTransition(transition.from_clip_id, transition.to_clip_id)?.type
+  return TRANSITION_TYPES.find((option) => option.value === type)?.labelKey
+    ?? 'edit.transitionDissolve'
+}
+
+function transitionMenuItems(fromClipId, toClipId) {
+  const from = fromClipId || props.selectedClipId || clipIdAt(props.currentMs)
+  const index = props.plan.clips.findIndex((clip) => clip.id === from)
+  const to = toClipId || (index >= 0 ? props.plan.clips[index + 1]?.id ?? '' : '')
+  if (!from || !to) {
+    return [{ key: 'need-next', label: t('edit.transitionNeedNext'), disabled: true }]
+  }
+  if (Number(props.plan.clips[index + 1]?.gapBeforeMs) > 0) {
+    return [{ key: 'gap', label: t('edit.transitionGapHint'), disabled: true }]
+  }
+  const existing = planTransition(from, to)
+  const items = [
+    {
+      key: 'none',
+      label: t('edit.transitionNone'),
+      disabled: !existing,
+      action: () => existing && emit('remove-transition', existing.id),
+    },
+    { separator: true, key: 'sep', label: '' },
+  ]
+  for (const option of TRANSITION_TYPES) {
+    items.push({
+      key: option.value,
+      label: t(option.labelKey),
+      action: () => emit('apply-transition', {
+        fromClipId: from,
+        toClipId: to,
+        type: option.value,
+        durationMs: existing?.durationMs ?? DEFAULT_TRANSITION_MS,
+      }),
+    })
+  }
+  return items
+}
+
+function openTransitionMenu(event, transition) {
+  if (props.readonly) return
+  openMenuAt(event, transitionMenuItems(transition.from_clip_id, transition.to_clip_id))
 }
 
 function subtitleMenuItems() {
@@ -552,12 +801,12 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .ed-timeline {
-  flex: 0 0 auto; min-height: 196px; display: flex; flex-direction: column; gap: 6px;
+  flex: 0 0 auto; min-height: 226px; display: flex; flex-direction: column; gap: 6px;
   padding: 8px 10px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-1);
 }
-.ed-timeline-head { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-3); }
+.ed-timeline-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 11px; color: var(--text-3); }
 .ed-timeline-head b { color: var(--text-1); font-size: 12px; }
-.ed-timeline-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.ed-timeline-tools { margin-left: auto; display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; }
 .ed-tool {
   width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--border); border-radius: 6px; background: var(--bg-2);
@@ -573,11 +822,12 @@ onBeforeUnmount(() => {
 .ed-tl-heads { flex: 0 0 46px; display: flex; flex-direction: column; font-size: 9px; color: var(--text-3); }
 .ed-head { display: flex; align-items: center; border-bottom: 1px solid transparent; }
 .ed-head.is-ruler { height: 24px; }
-.ed-head:nth-child(2) { height: 60px; }
-.ed-head:nth-child(3) { height: 34px; }
-.ed-head:nth-child(4) { height: 22px; }
+.ed-head:nth-child(2) { height: 28px; }
+.ed-head:nth-child(3) { height: 60px; }
+.ed-head:nth-child(4) { height: 34px; }
+.ed-head:nth-child(5) { height: 22px; }
 .ed-tl-scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; }
-.ed-tl-stage { position: relative; height: 140px; user-select: none; }
+.ed-tl-stage { position: relative; height: 170px; user-select: none; }
 .ed-tl-ruler {
   position: absolute; inset: 0 0 auto; height: 24px; cursor: ew-resize;
   border-bottom: 1px solid var(--border); background: var(--bg-2);
@@ -587,9 +837,27 @@ onBeforeUnmount(() => {
   font-size: 9px; color: var(--text-3); white-space: nowrap; pointer-events: none;
 }
 .ed-tl-track { position: absolute; left: 0; right: 0; border-radius: 6px; background: var(--bg-2); }
-.ed-tl-track.is-video { top: 24px; height: 60px; }
-.ed-tl-track.is-subtitle { top: 84px; height: 34px; background: color-mix(in srgb, var(--bg-2) 82%, transparent); }
-.ed-tl-track.is-audio { top: 118px; height: 22px; }
+.ed-tl-track.is-overlay { top: 24px; height: 28px; background: color-mix(in srgb, var(--bg-2) 82%, transparent); }
+.ed-tl-track.is-video { top: 52px; height: 60px; }
+.ed-tl-track.is-subtitle { top: 112px; height: 34px; background: color-mix(in srgb, var(--bg-2) 82%, transparent); }
+.ed-tl-track.is-audio { top: 146px; height: 22px; }
+.ed-tl-overlay {
+  position: absolute; top: 3px; bottom: 3px; min-width: 6px; overflow: hidden;
+  display: flex; align-items: center; padding: 0 8px; border-radius: 5px;
+  border: 1px solid color-mix(in srgb, #a78bfa 55%, transparent);
+  background: color-mix(in srgb, #a78bfa 22%, var(--bg-1));
+  color: var(--text-0); cursor: grab;
+}
+.ed-tl-overlay.is-image { border-color: color-mix(in srgb, #38bdf8 55%, transparent); background: color-mix(in srgb, #38bdf8 22%, var(--bg-1)); }
+.ed-tl-overlay.is-text { border-color: color-mix(in srgb, #d7a24a 55%, transparent); background: color-mix(in srgb, #d7a24a 22%, var(--bg-1)); }
+.ed-tl-overlay:hover { filter: brightness(1.15); }
+.ed-tl-overlay.is-selected { box-shadow: 0 0 0 1px #a78bfa; }
+.ed-tl-overlay.is-image.is-selected { box-shadow: 0 0 0 1px #38bdf8; }
+.ed-tl-overlay.is-text.is-selected { box-shadow: 0 0 0 1px #d7a24a; }
+.ed-tl-overlay.is-dragging { opacity: .82; cursor: grabbing; z-index: 4; }
+.ed-tl-overlay .ed-trim { background: color-mix(in srgb, #a78bfa 55%, transparent); }
+.ed-tl-overlay.is-image .ed-trim { background: color-mix(in srgb, #38bdf8 55%, transparent); }
+.ed-tl-overlay.is-text .ed-trim { background: color-mix(in srgb, #d7a24a 55%, transparent); }
 .ed-tl-clip {
   position: absolute; top: 3px; bottom: 3px; min-width: 4px; overflow: hidden;
   display: flex; flex-direction: column; justify-content: space-between;
@@ -617,18 +885,28 @@ onBeforeUnmount(() => {
 }
 .ed-tl-cue.is-follow { border-style: dashed; }
 .ed-tl-cue.is-selected { box-shadow: 0 0 0 1px #d7a24a; }
-.ed-tl-audio-bar {
-  position: absolute; inset: 3px; display: flex; align-items: center; gap: 5px;
-  padding: 0 8px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
-  background: color-mix(in srgb, var(--success) 13%, var(--bg-1));
-  color: var(--text-2); font-size: 9px; overflow: hidden; white-space: nowrap;
+.ed-tl-audio-clip {
+  position: absolute; top: 1px; height: 20px; overflow: hidden;
+  display: flex; align-items: center;
+  border-radius: 4px; border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, var(--bg-1));
+}
+.ed-tl-audio-clip.is-muted { border-style: dashed; opacity: .7; }
+.ed-tl-audio-flags {
+  position: absolute; right: 2px; top: 2px; z-index: 1;
+  max-width: calc(100% - 4px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 0 4px; border-radius: 3px; font-size: 8px; line-height: 12px;
+  background: color-mix(in srgb, var(--bg-1) 85%, transparent);
+  color: var(--text-2); pointer-events: none;
 }
 .ed-tl-transition {
-  position: absolute; top: 48px; transform: translateX(-50%); z-index: 3;
+  position: absolute; top: 73px; transform: translateX(-50%); z-index: 3;
   display: inline-flex; align-items: center; gap: 1px; height: 18px; padding: 0 3px;
   border-radius: 5px; background: var(--bg-0); border: 1px solid var(--border);
-  color: var(--text-2); font-size: 10px;
+  color: var(--text-2); font-size: 10px; cursor: pointer;
 }
+.ed-tl-transition:hover { border-color: var(--accent); color: var(--text-0); }
+.ed-tl-transition button { cursor: pointer; }
 .ed-tl-transition button {
   width: 14px; height: 14px; padding: 0; border: 0; border-radius: 3px;
   background: transparent; color: var(--text-3); cursor: pointer; line-height: 1;

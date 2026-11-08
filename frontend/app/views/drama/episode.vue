@@ -15,6 +15,9 @@
             <span class="studio-meta-pill">{{ currentSubStageLabel }}</span>
             <span class="studio-meta-pill is-progress">{{ pipelineProgress }}/{{ pipelineTotal }}</span>
             <span class="studio-meta-inline">{{ t('episode.topbar.meta', { roles: chars.length, shots: sbs.length }) }}</span>
+            <span v-if="showNativeAudioDubbingHint" class="studio-meta-hint" :title="t('episode.topbar.nativeAudioDubbingHintTitle')">
+              {{ t('episode.topbar.nativeAudioDubbingHint') }}
+            </span>
           </div>
         </div>
       </div>
@@ -964,14 +967,17 @@
                           :value="selectedSb.duration || 10"
                           type="number"
                           min="2"
-                          max="30"
+                          :max="videoDurationMax"
                           class="input video-duration-input"
                           @change="onVideoDurationChange"
                         />
-                        <span class="video-param-unit">{{ t('episode.inspector.durationUnit') }}</span>
+                        <span class="video-param-unit">{{ t('episode.inspector.durationUnit', { max: videoDurationMax }) }}</span>
                       </span>
                     </div>
                     <div class="video-param-hint">{{ t('episode.inspector.durationHint') }}</div>
+                    <div v-if="videoDurationOverLimit" class="video-param-hint video-param-warn">
+                      {{ t('episode.inspector.durationLimitWarning', { max: videoDurationMax, dur: effectiveVideoDuration }) }}
+                    </div>
                   </section>
                   <div class="video-inspector-effective">
                     {{ t('episode.inspector.effective', { model: effectiveVideoModelLabel || t('episode.vid.defaultModel'), res: episodeResolutionShort, dur: effectiveVideoDuration }) }}
@@ -2103,7 +2109,7 @@ import { startTour, autoTour } from '~/composables/useTour'
 import { useAgent } from '~/composables/useAgent'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
 import { episodeResolutionKey, isLocalH3Config, videoResolutionKey, videoResolutionOptions, videoResolutionProvider, videoResolutionVendor } from '~/utils/video-resolution'
-import { videoModelCapabilities } from '~/utils/model-capabilities'
+import { videoMaxDuration, videoModelCapabilities } from '~/utils/model-capabilities'
 import { createStoryboardUpdateQueue } from '~/utils/storyboard-update-queue'
 import { toastError, mapError, MODERATION_RE } from '~/composables/useToast'
 import LocaleSwitcher from '~/components/LocaleSwitcher.vue'
@@ -2229,6 +2235,8 @@ function applyRoutePanelQuery() {
     const step = Number(q.step)
     if (Number.isInteger(step) && step >= 0 && step < DUB_STEP_KEYS.length) dubStep.value = step
   }
+  // 剪辑工作台「查看导出记录」通过 query 直达导出阶段（成片列表/导出记录）
+  if (q.panel === 'export') panel.value = 'export'
 }
 
 const scriptStep = ref(storedPanel ? (storedPanel.scriptStep === 0 ? 0 : 1) : 0)
@@ -2957,6 +2965,10 @@ const episodeVideoAudioMode = computed({
   get: () => episode.value?.video_audio_mode || episode.value?.videoAudioMode || 'auto',
   set: (val) => { void changeEpisodeVideoAudioMode(val) },
 })
+// 保持 auto/native 的生成行为不变；开启配音且会生成原生对白时，提示可能与配音重叠
+const showNativeAudioDubbingHint = computed(() =>
+  dubbingEnabled.value && ['auto', 'native'].includes(episodeVideoAudioMode.value),
+)
 async function changeEpisodeVideoAudioMode(val) {
   const prev = episodeVideoAudioMode.value
   if (!episode.value || val === prev) return
@@ -3068,6 +3080,14 @@ const episodeResolutionLabel = computed(() =>
 const episodeResolutionShort = computed(() =>
   videoResolutionVendor(resolutionProvider.value, episodeResolution.value, resolutionModel.value, videoCapabilityOpts.value))
 const effectiveVideoDuration = computed(() => Number(selectedSb.value?.duration || 10))
+// 本地 H3 24GB：720p 最多 8 秒，480p 最多 15 秒；云端按各自模型上限
+const videoDurationMax = computed(() => Math.max(2, videoMaxDuration(
+  resolutionProvider.value,
+  resolutionModel.value,
+  episodeResolution.value,
+  videoCapabilityOpts.value,
+)))
+const videoDurationOverLimit = computed(() => effectiveVideoDuration.value > videoDurationMax.value)
 const batchVideoTotalDuration = computed(() =>
   batchVideoConfirm.value.targets.reduce((sum, sb) => sum + (Number(sb.duration) || 5), 0))
 
@@ -4615,12 +4635,12 @@ function resolveVideoPromptRefs(sb) {
 }
 
 // 分镜时长（视频生成参数区直接编辑并保存到分镜）：
-// 统一限制 2-30s，列表/批量/单次生成统一读取该值；超出厂商支持范围由后端适配器收敛
+// 下限 2s，上限按当前模型/分辨率收紧（本地 H3 720p 为 8s），列表/批量/单次生成统一读取该值
 function onVideoDurationChange(e) {
   const sb = selectedSb.value
   if (!sb) return
   const min = 2
-  const max = 30
+  const max = videoDurationMax.value
   let v = Math.round(Number(e.target.value))
   if (!Number.isFinite(v)) v = Number(sb.duration || 10)
   v = Math.min(max, Math.max(min, v))
@@ -5573,6 +5593,13 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   color: var(--text-3);
   font-weight: 600;
   white-space: nowrap;
+}
+.studio-meta-hint {
+  font-size: 9px;
+  color: var(--warning);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: help;
 }
 
 .studio-topbar-side {
@@ -7392,6 +7419,8 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .video-param-control { display: inline-flex; align-items: center; gap: 6px; }
 .video-param-unit { font-size: 11px; color: var(--text-2); }
 .video-duration-input { width: 56px; height: 24px; padding: 2px 6px; font-size: 12px; font-weight: 700; font-family: var(--font-mono); text-align: center; }
+.video-param-hint { margin-top: 6px; font-size: 11px; line-height: 1.5; color: var(--text-3); white-space: normal; }
+.video-param-warn { color: var(--warning, #f59e0b); }
 
 /* Prod grid */
 .prod-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }

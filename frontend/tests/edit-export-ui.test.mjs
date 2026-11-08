@@ -27,21 +27,29 @@ test('导出完成但带后端警告：展示提示且不自动关闭', () => {
 
 test('导出警告镜像后端编码', () => {
   const src = read('app/utils/edit-export-warnings.ts')
-  for (const code of ['TRANSITION_HARD_CUT', 'FILTER_UNSUPPORTED', 'TRANSFORM_UNSUPPORTED', 'OVERLAY_UNSUPPORTED']) {
+  for (const code of ['TRANSITION_HARD_CUT', 'SPEED_CLAMPED']) {
     assert.match(src, new RegExp(code))
   }
+  // 滤镜/画面调整/叠加轨均已真实导出，不再产生降级警告
+  assert.doesNotMatch(src, /FILTER_UNSUPPORTED|TRANSFORM_UNSUPPORTED|OVERLAY_UNSUPPORTED/)
 })
 
-test('图片选择器：上传、列表与插入', () => {
+test('图片与视频选择器：上传、列表与插入', () => {
   const picker = read('app/components/edit/EditImagePicker.vue')
   assert.match(picker, /editAPI\.uploadImage/)
   assert.match(picker, /emit\('insert'/)
   assert.match(picker, /type="file"/)
+
+  const videoPicker = read('app/components/edit/EditVideoPicker.vue')
+  assert.match(videoPicker, /editAPI\.uploadVideo/)
+  assert.match(videoPicker, /editAPI\.media/)
+  assert.match(videoPicker, /emit\('insert'/)
+  assert.match(videoPicker, /type="file"/)
 })
 
 test('editAPI 新端点与四语言文案', () => {
   const api = read('app/composables/useApi.ts')
-  for (const name of ['extractFrame', 'uploadImage', 'render', 'renderStatus']) {
+  for (const name of ['extractFrame', 'uploadImage', 'uploadVideo', 'render', 'renderStatus']) {
     assert.match(api, new RegExp(`${name}\\(`))
   }
   const zh = JSON.parse(read('app/locales/zh.json'))
@@ -49,5 +57,5 @@ test('editAPI 新端点与四语言文案', () => {
   assert.ok(zh.edit.exportWarningTitle)
   assert.ok(zh.edit.subtitleBurn)
   assert.ok(zh.edit.imagePickerTitle)
-  assert.ok(zh.edit.frameFreezeInserted)
+  assert.ok(zh.edit.videoPickerTitle)
 })

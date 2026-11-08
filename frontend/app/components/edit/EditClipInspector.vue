@@ -115,6 +115,146 @@
       </section>
     </template>
 
+    <template v-else-if="overlay">
+      <header class="ed-insp-head">
+        <b>{{ t(overlayKindLabelKey[overlay.kind] || 'edit.overlayKindVideo') }}</b>
+        <span>{{ formatPrecise(overlay.startMs) }} – {{ formatPrecise(overlay.endMs) }}</span>
+      </header>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.overlayWindow') }}</h4>
+        <div class="ed-row">
+          <label>{{ t('edit.startTime') }}
+            <input :value="formatClockMs(overlay.startMs)" @change="onOverlayStartInput($event)" />
+          </label>
+          <label>{{ t('edit.endTime') }}
+            <input :value="formatClockMs(overlay.endMs)" @change="onOverlayEndInput($event)" />
+          </label>
+        </div>
+        <div class="ed-row">
+          <button type="button" :disabled="readonly" @click="nudgeOverlay(-1)">−1 {{ t('edit.frameUnit') }}</button>
+          <button type="button" :disabled="readonly" @click="nudgeOverlay(1)">+1 {{ t('edit.frameUnit') }}</button>
+          <button type="button" :disabled="readonly" @click="$emit('overlay-align-start')">{{ t('edit.alignPlayheadStart') }}</button>
+          <button type="button" :disabled="readonly" @click="$emit('overlay-align-end')">{{ t('edit.alignPlayheadEnd') }}</button>
+        </div>
+      </section>
+
+      <section v-if="overlay.kind !== 'text'" class="ed-insp-section">
+        <h4>{{ t('edit.overlayPicture') }}</h4>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.overlayScale') }} {{ overlay.transform.scale.toFixed(2) }}×</span>
+          <input
+            type="range" min="0.1" max="4" step="0.05" :value="overlay.transform.scale" :disabled="readonly"
+            @change="$emit('overlay-transform', { scale: Number($event.target.value) })"
+          />
+        </label>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.transformX') }} {{ Math.round(overlay.transform.x * 100) }}%</span>
+          <input
+            type="range" min="-200" max="200" step="5" :value="Math.round(overlay.transform.x * 100)" :disabled="readonly"
+            @change="$emit('overlay-transform', { x: Number($event.target.value) / 100 })"
+          />
+        </label>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.transformY') }} {{ Math.round(overlay.transform.y * 100) }}%</span>
+          <input
+            type="range" min="-200" max="200" step="5" :value="Math.round(overlay.transform.y * 100)" :disabled="readonly"
+            @change="$emit('overlay-transform', { y: Number($event.target.value) / 100 })"
+          />
+        </label>
+      </section>
+
+      <section v-if="overlay.kind === 'text'" class="ed-insp-section">
+        <h4>{{ t('edit.overlayTextStyle') }}</h4>
+        <textarea
+          class="ed-insp-textarea"
+          rows="2"
+          :value="overlay.text?.text ?? ''"
+          :disabled="readonly"
+          @change="$emit('overlay-text', { text: $event.target.value })"
+        />
+        <label class="ed-insp-field">
+          <span>{{ t('edit.fontSize') }} {{ Math.round(overlay.text?.fontSize ?? 48) }}px</span>
+          <input
+            type="range" min="8" max="300" step="2" :value="Math.round(overlay.text?.fontSize ?? 48)" :disabled="readonly"
+            @change="$emit('overlay-text', { fontSize: Number($event.target.value) })"
+          />
+        </label>
+        <div class="ed-row">
+          <label>{{ t('edit.textColor') }} <input type="color" :value="overlay.text?.color ?? '#ffffff'" :disabled="readonly" @change="$emit('overlay-text', { color: $event.target.value })" /></label>
+          <label>{{ t('edit.strokeColor') }} <input type="color" :value="overlay.text?.strokeColor ?? '#000000'" :disabled="readonly" @change="$emit('overlay-text', { strokeColor: $event.target.value })" /></label>
+        </div>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.strokeWidth') }} {{ overlay.text?.strokeWidth ?? 0 }}</span>
+          <input
+            type="range" min="0" max="20" step="1" :value="overlay.text?.strokeWidth ?? 0" :disabled="readonly"
+            @change="$emit('overlay-text', { strokeWidth: Number($event.target.value) })"
+          />
+        </label>
+        <label class="ed-check">
+          <input
+            type="checkbox" :checked="Boolean(overlay.text?.backgroundColor)" :disabled="readonly"
+            @change="onTextBgToggle($event.target.checked)"
+          /> {{ t('edit.overlayTextBg') }}
+        </label>
+        <div class="ed-row" v-if="overlay.text?.backgroundColor">
+          <label>{{ t('edit.backgroundColor') }} <input type="color" :value="overlay.text.backgroundColor" :disabled="readonly" @change="$emit('overlay-text', { backgroundColor: $event.target.value })" /></label>
+        </div>
+        <h4>{{ t('edit.overlayTextPosition') }}</h4>
+        <div class="ed-nineGrid" role="radiogroup">
+          <button v-for="cell in TEXT_GRID" :key="cell.key" type="button"
+            :class="{ 'is-on': Math.abs((overlay.text?.x ?? 0.5) - cell.x) < 0.01 && Math.abs((overlay.text?.y ?? 0.5) - cell.y) < 0.01 }"
+            :disabled="readonly"
+            @click="$emit('overlay-text', { x: cell.x, y: cell.y })"
+          />
+        </div>
+        <div class="ed-row">
+          <label>X <input type="range" min="0" max="100" :value="Math.round((overlay.text?.x ?? 0.5) * 100)" :disabled="readonly" @change="$emit('overlay-text', { x: Number($event.target.value) / 100 })" /></label>
+          <label>Y <input type="range" min="0" max="100" :value="Math.round((overlay.text?.y ?? 0.5) * 100)" :disabled="readonly" @change="$emit('overlay-text', { y: Number($event.target.value) / 100 })" /></label>
+        </div>
+      </section>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.overlayOpacity') }}</h4>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.overlayOpacity') }} {{ Math.round((overlay.opacity ?? 1) * 100) }}%</span>
+          <input
+            type="range" min="0" max="100" step="5" :value="Math.round((overlay.opacity ?? 1) * 100)" :disabled="readonly"
+            @change="$emit('overlay-opacity', Number($event.target.value) / 100)"
+          />
+        </label>
+      </section>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.overlayFades') }}</h4>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.fadeIn') }}</span>
+          <input
+            type="number" min="0" max="1500" step="50" :value="overlay.fadeInMs" :disabled="readonly"
+            @change="$emit('overlay-fades', { inMs: Number($event.target.value), outMs: overlay.fadeOutMs })"
+          />
+        </label>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.fadeOut') }}</span>
+          <input
+            type="number" min="0" max="1500" step="50" :value="overlay.fadeOutMs" :disabled="readonly"
+            @change="$emit('overlay-fades', { inMs: overlay.fadeInMs, outMs: Number($event.target.value) })"
+          />
+        </label>
+        <p class="ed-insp-text">{{ t('edit.overlayFadeHint') }}</p>
+      </section>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.actions') }}</h4>
+        <div class="ed-insp-actions" v-if="!readonly">
+          <button class="is-danger" type="button" @click="$emit('overlay-remove')">
+            <Trash2 :size="12" /> {{ t('edit.overlayDelete') }}
+          </button>
+        </div>
+        <p v-else class="ed-insp-text">{{ t('edit.readonlyEdit') }}</p>
+      </section>
+    </template>
+
     <template v-else-if="clip">
       <header class="ed-insp-head">
         <b>{{ clip.source?.label || t('edit.clip') }}</b>
@@ -177,6 +317,158 @@
         </label>
       </section>
 
+      <section v-if="nextClip" class="ed-insp-section">
+        <h4>{{ t('edit.transition') }}</h4>
+        <div class="ed-insp-actions" role="radiogroup">
+          <button
+            type="button"
+            :class="{ 'is-on': !boundaryTransition }"
+            :disabled="readonly"
+            @click="$emit('transition-remove')"
+          >{{ t('edit.transitionNone') }}</button>
+          <button
+            v-for="option in TRANSITION_TYPES"
+            :key="option.value"
+            type="button"
+            :class="{ 'is-on': boundaryTransition?.type === option.value }"
+            :disabled="readonly"
+            @click="$emit('transition-set', { type: option.value, durationMs: boundaryTransition?.durationMs ?? DEFAULT_TRANSITION_MS })"
+          >{{ t(option.labelKey) }}</button>
+        </div>
+        <label v-if="boundaryTransition" class="ed-insp-field">
+          <span>{{ t('edit.transitionDuration') }} {{ boundaryTransition.durationMs }}ms</span>
+          <input
+            type="range" min="100" max="1500" step="50" :value="boundaryTransition.durationMs" :disabled="readonly"
+            @change="$emit('transition-set', { type: boundaryTransition.type, durationMs: Number($event.target.value) })"
+          />
+        </label>
+        <p v-if="transitionGapBlocked" class="ed-insp-warn">{{ t('edit.transitionGapHint') }}</p>
+        <p v-else class="ed-insp-text">{{ t('edit.transitionPreviewNote') }}</p>
+      </section>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.transformTitle') }}</h4>
+        <div class="ed-insp-actions" v-if="!readonly">
+          <button
+            type="button"
+            :class="{ 'is-on': clip.transform.rotation !== 0 }"
+            @click="$emit('transform-set', { rotation: (clip.transform.rotation + 90) % 360 })"
+          >{{ t('edit.transformRotate') }} {{ clip.transform.rotation }}°</button>
+          <button
+            type="button"
+            :class="{ 'is-on': clip.transform.flipH }"
+            @click="$emit('transform-set', { flipH: !clip.transform.flipH })"
+          >{{ t('edit.transformFlipH') }}</button>
+          <button
+            type="button"
+            :class="{ 'is-on': clip.transform.flipV }"
+            @click="$emit('transform-set', { flipV: !clip.transform.flipV })"
+          >{{ t('edit.transformFlipV') }}</button>
+          <button
+            type="button"
+            class="is-muted"
+            @click="$emit('transform-set', { rotation: 0, flipH: false, flipV: false, scale: 1, x: 0, y: 0 })"
+          >{{ t('edit.transformReset') }}</button>
+        </div>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.transformScale') }} {{ clip.transform.scale.toFixed(2) }}×</span>
+          <input
+            type="range" min="0.5" max="2" step="0.05" :value="clip.transform.scale" :disabled="readonly"
+            @change="$emit('transform-set', { scale: Number($event.target.value) })"
+          />
+        </label>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.transformX') }} {{ Math.round(clip.transform.x * 100) }}%</span>
+          <input
+            type="range" min="-100" max="100" step="5" :value="Math.round(clip.transform.x * 100)" :disabled="readonly"
+            @change="$emit('transform-set', { x: Number($event.target.value) / 100 })"
+          />
+        </label>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.transformY') }} {{ Math.round(clip.transform.y * 100) }}%</span>
+          <input
+            type="range" min="-100" max="100" step="5" :value="Math.round(clip.transform.y * 100)" :disabled="readonly"
+            @change="$emit('transform-set', { y: Number($event.target.value) / 100 })"
+          />
+        </label>
+      </section>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.filterTitle') }}</h4>
+        <div class="ed-insp-actions" role="radiogroup">
+          <button
+            v-for="option in FILTER_PRESETS"
+            :key="option.value"
+            type="button"
+            :class="{ 'is-on': (clip.filter?.preset ?? 'none') === option.value }"
+            :disabled="readonly"
+            @click="$emit('filter-set', { preset: option.value, intensity: filterIntensity })"
+          >{{ t(option.labelKey) }}</button>
+        </div>
+        <label v-if="(clip.filter?.preset ?? 'none') !== 'none'" class="ed-insp-field">
+          <span>{{ t('edit.filterIntensity') }} {{ clip.filter?.intensity ?? 0 }}</span>
+          <input
+            type="range" min="0" max="100" step="5" :value="clip.filter?.intensity ?? 0" :disabled="readonly"
+            @change="$emit('filter-set', { preset: clip.filter.preset, intensity: Number($event.target.value) })"
+          />
+        </label>
+        <p class="ed-insp-text">{{ t('edit.previewApprox') }}</p>
+      </section>
+
+      <section class="ed-insp-section">
+        <h4>{{ t('edit.audioTitle') }}</h4>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.clipVolume') }} {{ Math.round((clip.volume ?? 1) * 100) }}%</span>
+          <input
+            type="range" min="0" max="200" step="5" :value="Math.round((clip.volume ?? 1) * 100)" :disabled="readonly"
+            @change="$emit('volume-set', Number($event.target.value) / 100)"
+          />
+        </label>
+        <div class="ed-insp-actions" v-if="!readonly">
+          <button
+            type="button"
+            :class="{ 'is-on': !(clip.volume ?? 1) }"
+            @click="$emit('volume-set', (clip.volume ?? 1) ? 0 : 1)"
+          >{{ t('edit.mute') }}</button>
+        </div>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.audioFadeIn') }}</span>
+          <input
+            type="number" min="0" max="1500" step="50"
+            :value="clipAudioFadeInMs" :disabled="readonly"
+            @change="$emit('audio-fades', { inMs: Number($event.target.value), outMs: clipAudioFadeOutMs })"
+          />
+        </label>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.audioFadeOut') }}</span>
+          <input
+            type="number" min="0" max="1500" step="50"
+            :value="clipAudioFadeOutMs" :disabled="readonly"
+            @change="$emit('audio-fades', { inMs: clipAudioFadeInMs, outMs: Number($event.target.value) })"
+          />
+        </label>
+        <label class="ed-insp-field">
+          <span>{{ t('edit.pitchTitle') }} {{ clipPitchSemitones > 0 ? '+' : '' }}{{ clipPitchSemitones }}</span>
+          <input
+            type="range" min="-12" max="12" step="1"
+            :value="clipPitchSemitones" :disabled="readonly"
+            @change="$emit('pitch-set', Number($event.target.value))"
+          />
+        </label>
+        <div class="ed-insp-actions" role="radiogroup">
+          <button
+            v-for="option in AUDIO_EFFECT_PRESETS"
+            :key="option"
+            type="button"
+            :class="{ 'is-on': clipAudioEffectPreset === option }"
+            :disabled="readonly"
+            @click="$emit('effect-set', option)"
+          >{{ t(`edit.audioEffect_${option}`) }}</button>
+        </div>
+        <p class="ed-insp-text">{{ t('edit.audioEffectHint') }}</p>
+        <p class="ed-insp-text">{{ t('edit.volumeHint') }}</p>
+      </section>
+
       <section v-if="placement" class="ed-insp-section">
         <h4>{{ t('edit.linePlacement') }}</h4>
         <dl class="ed-insp-grid">
@@ -237,6 +529,23 @@
       <p class="ed-insp-text">
         {{ state.audio?.mode === 'video' ? t('edit.audioModeVideo') : t('edit.audioModeNone') }}
       </p>
+      <label class="ed-insp-field">
+        <span>{{ t('edit.projectFadeIn') }}</span>
+        <input
+          type="number" min="0" max="3000" step="100"
+          :value="Number(state.plan.project.audioFadeInMs) || 0" :disabled="readonly"
+          @change="$emit('project-audio-fades', { inMs: Number($event.target.value), outMs: Number(state.plan.project.audioFadeOutMs) || 0 })"
+        />
+      </label>
+      <label class="ed-insp-field">
+        <span>{{ t('edit.projectFadeOut') }}</span>
+        <input
+          type="number" min="0" max="3000" step="100"
+          :value="Number(state.plan.project.audioFadeOutMs) || 0" :disabled="readonly"
+          @change="$emit('project-audio-fades', { inMs: Number(state.plan.project.audioFadeInMs) || 0, outMs: Number($event.target.value) })"
+        />
+      </label>
+      <p class="ed-insp-text">{{ t('edit.projectFadeHint') }}</p>
     </section>
 
     <section class="ed-insp-section">
@@ -254,8 +563,10 @@
 <script setup>
 import { useI18n } from 'vue-i18n'
 import { MousePointer2, Scissors, Trash2 } from 'lucide-vue-next'
-import { formatClock, SUBTITLE_FONT_WHITELIST, resolveCueAppearance } from '~/utils/edit-plan'
+import { formatClock, SUBTITLE_FONT_WHITELIST, AUDIO_EFFECT_PRESETS, resolveCueAppearance } from '~/utils/edit-plan'
 import { formatPrecise, formatClockMs, parseClockMs, frameDurationMs } from '~/utils/edit-timecode'
+import { DEFAULT_TRANSITION_MS, TRANSITION_TYPES } from '~/utils/edit-transition-types'
+import { FILTER_PRESETS } from '~/utils/edit-filter-presets'
 
 const props = defineProps({
   plan: { type: Object, required: true },
@@ -266,15 +577,32 @@ const props = defineProps({
   currentMs: { type: Number, default: 0 },
   readonly: { type: Boolean, default: false },
   cue: { type: Object, default: null },
+  overlay: { type: Object, default: null },
 })
 const emit = defineEmits([
   'trim-start', 'trim-end', 'speed', 'gap', 'fades', 'split', 'remove',
   'cue-update', 'cue-apply-all', 'cue-set-default', 'cue-delete', 'cue-split',
   'cue-merge-next', 'cue-align-start', 'cue-align-end', 'cue-follow',
+  'transition-set', 'transition-remove',
+  'transform-set', 'filter-set', 'volume-set', 'audio-fades', 'project-audio-fades',
+  'pitch-set', 'effect-set',
+  'overlay-time', 'overlay-align-start', 'overlay-align-end', 'overlay-transform',
+  'overlay-opacity', 'overlay-fades', 'overlay-text', 'overlay-remove',
 ])
 const { t } = useI18n()
 
 const clip = computed(() => props.plan.clips.find((item) => item.id === props.clipId) ?? null)
+const nextClip = computed(() => {
+  const index = props.plan.clips.findIndex((item) => item.id === props.clipId)
+  return index >= 0 ? props.plan.clips[index + 1] ?? null : null
+})
+const boundaryTransition = computed(() => {
+  if (!clip.value || !nextClip.value) return null
+  return props.plan.transitions.find(
+    (item) => item.fromClipId === clip.value.id && item.toClipId === nextClip.value.id,
+  ) ?? null
+})
+const transitionGapBlocked = computed(() => Number(nextClip.value?.gapBeforeMs) > 0)
 const layoutClip = computed(() => (
   props.layout.clips.find((item) => item.clip_id === props.clipId) ?? null
 ))
@@ -289,6 +617,17 @@ const canSplit = computed(() => Boolean(
 const splitOffsetMs = computed(() => (
   layoutClip.value ? Math.round(props.currentMs - layoutClip.value.timeline_start_ms) : 0
 ))
+// 选滤镜时若当前强度为 0（或未设置）给一个可见的默认强度
+const filterIntensity = computed(() => {
+  const value = Number(clip.value?.filter?.intensity)
+  return Number.isFinite(value) && value > 0 ? value : 50
+})
+// 旧计划缺省音频淡入淡出时显示回退值（与导出 audioFilter 的回退口径一致）
+const clipAudioFadeInMs = computed(() => Number(clip.value?.audioFadeInMs ?? clip.value?.videoFadeInMs ?? 0))
+const clipAudioFadeOutMs = computed(() => Number(clip.value?.audioFadeOutMs ?? clip.value?.videoFadeOutMs ?? 0))
+// 旧计划缺省音调/特效时显示 0/none（与导出 audioFilter 的缺省口径一致）
+const clipPitchSemitones = computed(() => Number(clip.value?.pitchSemitones ?? 0) || 0)
+const clipAudioEffectPreset = computed(() => clip.value?.audioEffect?.preset ?? 'none')
 
 // ---- 字幕编辑（cue 页） ----
 const fonts = SUBTITLE_FONT_WHITELIST
@@ -389,6 +728,50 @@ function onEndInput(event) {
   }
   emit('cue-update', { startMs: Math.round(props.cue.startMs), endMs: Math.max(0, value) })
 }
+
+// ---- 叠加轨编辑（overlay 页） ----
+const overlayKindLabelKey = {
+  video: 'edit.overlayKindVideo',
+  image: 'edit.overlayKindImage',
+  text: 'edit.overlayKindText',
+}
+const TEXT_GRID = [
+  { key: 'tl', x: 0.12, y: 0.12 }, { key: 'tc', x: 0.5, y: 0.12 }, { key: 'tr', x: 0.88, y: 0.12 },
+  { key: 'ml', x: 0.12, y: 0.5 }, { key: 'mc', x: 0.5, y: 0.5 }, { key: 'mr', x: 0.88, y: 0.5 },
+  { key: 'bl', x: 0.12, y: 0.85 }, { key: 'bc', x: 0.5, y: 0.85 }, { key: 'br', x: 0.88, y: 0.85 },
+]
+
+function nudgeOverlay(delta) {
+  if (!props.overlay) return
+  const frame = frameDurationMs(props.plan.project?.fps ?? 30)
+  const shift = Math.round(frame * (Number(delta) || 0))
+  emit('overlay-time', {
+    startMs: Math.max(0, Math.round(props.overlay.startMs) + shift),
+    endMs: Math.round(props.overlay.endMs) + shift,
+  })
+}
+
+function onOverlayStartInput(event) {
+  const value = parseClockMs(event.target.value)
+  if (!Number.isFinite(value) || !props.overlay) {
+    event.target.value = formatClockMs(props.overlay?.startMs ?? 0)
+    return
+  }
+  emit('overlay-time', { startMs: Math.max(0, value), endMs: Math.round(props.overlay.endMs) })
+}
+
+function onOverlayEndInput(event) {
+  const value = parseClockMs(event.target.value)
+  if (!Number.isFinite(value) || !props.overlay) {
+    event.target.value = formatClockMs(props.overlay?.endMs ?? 0)
+    return
+  }
+  emit('overlay-time', { startMs: Math.round(props.overlay.startMs), endMs: value })
+}
+
+function onTextBgToggle(checked) {
+  emit('overlay-text', { backgroundColor: checked ? '#000000' : null })
+}
 </script>
 
 <style scoped>
@@ -450,6 +833,7 @@ function onEndInput(event) {
 .ed-insp-text { margin: 0; font-size: 10px; color: var(--text-2); line-height: 1.5; }
 .ed-insp-warn { margin: 0; font-size: 10px; color: var(--warning); line-height: 1.5; }
 .ed-insp-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.ed-insp-actions button.is-on { border-color: var(--accent); color: var(--accent-text); background: var(--accent-bg); }
 .ed-insp-actions button.is-danger { color: var(--action-danger); border-color: color-mix(in srgb, var(--action-danger) 40%, var(--border)); }
 .ed-insp-actions button.is-muted { color: var(--text-2); }
 .ed-insp-actions button:disabled { opacity: .45; cursor: not-allowed; }

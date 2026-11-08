@@ -6,8 +6,7 @@ const {
   snapToFrame,
   rippleDeleteFrame,
   insertImageClip,
-  insertFreezeFrame,
-  buildFreezeTail,
+  insertVideoClip,
   insertImageAtPlayheadNeedsSplit,
 } = await import('../app/utils/edit-frame-commands.ts')
 const { createClipFromSource } = await import('../app/utils/edit-commands.ts')
@@ -208,30 +207,51 @@ test('插入图片片段：时长超出 30 秒或低于下限时被夹取并带 
   assert.equal(short.plan.clips[1].sourceOutMs - short.plan.clips[1].sourceInMs, 40)
 })
 
-test('插入定格帧：默认 1000ms', () => {
-  const result = insertFreezeFrame(planWithSingleVideoClip(10_000, 25), 20_000, 25, imageAssetSource('frz'))
+test('插入视频片段：在片段中间先分割再插入，默认完整素材，后续内容后移', () => {
+  const planInput = planWithSingleVideoClip(10_000, 25)
+  const result = insertVideoClip(planInput, 5000, 25, videoSource('v2', 4000))
   assert.equal(errorsOf(result).length, 0)
-  assert.equal(result.plan.clips.length, 2)
-  assert.equal(result.plan.clips[1].kind, 'image')
-  assert.equal(result.plan.clips[1].sourceOutMs - result.plan.clips[1].sourceInMs, 1000)
+  assert.equal(result.plan.clips.length, 3)
+  const inserted = result.plan.clips[1]
+  assert.equal(inserted.kind, 'video')
+  assert.equal(inserted.sourceInMs, 0)
+  assert.equal(inserted.sourceOutMs, 4000)
+  const layout = computeLocalLayout(result.plan)
+  assert.equal(layout.duration_ms, 14_000)
+  assert.equal(layout.clips[1].timeline_start_ms, 5000)
+  assert.equal(layout.clips[2].timeline_start_ms, 9000)
 })
 
-test('定格延长：在指定片段后追加图片片段，原片段不动', () => {
+test('插入视频片段：播放头在成片末尾时直接追加，不改动已有片段', () => {
   const planInput = planWithSingleVideoClip(10_000, 25)
-  const result = buildFreezeTail(planInput, 'v1', 5000, 25, imageAssetSource('frz'))
+  const result = insertVideoClip(planInput, 10_000, 25, videoSource('v2', 4000))
   assert.equal(errorsOf(result).length, 0)
   assert.equal(result.plan.clips.length, 2)
-  assert.equal(result.plan.clips[0].id, 'v1')
   assert.equal(result.plan.clips[0].sourceOutMs, 10_000)
-  assert.equal(result.plan.clips[1].kind, 'image')
-  assert.equal(result.plan.clips[1].sourceOutMs - result.plan.clips[1].sourceInMs, 5000)
+  assert.equal(result.plan.clips[1].kind, 'video')
+  assert.equal(result.plan.clips[1].sourceOutMs - result.plan.clips[1].sourceInMs, 4000)
 })
 
-test('定格延长：时长上限 600000ms', () => {
+test('插入视频片段：素材短于 3 帧时报 VIDEO_TOO_SHORT 并返回原计划', () => {
   const planInput = planWithSingleVideoClip(10_000, 25)
-  const result = buildFreezeTail(planInput, 'v1', 10_000_000, 25, imageAssetSource('frz'))
-  assert.equal(errorsOf(result).length, 0)
-  assert.equal(result.plan.clips[1].sourceOutMs - result.plan.clips[1].sourceInMs, 600_000)
+  const result = insertVideoClip(planInput, 5000, 25, videoSource('tiny', 50))
+  const errors = errorsOf(result)
+  assert.equal(errors.length, 1)
+  assert.equal(errors[0].code, 'VIDEO_TOO_SHORT')
+  assert.equal(result.plan, planInput)
+})
+
+test('插入视频片段：指定时长超出素材或低于下限时被夹取并带 warning', () => {
+  const long = insertVideoClip(planWithSingleVideoClip(10_000, 25), 10_000, 25, videoSource('v2', 4000), 6000)
+  assert.equal(errorsOf(long).length, 0)
+  assert.ok(long.issues.some((item) => item.severity === 'warning' && item.code === 'VIDEO_DURATION_CLAMPED'))
+  assert.equal(long.plan.clips[1].sourceOutMs - long.plan.clips[1].sourceInMs, 4000)
+
+  const short = insertVideoClip(planWithSingleVideoClip(10_000, 25), 10_000, 25, videoSource('v2', 4000), 5)
+  assert.equal(errorsOf(short).length, 0)
+  assert.ok(short.issues.some((item) => item.severity === 'warning' && item.code === 'VIDEO_DURATION_CLAMPED'))
+  // 视频片段最短 3 帧：25fps → 120ms
+  assert.equal(short.plan.clips[1].sourceOutMs - short.plan.clips[1].sourceInMs, 120)
 })
 
 test('播放头插入图片是否需要先分割', () => {

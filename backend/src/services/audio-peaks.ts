@@ -10,6 +10,7 @@ import path from 'path'
 import { spawn } from 'child_process'
 import { and, eq, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
+import { normalizeEditSourceUrl, EditSourceUrlError } from './edit-source-url.js'
 import { resolveFfmpegSuite } from '../utils/ffmpeg.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import { projectSubdirPath } from './project-storage.js'
@@ -164,6 +165,23 @@ function resolveMediaUrl(raw: string | null | undefined): string {
   const value = String(raw || '').trim()
   if (!value) throw new PeaksError('音频尚未生成', 400)
   return path.isAbsolute(value) ? value : getAbsolutePath(value)
+}
+
+export async function getPeaksForEditSource(
+  episodeId: number,
+  rawUrl: string,
+): Promise<PeaksPayload> {
+  const episode = requireEpisode(episodeId)
+  let file: string
+  try {
+    // 与导出 resolveSourceUrl 同口径：/static/ 前缀剥掉后进存储根解析，越界/远程路径在 normalize 拒绝
+    const url = normalizeEditSourceUrl(rawUrl)
+    file = url.startsWith('/static/') ? getAbsolutePath(url.slice(1)) : getAbsolutePath(url)
+  } catch (error) {
+    if (error instanceof EditSourceUrlError) throw new PeaksError(error.message, 400)
+    throw error
+  }
+  return peaksForFile(episode.dramaId, file)
 }
 
 export async function getPeaksForAsset(episodeId: number, assetId: number): Promise<PeaksPayload> {

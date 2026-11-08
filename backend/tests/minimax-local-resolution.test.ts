@@ -30,7 +30,7 @@ const record = (patch: Partial<VideoGenerationRecord> = {}): VideoGenerationReco
   id: 1,
   model: 'MiniMax-H3',
   prompt: '雨夜，沈砚推门而入',
-  duration: 10,
+  duration: 8,
   resolution: '720p',
   aspectRatio: '9:16',
   firstFrameUrl: 'http://127.0.0.1:8190/files/first.png',
@@ -46,13 +46,11 @@ test('本地 shim：透传档位与竖屏比例，同时保留官方 resolution 
   assert.equal(req.body.ratio, undefined)
 })
 
-test('本地 shim：1080p 仍映射到官方 2K，档位原样带给画布换算', () => {
-  const req = adapter.buildGenerateRequest(localConfig, record({ resolution: '1080p', firstFrameUrl: null }))
-  assert.equal(req.body.resolution, '2K')
-  assert.equal(req.body.resolution_tier, '1080p')
-  assert.equal(req.body.aspect_ratio, '9:16')
-  // 文生视频按官方要求必须带 ratio
-  assert.equal(req.body.ratio, '9:16')
+test('本地 shim：1080p 超出 H3 档位，直接报可操作错误', () => {
+  assert.throws(
+    () => adapter.buildGenerateRequest(localConfig, record({ resolution: '1080p', firstFrameUrl: null })),
+    /不支持 1080p 分辨率，可选：480P \/ 768P/,
+  )
 })
 
 test('本地 shim：480p 走自有档位，官方 resolution 用 H3 能接受的 480P', () => {

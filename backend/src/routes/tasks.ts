@@ -14,7 +14,7 @@ import {
   withVisualBackground,
 } from '../services/drama-background.js'
 import { resolveStoryboardVoiceReferences } from '../services/character-voice-references.js'
-import { resolutionSupportError } from '../services/model-capabilities.js'
+import { durationSupportError, resolutionSupportError } from '../services/model-capabilities.js'
 import { isLocalShimConfig } from '../services/adapters/minimax-video.js'
 import { normalizeVideoAudioMode } from '../services/video-audio.js'
 import { compileLocalH3Prompt, translateH3Text } from '../services/h3-prompt.js'
@@ -201,6 +201,16 @@ app.post('/', async (c) => {
         { localShim: localVideoShim },
       )
       if (resolutionError) return badRequest(c, resolutionError)
+      if (localVideoShim) {
+        const durationError = durationSupportError(
+          effectiveConfig?.provider,
+          String(videoBody.model || effectiveConfig?.model || ''),
+          requestedResolution,
+          videoBody.duration,
+          { localShim: true },
+        )
+        if (durationError) return badRequest(c, durationError)
+      }
       if (!localVideoShim) {
         const voices = await resolveStoryboardVoiceReferences(String(videoBody.prompt || ''), Number(body.storyboard_id) || undefined, videoBody.reference_audio_urls)
         videoBody.prompt = voices.prompt

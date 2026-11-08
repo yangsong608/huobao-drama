@@ -5,10 +5,15 @@
  * 本文件不得 import DB / FFmpeg / 路由，便于测试与后续前端类型共享。
  */
 import {
+  AUDIO_EFFECT_PRESETS,
+  MAX_CLIP_VOLUME,
   MAX_CLIPS,
   MAX_FADE_MS,
   MAX_GAP_MS,
+  MAX_IMAGE_CLIP_MS,
   MAX_PLAN_BYTES,
+  MAX_PROJECT_FADE_MS,
+  MAX_PITCH_SEMITONES,
   MAX_SUBTITLES,
   MAX_TAIL_GAP_MS,
   MAX_TRANSITION_MS,
@@ -20,6 +25,7 @@ import {
   subtitleAppearanceForPreset,
   validateEditPlan,
   type EditAspect,
+  type EditAudioEffectPreset,
   type EditClip,
   type EditClipSource,
   type EditFilterPreset,
@@ -66,7 +72,12 @@ const FILTER_PRESETS = new Set<EditFilterPreset>(['none', 'clear', 'warm', 'cool
 const SUBTITLE_STYLES = new Set<EditSubtitleStyle>(['default', 'outline', 'box', 'custom'])
 const SUBTITLE_ALIGNS = new Set(['left', 'center', 'right'])
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
-const TRANSITION_TYPES = new Set<EditTransitionType>(['dissolve', 'white', 'push-left', 'blur'])
+const TRANSITION_TYPES = new Set<EditTransitionType>([
+  'dissolve', 'white', 'black',
+  'push-left', 'push-right', 'push-up', 'push-down',
+  'wipe-left', 'wipe-right', 'wipe-up', 'wipe-down',
+  'blur', 'circle-open', 'circle-close', 'radial', 'pixelize',
+])
 
 function issue(
   severity: EditIssue['severity'],
@@ -158,6 +169,9 @@ function normalizeProject(raw: unknown, fallback: EditProjectSettings, issues: E
       ? subtitleAppearanceForPreset(style) // 旧计划：按 defaultSubtitleStyle 预设生成
       : normalizeAppearance(input.subtitleAppearance, subtitleAppearanceForPreset(style), issues, 'project.subtitleAppearance'),
     subtitleSafeAreaPct: clamp(round(input.subtitleSafeAreaPct, fallback.subtitleSafeAreaPct ?? 8), 0, 30),
+    // 工程级片头/片尾音频淡入淡出：旧计划缺省回退 0（fallback 已含默认值）
+    audioFadeInMs: clamp(round(input.audioFadeInMs, fallback.audioFadeInMs ?? 0), 0, MAX_PROJECT_FADE_MS),
+    audioFadeOutMs: clamp(round(input.audioFadeOutMs, fallback.audioFadeOutMs ?? 0), 0, MAX_PROJECT_FADE_MS),
   }
 }
 
@@ -214,12 +228,19 @@ function normalizeClip(
   seen.add(id)
 
   const source = normalizeSource(input.source, path)
+  const kind = input.kind === 'image' ? 'image' : 'video'
   const sourceInMs = Math.max(0, round(input.sourceInMs))
   let sourceOutMs = round(input.sourceOutMs)
   if (!Number.isFinite(Number(input.sourceOutMs)) || sourceOutMs <= 0) {
     reject('CLIP_SOURCE_RANGE', `${path}.sourceOutMs`, '源入点/出点无效')
   }
-  if (sourceOutMs > source.durationMs) {
+  if (kind === 'image') {
+    // 图片可无限循环渲染：出点不按素材时长截断，只受最长时长约束
+    if (sourceOutMs > MAX_IMAGE_CLIP_MS) {
+      issues.push(issue('warning', 'CLIP_SOURCE_OUT', `${path}.sourceOutMs`, '图片时长已截断到上限 30 秒'))
+      sourceOutMs = MAX_IMAGE_CLIP_MS
+    }
+  } else if (sourceOutMs > source.durationMs) {
     issues.push(issue('warning', 'CLIP_SOURCE_OUT', `${path}.sourceOutMs`, '源出点已截断到素材时长'))
     sourceOutMs = source.durationMs
   }
@@ -230,6 +251,9 @@ function normalizeClip(
   const speedRaw = input.speed === undefined ? 1 : Number(input.speed)
   const speed = Math.round(clamp(Number.isFinite(speedRaw) ? speedRaw : 1, 0.25, 4) * 1000) / 1000
   if (speed !== speedRaw) issues.push(issue('warning', 'CLIP_SPEED', `${path}.speed`, '变速已截断到 0.25–4.0'))
+  const volumeRaw = input.volume === undefined ? 1 : Number(input.volume)
+  const volume = Math.round(clamp(Number.isFinite(volumeRaw) ? volumeRaw : 1, 0, MAX_CLIP_VOLUME) * 100) / 100
+  if (volume !== volumeRaw) issues.push(issue('warning', 'CLIP_VOLUME', `${path}.volume`, '音量已截断到 0–2 倍'))
   const gapRaw = round(input.gapBeforeMs)
   const gapBeforeMs = clamp(gapRaw, 0, MAX_GAP_MS)
   if (gapBeforeMs !== gapRaw) issues.push(issue('warning', 'CLIP_GAP', `${path}.gapBeforeMs`, '片段空档已截断到 0–300000ms'))
@@ -248,6 +272,40 @@ function normalizeClip(
     fadeIn = Math.floor(fadeIn * ratio)
     fadeOut = Math.floor(fadeOut * ratio)
     issues.push(issue('warning', 'CLIP_FADE_SUM', path, '淡入淡出之和超过片段时长，已等比缩短'))
+  }
+
+  // 独立音频淡入淡出：旧计划缺省时回退视频淡入淡出，保持既有导出行为
+  const audioFadeIn = clamp(
+    round(input.audioFadeInMs, input.audioFadeInMs === undefined ? fadeIn : 0),
+    0, MAX_FADE_MS,
+  )
+  const audioFadeOut = clamp(
+    round(input.audioFadeOutMs, input.audioFadeOutMs === undefined ? fadeOut : 0),
+    0, MAX_FADE_MS,
+  )
+  if (audioFadeIn !== input.audioFadeInMs && input.audioFadeInMs !== undefined) {
+    issues.push(issue('warning', 'CLIP_AUDIO_FADE', `${path}.audioFadeInMs`, '音频淡入已截断到 0–1500ms'))
+  }
+  if (audioFadeOut !== input.audioFadeOutMs && input.audioFadeOutMs !== undefined) {
+    issues.push(issue('warning', 'CLIP_AUDIO_FADE', `${path}.audioFadeOutMs`, '音频淡出已截断到 0–1500ms'))
+  }
+
+  // 音调升降半音：旧计划缺省回退 0（原调），越界截断到 ±12
+  const pitchRaw = Math.round(Number(input.pitchSemitones) || 0)
+  const pitchSemitones = clamp(pitchRaw, -MAX_PITCH_SEMITONES, MAX_PITCH_SEMITONES)
+  if (pitchSemitones !== pitchRaw) {
+    issues.push(issue('warning', 'CLIP_PITCH', `${path}.pitchSemitones`, '音调已截断到 −12 至 +12 半音'))
+  }
+  // 音频特效预设：白名单外回落 none
+  const effectInput = input.audioEffect && typeof input.audioEffect === 'object'
+    ? input.audioEffect as Record<string, unknown>
+    : null
+  const audioEffectPreset: EditAudioEffectPreset = effectInput
+    && AUDIO_EFFECT_PRESETS.has(effectInput.preset as EditAudioEffectPreset)
+    ? effectInput.preset as EditAudioEffectPreset
+    : 'none'
+  if (effectInput?.preset !== undefined && effectInput?.preset !== audioEffectPreset) {
+    issues.push(issue('warning', 'CLIP_AUDIO_EFFECT', `${path}.audioEffect.preset`, '音频特效预设不支持，已回落为无特效'))
   }
 
   const transformInput = input.transform && typeof input.transform === 'object'
@@ -278,14 +336,19 @@ function normalizeClip(
 
   return {
     id,
-    kind: input.kind === 'image' ? 'image' : 'video',
+    kind,
     source,
     sourceInMs,
     sourceOutMs,
     speed,
+    volume,
     gapBeforeMs,
     videoFadeInMs: fadeIn,
     videoFadeOutMs: fadeOut,
+    audioFadeInMs: audioFadeIn,
+    audioFadeOutMs: audioFadeOut,
+    pitchSemitones,
+    audioEffect: { preset: audioEffectPreset },
     transform,
     filter,
     lineId: Number.isSafeInteger(Number(input.lineId)) && Number(input.lineId) > 0 ? Number(input.lineId) : null,
@@ -503,6 +566,36 @@ function normalizeOverlays(raw: unknown, issues: EditIssue[]): EditOverlay[] {
   return result
 }
 
+/** 叠加窗口不得超出主轨末尾（主轨无片段时整体移除）；与前端命令同一语义 */
+function clampOverlaysToMainEnd(overlays: EditOverlay[], plan: EditPlanV1, issues: EditIssue[]): EditOverlay[] {
+  const mainEndMs = computeLayout({ ...plan, overlays: [] }).clips.reduce(
+    (max, item) => Math.max(max, item.timelineEndMs),
+    0,
+  )
+  const result: EditOverlay[] = []
+  overlays.forEach((overlay, position) => {
+    const path = `overlays[${position}]`
+    if (mainEndMs <= 0) {
+      issues.push(issue('warning', 'OVERLAY_RANGE', path, '主轨没有片段，叠加已移除'))
+      return
+    }
+    if (overlay.startMs >= mainEndMs) {
+      issues.push(issue('warning', 'OVERLAY_RANGE', path, '叠加起点超出主轨末尾，已移除'))
+      return
+    }
+    if (overlay.endMs > mainEndMs) {
+      issues.push(issue('warning', 'OVERLAY_RANGE', path, '叠加窗口已截断到主轨末尾'))
+      overlay.endMs = mainEndMs
+    }
+    if (overlay.endMs - overlay.startMs < Math.ceil(1000 / Math.max(1, plan.project.fps))) {
+      issues.push(issue('warning', 'OVERLAY_RANGE', path, '叠加窗口过短，已移除'))
+      return
+    }
+    result.push(overlay)
+  })
+  return result
+}
+
 function normalizeMarkers(raw: unknown): EditMarker[] {
   if (!Array.isArray(raw)) return []
   return raw.flatMap((value, position) => {
@@ -545,9 +638,10 @@ export function normalizeEditPlan(
     clips,
     transitions,
     subtitles: [],
-    overlays: normalizeOverlays(input.overlays, issues),
+    overlays: [],
     markers: normalizeMarkers(input.markers),
   }
+  basePlan.overlays = clampOverlaysToMainEnd(normalizeOverlays(input.overlays, issues), basePlan, issues)
   basePlan.subtitles = normalizeSubtitles(input.subtitles, basePlan, issues)
 
   assertPlanInvariants(basePlan)

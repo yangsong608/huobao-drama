@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { badRequest, serverError, success } from '../utils/response.js'
+import { badRequest, notFound, serverError, success } from '../utils/response.js'
+import { PeaksError, getPeaksForEditSource } from '../services/audio-peaks.js'
 import { roughCutEditPlan, suggestEditSubtitles } from '../services/edit-actions-service.js'
 import { getReadableEpisode, getWritableEpisode } from '../services/edit-access.js'
 import { discardEditDraft, saveEditDraft } from '../services/edit-draft-service.js'
@@ -9,6 +10,7 @@ import { extractEditFrame } from '../services/edit-frames.js'
 import { getEditExportStatus, startEditExport } from '../services/edit-export-service.js'
 import { saveEditImageAsset } from '../services/edit-image-assets.js'
 import { getEditMediaLibrary } from '../services/edit-media-library.js'
+import { saveEditVideoAsset } from '../services/edit-video-assets.js'
 import { EditPlanRejectedError } from '../services/edit-normalize.js'
 import {
   createEditRevision,
@@ -103,6 +105,23 @@ app.get('/episodes/:id/edit', async (c) => {
     return success(c, await getEpisodeEditState(episodeId, projectId))
   } catch (error) {
     if (error instanceof FilmError) return handleFilmError(c, error)
+    return handleEditError(c, error)
+  }
+})
+
+app.get('/episodes/:id/edit/audio-peaks', async (c) => {
+  const episodeId = parseId(c.req.param('id'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  const url = String(c.req.query('url') || '').trim()
+  if (!url) return badRequest(c, '缺少媒体地址')
+  try {
+    return success(c, await getPeaksForEditSource(episodeId, url))
+  } catch (error) {
+    if (error instanceof PeaksError) {
+      if (error.status === 404) return notFound(c, error.message)
+      if (error.status === 503) return c.json({ code: 503, message: error.message }, 503)
+      return badRequest(c, error.message)
+    }
     return handleEditError(c, error)
   }
 })
@@ -202,6 +221,21 @@ app.post('/episodes/:id/edit/assets/images', async (c) => {
     const file = body['file']
     if (!file || typeof file === 'string' || !(file instanceof File)) return badRequest(c, '文件必填')
     return success(c, await saveEditImageAsset(episode.dramaId, file))
+  } catch (error) {
+    return handleEditError(c, error)
+  }
+})
+
+app.post('/episodes/:id/edit/assets/videos', async (c) => {
+  const episodeId = parseId(c.req.param('id'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  try {
+    // 写闸门先于请求体解析：off/readonly 必须在读文件与任何写入之前返回 403。
+    const episode = getWritableEpisode(episodeId)
+    const body = await c.req.parseBody()
+    const file = body['file']
+    if (!file || typeof file === 'string' || !(file instanceof File)) return badRequest(c, '文件必填')
+    return success(c, await saveEditVideoAsset(episode.dramaId, file))
   } catch (error) {
     return handleEditError(c, error)
   }

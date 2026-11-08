@@ -89,7 +89,8 @@ export const editAPI = {
     force?: boolean
     project_id?: number
   }) => api.put(`/episodes/${episodeId}/edit/draft`, body),
-  discardDraft: (episodeId: number) => api.del(`/episodes/${episodeId}/edit/draft`),
+  discardDraft: (episodeId: number, projectId?: number) =>
+    api.del(`/episodes/${episodeId}/edit/draft${projectId ? `?project_id=${projectId}` : ''}`),
   revisions: (episodeId: number, projectId?: number) =>
     api.get(`/episodes/${episodeId}/edit/revisions${projectId ? `?project_id=${projectId}` : ''}`),
   revision: (episodeId: number, revisionId: number, projectId?: number) =>
@@ -127,6 +128,10 @@ export const editAPI = {
   uploadImage(episodeId: number, file: File) {
     return uploadForm(`/episodes/${episodeId}/edit/assets/images`, file)
   },
+  // 视频素材上传：后端落入项目 edit/assets 并返回可直接插入时间线的 source
+  uploadVideo(episodeId: number, file: File) {
+    return uploadForm<{ url: string; source: any }>(`/episodes/${episodeId}/edit/assets/videos`, file)
+  },
   // 剪辑导出（Task 21）：返回 { export_id }；状态行字段与后端 getEditExportStatus 同构
   render(episodeId: number, body: {
     project_id?: number
@@ -139,6 +144,10 @@ export const editAPI = {
   },
   renderStatus(episodeId: number, exportId: number) {
     return api.get(`/episodes/${episodeId}/edit/render/${exportId}`)
+  },
+  // 时间线音频轨波形：按片段源地址查询 4 级 peaks（后端复用全局 peaks 缓存）
+  audioPeaks(episodeId: number, url: string) {
+    return api.get(`/episodes/${episodeId}/edit/audio-peaks?url=${encodeURIComponent(url)}`)
   },
 }
 

@@ -53,11 +53,15 @@ export function draftDirtyFor(projectId: number): boolean {
  * 与 getEpisodeEditState 的读优先级一致，复用同一 parsePlanJson，不另造第二套反序列化。
  */
 export function loadProjectPlan(project: EditProjectRow): EditPlanV1 {
-  const draftPlan = parsePlanJson(draftFor(project.id)?.planJson)
-  if (draftPlan) return draftPlan
-  const revisionPlan = parsePlanJson(currentRevisionFor(project.id)?.planJson)
-  if (revisionPlan) return revisionPlan
-  throw new EditWorkspaceError(409, 'EDIT_NO_PLAN', '工程还没有计划，无法执行该操作')
+  const raw = draftFor(project.id)?.planJson ?? currentRevisionFor(project.id)?.planJson
+  const parsed = parsePlanJson(raw)
+  if (!parsed) throw new EditWorkspaceError(409, 'EDIT_NO_PLAN', '工程还没有计划，无法执行该操作')
+  // 存量计划（新增字段之前的版本）在此补齐默认值：导出与抽帧都以本函数为唯一读入口，
+  // 否则旧计划缺 pitchSemitones/audioEffect 会被 validateEditPlan 的严格校验拦死导出
+  return normalizeEditPlan(parsed, {
+    episodeId: project.episodeId,
+    project: projectSettingsFor(project),
+  }).plan
 }
 
 function projectSettingsFor(project: EditProjectRow): EditProjectSettings {
@@ -78,6 +82,8 @@ function projectSettingsFor(project: EditProjectRow): EditProjectSettings {
     defaultSubtitleStyle: 'default',
     defaultExportPreset: aspect === '9:16' ? 'edit-vertical-hd' : 'edit-horizontal-hd',
     tailGapMs: 0,
+    audioFadeInMs: 0,
+    audioFadeOutMs: 0,
     subtitleAppearance: subtitleAppearanceForPreset('default'),
     subtitleSafeAreaPct: 8,
   }

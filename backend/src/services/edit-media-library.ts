@@ -3,6 +3,7 @@ import { db, schema } from '../db/index.js'
 import { getReadableEpisode } from './edit-access.js'
 import { listEditImageAssets } from './edit-image-assets.js'
 import { editSourceFromUrl } from './edit-media.js'
+import { listEditVideoAssets } from './edit-video-assets.js'
 
 export interface EditMediaStoryboardResponse {
   id: number
@@ -66,6 +67,7 @@ export async function getEditMediaLibrary(episodeId: number) {
       label: `分镜 ${row.storyboardNumber}`,
     }))
   const uploadedImages = await listEditImageAssets(episode.dramaId)
+  const uploadedVideos = await listEditVideoAssets(episode.dramaId)
   const lineRows = db.select().from(schema.storyboardLines)
     .where(and(
       eq(schema.storyboardLines.episodeId, episodeId),
@@ -115,6 +117,7 @@ export async function getEditMediaLibrary(episodeId: number) {
     lines,
     audio: { mix: null, audio_ref: null },
     images: [...storyboardImages, ...uploadedImages],
+    videos: uploadedVideos,
     import_enabled: false,
   }
 }

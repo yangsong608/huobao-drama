@@ -111,19 +111,15 @@ test('dubbing session consumes the shared voice store instead of owning voice st
   assert.doesNotMatch(session, /async function generateCharacterVoice/)
 })
 
-test('generate step can force-regenerate all lines with their current voices', () => {
+test('generate step can regenerate all lines with their current voices', () => {
   assert.match(dubbingStage, /@click="startGenerationBatch"/)
-  assert.match(dubbingStage, /window\.confirm\(t\('generate\.forceConfirm'\)\)/)
-  assert.match(dubbingStage, /force: batchForce\.value/)
+  // 4.0.18 起批量生成取消强制重合成：无确认框、无 force 选项，直接按当前设置批量合成
+  assert.doesNotMatch(dubbingStage, /window\.confirm\(t\('generate\.forceConfirm'\)\)/)
+  assert.doesNotMatch(dubbingStage, /batchForce/)
   assert.match(session, /async function synthesizeAll\(optionsBatch: SynthesizeAllOptions = \{\}\)/)
   assert.match(session, /takeStore\.startBatch\(/)
   assert.doesNotMatch(dubbingStage, /@click="synthesizeAll"/)
   assert.match(dubbingStage, /@updated="onVoiceChanged"/)
-  for (const name of ['zh', 'en', 'ja', 'ko']) {
-    const messages = locale(name)
-    assert.ok(messages.generate?.force, `${name} missing generate.force`)
-    assert.ok(messages.generate?.forceConfirm, `${name} missing generate.forceConfirm`)
-  }
 })
 
 test('voice cards, shared editor and line assignment keys exist in all four locales', () => {

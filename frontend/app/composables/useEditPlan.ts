@@ -52,6 +52,8 @@ function plainClone(plan: EditPlanV1): EditPlanV1 {
 
 export function useEditPlan(initial: EditWorkspaceState) {
   const episodeId = initial.episode_id
+  // 草稿、版本、恢复都必须按打开时的工程作用域读写：非当前成片的工程不能落到当前工程。
+  const projectId = Number(initial.project?.id) || 0
   const plan = ref<EditPlanV1>(structuredClone(initial.plan))
   const version = ref(initial.draft?.version ?? 0)
   const dirty = ref(Boolean(initial.draft_dirty))
@@ -125,6 +127,7 @@ export function useEditPlan(initial: EditWorkspaceState) {
         const result = await editAPI.saveDraft(episodeId, {
           base_version: version.value,
           plan: nextPlan,
+          ...(projectId ? { project_id: projectId } : {}),
         })
         const unchanged = planFingerprint(toRaw(plan.value)) === planFingerprint(nextPlan)
         version.value = result.version
@@ -262,7 +265,7 @@ export function useEditPlan(initial: EditWorkspaceState) {
   async function reload() {
     queue.cancel()
     await queue.idle()
-    const state = await editAPI.get(episodeId) as EditWorkspaceState
+    const state = await editAPI.get(episodeId, projectId || undefined) as EditWorkspaceState
     resetFrom(state)
     recovery.value = null
     clearStoredRecovery()
@@ -273,7 +276,7 @@ export function useEditPlan(initial: EditWorkspaceState) {
     queue.cancel()
     // 等未完成的保存落地，避免丢弃后又被旧请求写回草稿。
     await queue.idle()
-    await editAPI.discardDraft(episodeId)
+    await editAPI.discardDraft(episodeId, projectId || undefined)
     await reload()
   }
 
@@ -288,6 +291,7 @@ export function useEditPlan(initial: EditWorkspaceState) {
         note,
         plan: sentPlan,
         update_draft: true,
+        ...(projectId ? { project_id: projectId } : {}),
       })
       const unchanged = planFingerprint(toRaw(plan.value)) === planFingerprint(sentPlan)
       const nextVersion = result.draft_version
@@ -319,7 +323,10 @@ export function useEditPlan(initial: EditWorkspaceState) {
     queue.cancel()
     await queue.idle()
     try {
-      await editAPI.restoreRevision(episodeId, revisionId, { base_version: version.value })
+      await editAPI.restoreRevision(episodeId, revisionId, {
+        base_version: version.value,
+        ...(projectId ? { project_id: projectId } : {}),
+      })
     } catch (cause: any) {
       if (cause?.code === 'EDIT_VERSION_CONFLICT') {
         // 不 reload：重载会丢掉本地未保存的改动，冲突交给 UI 决策。

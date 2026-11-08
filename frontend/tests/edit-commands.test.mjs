@@ -13,6 +13,13 @@ const {
   setClipSpeed,
   setClipGap,
   setClipFades,
+  setClipAudioFades,
+  setClipFilter,
+  setClipPitch,
+  setClipAudioEffect,
+  setClipVolume,
+  setProjectAudioFades,
+  setTransform,
   setTransition,
   removeTransition,
   closeGaps,
@@ -232,6 +239,12 @@ test('转场设置、移除与空档闭合', () => {
   assert.ok(spaced.issues.some((item) => item.code === 'TRANSITION_GAP'))
   const closed = closeGaps(spaced.plan)
   assert.equal(closed.plan.clips[1].gapBeforeMs, 0)
+
+  // 有间隙的交界直接拒绝，而不是悄悄丢弃转场
+  const gapped = plan([clip('a'), clip('b', { gapBeforeMs: 500 })])
+  const blocked = setTransition(gapped, 'a', 'b', {})
+  assert.equal(blocked.plan, gapped)
+  assert.ok(blocked.issues.some((item) => item.code === 'TRANSITION_GAP_BLOCKED'))
 })
 
 test('字幕移动解除跟随，文本可修改', () => {
@@ -362,4 +375,127 @@ test('时间线标记：添加、点击定位与删除', () => {
   assert.deepEqual(removed.plan.markers.map((item) => item.id), ['mk2'])
   const missing = deleteMarker(second.plan, 'zz')
   assert.ok(missing.issues.some((item) => item.severity === 'error' && item.code === 'MARKER_NOT_FOUND'))
+})
+
+test('画面调整：缩放/位移/旋转/翻转夹取与复原', () => {
+  const base = plan([clip('a')])
+  const scaled = setTransform(base, 'a', { scale: 1.5, x: 0.2, y: -0.1 })
+  assert.equal(scaled.plan.clips[0].transform.scale, 1.5)
+  assert.equal(scaled.plan.clips[0].transform.x, 0.2)
+  assert.equal(scaled.plan.clips[0].transform.y, -0.1)
+
+  const clamped = setTransform(base, 'a', { scale: 5, x: -2, rotation: 45 })
+  assert.equal(clamped.plan.clips[0].transform.scale, 2)
+  assert.equal(clamped.plan.clips[0].transform.x, -1)
+  assert.equal(clamped.plan.clips[0].transform.rotation, 0, '非法旋转回落 0')
+
+  const flip = setTransform(base, 'a', { flipH: true, flipV: true })
+  assert.equal(flip.plan.clips[0].transform.flipH, true)
+  assert.equal(flip.plan.clips[0].transform.flipV, true)
+
+  const reset = setTransform(flip.plan, 'a', { scale: 1, x: 0, y: 0, rotation: 0, flipH: false, flipV: false })
+  assert.deepEqual(reset.plan.clips[0].transform, { scale: 1, x: 0, y: 0, rotation: 0, flipH: false, flipV: false })
+
+  const missing = setTransform(base, 'zz', { scale: 2 })
+  assert.ok(missing.issues.some((item) => item.severity === 'error' && item.code === 'CLIP_NOT_FOUND'))
+})
+
+test('滤镜预设与强度：设置、夹取与还原原色', () => {
+  const base = plan([clip('a')])
+  const filtered = setClipFilter(base, 'a', 'mono', 80)
+  assert.deepEqual(filtered.plan.clips[0].filter, { preset: 'mono', intensity: 80 })
+
+  const clamped = setClipFilter(base, 'a', 'mono', 150)
+  assert.equal(clamped.plan.clips[0].filter.intensity, 100)
+
+  const cleared = setClipFilter(filtered.plan, 'a', 'none', 0)
+  assert.deepEqual(cleared.plan.clips[0].filter, { preset: 'none', intensity: 0 })
+
+  const missing = setClipFilter(base, 'zz', 'mono', 50)
+  assert.ok(missing.issues.some((item) => item.severity === 'error' && item.code === 'CLIP_NOT_FOUND'))
+})
+
+test('片段音量 0–2 倍夹取，静音与复原', () => {
+  const base = plan([clip('a')])
+  const muted = setClipVolume(base, 'a', 0)
+  assert.equal(muted.plan.clips[0].volume, 0)
+
+  const boosted = setClipVolume(base, 'a', 1.75)
+  assert.equal(boosted.plan.clips[0].volume, 1.75)
+
+  const clamped = setClipVolume(base, 'a', 3)
+  assert.equal(clamped.plan.clips[0].volume, 2)
+
+  const restored = setClipVolume(base, 'a', 1)
+  assert.equal(restored.plan.clips[0].volume, 1)
+
+  const missing = setClipVolume(base, 'zz', 2)
+  assert.ok(missing.issues.some((item) => item.severity === 'error' && item.code === 'CLIP_NOT_FOUND'))
+})
+
+test('独立音频淡入淡出与视频淡入淡出互不影响，各自夹取', () => {
+  const base = plan([clip('a')])
+  const withFades = setClipFades(base, 'a', 800, 600)
+  assert.equal(withFades.plan.clips[0].videoFadeInMs, 800)
+
+  const result = setClipAudioFades(withFades.plan, 'a', 400, 300)
+  assert.equal(result.plan.clips[0].audioFadeInMs, 400)
+  assert.equal(result.plan.clips[0].audioFadeOutMs, 300)
+  assert.equal(result.plan.clips[0].videoFadeInMs, 800, '视频淡入不受影响')
+  assert.equal(result.plan.clips[0].videoFadeOutMs, 600, '视频淡出不受影响')
+
+  const clamped = setClipAudioFades(base, 'a', 99999, -5)
+  assert.equal(clamped.plan.clips[0].audioFadeInMs, 1500)
+  assert.equal(clamped.plan.clips[0].audioFadeOutMs, 0)
+
+  const missing = setClipAudioFades(base, 'zz', 100, 100)
+  assert.ok(missing.issues.some((item) => item.severity === 'error' && item.code === 'CLIP_NOT_FOUND'))
+})
+
+test('工程级片头片尾音频淡入淡出 0–3000ms 夹取', () => {
+  const base = plan([clip('a')])
+  const result = setProjectAudioFades(base, 1200, 2000)
+  assert.equal(result.plan.project.audioFadeInMs, 1200)
+  assert.equal(result.plan.project.audioFadeOutMs, 2000)
+
+  const clamped = setProjectAudioFades(base, 99999, -1)
+  assert.equal(clamped.plan.project.audioFadeInMs, 3000)
+  assert.equal(clamped.plan.project.audioFadeOutMs, 0)
+})
+
+test('音调升降 −12..+12 半音夹取，特效白名单外回落 none', () => {
+  const base = plan([clip('a')])
+
+  const up = setClipPitch(base, 'a', 5)
+  assert.equal(up.plan.clips[0].pitchSemitones, 5)
+
+  const clamped = setClipPitch(base, 'a', 99)
+  assert.equal(clamped.plan.clips[0].pitchSemitones, 12)
+
+  const down = setClipPitch(base, 'a', -0.4)
+  assert.equal(down.plan.clips[0].pitchSemitones, 0)
+
+  const effect = setClipAudioEffect(base, 'a', 'telephone')
+  assert.equal(effect.plan.clips[0].audioEffect.preset, 'telephone')
+
+  const bogus = setClipAudioEffect(base, 'a', 'bogus')
+  assert.equal(bogus.plan.clips[0].audioEffect.preset, 'none')
+
+  const missing = setClipPitch(base, 'zz', 3)
+  assert.ok(missing.issues.some((item) => item.severity === 'error' && item.code === 'CLIP_NOT_FOUND'))
+})
+
+test('图片片段尾部可拉长到 30 秒上限，视频仍受源长限制', () => {
+  const img = plan([imageClip('img1', 5000)])
+  const extended = trimClipEnd(img, 'img1', 25000)
+  assert.equal(extended.plan.clips[0].sourceOutMs, 30000, '图片可延长到 30 秒')
+  assert.equal(computeLocalLayout(extended.plan).clips[0].content_duration_ms, 30000)
+
+  const capped = trimClipEnd(img, 'img1', 40000)
+  assert.equal(capped.plan.clips[0].sourceOutMs, 30000, '超出 30 秒被夹取')
+  assert.ok(capped.issues.some((item) => item.code === 'CLIP_TRIM_CLAMPED'))
+
+  const video = plan([clip('a')])
+  const videoExtended = trimClipEnd(video, 'a', 30000)
+  assert.equal(videoExtended.plan.clips[0].sourceOutMs, 10000, '视频不得超出源素材时长')
 })

@@ -20,6 +20,8 @@ export interface VideoModelCapabilities {
   vendorResolutions: Partial<Record<VideoResolutionTier, string>>
   minDuration: number
   maxDuration: number
+  /** 按分辨率收紧的时长上限（本地 24GB H3 的 720p 只能稳定跑 ~8s） */
+  maxDurationByResolution?: Partial<Record<VideoResolutionTier, number>>
   /** 参考图数量上限，0 表示不支持 */
   referenceImages: number
   referenceVideos: number
@@ -52,7 +54,7 @@ function build(
   family: string,
   resolutions: VideoResolutionTier[],
   vendorResolutions: Partial<Record<VideoResolutionTier, string>>,
-  options: Partial<Pick<VideoModelCapabilities, 'minDuration' | 'maxDuration' | 'referenceImages' | 'referenceVideos' | 'referenceAudios' | 'nativeAudio' | 'firstLastFrame'>> = {},
+  options: Partial<Pick<VideoModelCapabilities, 'minDuration' | 'maxDuration' | 'maxDurationByResolution' | 'referenceImages' | 'referenceVideos' | 'referenceAudios' | 'nativeAudio' | 'firstLastFrame'>> = {},
 ): VideoModelCapabilities {
   return {
     family,
@@ -60,6 +62,7 @@ function build(
     vendorResolutions,
     minDuration: options.minDuration ?? 2,
     maxDuration: options.maxDuration ?? 15,
+    maxDurationByResolution: options.maxDurationByResolution,
     referenceImages: options.referenceImages ?? 0,
     referenceVideos: options.referenceVideos ?? 0,
     referenceAudios: options.referenceAudios ?? 0,
@@ -107,9 +110,11 @@ function minimaxCapability(model: string, options: VideoCapabilityOptions = {}):
   }
   // 本地 shim 有完整 480P 画布，标准 H3 在本地也可选 480p；云端仍只认 768P/2K
   // 音频/视频参考尚未接入 shim，声明为 0，避免任务创建后素材被静默丢弃
+  // 24GB 单卡：720p 稳定上限 ~8s（209 帧），1080p 长时长必 OOM，直接不开档
   if (options.localShim) {
-    return build('h3', ['480p', '720p', '1080p'], { '480p': '480P', '720p': '768P', '1080p': '2K' }, {
-      minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 0, referenceAudios: 0, nativeAudio: true, firstLastFrame: true,
+    return build('h3', ['480p', '720p'], { '480p': '480P', '720p': '768P' }, {
+      minDuration: 4, maxDuration: 15, maxDurationByResolution: { '720p': 8 },
+      referenceImages: 9, referenceVideos: 0, referenceAudios: 0, nativeAudio: true, firstLastFrame: true,
     })
   }
   return build('h3', ['720p', '1080p'], { '720p': '768P', '1080p': '2K' }, {
@@ -181,6 +186,41 @@ export function videoResolutionVendor(
   const capability = videoModelCapabilities(provider, model, options)
   const key = videoResolutionTier(tier) || '720p'
   return capability.vendorResolutions[key] || key
+}
+
+/** 当前分辨率下的时长上限（无按分辨率限制时回退模型全局上限） */
+export function videoMaxDuration(
+  provider: string | null | undefined,
+  model: string | null | undefined,
+  resolution?: string | null,
+  options: VideoCapabilityOptions = {},
+): number {
+  const capability = videoModelCapabilities(provider, model, options)
+  const tier = videoResolutionTier(resolution)
+  if (tier) {
+    const limit = capability.maxDurationByResolution?.[tier]
+    if (limit != null) return limit
+  }
+  return capability.maxDuration
+}
+
+/** 显式时长超过当前分辨率上限时返回可操作错误 */
+export function durationSupportError(
+  provider: string | null | undefined,
+  model: string | null | undefined,
+  resolution: string | null | undefined,
+  duration: unknown,
+  options: VideoCapabilityOptions = {},
+): string | null {
+  const requested = Number(duration)
+  if (!Number.isFinite(requested) || requested <= 0) return null
+  const capability = videoModelCapabilities(provider, model, options)
+  const tier = videoResolutionTier(resolution)
+  const max = (tier ? capability.maxDurationByResolution?.[tier] : undefined) ?? capability.maxDuration
+  if (requested <= max) return null
+  const vendor = tier ? capability.vendorResolutions[tier] || tier : ''
+  const label = tier && vendor && vendor !== tier ? `${tier}（${vendor}）` : tier || '当前'
+  return `模型 ${model || capability.family} 在 ${label} 分辨率下最长 ${max} 秒，当前 ${requested} 秒；请缩短时长或改用更低分辨率`
 }
 
 /** 模型不支持请求档位时返回可操作错误；supported 为空表示不做模型级限制 */

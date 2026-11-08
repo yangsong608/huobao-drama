@@ -10,10 +10,16 @@ export const MAX_CLIPS = 200
 export const MAX_SUBTITLES = 2000
 export const MAX_PLAN_BYTES = 8 * 1024 * 1024
 export const MAX_FADE_MS = 1500
+/** 工程级片头/片尾音频淡入淡出上限 */
+export const MAX_PROJECT_FADE_MS = 3000
 export const MIN_TRANSITION_MS = 100
 export const MAX_TRANSITION_MS = 1500
 export const MAX_GAP_MS = 300_000
 export const MAX_TAIL_GAP_MS = 60_000
+/** 图片片段可拉长的最长时长（图片可无限循环渲染） */
+export const MAX_IMAGE_CLIP_MS = 30_000
+/** 片段音量倍率上限（0 = 静音，1 = 原声） */
+export const MAX_CLIP_VOLUME = 2
 
 export type EditAspect = '9:16' | '16:9' | '1:1'
 export type EditFit = 'fill' | 'fit'
@@ -38,7 +44,11 @@ export const SUBTITLE_FONT_WHITELIST = [
   'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
   'Source Han Sans SC', 'SimHei', 'KaiTi', 'Songti SC', 'Arial', 'Georgia',
 ] as const
-export type EditTransitionType = 'dissolve' | 'white' | 'push-left' | 'blur'
+export type EditTransitionType =
+  | 'dissolve' | 'white' | 'black'
+  | 'push-left' | 'push-right' | 'push-up' | 'push-down'
+  | 'wipe-left' | 'wipe-right' | 'wipe-up' | 'wipe-down'
+  | 'blur' | 'circle-open' | 'circle-close' | 'radial' | 'pixelize'
 export type EditSourceKind =
   | 'storyboard'
   | 'take'
@@ -58,6 +68,10 @@ export interface EditProjectSettings {
   defaultSubtitleStyle: EditSubtitleStyle
   defaultExportPreset: string
   tailGapMs: number
+  /** 工程级片头音频淡入（导出最终音轨 afade） */
+  audioFadeInMs: number
+  /** 工程级片尾音频淡出 */
+  audioFadeOutMs: number
   subtitleAppearance: EditSubtitleAppearance
   subtitleSafeAreaPct: number
 }
@@ -90,6 +104,20 @@ export interface EditFilter {
   intensity: number
 }
 
+/** 音调升降半音范围（−12 = 低八度，+12 = 高八度） */
+export const MAX_PITCH_SEMITONES = 12
+
+/** 片段音频特效预设：导出端 ffmpeg 滤镜见 edit-render-plan 的 AUDIO_EFFECT_FILTERS */
+export type EditAudioEffectPreset = 'none' | 'denoise' | 'echo' | 'reverb' | 'telephone'
+
+export const AUDIO_EFFECT_PRESETS: ReadonlySet<EditAudioEffectPreset> = new Set([
+  'none', 'denoise', 'echo', 'reverb', 'telephone',
+])
+
+export interface EditAudioEffect {
+  preset: EditAudioEffectPreset
+}
+
 export interface EditClip {
   id: string
   kind: 'video' | 'image'
@@ -97,9 +125,19 @@ export interface EditClip {
   sourceInMs: number
   sourceOutMs: number
   speed: number
+  /** 音量倍率：0 = 静音，1 = 原声，最大 2 */
+  volume: number
   gapBeforeMs: number
   videoFadeInMs: number
   videoFadeOutMs: number
+  /** 片段音频独立淡入（旧计划缺省时回退 videoFadeInMs） */
+  audioFadeInMs: number
+  /** 片段音频独立淡出 */
+  audioFadeOutMs: number
+  /** 音调升降半音数：导出 asetrate+atempo 真实合成，时长不变；预览不模拟 */
+  pitchSemitones: number
+  /** 片段音频特效预设（降噪/回声/混响/电话声），导出生效 */
+  audioEffect: EditAudioEffect
   transform: EditTransform
   filter: EditFilter
   lineId?: number | null
@@ -262,6 +300,8 @@ export function projectSettingsForAspect(aspect: EditAspect, fps = 30): EditProj
         ? 'edit-horizontal-hd'
         : 'edit-source',
     tailGapMs: 0,
+    audioFadeInMs: 0,
+    audioFadeOutMs: 0,
     subtitleAppearance: subtitleAppearanceForPreset('default'),
     subtitleSafeAreaPct: 8,
   }
@@ -273,6 +313,10 @@ function defaultTransform(): EditTransform {
 
 function defaultFilter(): EditFilter {
   return { preset: 'none', intensity: 100 }
+}
+
+function defaultAudioEffect(): EditAudioEffect {
+  return { preset: 'none' }
 }
 
 export function createEmptyEditPlan(episodeId: number, project: EditProjectSettings): EditPlanV1 {
@@ -302,9 +346,14 @@ export function createSingleClipPlan(
       sourceInMs: 0,
       sourceOutMs: source.durationMs,
       speed: 1,
+      volume: 1,
       gapBeforeMs: 0,
       videoFadeInMs: 0,
       videoFadeOutMs: 0,
+      audioFadeInMs: 0,
+      audioFadeOutMs: 0,
+      pitchSemitones: 0,
+      audioEffect: defaultAudioEffect(),
       transform: defaultTransform(),
       filter: defaultFilter(),
     }],
@@ -392,6 +441,10 @@ export function validateEditPlan(plan: EditPlanV1): EditIssue[] {
   if (!Number.isFinite(plan.project.tailGapMs) || plan.project.tailGapMs < 0 || plan.project.tailGapMs > MAX_TAIL_GAP_MS) {
     error('PROJECT_TAIL_GAP', 'project.tailGapMs', '尾段空档必须在 0–60000ms')
   }
+  if (plan.project.audioFadeInMs < 0 || plan.project.audioFadeInMs > MAX_PROJECT_FADE_MS
+    || plan.project.audioFadeOutMs < 0 || plan.project.audioFadeOutMs > MAX_PROJECT_FADE_MS) {
+    error('PROJECT_AUDIO_FADE_RANGE', 'project.audioFadeInMs', '片头/片尾音频淡入淡出必须在 0–3000ms')
+  }
   if (plan.clips.length > MAX_CLIPS) error('CLIP_LIMIT', 'clips', `片段数不能超过 ${MAX_CLIPS}`)
   if (plan.subtitles.length > MAX_SUBTITLES) error('SUBTITLE_LIMIT', 'subtitles', `字幕数不能超过 ${MAX_SUBTITLES}`)
   if (Buffer.byteLength(JSON.stringify(plan), 'utf8') > MAX_PLAN_BYTES) {
@@ -411,6 +464,9 @@ export function validateEditPlan(plan: EditPlanV1): EditIssue[] {
     if (!Number.isFinite(clip.speed) || clip.speed < 0.25 || clip.speed > 4) {
       error('CLIP_SPEED', `${path}.speed`, '变速必须在 0.25–4.0')
     }
+    if (!Number.isFinite(clip.volume) || clip.volume < 0 || clip.volume > MAX_CLIP_VOLUME) {
+      error('CLIP_VOLUME', `${path}.volume`, '音量必须在 0–2 倍')
+    }
     if (!Number.isFinite(clip.gapBeforeMs) || clip.gapBeforeMs < 0 || clip.gapBeforeMs > MAX_GAP_MS) {
       error('CLIP_GAP', `${path}.gapBeforeMs`, '片段空档必须在 0–300000ms')
     }
@@ -422,6 +478,17 @@ export function validateEditPlan(plan: EditPlanV1): EditIssue[] {
       error('CLIP_FADE_RANGE', path, '淡入淡出必须在 0–1500ms')
     } else if (clip.videoFadeInMs + clip.videoFadeOutMs > clipContentDurationMs(clip)) {
       warning('CLIP_FADE_SUM', path, '淡入淡出之和超过片段时长，导出时会等比缩短')
+    }
+    if (clip.audioFadeInMs < 0 || clip.audioFadeInMs > MAX_FADE_MS
+      || clip.audioFadeOutMs < 0 || clip.audioFadeOutMs > MAX_FADE_MS) {
+      error('CLIP_AUDIO_FADE_RANGE', `${path}.audioFadeInMs`, '音频淡入淡出必须在 0–1500ms')
+    }
+    if (!Number.isInteger(clip.pitchSemitones) || clip.pitchSemitones < -MAX_PITCH_SEMITONES
+      || clip.pitchSemitones > MAX_PITCH_SEMITONES) {
+      error('CLIP_PITCH_RANGE', `${path}.pitchSemitones`, `音调必须在 −${MAX_PITCH_SEMITONES} 到 +${MAX_PITCH_SEMITONES} 半音`)
+    }
+    if (!AUDIO_EFFECT_PRESETS.has(clip.audioEffect?.preset)) {
+      error('CLIP_AUDIO_EFFECT', `${path}.audioEffect.preset`, '音频特效预设不被支持')
     }
   }
 
@@ -481,6 +548,9 @@ export function validateEditPlan(plan: EditPlanV1): EditIssue[] {
     if (!Number.isFinite(overlay.startMs) || !Number.isFinite(overlay.endMs) || overlay.endMs <= overlay.startMs) {
       error('OVERLAY_RANGE', path, '叠加轨结束时间必须晚于开始时间')
     }
+    if ((overlay.kind === 'video' || overlay.kind === 'image') && !overlay.source?.url) {
+      error('OVERLAY_SOURCE', path, '视频/图片叠加缺少素材')
+    }
     if ((overlay.text?.text.length ?? 0) > 500) warning('OVERLAY_TEXT', path, '单条文案建议不超过 500 字符')
   }
 
@@ -536,6 +606,10 @@ function clipVisualHash(clip: EditClip) {
     gapBeforeMs: clip.gapBeforeMs,
     videoFadeInMs: clip.videoFadeInMs,
     videoFadeOutMs: clip.videoFadeOutMs,
+    audioFadeInMs: clip.audioFadeInMs,
+    audioFadeOutMs: clip.audioFadeOutMs,
+    pitchSemitones: clip.pitchSemitones,
+    audioEffect: clip.audioEffect,
     transform: clip.transform,
     filter: clip.filter,
   }
@@ -613,6 +687,8 @@ export function renderHashOf(plan: EditPlanV1): string {
       fps: plan.project.fps,
       background: plan.project.background,
       tailGapMs: plan.project.tailGapMs,
+      audioFadeInMs: plan.project.audioFadeInMs,
+      audioFadeOutMs: plan.project.audioFadeOutMs,
     },
     clips: plan.clips.map(clipVisualHash),
     transitions: transitionRows(plan),

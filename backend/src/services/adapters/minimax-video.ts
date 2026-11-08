@@ -22,7 +22,7 @@ import type {
   VideoPollResponse,
 } from './types'
 import { joinProviderUrl } from './url'
-import { videoModelCapabilities, videoResolutionTier } from '../model-capabilities.js'
+import { durationSupportError, videoModelCapabilities, videoResolutionTier } from '../model-capabilities.js'
 
 /** 仅支持 MiniMax-H3 系列（前缀匹配，兼容未来 H3.x 变体） */
 const H3_MODEL_PREFIX = 'minimax-h3'
@@ -111,6 +111,15 @@ export class MiniMaxVideoAdapter implements VideoProviderAdapter {
     const totalRefs = refImages.length + refVideos.length + refAudios.length + (firstFrame ? 1 : 0) + (lastFrame ? 1 : 0)
     if (refImages.length > REF_LIMITS.images || refVideos.length > REF_LIMITS.videos || refAudios.length > REF_LIMITS.audios || totalRefs > REF_LIMITS.total) {
       throw new Error(`参考素材超限：图片≤${REF_LIMITS.images}、视频≤${REF_LIMITS.videos}、音频≤${REF_LIMITS.audios}、总数≤${REF_LIMITS.total}`)
+    }
+
+    const localShim = isLocalShimConfig(config)
+    if (localShim) {
+      const capability = videoModelCapabilities('minimax', model, { localShim })
+      const tier = videoResolutionTier(record.resolution)
+        || (capability.resolutions.includes('720p') ? '720p' : capability.resolutions[0])
+      const durationError = durationSupportError('minimax', model, tier, record.duration, { localShim })
+      if (durationError) throw new Error(durationError)
     }
 
     const content: any[] = [{ type: 'text', text: prompt }]

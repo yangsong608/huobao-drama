@@ -22,7 +22,8 @@ import {
   type EditPlanV1,
 } from './edit-plan.js'
 import { buildEditAss, buildEditSrt } from './edit-subtitle-ass.js'
-import { renderEditVideo } from './edit-render-plan.js'
+import { renderEditVideo, resolveExportPlan } from './edit-render-plan.js'
+import { EXPORT_PRESETS } from './export-presets.js'
 import { setCurrentFilm } from './film-hub.js'
 import { createEditRevision } from './edit-revision-service.js'
 import { projectStorageRelative, projectSubdirPath } from './project-storage.js'
@@ -194,12 +195,14 @@ async function runEditExport(ctx: {
     const outputRel = projectStorageRelative(ctx.project.dramaId, subDir, `${baseName}.mp4`)
     const outputAbs = path.join(dirAbs, `${baseName}.mp4`)
 
+    // 预设尺寸同时覆盖 ASS PlayRes，保证烧录字幕与输出画幅一致
+    const presetDef = EXPORT_PRESETS[ctx.preset as keyof typeof EXPORT_PRESETS] ?? null
     let assPath: string | undefined
     let srtPath: string | undefined
     if (ctx.subtitleMode === 'burn') {
       assPath = path.join(dirAbs, `${baseName}.ass`)
       srtPath = path.join(dirAbs, `${baseName}.srt`)
-      await fsp.writeFile(assPath, buildEditAss(ctx.plan), 'utf8')
+      await fsp.writeFile(assPath, buildEditAss(resolveExportPlan(ctx.plan, presetDef)), 'utf8')
       await fsp.writeFile(srtPath, buildEditSrt(ctx.plan), 'utf8')
     } else if (ctx.subtitleMode === 'soft') {
       srtPath = path.join(dirAbs, `${baseName}.srt`)
@@ -208,6 +211,7 @@ async function runEditExport(ctx: {
 
     const { durationMs } = await renderEditVideo({
       plan: ctx.plan,
+      preset: presetDef,
       outputPath: outputAbs,
       subtitleMode: ctx.subtitleMode,
       assPath,

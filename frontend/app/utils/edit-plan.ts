@@ -1,8 +1,22 @@
 // 与 backend/src/services/edit-plan.ts 的常量保持一致
 export const MAX_FADE_MS = 1500
+/** 工程级片头/片尾音频淡入淡出上限 */
+export const MAX_PROJECT_FADE_MS = 3000
 export const MIN_TRANSITION_MS = 100
 export const MAX_TRANSITION_MS = 1500
 export const MAX_GAP_MS = 300_000
+/** 图片片段可拉长的最长时长（图片可无限循环渲染） */
+export const MAX_IMAGE_CLIP_MS = 30_000
+/** 片段音量倍率上限（0 = 静音，1 = 原声） */
+export const MAX_CLIP_VOLUME = 2
+
+/** 音调升降半音范围（−12 = 低八度，+12 = 高八度） */
+export const MAX_PITCH_SEMITONES = 12
+
+/** 片段音频特效预设：导出端真实合成（预览不模拟） */
+export type EditAudioEffectPreset = 'none' | 'denoise' | 'echo' | 'reverb' | 'telephone'
+
+export const AUDIO_EFFECT_PRESETS = ['none', 'denoise', 'echo', 'reverb', 'telephone'] as const
 
 export type EditAspect = '9:16' | '16:9' | '1:1'
 export type EditSourceKind = 'storyboard' | 'take' | 'asset' | 'merge' | 'episode-video' | 'import'
@@ -39,6 +53,9 @@ export interface EditProjectSettings {
   defaultSubtitleStyle: EditSubtitleStyle
   defaultExportPreset: string
   tailGapMs: number
+  /** 工程级片头音频淡入 / 片尾淡出（ms），导出真实生效，预览由增益自动化模拟 */
+  audioFadeInMs: number
+  audioFadeOutMs: number
   subtitleAppearance: EditSubtitleAppearance
   subtitleSafeAreaPct: number
 }
@@ -73,9 +90,18 @@ export interface EditClip {
   sourceInMs: number
   sourceOutMs: number
   speed: number
+  /** 音量倍率：0 = 静音，1 = 原声，最大 2 */
+  volume: number
   gapBeforeMs: number
   videoFadeInMs: number
   videoFadeOutMs: number
+  /** 独立音频淡入淡出：旧计划缺省时回退视频淡入淡出 */
+  audioFadeInMs: number
+  audioFadeOutMs: number
+  /** 音调升降半音数：导出真实合成，预览不模拟 */
+  pitchSemitones: number
+  /** 片段音频特效预设（降噪/回声/混响/电话声），导出生效 */
+  audioEffect: { preset: EditAudioEffectPreset }
   transform: EditTransform
   filter: { preset: string; intensity: number }
   lineId?: number | null
@@ -105,13 +131,33 @@ export interface EditSubtitleCue {
   appearance?: EditSubtitleAppearance
 }
 
+// 与 backend/src/services/edit-plan.ts 的 EditTextStyle 同构；x/y 为 0–1 画布比例（中心锚点）
+export interface EditOverlayTextStyle {
+  text: string
+  preset: 'title' | 'subtitle' | 'name' | 'place'
+  fontFamily: string
+  fontSize: number
+  color: string
+  strokeColor: string
+  strokeWidth: number
+  backgroundColor: string | null
+  align: 'left' | 'center' | 'right'
+  x: number
+  y: number
+}
+
 export interface EditOverlay {
   id: string
   kind: 'video' | 'image' | 'text'
+  source?: EditClipSource
+  text?: EditOverlayTextStyle
   startMs: number
   endMs: number
-  track: 0
+  transform: EditTransform
   opacity: number
+  fadeInMs: number
+  fadeOutMs: number
+  track: 0
 }
 
 export interface EditMarker {
@@ -390,6 +436,8 @@ export function projectSettingsForAspect(aspect: EditAspect, fps = 30): EditProj
         ? 'edit-horizontal-hd'
         : 'edit-source',
     tailGapMs: 0,
+    audioFadeInMs: 0,
+    audioFadeOutMs: 0,
     subtitleAppearance: subtitleAppearanceForPreset('default'),
     subtitleSafeAreaPct: 8,
   }

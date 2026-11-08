@@ -73,7 +73,6 @@ const menuItems = computed(() => {
   const isCurrent = film.id === props.currentFilmId
   return [
     { key: 'open', label: t('edit.openEdit'), action: () => emit('open', film) },
-    { key: 'preview', label: t('edit.preview'), action: () => emit('open', film) },
     { key: 'sep1', separator: true },
     {
       key: 'current', label: t('films.setCurrent'),

@@ -45,6 +45,22 @@ test('远程网关 + h3_gateway：按本地扩展协议发送', () => {
   assert.equal(req.body.duration, 2)
 })
 
+test('本地 H3 拒绝 720p 超过 8 秒与 1080p，480p 仍可到 15 秒', () => {
+  assert.throws(
+    () => adapter.buildGenerateRequest(gatewayConfig, record({ resolution: '720p', duration: 10 })),
+    /720p.*8 秒|8 秒.*720p/,
+  )
+  assert.throws(
+    () => adapter.buildGenerateRequest(gatewayConfig, record({ resolution: '1080p', duration: 5 })),
+    /不支持 1080p/,
+  )
+  const max = adapter.buildGenerateRequest(gatewayConfig, record({ resolution: '720p', duration: 8 }))
+  assert.equal(max.body.duration, 8)
+  assert.equal(max.body.resolution, '768P')
+  const long = adapter.buildGenerateRequest(gatewayConfig, record({ resolution: '480p', duration: 15 }))
+  assert.equal(long.body.duration, 15)
+})
+
 test('远程地址未勾选 h3_gateway：仍按云端 H3 schema 处理', () => {
   assert.equal(isLocalShimConfig(remoteCloudConfig), false)
   const req = adapter.buildGenerateRequest(remoteCloudConfig, record({ resolution: '768p', duration: 5 }))

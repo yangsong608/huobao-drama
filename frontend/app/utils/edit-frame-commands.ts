@@ -20,8 +20,6 @@ export interface FrameImageSource {
 }
 
 const MAX_IMAGE_CLIP_MS = 30_000
-const MAX_FREEZE_FRAME_MS = 10_000
-const MAX_FREEZE_TAIL_MS = 600_000
 
 /** 一帧在时间线上的毫秒数（fps 按工程取整，29.97 → 30） */
 export function frameMsOf(fps: number): number {
@@ -171,25 +169,17 @@ export function rippleDeleteFrame(
 }
 
 /**
- * 在播放头处插入图片片段：落在片段内部时先分割再插入，否则按时间顺序插入。
- * 时长夹取到 [最短可插入时长, 30000ms]，夹取时携带 warning。
+ * 播放头插入的共用落点：落在片段内部先分割再插入，否则按时间顺序插入。
+ * splitError 用于把「无法分割」翻译成调用方自己的错误码与文案。
  */
-export function insertImageClip(
+function insertAtPlayhead(
   plan: EditPlanV1,
   atMs: number,
   fps: number,
-  imageSource: FrameImageSource,
-  durationMs = 3000,
+  clip: EditClip,
+  issues: EditCommandIssue[],
+  splitError: { code: string; message: string },
 ): EditCommandResult {
-  const frame = frameMsOf(fps)
-  const minMs = minimumImageMsOf(fps)
-  const requested = Math.round(Number(durationMs) || 0)
-  const target = Math.max(minMs, Math.min(MAX_IMAGE_CLIP_MS, requested))
-  const issues: EditCommandIssue[] = []
-  if (target !== requested) {
-    issues.push(issueWarning('IMAGE_DURATION_CLAMPED', 'image', '图片时长超出限制，已自动调整（最长 30 秒）'))
-  }
-  const source = imageSourceToClipSource(imageSource, target)
   const snapped = Math.max(0, snapToFrame(atMs, fps))
   let working = plan
   let insertIndex = working.clips.length
@@ -200,63 +190,76 @@ export function insertImageClip(
   if (hit) {
     const split = splitClip(working, hit.clip_id, snapped - hit.timeline_start_ms, createCommandId('clp'))
     if (split.issues.some((item) => item.severity === 'error')) {
-      return unchanged(plan, issueError('IMAGE_INSERT_SPLIT', hit.clip_id, '播放头位置无法分割，无法插入图片'))
+      return unchanged(plan, issueError(splitError.code, hit.clip_id, splitError.message))
     }
     issues.push(...split.issues)
     working = split.plan
-    insertIndex = working.clips.findIndex((clip) => clip.id === hit.clip_id) + 1
+    insertIndex = working.clips.findIndex((item) => item.id === hit.clip_id) + 1
   } else {
     const at = layout.clips.findIndex((item) => item.timeline_start_ms >= snapped)
     insertIndex = at < 0 ? working.clips.length : at
   }
-  const clip = imageClip(createCommandId('img'), source, target)
   const inserted = insertClip(working, clip, { index: insertIndex })
-  // insertClip 返回全新 issues 数组，前面收集的夹取/分割提示需要并回去
+  // insertClip 返回全新 issues 数组，前面收集的提示需要并回去
   return issues.length ? { ...inserted, issues: [...issues, ...inserted.issues] } : inserted
 }
 
 /**
- * 在播放头处插入定格帧：与 insertImageClip 相同，但时长默认 1000ms、上限 10000ms。
+ * 在播放头处插入图片片段：时长夹取到 [最短可插入时长, 30000ms]，夹取时携带 warning。
  */
-export function insertFreezeFrame(
+export function insertImageClip(
   plan: EditPlanV1,
   atMs: number,
   fps: number,
   imageSource: FrameImageSource,
-  durationMs = 1000,
+  durationMs = 3000,
 ): EditCommandResult {
-  const frame = frameMsOf(fps)
+  const minMs = minimumImageMsOf(fps)
   const requested = Math.round(Number(durationMs) || 0)
-  const target = Math.max(frame, Math.min(MAX_FREEZE_FRAME_MS, requested))
-  return insertImageClip(plan, atMs, fps, imageSource, target)
+  const target = Math.max(minMs, Math.min(MAX_IMAGE_CLIP_MS, requested))
+  const issues: EditCommandIssue[] = []
+  if (target !== requested) {
+    issues.push(issueWarning('IMAGE_DURATION_CLAMPED', 'image', '图片时长超出限制，已自动调整（最长 30 秒）'))
+  }
+  const source = imageSourceToClipSource(imageSource, target)
+  const clip = imageClip(createCommandId('img'), source, target)
+  return insertAtPlayhead(plan, atMs, fps, clip, issues, {
+    code: 'IMAGE_INSERT_SPLIT',
+    message: '播放头位置无法分割，无法插入图片',
+  })
 }
 
 /**
- * 定格延长：在指定片段之后追加一个图片片段，原片段不动。时长上限 600000ms。
+ * 在播放头处插入视频片段（分镜视频或上传视频）。
+ * 默认插入完整素材；durationMs 可截短到 [3 帧, 素材时长]。
  */
-export function buildFreezeTail(
+export function insertVideoClip(
   plan: EditPlanV1,
-  clipId: string,
-  extendMs: number,
+  atMs: number,
   fps: number,
-  imageSource: FrameImageSource,
+  source: EditClipSource,
+  durationMs?: number,
 ): EditCommandResult {
-  const index = plan.clips.findIndex((clip) => clip.id === clipId)
-  if (index < 0) {
-    return unchanged(plan, issueError('CLIP_NOT_FOUND', `clip:${clipId}`, '片段不存在'))
+  const available = Math.max(0, Math.round(Number(source.durationMs) || 0))
+  const minMs = minimumSourceMsOf(fps)
+  if (available < minMs) {
+    return unchanged(plan, issueError('VIDEO_TOO_SHORT', 'video', '视频素材短于 3 帧，无法插入'))
   }
-  const frame = frameMsOf(fps)
-  const minMs = minimumImageMsOf(fps)
-  const requested = Math.round(Number(extendMs) || 0)
-  const target = Math.max(minMs, Math.min(MAX_FREEZE_TAIL_MS, requested))
+  const requested = Math.round(Number(durationMs) || available)
+  const target = Math.max(minMs, Math.min(available, requested))
   const issues: EditCommandIssue[] = []
   if (target !== requested) {
-    issues.push(issueWarning('IMAGE_DURATION_CLAMPED', `clip:${clipId}`, '定格时长超出限制，已自动调整（最长 10 分钟）'))
+    issues.push(issueWarning('VIDEO_DURATION_CLAMPED', 'video', '视频时长超出素材范围，已自动调整'))
   }
-  const source = imageSourceToClipSource(imageSource, target)
-  const clip = imageClip(createCommandId('frz'), source, target)
-  const inserted = insertClip(plan, clip, { index: index + 1 })
-  return issues.length ? { ...inserted, issues: [...issues, ...inserted.issues] } : inserted
+  const clip = createClipFromSource(createCommandId('vid'), { ...source, durationMs: available }, {
+    kind: 'video',
+    sourceInMs: 0,
+    sourceOutMs: target,
+  })
+  return insertAtPlayhead(plan, atMs, fps, clip, issues, {
+    code: 'VIDEO_INSERT_SPLIT',
+    message: '播放头位置无法分割，无法插入视频',
+  })
 }
 
 /**

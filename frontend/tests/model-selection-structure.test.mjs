@@ -9,7 +9,9 @@ const page = read('app/views/drama/episode.vue')
 const useAgent = read('app/composables/useAgent.ts')
 const useApi = read('app/composables/useApi.ts')
 const videoResolution = read('app/utils/video-resolution.ts')
+const capabilityUtil = read('app/utils/model-capabilities.ts')
 const modelSelect = read('app/components/ModelSelect.vue')
+const zhLocale = read('app/locales/zh.json')
 
 test('workbench offers model selectors for rewrite, image and video generation', () => {
   // 三个选择器（自定义 ModelSelect 弹窗组件，非原生 select）
@@ -77,3 +79,34 @@ test('同名模型的不同配置可区分，且本地 H3 可选择 480p', () =>
   assert.match(page, /isLocalH3Config\(selectedVideoConfig\.value\)/)
   assert.match(page, /videoCapabilityOpts\.value,\s*\n\s*\)\.map/)
 })
+
+test('本地 H3 前端同步收紧分辨率与时长上限', () => {
+  assert.match(capabilityUtil, /maxDurationByResolution\?/)
+  assert.match(capabilityUtil, /build\('h3', \['480p', '720p'\], \{ '480p': '480P', '720p': '768P' \}/)
+  assert.match(capabilityUtil, /maxDurationByResolution: \{ '720p': 8 \}/)
+  assert.match(capabilityUtil, /export function videoMaxDuration/)
+  assert.match(page, /videoMaxDuration, videoModelCapabilities/)
+  assert.match(page, /const videoDurationMax = computed\(\(\) => Math\.max\(2, videoMaxDuration\(/)
+  assert.match(page, /:max="videoDurationMax"/)
+  assert.match(page, /v = Math\.min\(max, Math\.max\(min, v\)\)/)
+  assert.match(page, /episode\.inspector\.durationLimitWarning/)
+  assert.match(zhLocale, /"durationLimitWarning"/)
+})
+
+test('原生对白与配音重叠时有可见提示', () => {
+  // 保持 auto/native 生成行为不变，只在开启配音且会生成原生对白时提示
+  assert.match(page, /const showNativeAudioDubbingHint = computed/)
+  assert.match(page, /dubbingEnabled\.value/)
+  assert.match(page, /\['auto', 'native'\]\.includes\(episodeVideoAudioMode\.value\)/)
+  assert.match(page, /v-if="showNativeAudioDubbingHint"/)
+  assert.match(page, /class="studio-meta-hint"/)
+  assert.match(page, /t\('episode\.topbar\.nativeAudioDubbingHint'\)/)
+  assert.match(page, /t\('episode\.topbar\.nativeAudioDubbingHintTitle'\)/)
+  assert.match(page, /\.studio-meta-hint/)
+  for (const lang of ['zh', 'en', 'ja', 'ko']) {
+    const messages = JSON.parse(read(`app/locales/${lang}.json`))
+    assert.ok(messages.episode?.topbar?.nativeAudioDubbingHint, `${lang} hint`)
+    assert.ok(messages.episode?.topbar?.nativeAudioDubbingHintTitle, `${lang} hint title`)
+  }
+})
+

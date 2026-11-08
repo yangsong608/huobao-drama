@@ -12,7 +12,17 @@
           {{ creating ? t('edit.saving') : t('edit.versionCreate') }}
         </button>
       </div>
+      <p class="ed-drawer-hint">{{ t('edit.versionDraftHint') }}</p>
       <p v-if="draftDirty" class="ed-drawer-dirty">{{ t('edit.versionDirty') }}</p>
+      <button
+        v-if="initialRevision && !(initialRevision.is_current && !draftDirty)"
+        class="ed-revision-initial"
+        type="button"
+        :disabled="!canEdit || restoringId === initialRevision.id"
+        @click="restore(initialRevision)"
+      >
+        {{ restoringId === initialRevision.id ? t('edit.saving') : t('edit.versionBackToInitial') }}
+      </button>
 
       <div class="ed-drawer-body">
         <p v-if="loading" class="ed-drawer-state">{{ t('edit.loading') }}</p>
@@ -25,6 +35,7 @@
         >
           <div class="ed-revision-head">
             <b>v{{ revision.revision_no }}</b>
+            <span v-if="revision.id === initialRevision?.id" class="ed-revision-badge is-initial">{{ t('edit.versionInitial') }}</span>
             <span v-if="revision.is_current" class="ed-revision-badge">{{ t('edit.versionCurrent') }}</span>
             <small>{{ formatTime(revision.created_at) }}</small>
           </div>
@@ -36,7 +47,7 @@
           <button
             class="ed-revision-restore"
             type="button"
-            :disabled="!canEdit || revision.is_current || restoringId === revision.id"
+            :disabled="!canEdit || (revision.is_current && !draftDirty) || restoringId === revision.id"
             @click="restore(revision)"
           >
             {{ restoringId === revision.id ? t('edit.saving') : t('edit.versionRestore') }}
@@ -63,6 +74,15 @@ const { t } = useI18n()
 const note = ref('')
 const creating = ref(false)
 const restoringId = ref(0)
+
+// 初始版本 = 版本号最小的快照；恢复它会以旧计划再建一个新版本（不会删除历史）。
+const initialRevision = computed(() => {
+  if (!props.revisions.length) return null
+  return props.revisions.reduce(
+    (min, item) => (Number(item.revision_no) < Number(min.revision_no) ? item : min),
+    props.revisions[0],
+  )
+})
 
 async function submitCreate() {
   if (!props.canEdit || creating.value) return
@@ -127,6 +147,14 @@ watch(
 }
 .ed-drawer-create button:disabled { opacity: .45; cursor: not-allowed; }
 .ed-drawer-dirty { margin: 0; padding: 0 12px 6px; font-size: 9px; color: var(--warning); }
+.ed-drawer-hint { margin: 0; padding: 0 12px 4px; font-size: 9px; color: var(--text-3); line-height: 1.5; }
+.ed-revision-initial {
+  flex: 0 0 auto; margin: 0 12px 6px; height: 26px; padding: 0 10px;
+  border: 1px solid var(--accent); border-radius: 6px; background: var(--accent-bg);
+  color: var(--accent-text); font-size: 10px; cursor: pointer;
+}
+.ed-revision-initial:hover { background: var(--accent); color: #fff; }
+.ed-revision-initial:disabled { opacity: .45; cursor: not-allowed; }
 .ed-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
 .ed-drawer-state { margin: 12px 0; text-align: center; font-size: 10px; color: var(--text-3); }
 .ed-revision {
@@ -140,6 +168,7 @@ watch(
 .ed-revision-badge {
   padding: 1px 5px; border-radius: 999px; background: var(--accent-bg); color: var(--accent-text); font-size: 8px;
 }
+.ed-revision-badge.is-initial { background: var(--bg-3, var(--bg-2)); color: var(--text-2); }
 .ed-revision-note { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--text-1); }
 .ed-revision-meta { display: flex; gap: 10px; font-size: 9px; color: var(--text-3); }
 .ed-revision-restore {

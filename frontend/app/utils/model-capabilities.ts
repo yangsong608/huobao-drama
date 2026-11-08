@@ -16,6 +16,7 @@ export interface VideoModelCapabilities {
   vendorResolutions: Partial<Record<VideoResolutionTier, string>>
   minDuration: number
   maxDuration: number
+  maxDurationByResolution?: Partial<Record<VideoResolutionTier, number>>
   referenceImages: number
   referenceVideos: number
   referenceAudios: number
@@ -44,7 +45,7 @@ function build(
   family: string,
   resolutions: VideoResolutionTier[],
   vendorResolutions: Partial<Record<VideoResolutionTier, string>>,
-  options: Partial<Pick<VideoModelCapabilities, 'minDuration' | 'maxDuration' | 'referenceImages' | 'referenceVideos' | 'referenceAudios' | 'nativeAudio' | 'firstLastFrame'>> = {},
+  options: Partial<Pick<VideoModelCapabilities, 'minDuration' | 'maxDuration' | 'maxDurationByResolution' | 'referenceImages' | 'referenceVideos' | 'referenceAudios' | 'nativeAudio' | 'firstLastFrame'>> = {},
 ): VideoModelCapabilities {
   return {
     family,
@@ -52,6 +53,7 @@ function build(
     vendorResolutions,
     minDuration: options.minDuration ?? 2,
     maxDuration: options.maxDuration ?? 15,
+    maxDurationByResolution: options.maxDurationByResolution,
     referenceImages: options.referenceImages ?? 0,
     referenceVideos: options.referenceVideos ?? 0,
     referenceAudios: options.referenceAudios ?? 0,
@@ -97,9 +99,11 @@ function minimaxCapability(model: string, options: VideoCapabilityOptions = {}):
   }
   // 本地 shim 有完整 480P 画布，标准 H3 在本地也可选 480p；云端仍只认 768P/2K
   // 音频/视频参考尚未接入 shim，声明为 0，避免 UI 让用户绑定后被后端拒绝
+  // 24GB 单卡：720p 稳定上限 ~8s（209 帧），1080p 长时长必 OOM，直接不开档
   if (options.localShim) {
-    return build('h3', ['480p', '720p', '1080p'], { '480p': '480P', '720p': '768P', '1080p': '2K' }, {
-      minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 0, referenceAudios: 0, nativeAudio: true, firstLastFrame: true,
+    return build('h3', ['480p', '720p'], { '480p': '480P', '720p': '768P' }, {
+      minDuration: 4, maxDuration: 15, maxDurationByResolution: { '720p': 8 },
+      referenceImages: 9, referenceVideos: 0, referenceAudios: 0, nativeAudio: true, firstLastFrame: true,
     })
   }
   return build('h3', ['720p', '1080p'], { '720p': '768P', '1080p': '2K' }, {
@@ -140,6 +144,22 @@ export function videoModelCapabilities(
   }
   return build('comfyui', ['480p', '720p', '1080p'], { '480p': '480p', '720p': '720p', '1080p': '1080p' },
     { minDuration: 2, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: false, firstLastFrame: true })
+}
+
+/** 当前分辨率下的时长上限（无按分辨率限制时回退模型全局上限） */
+export function videoMaxDuration(
+  provider?: string | null,
+  model?: string | null,
+  resolution?: string | null,
+  options: VideoCapabilityOptions = {},
+): number {
+  const capability = videoModelCapabilities(provider, model, options)
+  const tier = videoResolutionTier(resolution)
+  if (tier) {
+    const limit = capability.maxDurationByResolution?.[tier]
+    if (limit != null) return limit
+  }
+  return capability.maxDuration
 }
 
 /** 文本模型是否具备视觉理解能力（风格分析下拉过滤用） */

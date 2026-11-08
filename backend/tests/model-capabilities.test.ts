@@ -1,10 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  durationSupportError,
   imageModelSupportsReferenceImages,
   imageReferenceLimit,
   resolutionSupportError,
   textModelSupportsVision,
+  videoMaxDuration,
   videoModelCapabilities,
   videoResolutionTier,
   videoResolutionTiers,
@@ -48,11 +50,12 @@ test('MiniMax H3 variants expose their real tiers and vendor names', () => {
   assert.equal(videoModelCapabilities('minimax', 'MiniMax-H3-Highspeed').vendorResolutions['720p'], '768P')
 })
 
-test('本地 MiniMax shim 的 H3 额外支持 480p，云端仍只认 720p/1080p', () => {
+test('本地 MiniMax shim 的 H3 支持 480p/720p，1080p 超出 24GB 显存能力', () => {
   const local = videoModelCapabilities('minimax', 'MiniMax-H3', { localShim: true })
-  assert.deepEqual(local.resolutions, ['480p', '720p', '1080p'])
+  assert.deepEqual(local.resolutions, ['480p', '720p'])
   assert.equal(local.vendorResolutions['480p'], '480P')
   assert.equal(resolutionSupportError('minimax', 'MiniMax-H3', '480p', { localShim: true }), null)
+  assert.match(String(resolutionSupportError('minimax', 'MiniMax-H3', '1080p', { localShim: true })), /不支持/)
   // shim 只实现了图片参考与首尾帧，音频/视频参考必须显式声明为 0
   assert.equal(local.referenceImages, 9)
   assert.equal(local.referenceVideos, 0)
@@ -61,6 +64,20 @@ test('本地 MiniMax shim 的 H3 额外支持 480p，云端仍只认 720p/1080p'
   const cloud = videoModelCapabilities('minimax', 'MiniMax-H3')
   assert.deepEqual(cloud.resolutions, ['720p', '1080p'])
   assert.match(String(resolutionSupportError('minimax', 'MiniMax-H3', '480p')), /不支持/)
+})
+
+test('本地 H3 的 720p 时长上限为 8 秒，480p 保持 15 秒', () => {
+  const options = { localShim: true }
+  assert.equal(videoMaxDuration('minimax', 'MiniMax-H3', '720p', options), 8)
+  assert.equal(videoMaxDuration('minimax', 'MiniMax-H3', '480p', options), 15)
+  assert.equal(videoMaxDuration('minimax', 'MiniMax-H3', '720p'), 15)
+  assert.equal(videoMaxDuration('minimax', 'MiniMax-H3', '1080p'), 15)
+
+  assert.match(String(durationSupportError('minimax', 'MiniMax-H3', '720p', 10, options)), /8 秒/)
+  assert.equal(durationSupportError('minimax', 'MiniMax-H3', '720p', 8, options), null)
+  assert.equal(durationSupportError('minimax', 'MiniMax-H3', '480p', 15, options), null)
+  assert.match(String(durationSupportError('minimax', 'MiniMax-H3', '480p', 16, options)), /15 秒/)
+  assert.equal(durationSupportError('minimax', 'MiniMax-H3', '720p', 10), null)
 })
 
 test('Wan 3.0 exposes all tiers and more references than Wan 2.x', () => {

@@ -59,6 +59,8 @@ function fallbackSettingsOf(project: EditProjectRow): EditProjectSettings {
     defaultSubtitleStyle: 'default',
     defaultExportPreset: aspect === '9:16' ? 'edit-vertical-hd' : 'edit-horizontal-hd',
     tailGapMs: 0,
+    audioFadeInMs: 0,
+    audioFadeOutMs: 0,
     subtitleAppearance: subtitleAppearanceForPreset('default'),
     subtitleSafeAreaPct: 8,
   }
