@@ -23,7 +23,7 @@
       @open-export="openExportDialog"
       @go-mix="openMixWorkbench"
       @shortcuts="shortcutsOpen = true"
-      @toggle-media="mediaOpen = !mediaOpen"
+      @toggle-media="toggleMediaPanel"
       @toggle-subtitles="subtitlesOpen = !subtitlesOpen"
       @open-agent="$emit('open-agent')"
     />
@@ -43,22 +43,61 @@
     </div>
 
     <div class="ed-main" :class="{ 'is-empty': !plan.clips.length, 'is-media-open': mediaOpen }">
-      <EditSidebar
-        class="ed-media-slot"
-        :films="films"
-        :loading="filmsLoading"
-        :current-film-id="currentFilmId"
-        :active-film-id="activeFilmId"
-        :can-edit="canEdit"
-        @open="switchFilm"
-        @refresh="loadFilms"
-        @rename="renameFilm"
-        @remove="removeFilm"
-        @set-current="setCurrentFilm"
-        @open-mix="openFilmInMix"
-        @open-exports="$emit('back')"
-        @new-concat="goNewConcat"
-      />
+      <aside class="ed-left">
+        <div class="ed-left-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            :class="{ 'is-on': leftTab === 'media' }"
+            :aria-selected="leftTab === 'media'"
+            @click="leftTab = 'media'"
+          >
+            {{ t('edit.mediaLibrary') }}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :class="{ 'is-on': leftTab === 'films' }"
+            :aria-selected="leftTab === 'films'"
+            @click="leftTab = 'films'"
+          >
+            {{ t('edit.filmsPanelTitle') }}
+          </button>
+        </div>
+        <EditMediaLibrary
+          v-if="leftTab === 'media'"
+          class="ed-left-body"
+          :media="media"
+          :loading="mediaLoading"
+          :error="mediaError"
+          :readonly="!canEdit"
+          :used-storyboard-ids="usedStoryboardIds"
+          :rough-cut-available="topState.rough_cut_available"
+          :can-replace="Boolean(selectedClipId)"
+          @add-storyboard="addStoryboard"
+          @add-all="addAllStoryboards"
+          @replace-clip="replaceSelectedClip"
+          @rough-cut="runRoughCut"
+          @retry="loadMedia"
+        />
+        <EditSidebar
+          v-else
+          class="ed-left-body"
+          :films="films"
+          :loading="filmsLoading"
+          :current-film-id="currentFilmId"
+          :active-film-id="activeFilmId"
+          :can-edit="canEdit"
+          @open="switchFilm"
+          @refresh="loadFilms"
+          @rename="renameFilm"
+          @remove="removeFilm"
+          @set-current="setCurrentFilm"
+          @open-mix="openFilmInMix"
+          @open-exports="$emit('back')"
+          @new-concat="goNewConcat"
+        />
+      </aside>
 
       <section class="ed-stage">
         <EditEmptyState
@@ -253,6 +292,7 @@ import { useI18n } from 'vue-i18n'
 import EditTopBar from '~/components/edit/EditTopBar.vue'
 import EditPreview from '~/components/edit/EditPreview.vue'
 import EditSidebar from '~/components/edit/EditSidebar.vue'
+import EditMediaLibrary from '~/components/edit/EditMediaLibrary.vue'
 import EditTimeline from '~/components/edit/EditTimeline.vue'
 import EditClipInspector from '~/components/edit/EditClipInspector.vue'
 import EditSubtitleList from '~/components/edit/EditSubtitleList.vue'
@@ -263,12 +303,15 @@ import EditImagePicker from '~/components/edit/EditImagePicker.vue'
 import EditExportDialog from '~/components/edit/EditExportDialog.vue'
 import { editAPI, filmAPI } from '~/composables/useApi'
 import { useEditClock } from '~/composables/useEditClock'
+import { useEditMedia } from '~/composables/useEditMedia'
 import { useEditPlan } from '~/composables/useEditPlan'
 import {
   addCueAtPlayhead,
+  appendClip,
   applyAppearanceToAll,
   addMarker,
   closeGaps,
+  createClipFromSource,
   createCommandId,
   deleteCue,
   deleteMarker,
@@ -281,6 +324,7 @@ import {
   moveCue,
   removeClip,
   removeTransition,
+  replaceClipSource,
   setClipFades,
   setClipGap,
   setClipSpeed,
@@ -365,6 +409,18 @@ async function loadFilms() {
   }
 }
 
+// 左侧素材库：一次拉取分镜/台词/配音；加入与替换都走命令栈，可撤销。
+const {
+  media,
+  loading: mediaLoading,
+  error: mediaError,
+  load: loadMedia,
+} = useEditMedia(Number(props.state.episode_id))
+const usedStoryboardIds = computed(() => plan.value.clips
+  .filter((clip) => clip.source?.kind === 'storyboard')
+  .map((clip) => Number(clip.source.id))
+  .filter((id) => Number.isFinite(id)))
+
 async function switchFilm(film) {
   if (Number(film?.id) === activeFilmId.value) return
   if (dirty.value) {
@@ -428,12 +484,66 @@ function goNewConcat() {
   navigateTo(`${route.path.replace(/\/edit$/, '')}#exports`)
 }
 
+function toggleMediaPanel() {
+  leftTab.value = leftTab.value === 'media' ? 'films' : 'media'
+}
+
+function addStoryboard(item) {
+  if (!canEdit.value || !item?.playable || !item.source) return
+  const id = createCommandId('clp')
+  // item 来自素材库的深层 ref，source 是代理；命令内部会克隆片段，必须先去掉代理。
+  const ok = runCommand((value) => appendClip(value, createClipFromSource(id, toRaw(item.source))))
+  if (!ok) return
+  selection.value = { type: 'clip', id }
+  const layoutClip = layout.value.clips.find((clip) => clip.clip_id === id)
+  if (layoutClip) seek(layoutClip.timeline_start_ms)
+  notify(t('edit.addedToTimeline', { n: item.number }))
+}
+
+function addAllStoryboards() {
+  if (!canEdit.value) return
+  const candidates = (media.value?.storyboards ?? []).filter(
+    (item) => item.playable && item.source && !usedStoryboardIds.value.includes(item.id),
+  )
+  if (!candidates.length) return
+  const ids = candidates.map(() => createCommandId('clp'))
+  const ok = runCommand((value) => {
+    let next = value
+    candidates.forEach((item, index) => {
+      next = appendClip(next, createClipFromSource(ids[index], toRaw(item.source))).plan
+    })
+    return { plan: next, issues: [], focusClipId: ids[0] }
+  })
+  if (!ok) return
+  selection.value = { type: 'clip', id: ids[0] }
+  const layoutClip = layout.value.clips.find((clip) => clip.clip_id === ids[0])
+  if (layoutClip) seek(layoutClip.timeline_start_ms)
+  notify(t('edit.addedCountToTimeline', { n: candidates.length }))
+}
+
+// 替换选中片段的画面来源：保留片段位置、空档、速度、淡入淡出与字幕跟随，走命令栈可撤销。
+function replaceSelectedClip(item) {
+  if (!canEdit.value || !item?.playable || !item.source) return
+  if (!selectedClipId.value) {
+    notify(t('edit.replaceSelectFirst'))
+    return
+  }
+  const targetId = selectedClipId.value
+  const ok = runCommand((value) => replaceClipSource(value, targetId, toRaw(item.source)))
+  if (!ok) return
+  const layoutClip = layout.value.clips.find((clip) => clip.clip_id === targetId)
+  if (layoutClip) seek(layoutClip.timeline_start_ms)
+  notify(t('edit.replacedClip', { n: item.number }))
+}
+
 const previewRef = ref(null)
 const timelineRef = ref(null)
 const currentMs = ref(0)
 const playing = ref(false)
 const selection = ref(null)
 const mediaOpen = ref(true)
+// 左栏两个页签：素材库（分镜/台词/配音）与成片列表；顶栏素材库按钮在两个页签间切换。
+const leftTab = ref('media')
 const shortcutsOpen = ref(false)
 const timelineMessage = ref('')
 const roughCutBusy = ref(false)
@@ -1465,6 +1575,7 @@ watch(saveStatus, (value) => {
 
 onMounted(() => {
   void loadFilms()
+  void loadMedia()
   window.addEventListener('keydown', onKeydown)
 })
 
@@ -1489,7 +1600,7 @@ onBeforeUnmount(() => {
 .ed-banner span { flex: 1; min-width: 0; }
 .ed-banner button {
   height: 22px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg-1); color: var(--text-1); font-size: 10px; cursor: pointer;
+  background: var(--bg-1); color: var(--text-1); font-size: var(--text-micro); cursor: pointer;
 }
 .ed-banner button.is-muted { color: var(--text-3); }
 .ed-banner.is-error { background: color-mix(in srgb, var(--action-danger) 10%, var(--bg-1)); color: var(--action-danger); }
@@ -1500,7 +1611,22 @@ onBeforeUnmount(() => {
   grid-template-columns: 236px minmax(0, 1fr) 300px;
 }
 .ed-main.is-empty { grid-template-columns: 236px minmax(0, 1fr); }
-.ed-media-slot { min-width: 0; min-height: 0; }
+.ed-left {
+  min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  background: var(--bg-1); border-right: 1px solid var(--border); overflow: hidden;
+}
+.ed-left-tabs {
+  flex: 0 0 auto; display: flex; gap: 4px; padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.ed-left-tabs button {
+  flex: 1; height: var(--control-xs); border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--text-3); font-size: var(--text-micro); cursor: pointer;
+}
+.ed-left-tabs button.is-on {
+  background: var(--bg-2); border-color: var(--border); color: var(--text-0);
+}
+.ed-left-body { flex: 1; min-width: 0; min-height: 0; border-right: 0; }
 .ed-stage {
   min-width: 0; min-height: 0; display: flex; flex-direction: column;
   gap: 12px; padding: 14px 16px 16px;
@@ -1524,16 +1650,12 @@ onBeforeUnmount(() => {
 .ed-shortcuts dl div { display: flex; gap: 12px; font-size: 11px; }
 .ed-shortcuts dt { flex: 0 0 92px; color: var(--text-3); font-family: ui-monospace, SFMono-Regular, monospace; }
 .ed-shortcuts dd { margin: 0; color: var(--text-1); }
-@media (max-width: 1180px) {
-  .ed-main { grid-template-columns: 220px minmax(0, 1fr) 272px; }
-  .ed-main.is-empty { grid-template-columns: 220px minmax(0, 1fr); }
-}
 @media (max-width: 900px) {
   .ed-main, .ed-main.is-empty { grid-template-columns: minmax(0, 1fr); }
-  .ed-media-slot { display: none; }
-  .ed-main.is-media-open .ed-media-slot {
+  .ed-left { display: none; }
+  .ed-main.is-media-open .ed-left {
     display: flex; position: fixed; left: 0; top: 52px; bottom: 0;
-    width: min(280px, 82vw); z-index: 60; box-shadow: 0 0 30px rgba(0, 0, 0, .45);
+    width: min(300px, 86vw); z-index: 60; box-shadow: 0 0 30px rgba(0, 0, 0, .45);
   }
 }
 </style>

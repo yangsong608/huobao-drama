@@ -5,11 +5,12 @@ import assert from 'node:assert/strict'
 const root = new URL('..', import.meta.url)
 const read = (path) => readFileSync(new URL(path, root), 'utf8')
 
-test('左侧主列表为成片，分镜素材库退出剪辑页', () => {
+test('左栏保留成片页签并挂回分镜素材库', () => {
   const workbench = read('app/components/edit/EditWorkbench.vue')
   assert.match(workbench, /EditSidebar/)
-  assert.doesNotMatch(workbench, /EditMediaLibrary/)
-  assert.doesNotMatch(workbench, /useEditMedia/)
+  assert.match(workbench, /EditMediaLibrary/)
+  assert.match(workbench, /useEditMedia/)
+  assert.match(workbench, /leftTab/)
 
   const sidebar = read('app/components/edit/EditSidebar.vue')
   assert.match(sidebar, /ContextMenu/)

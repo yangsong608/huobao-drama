@@ -49,10 +49,10 @@ function formatTime(value) {
 }
 .ed-conflict header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ed-conflict header b { font-size: 14px; color: var(--text-0); }
-.ed-conflict header code { font-size: 9px; color: var(--warning); }
+.ed-conflict header code { font-size: var(--text-micro); color: var(--warning); }
 .ed-conflict p { margin: 0; font-size: 11px; color: var(--text-2); line-height: 1.6; }
 .ed-conflict dl { display: flex; flex-direction: column; gap: 4px; margin: 0; }
-.ed-conflict dl div { display: flex; justify-content: space-between; gap: 10px; font-size: 10px; }
+.ed-conflict dl div { display: flex; justify-content: space-between; gap: 10px; font-size: var(--text-micro); }
 .ed-conflict dt { color: var(--text-3); }
 .ed-conflict dd { margin: 0; color: var(--text-1); }
 .ed-conflict-actions { display: flex; gap: 8px; margin-top: 4px; }
@@ -62,5 +62,5 @@ function formatTime(value) {
 }
 .ed-conflict-actions button:first-child { border-color: var(--accent); background: var(--accent); color: #fff; }
 .ed-conflict-actions button:disabled { opacity: .45; cursor: not-allowed; }
-.ed-conflict-note { font-size: 9px; color: var(--text-3); }
+.ed-conflict-note { font-size: var(--text-micro); color: var(--text-3); }
 </style>

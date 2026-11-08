@@ -119,16 +119,16 @@ watch(
 .ed-drawer-create { flex: 0 0 auto; display: flex; gap: 6px; padding: 10px 12px 6px; }
 .ed-drawer-create input {
   flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--border);
-  border-radius: 6px; background: var(--bg-2); color: var(--text-0); font-size: 10px;
+  border-radius: 6px; background: var(--bg-2); color: var(--text-0); font-size: var(--text-micro);
 }
 .ed-drawer-create button {
   flex: 0 0 auto; height: 28px; padding: 0 10px; border: 1px solid var(--accent);
-  border-radius: 6px; background: var(--accent); color: #fff; font-size: 10px; cursor: pointer;
+  border-radius: 6px; background: var(--accent); color: #fff; font-size: var(--text-micro); cursor: pointer;
 }
 .ed-drawer-create button:disabled { opacity: .45; cursor: not-allowed; }
-.ed-drawer-dirty { margin: 0; padding: 0 12px 6px; font-size: 9px; color: var(--warning); }
+.ed-drawer-dirty { margin: 0; padding: 0 12px 6px; font-size: var(--text-micro); color: var(--warning); }
 .ed-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
-.ed-drawer-state { margin: 12px 0; text-align: center; font-size: 10px; color: var(--text-3); }
+.ed-drawer-state { margin: 12px 0; text-align: center; font-size: var(--text-micro); color: var(--text-3); }
 .ed-revision {
   display: flex; flex-direction: column; gap: 4px; padding: 8px; border-radius: 8px;
   border: 1px solid var(--border); background: var(--bg-2);
@@ -140,12 +140,12 @@ watch(
 .ed-revision-badge {
   padding: 1px 5px; border-radius: 999px; background: var(--accent-bg); color: var(--accent-text); font-size: 8px;
 }
-.ed-revision-note { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--text-1); }
-.ed-revision-meta { display: flex; gap: 10px; font-size: 9px; color: var(--text-3); }
+.ed-revision-note { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-micro); color: var(--text-1); }
+.ed-revision-meta { display: flex; gap: 10px; font-size: var(--text-micro); color: var(--text-3); }
 .ed-revision-restore {
   align-self: flex-start; height: 22px; margin-top: 2px; padding: 0 8px;
   border: 1px solid var(--border); border-radius: 5px; background: var(--bg-1);
-  color: var(--text-1); font-size: 9px; cursor: pointer;
+  color: var(--text-1); font-size: var(--text-micro); cursor: pointer;
 }
 .ed-revision-restore:hover { border-color: var(--accent); }
 .ed-revision-restore:disabled { opacity: .45; cursor: not-allowed; }

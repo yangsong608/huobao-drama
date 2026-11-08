@@ -120,7 +120,7 @@ function formatDuration(ms) {
 .ed-sidebar-title { flex: 1; min-width: 0; font-size: 12px; font-weight: 650; color: var(--text-0); }
 .ed-side-btn {
   height: 24px; padding: 0 9px; border: 1px solid var(--border); border-radius: 999px;
-  background: var(--bg-2); color: var(--text-1); font-size: 10px; cursor: pointer; white-space: nowrap;
+  background: var(--bg-2); color: var(--text-1); font-size: var(--text-micro); cursor: pointer; white-space: nowrap;
 }
 .ed-side-btn:hover { border-color: var(--accent); color: var(--text-0); }
 .ed-side-icon {
@@ -151,7 +151,7 @@ function formatDuration(ms) {
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 12px; font-weight: 600;
 }
-.ed-film-meta { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-3); }
+.ed-film-meta { display: flex; align-items: center; gap: 6px; font-size: var(--text-micro); color: var(--text-3); }
 .ed-film-kind {
   padding: 0 5px; border-radius: 4px; background: var(--bg-hover);
   color: var(--text-2); white-space: nowrap;

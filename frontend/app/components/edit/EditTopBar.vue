@@ -207,23 +207,24 @@ const saveTone = computed(() => {
 <style scoped>
 .ed-top-wrap { flex: 0 0 auto; display: flex; flex-direction: column; }
 .ed-top {
-  height: 52px; padding: 0 14px; display: flex; align-items: center;
-  gap: 12px; border-bottom: 1px solid var(--border); background: var(--bg-1);
+  height: var(--topbar-h); min-height: var(--topbar-h);
+  padding: 0 var(--topbar-pad-x); display: flex; align-items: center;
+  gap: 12px; border-bottom: 1px solid var(--border); background: var(--panel-bg);
 }
 .ed-top-left { min-width: 0; display: flex; align-items: center; gap: 10px; }
 .ed-top-center { display: flex; align-items: center; gap: 4px; padding-left: 4px; border-left: 1px solid var(--border); }
 .ed-top-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .ed-icon {
-  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  width: var(--control-sm); height: var(--control-sm); display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid transparent; border-radius: 8px; background: transparent;
   color: var(--text-1); cursor: pointer;
 }
 .ed-icon:hover { background: var(--bg-hover); }
 .ed-icon:disabled { opacity: .35; cursor: not-allowed; }
-.ed-brand { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 650; white-space: nowrap; }
+.ed-brand { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-strong); font-weight: 650; white-space: nowrap; }
 .ed-episode {
   max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 12px; color: var(--text-2);
+  font-size: var(--text-label); color: var(--text-2);
 }
 .ed-chip {
   height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 999px;
@@ -243,7 +244,7 @@ const saveTone = computed(() => {
 .ed-mix-chip.is-missing .ed-mix-shape { border-radius: 1px; }
 .ed-mix-pop { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
 .ed-mix-reasons { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; color: var(--text-1); font-size: 11px; line-height: 1.5; }
-.ed-mix-hint { margin: 0; color: var(--text-3); font-size: 10px; line-height: 1.5; }
+.ed-mix-hint { margin: 0; color: var(--text-3); font-size: var(--text-micro); line-height: 1.5; }
 .ed-mix-go {
   height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   border: 1px solid var(--accent); border-radius: 7px; background: var(--accent-bg);
@@ -253,7 +254,7 @@ const saveTone = computed(() => {
 .ed-save {
   height: 26px; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px;
   border: 1px solid var(--border); border-radius: 999px; background: var(--bg-2);
-  color: var(--text-2); font-size: 10px; cursor: pointer; white-space: nowrap;
+  color: var(--text-2); font-size: var(--text-micro); cursor: pointer; white-space: nowrap;
 }
 .ed-save:hover { border-color: var(--accent); }
 .ed-save-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -263,7 +264,7 @@ const saveTone = computed(() => {
 .ed-export-live {
   height: 26px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px;
   border: 1px solid var(--warning); border-radius: 999px; background: var(--warning-bg);
-  color: var(--warning); font-size: 10px; font-variant-numeric: tabular-nums;
+  color: var(--warning); font-size: var(--text-micro); font-variant-numeric: tabular-nums;
   cursor: pointer; white-space: nowrap;
 }
 .ed-live-dot {
@@ -274,17 +275,17 @@ const saveTone = computed(() => {
 .ed-action {
   height: 28px; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px;
   border: 1px solid var(--border); border-radius: 7px; background: var(--bg-2);
-  color: var(--text-1); font-size: 10px; cursor: pointer; white-space: nowrap;
+  color: var(--text-1); font-size: var(--text-micro); cursor: pointer; white-space: nowrap;
 }
 .ed-action:hover { border-color: var(--accent); color: var(--text-0); }
 .ed-action:disabled { opacity: .45; cursor: not-allowed; }
 .ed-readonly-bar {
   margin: 0; padding: 5px 14px; border-bottom: 1px solid var(--border);
-  background: var(--bg-2); color: var(--text-3); font-size: 10px;
+  background: var(--bg-2); color: var(--text-3); font-size: var(--text-micro);
 }
 .ed-blocked {
   max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--text-3); font-size: 10px;
+  color: var(--text-3); font-size: var(--text-micro);
 }
 @media (max-width: 1180px) {
   .ed-episode { max-width: 150px; }

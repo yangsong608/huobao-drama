@@ -463,6 +463,69 @@ export function duplicateClip(plan: EditPlanV1, clipId: string, newClipId: strin
   }
 }
 
+function cloneSource(source: EditClipSource): EditClipSource {
+  return {
+    kind: source.kind,
+    id: source.id,
+    url: String(source.url || ''),
+    durationMs: Math.max(1, Math.round(Number(source.durationMs) || 1)),
+    width: Math.max(0, Math.round(Number(source.width) || 0)),
+    height: Math.max(0, Math.round(Number(source.height) || 0)),
+    fps: source.fps === null || source.fps === undefined ? null : Number(source.fps) || null,
+    hasAudio: Boolean(source.hasAudio),
+    fingerprint: String(source.fingerprint || ''),
+    label: source.label,
+    thumbnailUrl: source.thumbnailUrl ?? null,
+  }
+}
+
+/**
+ * 用新素材替换片段画面，保留片段身份与所有编辑参数（位置、空档、速度、淡入淡出、变换、滤镜、台词关联）。
+ * 原片段已剪出的时长优先保留；新素材更短时按素材长度收短并提示，跟随字幕锚点收进新范围。
+ */
+export function replaceClipSource(
+  plan: EditPlanV1,
+  clipId: string,
+  source: EditClipSource,
+): EditCommandResult {
+  const index = plan.clips.findIndex((clip) => clip.id === clipId)
+  if (index < 0) {
+    return unchanged(plan, error('CLIP_NOT_FOUND', `clip:${clipId}`, '片段不存在'))
+  }
+  const clip = plan.clips[index]
+  const nextSource = cloneSource(source)
+  const speed = Number(clip.speed) > 0 ? Number(clip.speed) : 1
+  const wantedRange = Math.max(
+    0,
+    Math.round(Number(clip.sourceOutMs) - Number(clip.sourceInMs)),
+  )
+  const targetRange = Math.min(wantedRange, nextSource.durationMs)
+  if (targetRange < minSourceRangeFor(plan, clip, speed)) {
+    return unchanged(plan, error('CLIP_SOURCE_TOO_SHORT', `clip:${clipId}`, '新素材太短，无法替换'))
+  }
+
+  const issues: EditCommandIssue[] = []
+  if (targetRange < wantedRange) {
+    issues.push(warning('CLIP_REPLACED_SHORTER', `clip:${clipId}`, '新素材较短，片段已缩短'))
+  }
+  const next = clonePlan(plan)
+  next.clips[index] = clampClipFades({
+    ...next.clips[index],
+    source: nextSource,
+    sourceInMs: 0,
+    sourceOutMs: targetRange,
+    videoTakeAssetId: null,
+  }, issues)
+  const content = localClipContentDurationMs(next.clips[index])
+  const maxAnchorOffset = Math.max(0, content - 100)
+  next.subtitles = next.subtitles.map((cue) => (
+    cue.anchor?.clipId === clipId && cue.anchor.offsetMs > maxAnchorOffset
+      ? { ...cue, anchor: { clipId, offsetMs: maxAnchorOffset } }
+      : cue
+  ))
+  return { plan: sync(next, issues), issues, focusClipId: clipId }
+}
+
 export const DEFAULT_MARKER_COLOR = '#f59e0b'
 
 /** 扫描 mk_<n> 取最大编号加一；忽略随机后缀的历史 id，避免与后端缺省 id 撞号 */

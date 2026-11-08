@@ -404,36 +404,36 @@ function onEndInput(event) {
 }
 .ed-insp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .ed-insp-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.ed-insp-head span { flex: 0 0 auto; font-size: 9px; color: var(--text-3); }
+.ed-insp-head span { flex: 0 0 auto; font-size: var(--text-micro); color: var(--text-3); }
 .ed-insp-section { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
-.ed-insp-section h4 { margin: 0; font-size: 10px; font-weight: 650; letter-spacing: .04em; color: var(--text-3); }
+.ed-insp-section h4 { margin: 0; font-size: var(--text-micro); font-weight: 650; letter-spacing: .04em; color: var(--text-3); }
 .ed-insp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0; }
 .ed-insp-grid div { min-width: 0; }
-.ed-insp-grid dt { font-size: 9px; color: var(--text-3); }
-.ed-insp-grid dd { margin: 0; overflow: hidden; text-overflow: ellipsis; font-size: 10px; color: var(--text-1); }
+.ed-insp-grid dt { font-size: var(--text-micro); color: var(--text-3); }
+.ed-insp-grid dd { margin: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-micro); color: var(--text-1); }
 .ed-insp-row { display: flex; align-items: center; gap: 4px; }
-.ed-insp-row span { flex: 1; font-size: 9px; color: var(--text-3); }
+.ed-insp-row span { flex: 1; font-size: var(--text-micro); color: var(--text-3); }
 .ed-insp-row button, .ed-insp-actions button {
   height: 22px; padding: 0 6px; display: inline-flex; align-items: center; gap: 3px;
   border: 1px solid var(--border); border-radius: 5px; background: var(--bg-2);
-  color: var(--text-1); font-size: 9px; cursor: pointer;
+  color: var(--text-1); font-size: var(--text-micro); cursor: pointer;
 }
 .ed-insp-row button:hover, .ed-insp-actions button:hover { border-color: var(--accent); }
 .ed-insp-row button.is-on { border-color: var(--accent); color: var(--accent-text); background: var(--accent-bg); }
 .ed-insp-row button.is-danger { color: var(--action-danger); border-color: color-mix(in srgb, var(--action-danger) 40%, var(--border)); }
-.ed-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 9px; color: var(--text-3); }
+.ed-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--text-micro); color: var(--text-3); }
 .ed-row label { display: inline-flex; align-items: center; gap: 4px; }
 .ed-row input[type='range'] { width: 90px; accent-color: var(--accent); }
 .ed-row input[type='color'] { width: 24px; height: 20px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-2); cursor: pointer; }
 .ed-row input[type='text'], .ed-row input:not([type]) {
   width: 82px; height: 22px; padding: 0 5px; border: 1px solid var(--border); border-radius: 5px;
-  background: var(--bg-2); color: var(--text-0); font-size: 10px; font-variant-numeric: tabular-nums;
+  background: var(--bg-2); color: var(--text-0); font-size: var(--text-micro); font-variant-numeric: tabular-nums;
 }
 .ed-row select {
   height: 24px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-2);
-  color: var(--text-0); font-size: 10px;
+  color: var(--text-0); font-size: var(--text-micro);
 }
-.ed-check { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-2); cursor: pointer; }
+.ed-check { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-micro); color: var(--text-2); cursor: pointer; }
 .ed-check input { accent-color: var(--accent); }
 .ed-nineGrid {
   display: grid; grid-template-columns: repeat(3, 26px); grid-auto-rows: 18px; gap: 4px; width: fit-content;
@@ -447,29 +447,29 @@ function onEndInput(event) {
   width: 100%; min-height: 44px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px;
   background: var(--bg-2); color: var(--text-0); font-size: 11px; line-height: 1.5; resize: vertical;
 }
-.ed-insp-field { display: flex; flex-direction: column; gap: 3px; font-size: 9px; color: var(--text-3); }
+.ed-insp-field { display: flex; flex-direction: column; gap: 3px; font-size: var(--text-micro); color: var(--text-3); }
 .ed-insp-field input[type='range'] { width: 100%; accent-color: var(--accent); }
 .ed-insp-field input[type='number'] {
   width: 100%; height: 26px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg-2); color: var(--text-0); font-size: 10px;
+  background: var(--bg-2); color: var(--text-0); font-size: var(--text-micro);
 }
-.ed-insp-text { margin: 0; font-size: 10px; color: var(--text-2); line-height: 1.5; }
-.ed-insp-note p { margin: 0; font-size: 10px; color: var(--text-3); line-height: 1.5; }
-.ed-insp-warn { margin: 0; font-size: 10px; color: var(--warning); line-height: 1.5; }
+.ed-insp-text { margin: 0; font-size: var(--text-micro); color: var(--text-2); line-height: 1.5; }
+.ed-insp-note p { margin: 0; font-size: var(--text-micro); color: var(--text-3); line-height: 1.5; }
+.ed-insp-warn { margin: 0; font-size: var(--text-micro); color: var(--warning); line-height: 1.5; }
 .ed-insp-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .ed-insp-actions button.is-danger { color: var(--action-danger); border-color: color-mix(in srgb, var(--action-danger) 40%, var(--border)); }
 .ed-insp-actions button.is-muted { color: var(--text-2); }
 .ed-insp-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .ed-insp-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 8px; color: var(--text-3); }
-.ed-insp-empty p { margin: 0; font-size: 10px; }
+.ed-insp-empty p { margin: 0; font-size: var(--text-micro); }
 .ed-insp-hashes { display: flex; flex-direction: column; gap: 3px; margin: 0; }
 .ed-insp-hashes div { display: flex; justify-content: space-between; gap: 8px; }
-.ed-insp-hashes dt { flex: 0 0 auto; font-size: 9px; color: var(--text-3); }
+.ed-insp-hashes dt { flex: 0 0 auto; font-size: var(--text-micro); color: var(--text-3); }
 .ed-insp-hashes dd {
   margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: ui-monospace, SFMono-Regular, monospace; font-size: 9px; color: var(--text-2);
+  font-family: ui-monospace, SFMono-Regular, monospace; font-size: var(--text-micro); color: var(--text-2);
 }
 .ed-insp-warnings { margin: 0; padding-left: 14px; display: flex; flex-direction: column; gap: 4px; }
-.ed-insp-warnings li { font-size: 9px; color: var(--text-2); line-height: 1.4; }
+.ed-insp-warnings li { font-size: var(--text-micro); color: var(--text-2); line-height: 1.4; }
 .ed-insp-warnings b { color: var(--warning); font-weight: 600; }
 </style>

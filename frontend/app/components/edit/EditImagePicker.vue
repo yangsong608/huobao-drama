@@ -135,7 +135,7 @@ watch(() => props.open, (value) => {
 }
 .ed-img-cell span {
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 10px; color: var(--text-2);
+  font-size: var(--text-micro); color: var(--text-2);
 }
 .ed-empty { margin: 0; padding: 18px 0; text-align: center; font-size: 11px; color: var(--text-3); }
 </style>

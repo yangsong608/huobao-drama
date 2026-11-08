@@ -221,7 +221,7 @@ defineExpose({ seek, sync: seek, play, pause, video: videoRef })
 .ed-preview-badge {
   position: absolute; left: 10px; top: 10px; max-width: 60%; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; padding: 3px 8px; border-radius: 999px;
-  background: rgba(0, 0, 0, .58); color: #fff; font-size: 10px; pointer-events: none;
+  background: rgba(0, 0, 0, .58); color: #fff; font-size: var(--text-micro); pointer-events: none;
 }
 .ed-transport {
   flex: 0 0 auto; height: 38px; display: flex; align-items: center; gap: 8px;
@@ -236,8 +236,8 @@ defineExpose({ seek, sync: seek, play, pause, video: videoRef })
 .ed-clock b { color: var(--text-0); font-variant-numeric: tabular-nums; }
 .ed-clock i { font-style: normal; color: var(--text-3); }
 .ed-scrub { flex: 1; min-width: 80px; accent-color: var(--accent); }
-.ed-meta { font-size: 10px; color: var(--text-3); white-space: nowrap; }
-.ed-audio { font-size: 10px; color: var(--text-2); white-space: nowrap; }
+.ed-meta { font-size: var(--text-micro); color: var(--text-3); white-space: nowrap; }
+.ed-audio { font-size: var(--text-micro); color: var(--text-2); white-space: nowrap; }
 @media (max-width: 900px) {
   .ed-audio { display: none; }
 }

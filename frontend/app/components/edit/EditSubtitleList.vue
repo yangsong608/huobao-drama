@@ -90,10 +90,10 @@ watch(() => props.open, (value) => {
 .ed-sub-list li:hover { background: var(--bg-hover); }
 .ed-sub-list li.is-selected { background: var(--accent-bg); }
 .ed-sub-list li.is-empty { color: var(--text-3); cursor: default; }
-.ed-sub-time { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--text-3); font-size: 10px; }
+.ed-sub-time { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--text-3); font-size: var(--text-micro); }
 .ed-sub-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ed-sub-role { flex: 0 0 auto; font-size: 9px; color: var(--text-3); }
-.ed-sub-follow { flex: 0 0 auto; font-size: 9px; color: var(--accent-text); }
+.ed-sub-role { flex: 0 0 auto; font-size: var(--text-micro); color: var(--text-3); }
+.ed-sub-follow { flex: 0 0 auto; font-size: var(--text-micro); color: var(--accent-text); }
 .ed-sub-list footer { padding: 10px 12px; border-top: 1px solid var(--border); }
 .ed-sub-list footer button {
   width: 100%; height: 28px; border: 1px solid var(--border); border-radius: 7px;
