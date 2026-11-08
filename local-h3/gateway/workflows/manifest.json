@@ -25,6 +25,18 @@
         "steps": 8
       }
     },
+    "mode_quality_presets": {
+      "r2v": {
+        "preview": {
+          "lora": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+          "steps": 4
+        },
+        "final": {
+          "lora": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+          "steps": 4
+        }
+      }
+    },
     "default_quality": "preview",
     "default_cfg": 1.0,
     "cfg_range": [0.5, 5.0],

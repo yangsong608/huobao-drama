@@ -15,7 +15,8 @@ after(async () => { await fs.rm(root, { recursive: true, force: true }) })
 
 const TRANSITION_COLUMNS = [
   'id', 'episode_id', 'drama_id', 'from_storyboard_id', 'to_storyboard_id',
-  'from_video_url', 'to_video_url', 'first_frame_url', 'last_frame_url', 'source_hash',
+  'from_video_url', 'to_video_url', 'first_frame_url', 'last_frame_url',
+  'first_frame_upload_url', 'last_frame_upload_url', 'reference_image_urls', 'source_hash',
   'prompt', 'prompt_source', 'provider', 'model', 'config_id', 'config_base_url',
   'duration_requested', 'duration_effective', 'duration_actual', 'audio_mode',
   'status', 'video_url', 'sys_task_id', 'error_msg', 'enabled',
@@ -130,6 +131,76 @@ test('旧库的过渡表补齐 prompt_source，历史提示词保持原样', () 
   assert.equal(row.prompt, '旧版文字提示词')
   assert.equal(row.prompt_source, null)
   assert.equal(row.status, 'completed')
+  db.close()
+})
+
+test('旧库过渡表补齐参考图三列，历史数据保持原样', () => {
+  const db = new Database(path.join(root, 'legacy-reference-images.sqlite3'))
+  db.exec(`
+    CREATE TABLE video_transitions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      episode_id INTEGER NOT NULL,
+      drama_id INTEGER,
+      from_storyboard_id INTEGER NOT NULL,
+      to_storyboard_id INTEGER NOT NULL,
+      from_video_url TEXT,
+      to_video_url TEXT,
+      first_frame_url TEXT,
+      last_frame_url TEXT,
+      source_hash TEXT,
+      prompt TEXT,
+      provider TEXT,
+      model TEXT,
+      config_id INTEGER,
+      config_base_url TEXT,
+      duration_requested REAL,
+      duration_effective REAL,
+      duration_actual REAL,
+      audio_mode TEXT DEFAULT 'ambient',
+      status TEXT DEFAULT 'pending',
+      video_url TEXT,
+      sys_task_id INTEGER,
+      error_msg TEXT,
+      enabled INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    INSERT INTO video_transitions
+      (episode_id, from_storyboard_id, to_storyboard_id, first_frame_url, last_frame_url, prompt, status, created_at, updated_at)
+      VALUES (1, 2, 3, '/static/legacy-first.jpg', '/static/legacy-last.jpg', '旧版文字提示词', 'completed', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+  `)
+
+  initSqliteSchema(db)
+
+  const columns = (db.prepare('PRAGMA table_info(video_transitions)').all() as { name: string }[]).map(c => c.name)
+  assert.ok(columns.includes('first_frame_upload_url'))
+  assert.ok(columns.includes('last_frame_upload_url'))
+  assert.ok(columns.includes('reference_image_urls'))
+
+  const row = db.prepare(`
+    SELECT first_frame_url, last_frame_url, first_frame_upload_url, last_frame_upload_url, reference_image_urls, prompt, status
+    FROM video_transitions WHERE id = 1
+  `).get() as any
+  assert.equal(row.first_frame_url, '/static/legacy-first.jpg')
+  assert.equal(row.last_frame_url, '/static/legacy-last.jpg')
+  assert.equal(row.first_frame_upload_url, null)
+  assert.equal(row.last_frame_upload_url, null)
+  assert.equal(row.reference_image_urls, null)
+  assert.equal(row.prompt, '旧版文字提示词')
+  assert.equal(row.status, 'completed')
+
+  db.prepare(`
+    INSERT INTO video_transitions
+      (episode_id, from_storyboard_id, to_storyboard_id, reference_image_urls, created_at, updated_at)
+      VALUES (1, 4, 5, '["/static/uploads/ref-a.jpg","/static/uploads/ref-b.jpg"]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
+  `).run()
+  const appended = db.prepare('SELECT reference_image_urls FROM video_transitions WHERE id = 2').get() as any
+  assert.deepEqual(JSON.parse(appended.reference_image_urls), ['/static/uploads/ref-a.jpg', '/static/uploads/ref-b.jpg'])
+
+  initSqliteSchema(db)
+  const again = (db.prepare('PRAGMA table_info(video_transitions)').all() as { name: string }[]).map(c => c.name)
+  assert.ok(again.includes('reference_image_urls'))
   db.close()
 })
 

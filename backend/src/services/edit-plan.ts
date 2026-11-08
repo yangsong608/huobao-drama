@@ -13,7 +13,7 @@ export const MAX_FADE_MS = 1500
 /** 工程级片头/片尾音频淡入淡出上限 */
 export const MAX_PROJECT_FADE_MS = 3000
 export const MIN_TRANSITION_MS = 100
-export const MAX_TRANSITION_MS = 1500
+export const MAX_TRANSITION_MS = 2000
 export const MAX_GAP_MS = 300_000
 export const MAX_TAIL_GAP_MS = 60_000
 /** 图片片段可拉长的最长时长（图片可无限循环渲染） */
@@ -506,7 +506,7 @@ export function validateEditPlan(plan: EditPlanV1): EditIssue[] {
     usedBoundaries.add(to)
     if (plan.clips[to].gapBeforeMs > 0) warning('TRANSITION_GAP', path, '有间隙的交界不允许转场，保存时会移除')
     if (transition.durationMs < MIN_TRANSITION_MS || transition.durationMs > MAX_TRANSITION_MS) {
-      warning('TRANSITION_RANGE', path, '转场时长必须在 100–1500ms')
+      warning('TRANSITION_RANGE', path, '转场时长必须在 100–2000ms')
     }
     const spare = Math.min(clipContentDurationMs(plan.clips[from]), clipContentDurationMs(plan.clips[to]))
       - 1000 / Math.max(1, plan.project.fps)

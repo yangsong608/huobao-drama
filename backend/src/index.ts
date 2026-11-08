@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url'
 import dramas from './routes/dramas.js'
 import episodes from './routes/episodes.js'
 import storyboards from './routes/storyboards.js'
+import storyboardFrameAssets from './routes/storyboardFrameAssets.js'
 import scenes from './routes/scenes.js'
 import characters from './routes/characters.js'
 import tasks from './routes/tasks.js'
@@ -24,6 +25,7 @@ import settings from './routes/settings.js'
 import storage from './routes/storage.js'
 import mcpRoute from './routes/mcp.js'
 import pipelineRules from './routes/pipelineRules.js'
+import breakdownMethods from './routes/breakdownMethods.js'
 import serverUpdate from './routes/serverUpdate.js'
 import projectFiles from './routes/project-files.js'
 import voices, { characterVoices } from './routes/voices.js'
@@ -50,7 +52,9 @@ import { initMcp, setMcpMainApp } from './services/mcp.js'
 import { markInterruptedAutomations, setAutomationApp } from './services/automation.js'
 import { markInterruptedNovelJobs } from './services/novel-job-runner.js'
 import { migrateUploadedVoices } from './services/voice-profile.js'
+import { ensureBreakdownMethodsSeeded } from './services/breakdown-methods.js'
 import { startQueueWorker } from './services/queue-worker.js'
+import { logTaskWarn } from './utils/task-logger.js'
 import { refreshFfmpegConfig } from './utils/ffmpeg.js'
 import { DATA_ROOT } from './utils/paths.js'
 
@@ -79,6 +83,8 @@ const api = new Hono()
 api.route('/dramas', dramas)
 api.route('/episodes', episodes)
 api.route('/storyboards', storyboards)
+// 分镜末帧资产：/episodes/:id/frame-assets、/storyboards/:id/frame-assets/last、/storyboards/:id/first-frame
+api.route('/', storyboardFrameAssets)
 api.route('/scenes', scenes)
 api.route('/characters', characters)
 api.route('/tasks', tasks)
@@ -96,6 +102,7 @@ api.route('/settings', settings)
 api.route('/server-update', serverUpdate)
 api.route('/mcp', mcpRoute)
 api.route('/pipeline-rules', pipelineRules)
+api.route('/breakdown-methods', breakdownMethods)
 // V2 新增路由：M0 先按契约挂载（501/503），后续里程碑逐项替换实现
 api.route('/voices', voices)
 api.route('/tts', ttsRoute)
@@ -168,6 +175,12 @@ await markInterruptedAutomations()
 markInterruptedNovelJobs()
 // V1 已上传的角色音色迁移为 character_voices（幂等，失败不影响启动）
 migrateUploadedVoices()
+// 分镜拆分方案：内置五条按 key 幂等补齐，已有编辑不覆盖；失败不影响启动
+try {
+  await ensureBreakdownMethodsSeeded()
+} catch (error) {
+  logTaskWarn('BreakdownMethod', '内置拆分方案播种失败，按标准规范运行', { error: String(error) })
+}
 
 // 应用设置中的自定义 FFmpeg 目录（db 已注入读取器），启动即生效
 refreshFfmpegConfig()

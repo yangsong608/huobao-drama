@@ -33,6 +33,12 @@
           "input": "frame_rate",
           "type": "number"
         },
+        "ref_max_size": {
+          "node": "6",
+          "input": "ref_max_size",
+          "type": "integer",
+          "optional": true
+        },
         "steps": {
           "node": "6",
           "input": "steps",
@@ -139,6 +145,7 @@
         "width": 1024,
         "height": 576,
         "frame_rate": 24.0,
+        "ref_max_size": 1024,
         "seed": 20275001
       }
     },

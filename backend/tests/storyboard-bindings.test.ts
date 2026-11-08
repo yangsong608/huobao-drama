@@ -132,6 +132,40 @@ test('创建分镜同样接受项目素材并补关联', async () => {
   assert.deepEqual(chars.body.data.map((c: any) => c.id), [char])
 })
 
+test('创建分镜未传编号时自动取当前集最大编号加一', async () => {
+  const dramaId = await insertDrama()
+  const ep = await insertEpisode(dramaId, 1)
+  const otherEp = await insertEpisode(dramaId, 2)
+  await insertStoryboard(ep, 3)
+  await insertStoryboard(ep, 7)
+  await insertStoryboard(otherEp, 12)
+
+  const created = await request('POST', '/api/v1/storyboards', { episode_id: ep, title: '新镜头' })
+  assert.equal(created.status, 201)
+  assert.equal(created.body.data.storyboard_number, 8)
+
+  const zero = await request('POST', '/api/v1/storyboards', { episode_id: ep, storyboard_number: 0 })
+  assert.equal(zero.status, 201)
+  assert.equal(zero.body.data.storyboard_number, 9)
+})
+
+test('空集创建分镜未传编号时从 1 开始', async () => {
+  const dramaId = await insertDrama()
+  const ep = await insertEpisode(dramaId, 1)
+  const created = await request('POST', '/api/v1/storyboards', { episode_id: ep })
+  assert.equal(created.status, 201)
+  assert.equal(created.body.data.storyboard_number, 1)
+})
+
+test('剧集不存在时创建分镜返回 400 且不写入数据', async () => {
+  const before = await db.select().from(schema.storyboards)
+  const res = await request('POST', '/api/v1/storyboards', { episode_id: 999999, title: '幽灵镜头' })
+  assert.equal(res.status, 400)
+  assert.match(res.body.message, /剧集不存在/)
+  const afterRows = await db.select().from(schema.storyboards)
+  assert.equal(afterRows.length, before.length)
+})
+
 test('跨项目素材被拒绝，返回 400', async () => {
   const dramaA = await insertDrama()
   const dramaB = await insertDrama()

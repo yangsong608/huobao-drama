@@ -76,6 +76,14 @@ export const episodeAPI = {
   comfyRun: (id: number, opts?: { configId?: number; forceNew?: boolean }) => api.post(`/episodes/${id}/comfyui/run`, { config_id: opts?.configId, force_new: opts?.forceNew === true }),
 }
 
+export const frameAssetAPI = {
+  list: (episodeId: number) => api.get(`/episodes/${episodeId}/frame-assets`),
+  extractLast: (storyboardId: number) => api.post(`/storyboards/${storyboardId}/frame-assets/last`),
+  setFirstFrame: (storyboardId: number, assetId: number | null) =>
+    api.post(`/storyboards/${storyboardId}/first-frame`, { asset_id: assetId }),
+  del: (episodeId: number, assetId: number) => api.del(`/episodes/${episodeId}/frame-assets/${assetId}`),
+}
+
 export const editAPI = {
   get: (episodeId: number, projectId?: number) =>
     api.get(`/episodes/${episodeId}/edit${projectId ? `?project_id=${projectId}` : ''}`),
@@ -164,6 +172,17 @@ export const pipelineRuleAPI = {
   list: () => api.get('/pipeline-rules'),
   save: (key: string, rule: string) => api.put(`/pipeline-rules/${key}`, { rule }),
   reset: (key: string) => api.post(`/pipeline-rules/${key}/reset`),
+}
+
+// 分镜拆分方案（设置页「分镜拆分」与视频页「拆分方式」）
+export const breakdownMethodAPI = {
+  list: () => api.get('/breakdown-methods'),
+  get: (key: string) => api.get(`/breakdown-methods/${key}`),
+  create: (data: any) => api.post('/breakdown-methods', data),
+  update: (key: string, data: any) => api.put(`/breakdown-methods/${key}`, data),
+  del: (key: string) => api.del(`/breakdown-methods/${key}`),
+  reset: (key: string) => api.post(`/breakdown-methods/${key}/reset`),
+  duplicate: (key: string) => api.post(`/breakdown-methods/${key}/duplicate`),
 }
 
 export const storyboardAPI = {
@@ -1312,6 +1331,7 @@ export const transitionAPI = {
   retry: (id: number, payload: Record<string, any> = {}) => api.post<any>(`/merge/transitions/${id}/retry`, payload),
   analyze: (id: number, payload: Record<string, any> = {}) => api.post<any>(`/merge/transitions/${id}/analyze`, payload),
   savePrompt: (id: number, prompt: string) => api.put<any>(`/merge/transitions/${id}/prompt`, { prompt }),
+  saveReferenceImages: (id: number, payload: Record<string, any>) => api.put<any>(`/merge/transitions/${id}/reference-images`, payload),
   skip: (id: number) => api.post<any>(`/merge/transitions/${id}/skip`, {}),
   del: (id: number) => api.del(`/merge/transitions/${id}`),
 }

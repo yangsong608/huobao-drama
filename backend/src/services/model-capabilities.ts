@@ -30,6 +30,8 @@ export interface VideoModelCapabilities {
   nativeAudio: boolean
   /** 是否同时接受首帧与尾帧（AI 过渡片段的硬门槛） */
   firstLastFrame: boolean
+  /** 首尾帧能否与追加参考图同请求混用（AI 过渡片段的参考图门槛；false 时自动降级为仅槽位） */
+  firstLastFrameWithReferences: boolean
 }
 
 export interface VideoCapabilityOptions {
@@ -54,7 +56,7 @@ function build(
   family: string,
   resolutions: VideoResolutionTier[],
   vendorResolutions: Partial<Record<VideoResolutionTier, string>>,
-  options: Partial<Pick<VideoModelCapabilities, 'minDuration' | 'maxDuration' | 'maxDurationByResolution' | 'referenceImages' | 'referenceVideos' | 'referenceAudios' | 'nativeAudio' | 'firstLastFrame'>> = {},
+  options: Partial<Pick<VideoModelCapabilities, 'minDuration' | 'maxDuration' | 'maxDurationByResolution' | 'referenceImages' | 'referenceVideos' | 'referenceAudios' | 'nativeAudio' | 'firstLastFrame' | 'firstLastFrameWithReferences'>> = {},
 ): VideoModelCapabilities {
   return {
     family,
@@ -68,6 +70,7 @@ function build(
     referenceAudios: options.referenceAudios ?? 0,
     nativeAudio: options.nativeAudio ?? false,
     firstLastFrame: options.firstLastFrame ?? false,
+    firstLastFrameWithReferences: options.firstLastFrameWithReferences ?? false,
   }
 }
 
@@ -98,6 +101,7 @@ function minimaxCapability(model: string, options: VideoCapabilityOptions = {}):
   if (lower.includes('highspeed')) {
     return build('h3-highspeed', ['720p'], { '720p': '768P' }, {
       minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true, firstLastFrame: true,
+      firstLastFrameWithReferences: true,
     })
   }
   // 不能直接 includes('max')：MiniMax 品牌名会误命中 H3-Max
@@ -106,6 +110,7 @@ function minimaxCapability(model: string, options: VideoCapabilityOptions = {}):
   if (isLiteOrMax) {
     return build('h3-lite', ['480p', '720p'], { '480p': '480P', '720p': '768P' }, {
       minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true, firstLastFrame: true,
+      firstLastFrameWithReferences: true,
     })
   }
   // 本地 shim 有完整 480P 画布，标准 H3 在本地也可选 480p；云端仍只认 768P/2K
@@ -115,10 +120,12 @@ function minimaxCapability(model: string, options: VideoCapabilityOptions = {}):
     return build('h3', ['480p', '720p'], { '480p': '480P', '720p': '768P' }, {
       minDuration: 4, maxDuration: 15, maxDurationByResolution: { '720p': 8 },
       referenceImages: 9, referenceVideos: 0, referenceAudios: 0, nativeAudio: true, firstLastFrame: true,
+      firstLastFrameWithReferences: true,
     })
   }
   return build('h3', ['720p', '1080p'], { '720p': '768P', '1080p': '2K' }, {
     minDuration: 4, maxDuration: 15, referenceImages: 9, referenceVideos: 3, referenceAudios: 3, nativeAudio: true, firstLastFrame: true,
+    firstLastFrameWithReferences: true,
   })
 }
 

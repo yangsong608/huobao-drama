@@ -16,7 +16,7 @@
         >{{ t('edit.insertMenu') }} ▾</button>
         <button
           class="ed-tool is-text" type="button" :disabled="readonly"
-          @click="openMenuFromButton($event, transitionMenuItems())"
+          @click="openTransitionPicker()"
         >{{ t('edit.transition') }} ▾</button>
         <button
           class="ed-tool is-text" type="button" :disabled="readonly"
@@ -176,7 +176,7 @@
             class="ed-tl-transition"
             :style="{ left: `${transition.left}px` }"
             :title="`${t('edit.transition')} · ${t(transitionLabelKey(transition))}`"
-            @click.stop="openTransitionMenu($event, transition)"
+            @click.stop="emit('open-transition-picker', { fromClipId: transition.from_clip_id, toClipId: transition.to_clip_id })"
           >
             <span>⇄</span>
             <button
@@ -228,7 +228,7 @@ import ContextMenu from '~/components/ContextMenu.vue'
 import EditAudioWave from './EditAudioWave.vue'
 import { formatClock } from '~/utils/edit-plan'
 import { formatPrecise } from '~/utils/edit-timecode'
-import { DEFAULT_TRANSITION_MS, TRANSITION_TYPES } from '~/utils/edit-transition-types'
+import { TRANSITION_TYPES } from '~/utils/edit-transition-types'
 import { activeClipIndex } from '~/utils/edit-layout'
 import { collectSnapPoints, snapTime } from '~/utils/edit-snap'
 
@@ -246,7 +246,7 @@ const props = defineProps({
 })
 const emit = defineEmits([
   'seek', 'select-clip', 'select-cue', 'move-clip', 'trim-clip',
-  'split-clip', 'move-cue', 'remove-transition', 'apply-transition',
+  'split-clip', 'move-cue', 'remove-transition', 'open-transition-picker',
   'frame-op', 'cue-op', 'toggle-subtitles', 'fit-view', 'open-subtitles', 'remove-clip',
   'duplicate-clip', 'add-marker', 'delete-marker', 'close-gaps',
   'select-overlay', 'move-overlay', 'trim-overlay', 'remove-overlay', 'overlay-insert',
@@ -687,7 +687,7 @@ function openClipMenu(event, view) {
   openMenuAt(event, frameMenuItems(view))
 }
 
-// 转场菜单：工具栏按选中片段/播放头找交界，时间线转场块按自身两端点定位
+// 转场库：工具栏按选中片段/播放头找交界，时间线转场块按自身两端点定位（emit 给工作台）
 function planTransition(fromClipId, toClipId) {
   return props.plan.transitions.find(
     (item) => item.fromClipId === fromClipId && item.toClipId === toClipId,
@@ -700,44 +700,11 @@ function transitionLabelKey(transition) {
     ?? 'edit.transitionDissolve'
 }
 
-function transitionMenuItems(fromClipId, toClipId) {
-  const from = fromClipId || props.selectedClipId || clipIdAt(props.currentMs)
+function openTransitionPicker() {
+  const from = props.selectedClipId || clipIdAt(props.currentMs)
   const index = props.plan.clips.findIndex((clip) => clip.id === from)
-  const to = toClipId || (index >= 0 ? props.plan.clips[index + 1]?.id ?? '' : '')
-  if (!from || !to) {
-    return [{ key: 'need-next', label: t('edit.transitionNeedNext'), disabled: true }]
-  }
-  if (Number(props.plan.clips[index + 1]?.gapBeforeMs) > 0) {
-    return [{ key: 'gap', label: t('edit.transitionGapHint'), disabled: true }]
-  }
-  const existing = planTransition(from, to)
-  const items = [
-    {
-      key: 'none',
-      label: t('edit.transitionNone'),
-      disabled: !existing,
-      action: () => existing && emit('remove-transition', existing.id),
-    },
-    { separator: true, key: 'sep', label: '' },
-  ]
-  for (const option of TRANSITION_TYPES) {
-    items.push({
-      key: option.value,
-      label: t(option.labelKey),
-      action: () => emit('apply-transition', {
-        fromClipId: from,
-        toClipId: to,
-        type: option.value,
-        durationMs: existing?.durationMs ?? DEFAULT_TRANSITION_MS,
-      }),
-    })
-  }
-  return items
-}
-
-function openTransitionMenu(event, transition) {
-  if (props.readonly) return
-  openMenuAt(event, transitionMenuItems(transition.from_clip_id, transition.to_clip_id))
+  const to = index >= 0 ? props.plan.clips[index + 1]?.id ?? '' : ''
+  emit('open-transition-picker', { fromClipId: from || '', toClipId: to || '' })
 }
 
 function subtitleMenuItems() {

@@ -64,6 +64,21 @@ class SeedCase(unittest.TestCase):
         self.assertEqual(item["input_map"]["timeline_data"]["type"], "json")
         self.assertEqual(item["input_map"]["timeline_data"]["node"], "6")
 
+    def test_timeline_seed_uses_ref2va_for_reference_mode(self):
+        item = {i["slug"]: i for i in seed.load_seeds(SEED_DIR)}["e12-timeline"]
+        workflow = item["workflow"]
+        self.assertEqual(
+            workflow["1"]["inputs"]["unet_name"],
+            "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+        )
+        self.assertIn("ref2v_turbo_4step", workflow["2"]["inputs"]["lora_name"])
+        self.assertNotIn("fl2v_turbo", workflow["2"]["inputs"]["lora_name"])
+        self.assertTrue(workflow["6"]["inputs"]["task_type"].startswith("r2v"))
+        self.assertEqual(workflow["6"]["inputs"]["steps"], 4)
+        self.assertIn("ref_max_size", item["input_map"])
+        self.assertEqual(item["input_map"]["ref_max_size"]["node"], "6")
+        self.assertEqual(item["input_map"]["ref_max_size"]["input"], "ref_max_size")
+
     def test_audio_seed_targets_seconds(self):
         item = {i["slug"]: i for i in seed.load_seeds(SEED_DIR)}["stable-audio"]
         workflow = item["workflow"]

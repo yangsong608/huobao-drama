@@ -24,6 +24,7 @@ const {
   skipTransition,
   analyzeTransitionPrompt,
   saveTransitionPrompt,
+  saveTransitionReferenceImages,
 } = await import('../src/services/transition-service.ts')
 
 const ts = '2026-11-05T00:00:00.000Z'
@@ -785,8 +786,7 @@ test('delete 待生成记录也拒绝删除，避免任务完成后留下孤儿�
     .where(eq(schema.videoTransitions.id, row.id))).length, 1)
 })
 
-test('delete 删除过渡记录与本地文件，运行中拒绝删除', async () => {
-  const configId = await insertBaseConfig()
+test('delete 删除过渡记录与本地文件，运行中拒绝删除', async () => {  const configId = await insertBaseConfig()
   const { dramaId, episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
   const { deps } = fakeDeps()
   await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
@@ -827,4 +827,197 @@ test('delete 删除过渡记录与本地文件，运行中拒绝删除', async (
   await assert.rejects(deleteTransition(processing.id), /运行中/)
   assert.equal((await db.select().from(schema.videoTransitions)
     .where(eq(schema.videoTransitions.id, processing.id))).length, 1)
+})
+
+const UPLOAD_FIRST = 'static/uploads/transition-upload-first.jpg'
+const UPLOAD_LAST = 'static/uploads/transition-upload-last.jpg'
+const UPLOAD_REF_A = 'static/uploads/transition-ref-a.jpg'
+const UPLOAD_REF_B = 'static/uploads/transition-ref-b.jpg'
+
+test('retry 把上传槽位图作为生效首尾帧并把追加参考图传给提交', async () => {
+  const configId = await insertBaseConfig({
+    provider: 'minimax',
+    model: 'MiniMax-H3',
+    baseUrl: 'http://127.0.0.1:8190',
+  })
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, analyzeCalls, deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  const extractedFirst = row.firstFrameUrl
+  const extractedLast = row.lastFrameUrl
+  await db.update(schema.videoTransitions).set({
+    status: 'failed',
+    firstFrameUploadUrl: UPLOAD_FIRST,
+    lastFrameUploadUrl: UPLOAD_LAST,
+    referenceImageUrls: JSON.stringify([UPLOAD_REF_A, UPLOAD_REF_B]),
+  }).where(eq(schema.videoTransitions.id, row.id))
+
+  await retryTransition(row.id, {}, deps)
+
+  assert.equal(submissions.length, 2)
+  // 生效帧 = 上传槽位优先，追加参考图随首尾帧一起提交
+  assert.equal(submissions[1].firstFrameUrl, UPLOAD_FIRST)
+  assert.equal(submissions[1].lastFrameUrl, UPLOAD_LAST)
+  assert.deepEqual(submissions[1].referenceImageUrls, [UPLOAD_REF_A, UPLOAD_REF_B])
+  // 提示词分析同样以生效槽位图与追加参考图为依据（生效解析在 analyze 内部完成）
+  assert.equal(analyzeCalls[1].firstFrameUploadPath, UPLOAD_FIRST)
+  assert.equal(analyzeCalls[1].lastFrameUploadPath, UPLOAD_LAST)
+  assert.deepEqual(analyzeCalls[1].referenceImagePaths, [UPLOAD_REF_A, UPLOAD_REF_B])
+  // 库里首尾帧保留镜头抽帧缓存，恢复默认就是清空上传槽位
+  const [retried] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(retried.firstFrameUrl, extractedFirst)
+  assert.equal(retried.lastFrameUrl, extractedLast)
+  assert.equal(retried.firstFrameUploadUrl, UPLOAD_FIRST)
+  assert.deepEqual(JSON.parse(retried.referenceImageUrls || '[]'), [UPLOAD_REF_A, UPLOAD_REF_B])
+})
+
+test('Wan 3.0 等不支持混用的模型自动降级：保留槽位、丢弃追加参考图', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, analyzeCalls, deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  await db.update(schema.videoTransitions).set({
+    status: 'failed',
+    firstFrameUploadUrl: UPLOAD_FIRST,
+    lastFrameUploadUrl: UPLOAD_LAST,
+    referenceImageUrls: JSON.stringify([UPLOAD_REF_A, UPLOAD_REF_B]),
+  }).where(eq(schema.videoTransitions.id, row.id))
+
+  await retryTransition(row.id, {}, deps)
+
+  assert.equal(submissions.length, 2)
+  // 槽位上传图替换首尾帧输入，保证衔接语义不丢
+  assert.equal(submissions[1].firstFrameUrl, UPLOAD_FIRST)
+  assert.equal(submissions[1].lastFrameUrl, UPLOAD_LAST)
+  assert.equal(submissions[1].referenceImageUrls, undefined)
+  // 参考图记录保留，换回支持的模型后重新生成即可生效
+  const [retried] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(retried.firstFrameUploadUrl, UPLOAD_FIRST)
+  assert.deepEqual(JSON.parse(retried.referenceImageUrls || '[]'), [UPLOAD_REF_A, UPLOAD_REF_B])
+  // 分析不受生成端混用限制影响：参考图仍是提示词的有效依据
+  assert.deepEqual(analyzeCalls[1].referenceImagePaths, [UPLOAD_REF_A, UPLOAD_REF_B])
+})
+
+test('AI 分析入口同样使用生效槽位图与追加参考图', async () => {
+  const configId = await insertBaseConfig()
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { analyzeCalls, deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  await saveTransitionReferenceImages(row.id, {
+    firstFrameUploadUrl: UPLOAD_FIRST,
+    lastFrameUploadUrl: UPLOAD_LAST,
+    referenceImageUrls: [UPLOAD_REF_A, UPLOAD_REF_B],
+  })
+  const before = analyzeCalls.length
+
+  await analyzeTransitionPrompt(row.id, {}, deps)
+
+  assert.equal(analyzeCalls.length, before + 1)
+  assert.equal(analyzeCalls.at(-1).firstFrameUploadPath, UPLOAD_FIRST)
+  assert.equal(analyzeCalls.at(-1).lastFrameUploadPath, UPLOAD_LAST)
+  assert.deepEqual(analyzeCalls.at(-1).referenceImagePaths, [UPLOAD_REF_A, UPLOAD_REF_B])
+})
+
+test('参考图变化使已完成的旧片段过期并重新生成，参考图不变则继续复用', async () => {
+  const configId = await insertBaseConfig({
+    provider: 'minimax',
+    model: 'MiniMax-H3',
+    baseUrl: 'http://127.0.0.1:8190',
+  })
+  const { dramaId, episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { submissions, deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  const videoRel = `static/projects/${dramaId}/transitions/transition-${row.id}.mp4`
+  fsSync.mkdirSync(path.dirname(path.join(root, videoRel)), { recursive: true })
+  fsSync.writeFileSync(path.join(root, videoRel), Buffer.alloc(2048))
+  await db.update(schema.videoTransitions).set({ status: 'completed', videoUrl: videoRel })
+    .where(eq(schema.videoTransitions.id, row.id))
+
+  await saveTransitionReferenceImages(row.id, { referenceImageUrls: [UPLOAD_REF_A] })
+  // 落库的 hash 保持旧值，过期由比较时的公式（纳入参考图）判定
+  const [stale] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(stale.sourceHash, row.sourceHash)
+  const staleView = await listTransitions({ episodeId, storyboardIds })
+  assert.equal(staleView.boundaries[0].stale, true)
+
+  const regenerate = await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  assert.equal(regenerate.created, 1)
+  assert.equal(regenerate.reused, 0)
+  assert.equal(submissions.length, 2)
+  assert.deepEqual(submissions[1].referenceImageUrls, [UPLOAD_REF_A])
+  const [regenerated] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, row.id))
+  assert.notEqual(regenerated.sourceHash, row.sourceHash)
+
+  fsSync.writeFileSync(path.join(root, videoRel), Buffer.alloc(4096))
+  await db.update(schema.videoTransitions).set({ status: 'completed', videoUrl: videoRel })
+    .where(eq(schema.videoTransitions.id, row.id))
+  const reuse = await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  assert.equal(reuse.created, 0)
+  assert.equal(reuse.reused, 1)
+})
+
+test('saveTransitionReferenceImages 校验上限、去重并支持清空槽位', async () => {
+  const configId = await insertBaseConfig({
+    provider: 'minimax',
+    model: 'MiniMax-H3',
+    baseUrl: 'http://127.0.0.1:8190',
+  })
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+
+  await saveTransitionReferenceImages(row.id, {
+    firstFrameUploadUrl: ` ${UPLOAD_FIRST} `,
+    lastFrameUploadUrl: UPLOAD_LAST,
+    referenceImageUrls: [' ', UPLOAD_REF_A, UPLOAD_REF_A, UPLOAD_REF_B],
+  })
+  const [saved] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(saved.firstFrameUploadUrl, UPLOAD_FIRST)
+  assert.equal(saved.lastFrameUploadUrl, UPLOAD_LAST)
+  assert.deepEqual(JSON.parse(saved.referenceImageUrls || '[]'), [UPLOAD_REF_A, UPLOAD_REF_B])
+
+  await assert.rejects(
+    saveTransitionReferenceImages(row.id, {
+      referenceImageUrls: Array.from({ length: 10 }, (_, i) => `static/uploads/ref-${i}.jpg`),
+    }),
+    /9/,
+  )
+
+  await saveTransitionReferenceImages(row.id, { firstFrameUploadUrl: null, referenceImageUrls: [] })
+  const [cleared] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, row.id))
+  assert.equal(cleared.firstFrameUploadUrl, null)
+  assert.equal(cleared.lastFrameUploadUrl, UPLOAD_LAST)
+  assert.equal(cleared.referenceImageUrls, null)
+
+  await assert.rejects(saveTransitionReferenceImages(row.id, { firstFrameUploadUrl: '   ' }), /路径/)
+  await assert.rejects(saveTransitionReferenceImages(999999, {}), /不存在/)
+})
+
+test('list 暴露参考图字段与模型混用能力', async () => {
+  const configId = await insertBaseConfig({
+    provider: 'minimax',
+    model: 'MiniMax-H3',
+    baseUrl: 'http://127.0.0.1:8190',
+  })
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: configId })
+  const { deps } = fakeDeps()
+  await prepareTransitions({ episodeId, storyboardIds, duration: 3 }, deps)
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.episodeId, episodeId))
+  await saveTransitionReferenceImages(row.id, {
+    firstFrameUploadUrl: UPLOAD_FIRST,
+    referenceImageUrls: [UPLOAD_REF_A, UPLOAD_REF_B],
+  })
+
+  const view = await listTransitions({ episodeId, storyboardIds })
+  const boundary = view.boundaries[0]
+  assert.equal(boundary.firstFrameUploadUrl, UPLOAD_FIRST)
+  assert.equal(boundary.lastFrameUploadUrl, null)
+  assert.deepEqual(boundary.referenceImageUrls, [UPLOAD_REF_A, UPLOAD_REF_B])
+  assert.equal(view.provider?.reference_images_allowed, true)
+  assert.equal(view.provider?.reference_images_max, 9)
 })

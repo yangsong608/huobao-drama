@@ -336,6 +336,14 @@ def normalize_quality(value, presets, default):
     return quality if quality in presets else default
 
 
+def resolve_video_quality(video, mode, value):
+    presets = dict(video.get("quality_presets") or {})
+    presets.update((video.get("mode_quality_presets") or {}).get(mode) or {})
+    default = (video.get("mode_default_quality") or {}).get(mode) or video.get("default_quality", "preview")
+    quality = normalize_quality(value, presets, default)
+    return quality, presets.get(quality) or {}
+
+
 def normalize_seed(raw):
     try:
         seed = int(raw)
@@ -1117,11 +1125,7 @@ class Gateway:
             self._upload_source(url) for url in (payload.get("refs") or [])[:max_refs] if url
         ]
 
-        quality = normalize_quality(
-            payload.get("quality"), video.get("quality_presets") or {},
-            video.get("default_quality", "preview"),
-        )
-        preset = (video.get("quality_presets") or {}).get(quality) or {}
+        quality, preset = resolve_video_quality(video, mode, payload.get("quality"))
         audio_mode = payload.get("audio_mode") or "native"
         directives = (video.get("audio") or {}).get("directives") or {}
         global_prompts = (video.get("audio") or {}).get("global_prompts") or {}
@@ -1724,14 +1728,11 @@ def make_handler(gateway):
             audio_mode = str(body.get("audio_mode") or "native").strip().lower()
             if audio_mode not in ("native", "ambient", "silent"):
                 audio_mode = "native"
-            quality = normalize_quality(
-                body.get("quality"), video_manifest.get("quality_presets") or {},
-                video_manifest.get("default_quality", "preview"),
-            )
+            mode = "fl2v" if first else ("r2v" if refs else "t2v")
+            quality, _ = resolve_video_quality(video_manifest, mode, body.get("quality"))
             negative = str(body.get("negative_prompt") or "").strip()
             seed = normalize_seed(body.get("seed"))
             cfg = body.get("cfg")
-            mode = "fl2v" if first else ("r2v" if refs else "t2v")
 
             task_id = gateway.enqueue(
                 "video", mode,

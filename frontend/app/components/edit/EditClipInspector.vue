@@ -327,18 +327,21 @@
             @click="$emit('transition-remove')"
           >{{ t('edit.transitionNone') }}</button>
           <button
-            v-for="option in TRANSITION_TYPES"
+            v-for="option in commonTransitionOptions"
             :key="option.value"
             type="button"
             :class="{ 'is-on': boundaryTransition?.type === option.value }"
             :disabled="readonly"
             @click="$emit('transition-set', { type: option.value, durationMs: boundaryTransition?.durationMs ?? DEFAULT_TRANSITION_MS })"
           >{{ t(option.labelKey) }}</button>
+          <button type="button" class="ed-insp-picker-open" :disabled="readonly" @click="$emit('open-transition-picker')">
+            {{ t('edit.transitionPickerOpen') }}
+          </button>
         </div>
         <label v-if="boundaryTransition" class="ed-insp-field">
           <span>{{ t('edit.transitionDuration') }} {{ boundaryTransition.durationMs }}ms</span>
           <input
-            type="range" min="100" max="1500" step="50" :value="boundaryTransition.durationMs" :disabled="readonly"
+            type="range" min="100" max="2000" step="50" :value="boundaryTransition.durationMs" :disabled="readonly"
             @change="$emit('transition-set', { type: boundaryTransition.type, durationMs: Number($event.target.value) })"
           />
         </label>
@@ -565,7 +568,7 @@ import { useI18n } from 'vue-i18n'
 import { MousePointer2, Scissors, Trash2 } from 'lucide-vue-next'
 import { formatClock, SUBTITLE_FONT_WHITELIST, AUDIO_EFFECT_PRESETS, resolveCueAppearance } from '~/utils/edit-plan'
 import { formatPrecise, formatClockMs, parseClockMs, frameDurationMs } from '~/utils/edit-timecode'
-import { DEFAULT_TRANSITION_MS, TRANSITION_TYPES } from '~/utils/edit-transition-types'
+import { DEFAULT_TRANSITION_MS, COMMON_TRANSITION_TYPES, transitionTypeOption } from '~/utils/edit-transition-types'
 import { FILTER_PRESETS } from '~/utils/edit-filter-presets'
 
 const props = defineProps({
@@ -583,7 +586,7 @@ const emit = defineEmits([
   'trim-start', 'trim-end', 'speed', 'gap', 'fades', 'split', 'remove',
   'cue-update', 'cue-apply-all', 'cue-set-default', 'cue-delete', 'cue-split',
   'cue-merge-next', 'cue-align-start', 'cue-align-end', 'cue-follow',
-  'transition-set', 'transition-remove',
+  'transition-set', 'transition-remove', 'open-transition-picker',
   'transform-set', 'filter-set', 'volume-set', 'audio-fades', 'project-audio-fades',
   'pitch-set', 'effect-set',
   'overlay-time', 'overlay-align-start', 'overlay-align-end', 'overlay-transform',
@@ -603,6 +606,11 @@ const boundaryTransition = computed(() => {
   ) ?? null
 })
 const transitionGapBlocked = computed(() => Number(nextClip.value?.gapBeforeMs) > 0)
+const commonTransitionOptions = computed(() => (
+  COMMON_TRANSITION_TYPES
+    .map((value) => transitionTypeOption(value))
+    .filter(Boolean)
+))
 const layoutClip = computed(() => (
   props.layout.clips.find((item) => item.clip_id === props.clipId) ?? null
 ))

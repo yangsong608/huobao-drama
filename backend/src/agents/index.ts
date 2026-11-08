@@ -18,8 +18,9 @@ import { createVoiceProfileTools } from './tools/voice-profile-tools.js'
 import { loadAgentSkills, skillWorkspaces } from './skills.js'
 import { loadAgentPromptFile, loadBasePromptFile } from './prompts.js'
 import { buildLanguageDirective } from './language.js'
-import { getContentLanguageFromRC } from './context.js'
+import { getContentLanguageFromRC, getEpisodeId } from './context.js'
 import { getVoiceReferenceInstructions } from './voice-reference-instructions.js'
+import { getEpisodeBreakdownBlock } from '../services/breakdown-methods.js'
 
 // Default prompts (used when workspace/prompts/<type>.md 文件缺失时兜底)
 export const DEFAULT_PROMPTS: Record<string, { name: string; instructions: string }> = {
@@ -371,6 +372,21 @@ const AGENT_TOOLS: Record<string, Record<string, any>> = {
   voice_designer: createVoiceProfileTools,
 }
 
+export interface AgentInstructionParts {
+  base?: string | null
+  skills?: string | null
+  breakdown?: string | null
+  voice?: string | null
+  language?: string | null
+}
+
+/** 固定顺序：系统提示词 → 基础 Skill → 分镜拆分方案 → 声音引用 → 语言指令 */
+export function composeAgentInstructions(parts: AgentInstructionParts): string {
+  return [parts.base, parts.skills, parts.breakdown, parts.voice, parts.language]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
 /** instructions 按请求解析：prompt 文件（或默认）+ 技能全文拼接 + 目标语言指令块
  *  prompt/skill 文本随内容语言切换语言变体（<type>.<lang>.md / SKILL.<lang>.md），缺失回退中文版 */
 function buildInstructions(type: string) {
@@ -380,11 +396,18 @@ function buildInstructions(type: string) {
     const promptFile = await loadAgentPromptFile(type, lang)
     const baseInstructions = promptFile?.instructions || defaults.instructions
     const skillInstructions = await loadAgentSkills(type, lang)
+    const breakdown = type === 'storyboard_breaker'
+      ? getEpisodeBreakdownBlock(getEpisodeId(requestContext))
+      : null
     const languageDirective = buildLanguageDirective(lang)
     const voiceInstructions = getVoiceReferenceInstructions(type, lang)
-    return [baseInstructions, skillInstructions, voiceInstructions, languageDirective]
-      .filter(Boolean)
-      .join('\n\n')
+    return composeAgentInstructions({
+      base: baseInstructions,
+      skills: skillInstructions,
+      breakdown,
+      voice: voiceInstructions,
+      language: languageDirective,
+    })
   }
 }
 

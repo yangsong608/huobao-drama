@@ -105,6 +105,7 @@ export const sqliteSchemaStatements = [
     automation_error TEXT,
     automation_started_at TEXT,
     automation_finished_at TEXT,
+    breakdown_method TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT
@@ -183,6 +184,19 @@ export const sqliteSchemaStatements = [
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS breakdown_methods (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    prompt TEXT NOT NULL DEFAULT '',
+    skill TEXT NOT NULL DEFAULT '',
+    builtin INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
   )`,
 
   `CREATE TABLE IF NOT EXISTS episode_characters (
@@ -325,6 +339,9 @@ export const sqliteSchemaStatements = [
     to_video_url TEXT,
     first_frame_url TEXT,
     last_frame_url TEXT,
+    first_frame_upload_url TEXT,
+    last_frame_upload_url TEXT,
+    reference_image_urls TEXT,
     source_hash TEXT,
     prompt TEXT,
     prompt_source TEXT,
@@ -1276,6 +1293,8 @@ export function initSqliteSchema(sqlite: Database.Database) {
   for (const [name, type] of Object.entries(episodeAutomationColumns)) {
     if (!episodeColumns.has(name)) sqlite.exec(`ALTER TABLE episodes ADD COLUMN ${name} ${type}`)
   }
+  // 分镜拆分方案：旧库补可空列，历史集为空等同 standard。
+  if (!episodeColumns.has('breakdown_method')) sqlite.exec('ALTER TABLE episodes ADD COLUMN breakdown_method TEXT')
 
   // ===== V2 列扩展：只加列，不改旧列，历史数据保持原样 =====
   // 配音状态、字幕与单集 BGM/原声策略
@@ -1312,6 +1331,10 @@ export function initSqliteSchema(sqlite: Database.Database) {
   // 过渡提示词来源：旧库补列；历史提示词保留，来源为空按旧记录展示。
   const transitionColumns = new Set((sqlite.prepare('PRAGMA table_info(video_transitions)').all() as { name: string }[]).map(c => c.name))
   if (!transitionColumns.has('prompt_source')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN prompt_source TEXT')
+  // 过渡参考图三列：槽位上传图与追加参考图；旧库补列，历史数据为空按原首尾帧走。
+  if (!transitionColumns.has('first_frame_upload_url')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN first_frame_upload_url TEXT')
+  if (!transitionColumns.has('last_frame_upload_url')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN last_frame_upload_url TEXT')
+  if (!transitionColumns.has('reference_image_urls')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN reference_image_urls TEXT')
   // 分镜内容指纹：台词抽取幂等
   const storyboardColumns = new Set((sqlite.prepare('PRAGMA table_info(storyboards)').all() as { name: string }[]).map(c => c.name))
   if (!storyboardColumns.has('source_hash')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN source_hash TEXT')

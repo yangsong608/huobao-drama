@@ -156,14 +156,19 @@ export interface TransitionSourceParts {
   fromMtimeMs: number
   toSize: number
   toMtimeMs: number
+  /** 过渡参考图：上传槽位图与追加参考图列表 */
+  firstFrameUploadUrl?: string | null
+  lastFrameUploadUrl?: string | null
+  referenceImageUrls?: readonly string[] | null
 }
 
 /** 指纹版本：v2 起断点首帧改为上一镜尾帧、尾帧改为下一镜首帧，旧片段自动过期 */
 const SOURCE_HASH_VERSION = 'transition-v2'
 
-/** SHA-256：版本 + URL + 文件大小/mtime，源视频被替换时指纹变化 */
+/** SHA-256：版本 + URL + 文件大小/mtime，源视频被替换时指纹变化。
+ * 三项参考图全空时与 v2 原公式逐字节一致，历史无参考图片段不会误判过期。 */
 export function transitionSourceHash(parts: TransitionSourceParts): string {
-  return crypto.createHash('sha256').update([
+  const fields = [
     SOURCE_HASH_VERSION,
     parts.fromVideoUrl,
     parts.toVideoUrl,
@@ -171,5 +176,12 @@ export function transitionSourceHash(parts: TransitionSourceParts): string {
     parts.fromMtimeMs,
     parts.toSize,
     parts.toMtimeMs,
-  ].join('|')).digest('hex')
+  ]
+  const firstUpload = String(parts.firstFrameUploadUrl || '').trim()
+  const lastUpload = String(parts.lastFrameUploadUrl || '').trim()
+  const refList = (parts.referenceImageUrls || []).map(u => String(u || '').trim()).filter(Boolean)
+  if (firstUpload || lastUpload || refList.length) {
+    fields.push('refs', firstUpload, lastUpload, JSON.stringify(refList))
+  }
+  return crypto.createHash('sha256').update(fields.join('|')).digest('hex')
 }

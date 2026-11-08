@@ -82,6 +82,11 @@ export interface TransitionBoundaryView {
   videoUrl: string | null
   firstFrameUrl: string | null
   lastFrameUrl: string | null
+  /** 上传槽位图：非空时替代对应首尾帧参与生成 */
+  firstFrameUploadUrl: string | null
+  lastFrameUploadUrl: string | null
+  /** 追加参考图列表 */
+  referenceImageUrls: string[]
   durationRequested: number | null
   durationEffective: number | null
   durationActual: number | null
@@ -108,6 +113,10 @@ export interface TransitionProviderSummary {
   provider: string
   model: string
   first_last_frame: boolean
+  /** 首尾帧与追加参考图能否同请求混用 */
+  reference_images_allowed: boolean
+  /** 追加参考图数量上限 */
+  reference_images_max: number
   min_duration: number
   max_duration: number
 }
@@ -249,7 +258,11 @@ function sourceStats(relativePath: string): { size: number; mtimeMs: number } {
   }
 }
 
-function hashFor(from: StoryboardRow, to: StoryboardRow): string {
+function hashFor(
+  from: StoryboardRow,
+  to: StoryboardRow,
+  row?: Pick<TransitionRow, 'firstFrameUploadUrl' | 'lastFrameUploadUrl' | 'referenceImageUrls'> | null,
+): string {
   const fromStat = sourceStats(String(from.videoUrl))
   const toStat = sourceStats(String(to.videoUrl))
   return transitionSourceHash({
@@ -259,7 +272,27 @@ function hashFor(from: StoryboardRow, to: StoryboardRow): string {
     fromMtimeMs: fromStat.mtimeMs,
     toSize: toStat.size,
     toMtimeMs: toStat.mtimeMs,
+    firstFrameUploadUrl: row?.firstFrameUploadUrl,
+    lastFrameUploadUrl: row?.lastFrameUploadUrl,
+    referenceImageUrls: row?.referenceImageUrls ? parseReferenceImageUrls(row.referenceImageUrls) : null,
   })
+}
+
+/** 解析 reference_image_urls JSON 文本：去空白、去重，保持顺序 */
+function parseReferenceImageUrls(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    const seen = new Set<string>()
+    for (const item of parsed) {
+      const url = String(item || '').trim()
+      if (url) seen.add(url)
+    }
+    return [...seen]
+  } catch {
+    return []
+  }
 }
 
 function videoFileExists(relativePath: string | null | undefined): boolean {
@@ -316,6 +349,9 @@ function toView(
     videoUrl: row?.videoUrl ?? null,
     firstFrameUrl: row?.firstFrameUrl ?? null,
     lastFrameUrl: row?.lastFrameUrl ?? null,
+    firstFrameUploadUrl: row?.firstFrameUploadUrl ?? null,
+    lastFrameUploadUrl: row?.lastFrameUploadUrl ?? null,
+    referenceImageUrls: row?.referenceImageUrls ? parseReferenceImageUrls(row.referenceImageUrls) : [],
     durationRequested: row?.durationRequested ?? null,
     durationEffective: row?.durationEffective ?? null,
     durationActual: row?.durationActual ?? null,
@@ -430,6 +466,9 @@ interface BoundaryPromptInput {
   frames: BoundaryFramePair
   localShim: boolean
   existing?: TransitionRow
+  firstFrameUploadUrl?: string | null
+  lastFrameUploadUrl?: string | null
+  referenceImageUrls?: string[]
   manualPrompt?: string
   textConfigId?: number
   textModel?: string
@@ -457,6 +496,9 @@ async function resolveBoundaryPrompt(
     const result = await analyze({
       firstFramePath: input.frames.firstFrame.relativePath,
       lastFramePath: input.frames.lastFrame.relativePath,
+      firstFrameUploadPath: input.firstFrameUploadUrl,
+      lastFrameUploadPath: input.lastFrameUploadUrl,
+      referenceImagePaths: input.referenceImageUrls,
       fromNumber: input.boundary.fromNumber,
       toNumber: input.boundary.toNumber,
       prevDescription: String(input.from.description || ''),
@@ -599,7 +641,7 @@ async function submitBoundary(input: SubmitRowInput): Promise<{ rowId: number; r
   const to = storyboardById(context, boundary.toStoryboardId)
   if (!from || !to) throw new Error('过渡断点的镜头不在本集，请刷新后重试')
 
-  const hash = hashFor(from, to)
+  const hash = hashFor(from, to, input.existing)
   const claim = await claimBoundary({ existing: input.existing, context, boundary })
   if (!claim) return null
   const { rowId, previous } = claim
@@ -614,6 +656,10 @@ async function submitBoundary(input: SubmitRowInput): Promise<{ rowId: number; r
       deps,
     })
     const { firstFrame, lastFrame } = frames
+    // 生效帧 = 上传槽位图优先；槽位为空用镜头抽帧，保证衔接语义
+    const effectiveFirst = String(input.existing?.firstFrameUploadUrl || '').trim() || firstFrame.relativePath
+    const effectiveLast = String(input.existing?.lastFrameUploadUrl || '').trim() || lastFrame.relativePath
+    const existingRefs = parseReferenceImageUrls(input.existing?.referenceImageUrls)
     const { prompt, promptSource } = await resolveBoundaryPrompt({
       context,
       boundary,
@@ -622,6 +668,9 @@ async function submitBoundary(input: SubmitRowInput): Promise<{ rowId: number; r
       frames,
       localShim,
       existing: input.existing,
+      firstFrameUploadUrl: input.existing?.firstFrameUploadUrl,
+      lastFrameUploadUrl: input.existing?.lastFrameUploadUrl,
+      referenceImageUrls: existingRefs,
       manualPrompt: input.promptOptions?.manualPrompt,
       textConfigId: input.promptOptions?.textConfigId,
       textModel: input.promptOptions?.textModel,
@@ -649,6 +698,21 @@ async function submitBoundary(input: SubmitRowInput): Promise<{ rowId: number; r
       updatedAt: now(),
     }).where(eq(schema.videoTransitions.id, rowId))
 
+    const capability = capabilityFor(config, model)
+    const refs = existingRefs
+    const refsAllowed = capability.firstLastFrameWithReferences && capability.referenceImages > 0
+    const referenceImageUrls = refsAllowed && refs.length
+      ? refs.slice(0, capability.referenceImages)
+      : undefined
+    if (refs.length && !refsAllowed) {
+      logTaskWarn('Transition', 'references-dropped', {
+        fromStoryboardId: boundary.fromStoryboardId,
+        toStoryboardId: boundary.toStoryboardId,
+        count: refs.length,
+        model,
+      })
+    }
+
     const submit = deps.submit ?? ((params: GenerateVideoParams) => generateVideo(params))
     const taskId = await submit({
       transitionId: rowId,
@@ -658,8 +722,9 @@ async function submitBoundary(input: SubmitRowInput): Promise<{ rowId: number; r
       toStoryboardId: boundary.toStoryboardId,
       prompt,
       model,
-      firstFrameUrl: firstFrame.relativePath,
-      lastFrameUrl: lastFrame.relativePath,
+      firstFrameUrl: effectiveFirst,
+      lastFrameUrl: effectiveLast,
+      referenceImageUrls,
       duration: durationEffective,
       durationRequested,
       durationEffective,
@@ -723,7 +788,7 @@ export async function prepareTransitions(
     const to = storyboardById(context, boundary.toStoryboardId)
     if (!from || !to) continue
     const existing = existingByKey.get(`${boundary.fromStoryboardId}:${boundary.toStoryboardId}`)
-    const hash = hashFor(from, to)
+    const hash = hashFor(from, to, existing)
 
     if (existing) {
       if (existing.status === 'processing') {
@@ -805,8 +870,9 @@ export async function listTransitions(params: {
   const boundaries = context.boundaries.map((boundary) => {
     const from = storyboardById(context, boundary.fromStoryboardId)
     const to = storyboardById(context, boundary.toStoryboardId)
-    const hash = from && to ? hashFor(from, to) : ''
-    return toView(boundary, byKey.get(`${boundary.fromStoryboardId}:${boundary.toStoryboardId}`), supported, hash)
+    const row = byKey.get(`${boundary.fromStoryboardId}:${boundary.toStoryboardId}`)
+    const hash = from && to ? hashFor(from, to, row) : ''
+    return toView(boundary, row, supported, hash)
   })
   // 全集模式补上非相邻断点的历史片段（例如曾只勾选 S1/S3 生成的 S1→S3），
   // 否则这些片段在镜头素材的管理区永远不可见、也无法删除。
@@ -829,7 +895,7 @@ export async function listTransitions(params: {
         toStoryboardId: row.toStoryboardId,
         fromNumber: from.storyboardNumber,
         toNumber: to.storyboardNumber,
-      }, row, supported, hashFor(from, to)))
+      }, row, supported, hashFor(from, to, row)))
     }
   }
 
@@ -843,6 +909,8 @@ export async function listTransitions(params: {
           provider: config.provider,
           model,
           first_last_frame: capability.firstLastFrame,
+          reference_images_allowed: capability.firstLastFrameWithReferences && capability.referenceImages > 0,
+          reference_images_max: capability.referenceImages,
           min_duration: capability.minDuration,
           max_duration: capability.maxDuration,
         }
@@ -914,7 +982,7 @@ export async function analyzeTransitionPrompt(
   const to = storyboardById(context, boundary.toStoryboardId)
   if (!from || !to) throw new Error('过渡断点的镜头不在本集，请刷新后重试')
 
-  const hash = hashFor(from, to)
+  const hash = hashFor(from, to, row)
   const frames = await ensureBoundaryFrames({
     context,
     from,
@@ -931,6 +999,9 @@ export async function analyzeTransitionPrompt(
   const result = await analyze({
     firstFramePath: frames.firstFrame.relativePath,
     lastFramePath: frames.lastFrame.relativePath,
+    firstFrameUploadPath: row.firstFrameUploadUrl,
+    lastFrameUploadPath: row.lastFrameUploadUrl,
+    referenceImagePaths: parseReferenceImageUrls(row.referenceImageUrls),
     fromNumber: boundary.fromNumber,
     toNumber: boundary.toNumber,
     prevDescription: String(from.description || ''),
@@ -979,6 +1050,67 @@ export async function saveTransitionPrompt(id: number, options: { prompt: string
   await db.update(schema.videoTransitions)
     .set({ prompt, promptSource: 'manual', updatedAt: now() })
     .where(eq(schema.videoTransitions.id, id))
+}
+
+/** 参考图上限：按行当前配置取能力；配置已删除时按行上记录的厂商/模型兜底 */
+async function referenceImageLimitFor(row: TransitionRow): Promise<number> {
+  const [episode] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, row.episodeId))
+  const config = episode
+    ? await resolveVideoConfig(row.configId ?? undefined, episode.videoConfigId)
+    : null
+  if (config) return capabilityFor(config, config.model || row.model || '').referenceImages
+  return videoModelCapabilities(row.provider, row.model).referenceImages
+}
+
+/**
+ * 保存过渡参考图：槽位上传图（null = 清空恢复默认抽帧）与追加参考图列表。
+ * 参考图参与 source hash，保存后旧片段自动过期，下次生成按新参考图重出。
+ */
+export async function saveTransitionReferenceImages(
+  id: number,
+  options: {
+    firstFrameUploadUrl?: string | null
+    lastFrameUploadUrl?: string | null
+    referenceImageUrls?: string[]
+  },
+): Promise<void> {
+  const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, id))
+  if (!row) throw new Error('过渡片段不存在')
+  // 运行中允许保存：参考图列与提交链路互不覆盖，保存后 source hash 与旧片段失配，
+  // 完成的旧片段自然过期，下次生成按新参考图重出。
+
+  const updates: Partial<typeof schema.videoTransitions.$inferInsert> = {}
+  for (const key of ['firstFrameUploadUrl', 'lastFrameUploadUrl'] as const) {
+    const value = options[key]
+    if (value === undefined) continue
+    const trimmed = String(value ?? '').trim()
+    if (value !== null && !trimmed) throw new Error(`${key === 'firstFrameUploadUrl' ? '出帧' : '入帧'}槽位图路径不能为空`)
+    updates[key] = trimmed || null
+  }
+  if (options.referenceImageUrls !== undefined) {
+    if (!Array.isArray(options.referenceImageUrls)) throw new Error('参考图列表格式不正确')
+    const limit = await referenceImageLimitFor(row)
+    const seen = new Set<string>()
+    for (const item of options.referenceImageUrls) {
+      const url = String(item || '').trim()
+      if (url) seen.add(url)
+    }
+    if (seen.size > limit) {
+      throw new Error(`当前模型最多支持 ${limit} 张参考图，当前 ${seen.size} 张`)
+    }
+    updates.referenceImageUrls = seen.size ? JSON.stringify([...seen]) : null
+  }
+  if (Object.keys(updates).length === 0) return
+  await db.update(schema.videoTransitions)
+    .set({ ...updates, updatedAt: now() })
+    .where(eq(schema.videoTransitions.id, id))
+  logTaskProgress('Transition', 'reference-images-saved', {
+    id,
+    episodeId: row.episodeId,
+    firstUpload: !!updates.firstFrameUploadUrl,
+    lastUpload: !!updates.lastFrameUploadUrl,
+    referenceCount: updates.referenceImageUrls ? JSON.parse(updates.referenceImageUrls).length : null,
+  })
 }
 
 export async function skipTransition(id: number): Promise<void> {
@@ -1053,7 +1185,7 @@ export async function readyTransitions(params: {
     if (row.enabled === false || row.status !== 'completed' || !videoFileExists(row.videoUrl)) continue
     const from = storyboardById(context, row.fromStoryboardId)
     const to = storyboardById(context, row.toStoryboardId)
-    if (!from || !to || row.sourceHash !== hashFor(from, to)) continue
+    if (!from || !to || row.sourceHash !== hashFor(from, to, row)) continue
     result.set(`${row.fromStoryboardId}:${row.toStoryboardId}`, row)
   }
   return result

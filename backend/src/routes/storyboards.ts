@@ -1,9 +1,10 @@
 import { Hono } from 'hono'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, or } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { success, created, now, badRequest } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { cleanupFrameAssetsForStoryboard } from '../services/storyboard-frame-assets.js'
 
 const app = new Hono()
 const TRANSITIONS = new Set(['cut', 'fade', 'dissolve', 'wipe'])
@@ -94,16 +95,24 @@ app.post('/', async (c) => {
   const ts = now()
   logTaskStart('StoryboardAPI', 'create', {
     episodeId: body.episode_id,
-    shotNumber: body.storyboard_number || 1,
+    shotNumber: body.storyboard_number || 'auto',
     sceneId: body.scene_id,
     characterIds: body.character_ids,
   })
   logTaskPayload('StoryboardAPI', 'create body', body)
   const bindingError = await ensureStoryboardBindings(body.episode_id, body.scene_id, body.character_ids, body.prop_ids)
   if (bindingError) return badRequest(c, bindingError)
+  const providedNumber = Number(body.storyboard_number)
+  let storyboardNumber = Number.isFinite(providedNumber) && providedNumber > 0 ? Math.trunc(providedNumber) : 0
+  if (!storyboardNumber) {
+    const rows = await db.select({ storyboardNumber: schema.storyboards.storyboardNumber })
+      .from(schema.storyboards)
+      .where(eq(schema.storyboards.episodeId, body.episode_id))
+    storyboardNumber = rows.reduce((max, row) => Math.max(max, row.storyboardNumber || 0), 0) + 1
+  }
   const res = await db.insert(schema.storyboards).values({
     episodeId: body.episode_id,
-    storyboardNumber: body.storyboard_number || 1,
+    storyboardNumber,
     title: body.title,
     description: body.description,
     transition: normalizeTransition(body.transition),
@@ -181,18 +190,45 @@ app.put('/:id', async (c) => {
 // DELETE /storyboards/:id
 app.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'))
-  logTaskStart('StoryboardAPI', 'delete', { storyboardId: id })
+  const [storyboard] = await db.select().from(schema.storyboards).where(eq(schema.storyboards.id, id))
+  if (!storyboard) return badRequest(c, '镜头不存在')
+  logTaskStart('StoryboardAPI', 'delete', { storyboardId: id, episodeId: storyboard.episodeId })
   const ts = now()
-  // 台词随分镜软删，避免 storyboard_id 悬空（否则选音色报「镜头不存在」、时间轴丢 cue）
-  await db.update(schema.storyboardLines)
-    .set({ deletedAt: ts, updatedAt: ts })
-    .where(and(eq(schema.storyboardLines.storyboardId, id), isNull(schema.storyboardLines.deletedAt)))
-    .run()
-  await db.delete(schema.storyboardCharacters).where(eq(schema.storyboardCharacters.storyboardId, id))
-  await db.delete(schema.storyboardProps).where(eq(schema.storyboardProps.storyboardId, id))
-  await db.delete(schema.storyboards).where(eq(schema.storyboards.id, id))
-  logTaskSuccess('StoryboardAPI', 'delete', { storyboardId: id })
-  return success(c)
+  const episodeId = storyboard.episodeId
+  let durationMinutes = 0
+  let removedAssets = 0
+  db.transaction((tx) => {
+    removedAssets = cleanupFrameAssetsForStoryboard(tx, id, ts)
+    // 台词随分镜软删，避免 storyboard_id 悬空（否则选音色报「镜头不存在」、时间轴丢 cue）
+    tx.update(schema.storyboardLines)
+      .set({ deletedAt: ts, updatedAt: ts })
+      .where(and(eq(schema.storyboardLines.storyboardId, id), isNull(schema.storyboardLines.deletedAt)))
+      .run()
+    tx.delete(schema.storyboardCharacters).where(eq(schema.storyboardCharacters.storyboardId, id)).run()
+    tx.delete(schema.storyboardProps).where(eq(schema.storyboardProps.storyboardId, id)).run()
+    tx.delete(schema.videoTransitions)
+      .where(or(
+        eq(schema.videoTransitions.fromStoryboardId, id),
+        eq(schema.videoTransitions.toStoryboardId, id),
+      ))
+      .run()
+    tx.delete(schema.storyboards).where(eq(schema.storyboards.id, id)).run()
+
+    const remaining = tx.select({ duration: schema.storyboards.duration, deletedAt: schema.storyboards.deletedAt })
+      .from(schema.storyboards)
+      .where(eq(schema.storyboards.episodeId, episodeId))
+      .all()
+    const totalDuration = remaining
+      .filter(row => !row.deletedAt)
+      .reduce((sum, row) => sum + (Number(row.duration) || 0), 0)
+    durationMinutes = Math.ceil(totalDuration / 60)
+    tx.update(schema.episodes)
+      .set({ duration: durationMinutes, updatedAt: ts })
+      .where(eq(schema.episodes.id, episodeId))
+      .run()
+  })
+  logTaskSuccess('StoryboardAPI', 'delete', { storyboardId: id, episodeId, durationMinutes, removedAssets })
+  return success(c, { deleted_id: id, episode_id: episodeId, duration_minutes: durationMinutes })
 })
 
 export default app

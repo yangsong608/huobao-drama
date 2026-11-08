@@ -108,6 +108,8 @@ export const episodes = sqliteTable('episodes', {
   sourcePartNo: integer('source_part_no'),
   /** 原著已更新，剧本/分镜待重做（V3） */
   sourceStale: integer('source_stale', { mode: 'boolean' }).default(false),
+  /** 分镜拆分方案 key；空值等同 standard */
+  breakdownMethod: text('breakdown_method'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   deletedAt: text('deleted_at'),
@@ -217,6 +219,20 @@ export const storyboards = sqliteTable('storyboards', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   deletedAt: text('deleted_at'),
+})
+
+/** 分镜拆分方案：提示词 + Skill 两段文本；内置方案启动时幂等补齐 */
+export const breakdownMethods = sqliteTable('breakdown_methods', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  key: text('key').notNull().unique(),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  prompt: text('prompt').notNull().default(''),
+  skill: text('skill').notNull().default(''),
+  builtin: integer('builtin').notNull().default(0),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
 })
 
 export const storyboardCharacters = sqliteTable('storyboard_characters', {
@@ -363,6 +379,12 @@ export const videoTransitions = sqliteTable('video_transitions', {
   toVideoUrl: text('to_video_url'),
   firstFrameUrl: text('first_frame_url'),
   lastFrameUrl: text('last_frame_url'),
+  /** 用户上传的出帧槽位图：非空时替代 first_frame_url 参与生成与 hash */
+  firstFrameUploadUrl: text('first_frame_upload_url'),
+  /** 用户上传的入帧槽位图：非空时替代 last_frame_url 参与生成与 hash */
+  lastFrameUploadUrl: text('last_frame_upload_url'),
+  /** 追加参考图列表（JSON 数组文本）：以 reference_image 角色随首尾帧一并提供 */
+  referenceImageUrls: text('reference_image_urls'),
   /** 来源视频指纹：URL + 文件大小/mtime，用于复用与过期判断 */
   sourceHash: text('source_hash'),
   prompt: text('prompt'),

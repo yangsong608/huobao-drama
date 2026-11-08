@@ -124,7 +124,7 @@
             @split-clip="splitAt"
             @move-cue="moveCueTo"
             @remove-transition="removeTransitionById"
-            @apply-transition="applyTransition"
+            @open-transition-picker="openTransitionPickerAt"
             @frame-op="onFrameOp"
             @cue-op="onCueOp"
             @toggle-subtitles="showSubtitles = !showSubtitles"
@@ -169,6 +169,7 @@
         @cue-follow="toggleCueFollow"
         @transition-set="setSelectedTransition"
         @transition-remove="removeSelectedTransition"
+        @open-transition-picker="openTransitionPickerAt"
         @transform-set="setSelectedTransform"
         @filter-set="setSelectedFilter"
         @volume-set="setSelectedVolume"
@@ -233,6 +234,16 @@
       @insert="insertVideo"
     />
 
+    <!-- 转场库：分类卡片 + 悬停演示 + 时长档；目标交界在打开时确定，blocked 时仅展示原因 -->
+    <EditTransitionPicker
+      :open="transitionPickerOpen"
+      :current-type="transitionPickerCurrent?.type ?? ''"
+      :duration-ms="transitionPickerCurrent?.durationMs ?? DEFAULT_TRANSITION_MS"
+      :blocked="transitionPickerBlocked"
+      @close="transitionPickerOpen = false"
+      @apply="applyPickedTransition"
+    />
+
     <!-- 剪辑导出确认：只读展示降级清单，导出以保存后的服务端计划为准 -->
     <EditExportDialog
       :open="exportOpen"
@@ -280,8 +291,10 @@ import EditRevisionsDrawer from '~/components/edit/EditRevisionsDrawer.vue'
 import EditConflictDialog from '~/components/edit/EditConflictDialog.vue'
 import EditImagePicker from '~/components/edit/EditImagePicker.vue'
 import EditVideoPicker from '~/components/edit/EditVideoPicker.vue'
+import EditTransitionPicker from '~/components/edit/EditTransitionPicker.vue'
 import EditExportDialog from '~/components/edit/EditExportDialog.vue'
 import { editAPI, filmAPI } from '~/composables/useApi'
+import { DEFAULT_TRANSITION_MS } from '~/utils/edit-transition-types'
 import { useEditClock } from '~/composables/useEditClock'
 import { useEditPlan } from '~/composables/useEditPlan'
 import {
@@ -470,6 +483,10 @@ const pendingInsertAt = ref(null)
 // 选择器复用：同一弹窗既服务主轨插入也服务叠加轨插入（「必须一套」），pendingOverlayKind 区分落点
 const pendingOverlayKind = ref('')
 const exportOpen = ref(false)
+// 转场库弹窗：打开时锁定交界；交界不成立（无相邻段/有间隙）时仅展示原因
+const transitionPickerOpen = ref(false)
+const transitionPickerBoundary = ref(null)
+const transitionPickerBlocked = ref('')
 const stateProjectId = computed(() => Number(props.state.project?.id) || 0)
 
 // 服务端派生字段（台词放置、素材告警、音频、混音状态、初剪可用性）只读：
@@ -828,6 +845,39 @@ function selectedBoundary() {
   const index = plan.value.clips.findIndex((clip) => clip.id === selectedClipId.value)
   if (index < 0) return null
   return { from: plan.value.clips[index], to: plan.value.clips[index + 1] ?? null }
+}
+
+// ---- 转场库弹窗（EditTimeline 工具栏/转场块、检查器共用一个入口） ----
+function boundaryTransitionAt(boundary) {
+  if (!boundary) return null
+  return plan.value.transitions.find(
+    (item) => item.fromClipId === boundary.fromClipId && item.toClipId === boundary.toClipId,
+  ) ?? null
+}
+
+const transitionPickerCurrent = computed(() => boundaryTransitionAt(transitionPickerBoundary.value))
+
+function openTransitionPickerAt(payload) {
+  if (!canEdit.value) return
+  const fromId = payload?.fromClipId || selectedClipId.value || ''
+  const index = plan.value.clips.findIndex((clip) => clip.id === fromId)
+  const to = index >= 0 ? plan.value.clips[index + 1] ?? null : null
+  transitionPickerBoundary.value = fromId && to
+    ? { fromClipId: fromId, toClipId: to.id }
+    : null
+  transitionPickerBlocked.value = !fromId || !to
+    ? t('edit.transitionNeedNext')
+    : Number(to.gapBeforeMs) > 0
+      ? t('edit.transitionGapHint')
+      : ''
+  transitionPickerOpen.value = true
+}
+
+function applyPickedTransition(payload) {
+  const boundary = transitionPickerBoundary.value
+  if (!boundary || transitionPickerBlocked.value) return
+  applyTransition({ fromClipId: boundary.fromClipId, toClipId: boundary.toClipId, ...payload })
+  transitionPickerOpen.value = false
 }
 
 function setSelectedTransition(payload) {

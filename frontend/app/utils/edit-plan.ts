@@ -3,7 +3,7 @@ export const MAX_FADE_MS = 1500
 /** 工程级片头/片尾音频淡入淡出上限 */
 export const MAX_PROJECT_FADE_MS = 3000
 export const MIN_TRANSITION_MS = 100
-export const MAX_TRANSITION_MS = 1500
+export const MAX_TRANSITION_MS = 2000
 export const MAX_GAP_MS = 300_000
 /** 图片片段可拉长的最长时长（图片可无限循环渲染） */
 export const MAX_IMAGE_CLIP_MS = 30_000

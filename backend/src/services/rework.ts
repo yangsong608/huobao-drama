@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { isAutomationRunning } from './automation.js'
+import { cleanupFrameAssetsForEpisode } from './storyboard-frame-assets.js'
 
 export type ReworkReason = 'automation_running' | 'dubbing_running' | 'queue_running'
 
@@ -64,6 +65,8 @@ export function reworkEpisode(episodeId: number): ReworkResult {
         ))
         .run()
     }
+    // 分镜全部作废，来源已消失的末帧资产一并软删
+    cleanupFrameAssetsForEpisode(tx, episodeId, ts)
     // 挂载台词随分镜软删：绝对锚点台词（无分镜）保留，重做后重新抽取
     tx.update(schema.storyboardLines)
       .set({ deletedAt: ts, updatedAt: ts })

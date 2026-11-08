@@ -12,6 +12,7 @@ import { logTaskProgress, logTaskSuccess } from '../../utils/task-logger.js'
 import { getDramaId, getEpisodeId } from '../context.js'
 import { resolveVoiceMentions } from '../../services/character-voice-references.js'
 import { getDramaBackground } from '../../services/drama-background.js'
+import { cleanupFrameAssetsForEpisode } from '../../services/storyboard-frame-assets.js'
 
 async function validateVideoPromptVoices(prompt: string | undefined, dramaId: number, characterIds: number[] = []) {
   if (!prompt?.includes('#')) return
@@ -300,6 +301,8 @@ const saveStoryboards = createTool({
         ))
         .run()
       await db.delete(schema.storyboards).where(eq(schema.storyboards.episodeId, episodeId))
+      // 分镜来源已整体重建，旧末帧资产随之作废，避免孤儿资产还留在本集资产列表里
+      cleanupFrameAssetsForEpisode(db, episodeId, ts)
     }
 
     // shot_number → id 索引（含本次调用内新增的行），保证按分镜号幂等 upsert

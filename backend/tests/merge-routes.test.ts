@@ -376,6 +376,80 @@ test('prompt 保存路由写入 manual，analyze 校验参数与缺失记录', a
   assert.match((await analyzeNoText.json() as any).message, /文本模型/)
 })
 
+test('reference-images 路由保存槽位与追加列表，校验上限并支持清空', async () => {
+  const dramaId = insertDrama()
+  const episodeId = insertEpisode(dramaId)
+  const urls = [1, 2, 3].map(n => `static/projects/${dramaId}/videos/s${n}.mp4`)
+  urls.forEach(url => writeStatic(url))
+  const [s1, s2, s3] = urls.map((url, index) => insertStoryboard(episodeId, index + 1, url))
+  const rowId = insertTransitionRow(episodeId, dramaId, s1, s2, {
+    status: 'failed',
+    provider: 'minimax',
+    model: 'MiniMax-H3',
+    configBaseUrl: 'http://127.0.0.1:8190',
+    sourceHash: sourceHashFor(urls[0], urls[1]),
+  })
+  const saveUrl = `http://localhost/api/v1/merge/transitions/${rowId}/reference-images`
+
+  const save = await app.fetch(new Request(saveUrl, {
+    method: 'PUT',
+    body: JSON.stringify({
+      first_frame_upload_url: ' static/uploads/u-first.jpg ',
+      reference_image_urls: [' a ', 'a', ' static/uploads/b.jpg '],
+    }),
+  }))
+  const saveBody = await save.json() as any
+  assert.equal(save.status, 200)
+  assert.equal(saveBody.data.first_frame_upload_url, 'static/uploads/u-first.jpg')
+  assert.equal(saveBody.data.last_frame_upload_url, null)
+  assert.deepEqual(saveBody.data.reference_image_urls, ['a', 'static/uploads/b.jpg'])
+
+  const over = await app.fetch(new Request(saveUrl, {
+    method: 'PUT',
+    body: JSON.stringify({
+      reference_image_urls: Array.from({ length: 10 }, (_, i) => `static/uploads/r-${i}.jpg`),
+    }),
+  }))
+  assert.equal(over.status, 400)
+  assert.match((await over.json() as any).message, /9 张/)
+
+  const blankSlot = await app.fetch(new Request(saveUrl, {
+    method: 'PUT',
+    body: JSON.stringify({ first_frame_upload_url: '   ' }),
+  }))
+  assert.equal(blankSlot.status, 400)
+  assert.match((await blankSlot.json() as any).message, /路径/)
+
+  const clear = await app.fetch(new Request(saveUrl, {
+    method: 'PUT',
+    body: JSON.stringify({ first_frame_upload_url: null, reference_image_urls: [] }),
+  }))
+  const clearBody = await clear.json() as any
+  assert.equal(clear.status, 200)
+  assert.equal(clearBody.data.first_frame_upload_url, null)
+  assert.deepEqual(clearBody.data.reference_image_urls, [])
+
+  const missing = await app.fetch(new Request(
+    'http://localhost/api/v1/merge/transitions/99999/reference-images',
+    { method: 'PUT', body: JSON.stringify({ reference_image_urls: [] }) },
+  ))
+  assert.equal(missing.status, 400)
+  assert.match((await missing.json() as any).message, /不存在/)
+
+  // 运行中的断点允许保存参考图：旧片段按 source hash 过期，不破坏在跑任务
+  const processingId = insertTransitionRow(episodeId, dramaId, s2, s3, {
+    status: 'processing',
+    provider: 'minimax',
+    model: 'MiniMax-H3',
+    sourceHash: '',
+  })
+  const onProcessing = await app.fetch(new Request(
+    `http://localhost/api/v1/merge/transitions/${processingId}/reference-images`,
+    { method: 'PUT', body: JSON.stringify({ reference_image_urls: ['static/uploads/c.jpg'] }) },
+  ))
+  assert.equal(onProcessing.status, 200)
+})
+
 test('merge 按 use_ai_transitions 写入过渡快照，关闭时保持旧行为', async () => {
   const dramaId = insertDrama()
   const episodeId = insertEpisode(dramaId)

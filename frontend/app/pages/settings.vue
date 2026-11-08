@@ -853,6 +853,94 @@
           </section>
         </div>
 
+        <!-- ===== 分镜拆分方案 ===== -->
+        <div v-else-if="tab === 'breakdown'" class="settings-scroll">
+          <div class="settings-head">
+            <h2 class="settings-title">{{ t('settings.breakdown.title') }}</h2>
+            <p class="settings-desc">{{ t('settings.breakdown.subtitle') }}</p>
+          </div>
+
+          <div class="breakdown-layout">
+            <section class="card svc-group breakdown-list-card">
+              <div class="svc-group-head">
+                <div class="svc-group-heading">
+                  <span class="svc-group-title">{{ t('settings.breakdown.title') }}</span>
+                  <div class="svc-group-sub">{{ t('settings.breakdown.methodCount', { count: breakdownMethods.length }) }}</div>
+                </div>
+                <button class="btn btn-primary btn-sm ml-auto" @click="newBreakdownMethod">
+                  <Plus :size="13" /> {{ t('settings.breakdown.new') }}
+                </button>
+              </div>
+              <div
+                v-for="m in breakdownMethods"
+                :key="m.key"
+                :class="['breakdown-item', { active: m.key === breakdownEditingKey }]"
+                role="button"
+                tabindex="0"
+                @click="selectBreakdownMethod(m)"
+                @keydown.enter.prevent="selectBreakdownMethod(m)"
+              >
+                <div class="config-line">
+                  <span class="config-name">{{ m.name }}</span>
+                  <span class="tag" :class="{ 'tag-success': m.builtin }">{{ m.builtin ? t('settings.breakdown.builtin') : t('settings.breakdown.custom') }}</span>
+                  <span v-if="m.customized" class="tag tag-accent">{{ t('settings.breakdown.customized') }}</span>
+                </div>
+                <div class="config-sub truncate">{{ m.description || '—' }}</div>
+                <div class="config-sub">{{ t('settings.breakdown.usage', { count: m.usage_count }) }}</div>
+              </div>
+              <p v-if="breakdownLoading && !breakdownMethods.length" class="config-empty">
+                <Loader2 :size="14" class="animate-spin" /> {{ t('common.loading') }}
+              </p>
+              <p v-else-if="breakdownLoadFailed" class="config-empty">{{ t('settings.breakdown.loadFailed') }}</p>
+              <p v-else-if="!breakdownMethods.length" class="config-empty">{{ t('settings.breakdown.empty') }}</p>
+            </section>
+
+            <section class="card svc-group breakdown-editor-card">
+              <div class="svc-group-head">
+                <div class="svc-group-heading">
+                  <span class="svc-group-title">{{ currentBreakdownMethod?.name || t('settings.breakdown.new') }}</span>
+                  <div v-if="currentBreakdownMethod" class="svc-group-sub">
+                    {{ currentBreakdownMethod.builtin ? t('settings.breakdown.builtin') : t('settings.breakdown.custom') }}
+                    · {{ t('settings.breakdown.usage', { count: currentBreakdownMethod.usage_count }) }}
+                  </div>
+                </div>
+                <span v-if="breakdownDirty" class="tag tag-accent ml-auto">{{ t('settings.breakdown.unsavedTag') }}</span>
+              </div>
+
+              <label class="field">
+                <span class="field-label">{{ t('settings.breakdown.name') }} <span class="dim">{{ breakdownDraft.name.length }} / 60</span></span>
+                <input v-model="breakdownDraft.name" class="input" maxlength="60" :placeholder="t('settings.breakdown.name')" />
+              </label>
+              <label class="field">
+                <span class="field-label">{{ t('settings.breakdown.description') }}</span>
+                <textarea v-model="breakdownDraft.description" class="textarea" rows="2" maxlength="500" />
+              </label>
+              <label class="field">
+                <span class="field-label">{{ t('settings.breakdown.prompt') }} <span class="dim">{{ breakdownDraft.prompt.length }} / 20000</span></span>
+                <textarea v-model="breakdownDraft.prompt" class="textarea" rows="8" maxlength="20000" :placeholder="t('settings.breakdown.promptHint')" />
+                <span class="field-hint">{{ t('settings.breakdown.promptHint') }}</span>
+              </label>
+              <label class="field">
+                <span class="field-label">{{ t('settings.breakdown.skill') }} <span class="dim">{{ breakdownDraft.skill.length }} / 40000</span></span>
+                <textarea v-model="breakdownDraft.skill" class="textarea" rows="10" maxlength="40000" :placeholder="t('settings.breakdown.skillHint')" />
+                <span class="field-hint">{{ t('settings.breakdown.skillHint') }}</span>
+              </label>
+
+              <p v-if="bothBreakdownTextsEmpty" class="breakdown-empty-hint">{{ t('settings.breakdown.bothEmptyHint') }}</p>
+
+              <div class="breakdown-actions">
+                <button class="btn btn-primary" :disabled="breakdownSaving || !breakdownDraft.name.trim()" @click="saveBreakdownMethod">
+                  <Loader2 v-if="breakdownSaving" :size="13" class="animate-spin" />
+                  {{ breakdownSaving ? t('settings.breakdown.saving') : t('settings.breakdown.save') }}
+                </button>
+                <button class="btn" :disabled="!breakdownEditingKey || breakdownSaving" @click="duplicateBreakdownMethod">{{ t('settings.breakdown.duplicate') }}</button>
+                <button v-if="currentBreakdownMethod?.builtin" class="btn btn-ghost" :disabled="breakdownSaving" @click="resetBreakdownMethod">{{ t('settings.breakdown.reset') }}</button>
+                <button v-if="currentBreakdownMethod && !currentBreakdownMethod.builtin" class="btn btn-danger" :disabled="breakdownSaving" @click="breakdownToDelete = currentBreakdownMethod">{{ t('settings.breakdown.delete') }}</button>
+              </div>
+            </section>
+          </div>
+        </div>
+
         <!-- ===== 任务队列 ===== -->
         <div v-else-if="tab === 'queue'" class="settings-scroll">
           <div class="settings-head">
@@ -1744,17 +1832,25 @@
       @confirm="confirmDeleteBgm"
       @cancel="bgmToDelete = null"
     />
+    <ConfirmDialog
+      :open="!!breakdownToDelete"
+      :title="t('settings.breakdown.deleteTitle')"
+      :message="`${t('settings.breakdown.deleteMessage', { name: breakdownToDelete?.name })} ${t('settings.breakdown.deleteUsage', { count: breakdownToDelete?.usage_count || 0 })}`"
+      :loading="breakdownDeleting"
+      @confirm="confirmDeleteBreakdownMethod"
+      @cancel="breakdownToDelete = null"
+    />
   </div>
 </template>
 
 <script setup>
-import { Plus, Pencil, Trash2, FileText, ChevronDown, Check, Loader2, Bot, Cpu, Sparkles, Palette, ExternalLink, Star, HardDrive, Database, RefreshCw, Download, Languages, SunMoon, X, Plug, KeyRound, Copy, ListOrdered, Mic, Music, BookOpen } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, FileText, ChevronDown, Check, Loader2, Bot, Cpu, Sparkles, Palette, ExternalLink, Star, HardDrive, Database, RefreshCw, Download, Languages, SunMoon, X, Plug, KeyRound, Copy, ListOrdered, Mic, Music, BookOpen, Layers } from 'lucide-vue-next'
 import BaseSelect from '~/components/BaseSelect.vue'
 import QueuePanel from '~/components/QueuePanel.vue'
 import { toast } from 'vue-sonner'
 import { toastError } from '~/composables/useToast'
 import { useI18n } from 'vue-i18n'
-import { aiConfigAPI, promptAPI, skillsAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, bgmAPI } from '~/composables/useApi'
+import { aiConfigAPI, promptAPI, skillsAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, uploadAPI, pipelineRuleAPI, breakdownMethodAPI, dubbingAPI, bgmAPI } from '~/composables/useApi'
 import { useDesktopBridge } from '~/composables/useDesktopBridge'
 import { useMigrateState } from '~/composables/useMigrateState'
 import { useTheme } from '~/composables/useTheme'
@@ -1766,7 +1862,7 @@ const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
-const SETTINGS_TABS = ['ai', 'dubbing', 'novel', 'general', 'styles', 'rules', 'agents', 'queue', 'storage', 'mcp', 'about']
+const SETTINGS_TABS = ['ai', 'dubbing', 'novel', 'general', 'styles', 'rules', 'breakdown', 'agents', 'queue', 'storage', 'mcp', 'about']
 const requestedTab = typeof route.query.tab === 'string' ? route.query.tab : ''
 const showBrandImage = ref(true)
 const tab = ref(SETTINGS_TABS.includes(requestedTab) ? requestedTab : 'ai')
@@ -1784,6 +1880,7 @@ const baseTabs = computed(() => [
   { id: 'general', label: t('settings.tabs.general'), icon: Languages },
   { id: 'styles', label: t('settings.tabs.styles'), icon: Palette },
   { id: 'rules', label: t('settings.tabs.rules'), icon: FileText },
+  { id: 'breakdown', label: t('settings.tabs.breakdown'), icon: Layers },
   { id: 'agents', label: t('settings.tabs.agents'), icon: Bot },
   { id: 'queue', label: t('settings.tabs.queue'), icon: ListOrdered },
   { id: 'storage', label: t('settings.tabs.storage'), icon: HardDrive },
@@ -2981,6 +3078,141 @@ async function resetPipelineRuleItem(rule) {
   } catch (e) { toastError(e) }
 }
 
+// ===== 分镜拆分方案 =====
+const breakdownMethods = ref([])
+const breakdownLoading = ref(false)
+const breakdownSaving = ref(false)
+const breakdownDeleting = ref(false)
+const breakdownLoadFailed = ref(false)
+const breakdownEditingKey = ref('')
+const breakdownToDelete = ref(null)
+const BREAKDOWN_TEXT_FIELDS = ['name', 'description', 'prompt', 'skill']
+function emptyBreakdownDraft() {
+  return { key: '', name: '', description: '', prompt: '', skill: '' }
+}
+const breakdownDraft = ref(emptyBreakdownDraft())
+const breakdownOriginal = ref(emptyBreakdownDraft())
+const breakdownDirty = computed(() =>
+  BREAKDOWN_TEXT_FIELDS.some(field => (breakdownDraft.value[field] || '') !== (breakdownOriginal.value[field] || '')),
+)
+const currentBreakdownMethod = computed(() =>
+  breakdownMethods.value.find(item => item.key === breakdownEditingKey.value) || null,
+)
+const bothBreakdownTextsEmpty = computed(() =>
+  !breakdownDraft.value.prompt.trim() && !breakdownDraft.value.skill.trim(),
+)
+
+function applyBreakdownMethod(method) {
+  const next = {
+    key: method?.key || '',
+    name: method?.name || '',
+    description: method?.description || '',
+    prompt: method?.prompt || '',
+    skill: method?.skill || '',
+  }
+  breakdownEditingKey.value = next.key
+  breakdownDraft.value = next
+  breakdownOriginal.value = { ...next }
+}
+
+async function loadBreakdownMethodDetail(key) {
+  const method = await breakdownMethodAPI.get(key)
+  applyBreakdownMethod(method)
+}
+
+async function loadBreakdownMethods(preferredKey = '') {
+  breakdownLoading.value = true
+  breakdownLoadFailed.value = false
+  try {
+    const data = await breakdownMethodAPI.list()
+    breakdownMethods.value = Array.isArray(data?.list) ? data.list : []
+    const target = [preferredKey, breakdownEditingKey.value, breakdownMethods.value[0]?.key]
+      .find(key => key && breakdownMethods.value.some(item => item.key === key))
+    if (target) {
+      await loadBreakdownMethodDetail(target)
+    } else {
+      applyBreakdownMethod(null)
+    }
+  } catch (e) {
+    breakdownLoadFailed.value = true
+    toastError(e, { fallback: 'settings.breakdown.loadFailed' })
+  } finally {
+    breakdownLoading.value = false
+  }
+}
+
+async function selectBreakdownMethod(method) {
+  if (!method || method.key === breakdownEditingKey.value) return
+  if (breakdownDirty.value && !window.confirm(t('settings.breakdown.unsaved'))) return
+  try {
+    await loadBreakdownMethodDetail(method.key)
+  } catch (e) { toastError(e) }
+}
+
+function newBreakdownMethod() {
+  if (breakdownDirty.value && !window.confirm(t('settings.breakdown.unsaved'))) return
+  applyBreakdownMethod(null)
+}
+
+async function saveBreakdownMethod() {
+  if (breakdownSaving.value) return
+  const name = breakdownDraft.value.name.trim()
+  if (!name) return
+  breakdownSaving.value = true
+  try {
+    const payload = {
+      name,
+      description: breakdownDraft.value.description,
+      prompt: breakdownDraft.value.prompt,
+      skill: breakdownDraft.value.skill,
+    }
+    const saved = breakdownDraft.value.key
+      ? await breakdownMethodAPI.update(breakdownDraft.value.key, payload)
+      : await breakdownMethodAPI.create(payload)
+    toast.success(t('settings.breakdown.saved'))
+    await loadBreakdownMethods(saved?.key || breakdownDraft.value.key)
+  } catch (e) {
+    toastError(e)
+  } finally {
+    breakdownSaving.value = false
+  }
+}
+
+async function resetBreakdownMethod() {
+  const key = breakdownEditingKey.value
+  if (!key) return
+  if (!window.confirm(t('settings.breakdown.resetConfirm'))) return
+  try {
+    await breakdownMethodAPI.reset(key)
+    await loadBreakdownMethods(key)
+  } catch (e) { toastError(e) }
+}
+
+async function duplicateBreakdownMethod() {
+  const key = breakdownEditingKey.value
+  if (!key) return
+  try {
+    const copy = await breakdownMethodAPI.duplicate(key)
+    await loadBreakdownMethods(copy?.key || key)
+  } catch (e) { toastError(e) }
+}
+
+async function confirmDeleteBreakdownMethod() {
+  const target = breakdownToDelete.value
+  if (!target || breakdownDeleting.value) return
+  breakdownDeleting.value = true
+  try {
+    await breakdownMethodAPI.del(target.key)
+    breakdownToDelete.value = null
+    toast.success(t('index.deleted'))
+    await loadBreakdownMethods('standard')
+  } catch (e) {
+    toastError(e)
+  } finally {
+    breakdownDeleting.value = false
+  }
+}
+
 onMounted(() => {
   loadCfgs()
   loadAgents()
@@ -2992,6 +3224,7 @@ onMounted(() => {
   loadMediaSettings()
   if (tab.value === 'dubbing') loadDubbing()
   if (tab.value === 'novel') loadNovel()
+  if (tab.value === 'breakdown') loadBreakdownMethods()
 })
 
 // ===== 应用内引导（设置页）：快捷配置 + 手动模板两步 =====
@@ -3216,6 +3449,7 @@ async function applyUpdate() {
 watch(tab, (t) => {
   if (t === 'about') refreshUpdateState()
   if (t === 'rules') loadPipelineRules()
+  if (t === 'breakdown') loadBreakdownMethods()
   // 进入 Agent 页总是按当前内容语言重载（幂等）：兜住「先切语言、后进 Agent」的时序
   if (t === 'agents') {
     loadAgentPrompt(selectedAgent.value)
@@ -3782,4 +4016,48 @@ onBeforeUnmount(stopUsagePoll)
 .dub-number { width: 90px; text-align: right; }
 .dub-value { min-width: 48px; text-align: right; font-size: 12px; color: var(--text-2); }
 .dub-unit { font-size: 11px; color: var(--text-3); }
+
+/* ===== 分镜拆分方案 ===== */
+.breakdown-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.breakdown-list-card,
+.breakdown-editor-card { margin-top: 0 !important; }
+.breakdown-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.breakdown-item:first-of-type { margin-top: 0; }
+.breakdown-item:hover { border-color: var(--accent); }
+.breakdown-item.active { border-color: var(--accent); background: var(--accent-bg); }
+.breakdown-editor-card .field { margin-top: 14px; }
+.breakdown-empty-hint {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 12px;
+}
+.breakdown-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+@media (max-width: 900px) {
+  .breakdown-layout { grid-template-columns: 1fr; }
+}
 </style>

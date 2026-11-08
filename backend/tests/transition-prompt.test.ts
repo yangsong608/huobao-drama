@@ -8,6 +8,7 @@ const {
   buildTransitionPromptSystemText,
   buildTransitionPromptUserText,
   parseTransitionPrompt,
+  resolveAnalysisImagePaths,
 } = await import('../src/services/transition-prompt.ts')
 
 test('parse 去掉代码块、字段名与包裹引号，合并为单段', () => {
@@ -62,4 +63,43 @@ test('用户指令包含两镜描述、连续性与景别信息', () => {
   assert.match(text, /林晚站在雨夜街头/)
   assert.match(text, /林晚推门走进咖啡馆/)
   assert.match(text, /保持同一件湿透的风衣/)
+})
+
+test('分析图来源：槽位上传优先，追加参考图截到 4 张并保持顺序', () => {
+  const resolved = resolveAnalysisImagePaths({
+    firstFramePath: 'static/frames/extracted-first.jpg',
+    lastFramePath: 'static/frames/extracted-last.jpg',
+    firstFrameUploadPath: ' static/uploads/upload-first.jpg ',
+    lastFrameUploadPath: '   ',
+    referenceImagePaths: ['static/uploads/a.jpg', '', 'static/uploads/a.jpg', 'b', 'c', 'd', 'e', 'f'],
+  })
+  assert.deepEqual(resolved.paths, [
+    'static/uploads/upload-first.jpg',
+    'static/frames/extracted-last.jpg',
+    'static/uploads/a.jpg',
+    'b',
+    'c',
+    'd',
+  ])
+  assert.equal(resolved.referencePaths.length, 4)
+})
+
+test('分析图来源：无上传无参考时恰好两帧', () => {
+  const resolved = resolveAnalysisImagePaths({
+    firstFramePath: 'static/frames/extracted-first.jpg',
+    lastFramePath: 'static/frames/extracted-last.jpg',
+  })
+  assert.deepEqual(resolved.paths, ['static/frames/extracted-first.jpg', 'static/frames/extracted-last.jpg'])
+})
+
+test('系统指令在有参考图时说明参考图用途，无参考时保持两帧语义', () => {
+  const plain = buildTransitionPromptSystemText(false)
+  assert.doesNotMatch(plain, /参考图/)
+  const withRefs = buildTransitionPromptSystemText(false, { referenceImageCount: 2 })
+  assert.match(withRefs, /第一张图.*上一镜.*最后一帧/)
+  assert.match(withRefs, /第二张图.*下一镜.*第一帧/)
+  assert.match(withRefs, /参考图/)
+  const localWithRefs = buildTransitionPromptSystemText(true, { referenceImageCount: 1 })
+  assert.match(localWithRefs, /English only/i)
+  assert.match(localWithRefs, /reference/i)
 })

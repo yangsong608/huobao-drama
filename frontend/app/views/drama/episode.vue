@@ -532,11 +532,23 @@
                   @click="changeEpisodeVideoMode('comfyui')"
                 >{{ t('episode.comfy.modeComfy') }}</button>
               </div>
+              <label class="video-method-pick">
+                <span class="dim">{{ t('episode.sb.methodLabel') }}</span>
+                <select
+                  class="input video-method-select"
+                  :value="breakdownMethodKey"
+                  :disabled="rn || methodSaving"
+                  :title="currentBreakdownMethodName"
+                  @change="changeBreakdownMethod"
+                >
+                  <option v-for="method in breakdownMethods" :key="method.key" :value="method.key">{{ method.name }}</option>
+                </select>
+              </label>
               <span class="dim" style="font-size:12px">{{ t('episode.prod.videos') }}</span>
               <span class="tag mono">{{ t('episode.sb.segmentStat', { n: sbs.length, dur: totalDuration }) }}</span>
               <span class="tag mono" :title="t('episode.vid.aspectRatio')">{{ dramaAspectRatio }}</span>
               <div class="ml-auto flex gap-1">
-                <button class="btn btn-sm" :disabled="rn" @click="doBreakdown">
+                <button class="btn btn-sm" :disabled="rn || methodSaving" :title="currentBreakdownMethodName" @click="doBreakdown">
                   <Loader2 v-if="rt === 'storyboard_breaker'" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                   {{ sbs.length ? t('episode.sb.rebreak') : t('episode.sb.startBreak') }}
@@ -565,11 +577,17 @@
               </div>
               <div class="empty-title">{{ t('episode.sb.emptyTitle') }}</div>
               <div class="empty-desc">{{ rt === 'storyboard_breaker' ? t('episode.sb.breakingElapsed', { s: breakdownElapsed }) : t('episode.sb.emptyDesc') }}</div>
+              <div class="empty-desc">{{ t('episode.sb.methodCurrent', { method: currentBreakdownMethodName }) }}</div>
               <div class="locked-config-banner">{{ t('episode.vid.lockedModel') }}{{ effectiveVideoModelLabel }}</div>
-              <button class="btn btn-primary" :disabled="rn" @click="doBreakdown">
+              <button class="btn btn-primary" :disabled="rn || methodSaving" :title="currentBreakdownMethodName" @click="doBreakdown">
                 <Loader2 v-if="rt === 'storyboard_breaker'" :size="13" class="animate-spin" />
                 <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 {{ t('episode.sb.startBreak') }}
+              </button>
+              <button class="btn btn-sm" :disabled="rn || addingStoryboard" @click="addStoryboard">
+                <Loader2 v-if="addingStoryboard" :size="11" class="animate-spin" />
+                <Plus v-else :size="11" />
+                {{ t('episode.vid.addShotHint') }}
               </button>
             </div>
             <div v-else class="video-task-workbench has-player" :style="{ '--vleft': videoLeftW + 'px', '--vright': videoRightW + 'px' }">
@@ -584,6 +602,11 @@
                   <button type="button" class="video-task-metric is-done" :class="{ on: videoListFilter === 'done' }" @click="toggleVideoFilter('done')">{{ t('episode.vid.metricDone', { n: videoTaskDoneCount }) }}</button>
                   <button type="button" class="video-task-metric is-failed" :class="{ on: videoListFilter === 'failed' }" @click="toggleVideoFilter('failed')">{{ t('episode.vid.metricFailed', { n: videoTaskFailedCount }) }}</button>
                 </div>
+                <button class="btn btn-sm" :disabled="rn || addingStoryboard" @click="addStoryboard">
+                  <Loader2 v-if="addingStoryboard" :size="11" class="animate-spin" />
+                  <Plus v-else :size="11" />
+                  {{ t('episode.vid.addShot') }}
+                </button>
                 </div>
                 <div v-if="videoSelectMode" class="shot-quick-actions video-quick-actions">
                   <button class="shot-quick-btn" @click="toggleSelectAllVideos">{{ t('episode.sb.selectAll') }}</button>
@@ -655,6 +678,17 @@
                     @click.stop="genVid(task.storyboard)"
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                  </button>
+                  <button
+                    v-if="!videoSelectMode"
+                    type="button"
+                    class="btn btn-icon btn-sm video-task-delete"
+                    :title="t('episode.vid.deleteShot')"
+                    :aria-label="t('episode.vid.deleteShot')"
+                    :disabled="rn || shotDelete.loading"
+                    @click.stop="deleteStoryboard(task.storyboard)"
+                  >
+                    <Trash2 :size="12" />
                   </button>
                 </div>
                 </div>
@@ -753,7 +787,7 @@
                     <span class="video-inspector-label">{{ t('episode.sb.descSection') }}</span>
                     <label class="field">
                       <span class="field-label">{{ t('episode.sb.descLabel') }} <span class="dim">({{ t('episode.sb.descHint') }})</span></span>
-                      <textarea :value="selectedSb.description || ''" class="textarea" rows="7" @blur="updateField(selectedSb, 'description', $event.target.value)" :placeholder="t('episode.sb.descPlaceholder')" />
+                      <textarea ref="sbDescriptionInput" :value="selectedSb.description || ''" class="textarea" rows="7" @blur="updateField(selectedSb, 'description', $event.target.value)" :placeholder="t('episode.sb.descPlaceholder')" />
                     </label>
                     <label class="field">
                       <span class="field-label">{{ t('episode.sb.atmosphere') }}</span>
@@ -857,6 +891,16 @@
                   <span v-if="selectedSb.duration" class="video-player-sub">{{ selectedSb.duration }}s</span>
                 </div>
                 <button
+                  v-if="canExtractLastFrame"
+                  class="btn btn-sm"
+                  :disabled="frameAssetExtracting"
+                  :title="t('episode.frameAssets.extractTitle')"
+                  @click="extractShotLastFrame(selectedSb)"
+                >
+                  <Loader2 v-if="frameAssetExtracting" :size="11" class="animate-spin" />
+                  {{ frameAssetExtracting ? t('episode.frameAssets.extracting') : t('episode.frameAssets.extract') }}
+                </button>
+                <button
                   v-if="previewVideoUrl && !playerIsRemote"
                   class="btn btn-sm btn-primary"
                   @click="setAsMainVideo"
@@ -954,6 +998,53 @@
                       </button>
                     </div>
                     <div v-else class="video-bound-refs-empty">{{ t('episode.inspector.noBoundRefs') }}</div>
+                  </section>
+                  <section class="video-inspector-section">
+                    <div class="video-inspector-prompt-head">
+                      <span class="video-inspector-label">{{ t('episode.frameAssets.title') }}</span>
+                      <span class="tag mono">{{ t('episode.frameAssets.onlyThisEpisode') }}</span>
+                    </div>
+                    <p class="voice-reference-hint">{{ t('episode.frameAssets.scopeHint') }}</p>
+                    <div class="frame-asset-current">
+                      <template v-if="currentShotFirstFrame">
+                        <img :src="videoSourceUrl(currentShotFirstFrame)" class="frame-asset-current-thumb" alt="" loading="lazy" />
+                        <div class="frame-asset-current-meta">
+                          <span>{{ t('episode.frameAssets.current') }}</span>
+                          <button type="button" class="btn btn-sm" @click="clearShotFirstFrame(selectedSb)">
+                            {{ t('episode.frameAssets.clearFirstFrame') }}
+                          </button>
+                        </div>
+                      </template>
+                      <span v-else class="dim">{{ t('episode.frameAssets.noFirstFrame') }}</span>
+                    </div>
+                    <div class="frame-asset-bind-hint">{{ t('episode.frameAssets.bindHint') }}</div>
+                    <div v-if="episodeFrameAssets.length" class="frame-asset-grid">
+                      <div v-for="asset in episodeFrameAssets" :key="asset.id" class="frame-asset-card">
+                        <img :src="frameAssetSource(asset)" alt="" loading="lazy" />
+                        <div class="frame-asset-card-foot">
+                          <span class="frame-asset-shot">{{ t('episode.frameAssets.sourceShot', { n: frameAssetShotNumber(asset) }) }}</span>
+                          <button
+                            v-if="!isCurrentShotAsset(asset)"
+                            type="button"
+                            class="btn btn-sm"
+                            :disabled="frameAssetBusyId === asset.id"
+                            @click="setShotFirstFrame(asset)"
+                          >
+                            <Loader2 v-if="frameAssetBusyId === asset.id" :size="11" class="animate-spin" />
+                            {{ t('episode.frameAssets.useAsFirstFrame') }}
+                          </button>
+                          <span v-else-if="isCurrentShotAsset(asset)" class="tag mono">{{ t('episode.frameAssets.fromCurrentShot') }}</span>
+                          <button
+                            type="button"
+                            class="frame-asset-del"
+                            :title="t('episode.frameAssets.delete')"
+                            :aria-label="t('episode.frameAssets.delete')"
+                            @click.stop="removeFrameAsset(asset)"
+                          >×</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-else class="video-bound-refs-empty">{{ t('episode.frameAssets.empty') }}</div>
                   </section>
                 </div>
 
@@ -1234,8 +1325,8 @@
                 >
                   <div class="ai-transition-card-thumb">
                     <img
-                      v-if="b.first_frame_url"
-                      :src="'/' + b.first_frame_url"
+                      v-if="b.first_frame_upload_url || b.first_frame_url"
+                      :src="'/' + (b.first_frame_upload_url || b.first_frame_url)"
                       :alt="transitionPairLabel(b)"
                       loading="lazy"
                     />
@@ -1694,29 +1785,118 @@
             <div v-else-if="transitionDetailBoundary.error_msg" class="transition-detail-error">
               {{ mapError(transitionDetailBoundary.error_msg) }}
             </div>
-            <div v-if="transitionDetailBoundary.first_frame_url || transitionDetailBoundary.last_frame_url" class="transition-detail-frames">
+            <div v-if="transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'first') || transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'last')" class="transition-detail-frames">
               <button
-                v-if="transitionDetailBoundary.first_frame_url"
+                v-if="transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'first')"
                 type="button"
                 class="transition-detail-frame"
-                @click="openImageViewer('/' + transitionDetailBoundary.first_frame_url, t('episode.export.aiTransition.firstFrame'))"
+                @click="openImageViewer('/' + transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'first'), t('episode.export.aiTransition.firstFrame'))"
               >
-                <img :src="'/' + transitionDetailBoundary.first_frame_url" :alt="t('episode.export.aiTransition.firstFrame')" loading="lazy" />
+                <img :src="'/' + transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'first')" :alt="t('episode.export.aiTransition.firstFrame')" loading="lazy" />
                 <span>{{ t('episode.export.aiTransition.firstFrame') }}</span>
+                <span v-if="transitionUploadedFrameUrl(transitionDetailBoundary, 'first')" class="transition-slot-tag">{{ t('episode.export.aiTransition.slotUploadedTag') }}</span>
               </button>
               <button
-                v-if="transitionDetailBoundary.last_frame_url"
+                v-if="transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'last')"
                 type="button"
                 class="transition-detail-frame"
-                @click="openImageViewer('/' + transitionDetailBoundary.last_frame_url, t('episode.export.aiTransition.lastFrame'))"
+                @click="openImageViewer('/' + transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'last'), t('episode.export.aiTransition.lastFrame'))"
               >
-                <img :src="'/' + transitionDetailBoundary.last_frame_url" :alt="t('episode.export.aiTransition.lastFrame')" loading="lazy" />
+                <img :src="'/' + transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'last')" :alt="t('episode.export.aiTransition.lastFrame')" loading="lazy" />
                 <span>{{ t('episode.export.aiTransition.lastFrame') }}</span>
+                <span v-if="transitionUploadedFrameUrl(transitionDetailBoundary, 'last')" class="transition-slot-tag">{{ t('episode.export.aiTransition.slotUploadedTag') }}</span>
               </button>
             </div>
-            <p v-if="transitionDetailBoundary.first_frame_url || transitionDetailBoundary.last_frame_url" class="ai-transition-prompt-note">
+            <div v-if="transitionDetailBoundary.id" class="transition-detail-slots">
+              <div class="transition-slot-row">
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  :disabled="transitionRefBusy['slot:first:' + transitionDetailBoundary.id]"
+                  @click="uploadTransitionSlotImage(transitionDetailBoundary, 'first')"
+                >
+                  {{ transitionRefBusy['slot:first:' + transitionDetailBoundary.id]
+                    ? t('episode.export.aiTransition.slotUploading')
+                    : t('episode.export.aiTransition.slotUpload') }}
+                </button>
+                <button
+                  v-if="transitionUploadedFrameUrl(transitionDetailBoundary, 'first')"
+                  type="button"
+                  class="btn btn-sm btn-ghost"
+                  :disabled="transitionRefBusy['slot:first:' + transitionDetailBoundary.id]"
+                  @click="resetTransitionSlot(transitionDetailBoundary, 'first')"
+                >
+                  {{ t('episode.export.aiTransition.slotRestore') }}
+                </button>
+              </div>
+              <div class="transition-slot-row">
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  :disabled="transitionRefBusy['slot:last:' + transitionDetailBoundary.id]"
+                  @click="uploadTransitionSlotImage(transitionDetailBoundary, 'last')"
+                >
+                  {{ transitionRefBusy['slot:last:' + transitionDetailBoundary.id]
+                    ? t('episode.export.aiTransition.slotUploading')
+                    : t('episode.export.aiTransition.slotUpload') }}
+                </button>
+                <button
+                  v-if="transitionUploadedFrameUrl(transitionDetailBoundary, 'last')"
+                  type="button"
+                  class="btn btn-sm btn-ghost"
+                  :disabled="transitionRefBusy['slot:last:' + transitionDetailBoundary.id]"
+                  @click="resetTransitionSlot(transitionDetailBoundary, 'last')"
+                >
+                  {{ t('episode.export.aiTransition.slotRestore') }}
+                </button>
+              </div>
+            </div>
+            <p v-if="transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'first') || transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'last')" class="ai-transition-prompt-note">
               {{ t('episode.export.aiTransition.framesHint') }}
             </p>
+            <div v-if="transitionDetailBoundary.id" class="transition-ref-section">
+              <div class="transition-ref-head">
+                <span class="transition-ref-title">{{ t('episode.export.aiTransition.refsTitle') }}</span>
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  :disabled="transitionRefBusy['refs:' + transitionDetailBoundary.id]"
+                  @click="addTransitionReferences(transitionDetailBoundary)"
+                >
+                  {{ transitionRefBusy['refs:' + transitionDetailBoundary.id]
+                    ? t('episode.export.aiTransition.refsAdding')
+                    : t('episode.export.aiTransition.refsAdd') }}
+                </button>
+                <span class="dim transition-ref-hint">{{ t('episode.export.aiTransition.refsHint', { n: transitionReferenceLimit() }) }}</span>
+              </div>
+              <p v-if="!transitionReferenceAllowed() && transitionReferenceUrls(transitionDetailBoundary).length" class="ai-transition-prompt-note transition-ref-warning">
+                {{ t('episode.export.aiTransition.refsNotAllowed') }}
+              </p>
+              <div v-if="transitionReferenceUrls(transitionDetailBoundary).length" class="transition-ref-list">
+                <div
+                  v-for="(url, i) in transitionReferenceUrls(transitionDetailBoundary)"
+                  :key="`${url}-${i}`"
+                  class="transition-ref-item"
+                >
+                  <img
+                    :src="'/' + url"
+                    :alt="t('episode.export.aiTransition.refsTitle')"
+                    loading="lazy"
+                    @click="openImageViewer('/' + url, t('episode.export.aiTransition.refsTitle'))"
+                  />
+                  <button
+                    type="button"
+                    class="transition-ref-remove"
+                    :disabled="transitionRefBusy['refs:' + transitionDetailBoundary.id]"
+                    :aria-label="t('episode.export.aiTransition.refsRemoved')"
+                    @click="removeTransitionReference(transitionDetailBoundary, i)"
+                  >
+                    <X :size="10" />
+                  </button>
+                </div>
+              </div>
+              <p v-else class="dim transition-ref-empty">{{ t('episode.export.aiTransition.refsEmpty') }}</p>
+            </div>
             <div class="ai-transition-prompt transition-detail-prompt">
               <div class="ai-transition-prompt-head">
                 <span :class="['ai-transition-prompt-source', transitionPromptSourceClass(transitionDetailBoundary)]">
@@ -1921,6 +2101,7 @@
                       </label>
                       <span class="ai-transition-pair">{{ transitionPairLabel(b) }}</span>
                       <span :class="['ai-transition-status', transitionStatusClass(b)]">{{ transitionStatusLabel(b) }}</span>
+                      <span v-if="transitionRefCountLabel(b)" class="ai-transition-refs-badge">{{ transitionRefCountLabel(b) }}</span>
                       <span v-if="transitionDurationLabel(b)" class="dim ai-transition-duration">{{ transitionDurationLabel(b) }}</span>
                       <span class="ai-transition-actions">
                         <button
@@ -2076,6 +2257,16 @@
         @confirm="confirmDeleteTransition"
         @cancel="transitionDelete.open = false"
       />
+
+      <ConfirmDialog
+        :open="shotDelete.open"
+        :title="t('episode.vid.deleteTitle')"
+        :message="t('episode.vid.deleteMessage', { title: shotDelete.title, number: shotDelete.number })"
+        :confirm-text="t('episode.vid.deleteConfirm')"
+        :loading="shotDelete.loading"
+        @confirm="confirmDeleteStoryboard"
+        @cancel="shotDelete.open = false; shotDelete.target = null"
+      />
     </main>
     </div>
   </div>
@@ -2104,7 +2295,7 @@ import {
   Users, FileText, FolderKanban, Clapperboard, Download, Loader2,
   Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors,
 } from 'lucide-vue-next'
-import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI } from '~/composables/useApi'
+import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
 import { useAgent } from '~/composables/useAgent'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
@@ -2154,6 +2345,68 @@ const { running: rn, runningType: rt, run: runAgent } = useAgent()
 // 拆分是同步长请求：运行期间定时刷新，Agent 已写入的分镜能逐步出现；失败也会在 onSettled 刷新
 const breakdownElapsed = ref(0)
 let breakdownTimer = null
+
+// ===== 分镜拆分方式：设置页管理，剧集只存 key =====
+const standardBreakdownMethod = () => ({ key: 'standard', name: t('episode.sb.methodStandard'), builtin: true, customized: false })
+const breakdownMethods = ref([standardBreakdownMethod()])
+const breakdownMethodKey = ref('standard')
+const methodSaving = ref(false)
+let breakdownMethodsLoaded = false
+
+const currentBreakdownMethodName = computed(() => {
+  const selected = breakdownMethods.value.find(method => method.key === breakdownMethodKey.value)
+  return selected?.name || t('episode.sb.methodStandard')
+})
+
+function syncBreakdownMethodKey() {
+  if (methodSaving.value) return
+  const key = String(episode.value?.breakdown_method || '').trim()
+  breakdownMethodKey.value = key && breakdownMethods.value.some(method => method.key === key) ? key : 'standard'
+}
+
+async function loadBreakdownMethods() {
+  if (breakdownMethodsLoaded) return
+  breakdownMethodsLoaded = true
+  try {
+    const result = await breakdownMethodAPI.list()
+    const list = Array.isArray(result?.list) ? result.list : []
+    if (!list.length) throw new Error('empty breakdown method list')
+    breakdownMethods.value = list
+  } catch {
+    breakdownMethods.value = [standardBreakdownMethod()]
+    toast.warning(t('episode.sb.methodLoadFailed'))
+  }
+  syncBreakdownMethodKey()
+}
+
+async function changeBreakdownMethod(event) {
+  const nextKey = String(event?.target?.value || 'standard')
+  const prevKey = breakdownMethodKey.value
+  if (nextKey === prevKey) return
+  if (rn.value || methodSaving.value) {
+    if (event?.target) event.target.value = prevKey
+    return
+  }
+  const ep = episode.value
+  if (!ep?.id) {
+    if (event?.target) event.target.value = prevKey
+    return
+  }
+  breakdownMethodKey.value = nextKey
+  const prevEpisodeKey = ep.breakdown_method || null
+  ep.breakdown_method = nextKey
+  methodSaving.value = true
+  try {
+    await episodeAPI.update(ep.id, { breakdown_method: nextKey })
+    toast.success(t('episode.sb.methodSaved'))
+  } catch (e) {
+    breakdownMethodKey.value = prevKey
+    ep.breakdown_method = prevEpisodeKey
+    toastError(e, { fallback: 'episode.sb.methodSaveFailed' })
+  } finally {
+    methodSaving.value = false
+  }
+}
 watch(rt, (value) => {
   if (breakdownTimer) { clearInterval(breakdownTimer); breakdownTimer = null }
   if (value !== 'storyboard_breaker') return
@@ -2858,6 +3111,9 @@ function toggleVideoFilter(state) {
 // ===== 批量视频：选择模式 + 生成前确认（视频生成成本高，避免误触全量触发） =====
 const videoSelectMode = ref(false)
 const selectedVideoSbIds = ref([])
+const addingStoryboard = ref(false)
+const sbDescriptionInput = ref(null)
+const shotDelete = ref({ open: false, target: null, title: '', number: '', loading: false, nextId: null })
 const batchVideoConfirm = ref({ open: false, targets: [] })
 
 function isVideoSbSelected(id) { return selectedVideoSbIds.value.includes(id) }
@@ -2873,6 +3129,74 @@ function toggleVideoSelectMode() {
 function onVideoTaskRowClick(sb) {
   if (videoSelectMode.value) toggleVideoSbSelect(sb.id)
   else selectedSb.value = sb
+}
+
+async function addStoryboard() {
+  const ep = episode.value
+  if (!ep?.id || rn.value || addingStoryboard.value) return
+  const source = selectedSb.value || sbs.value[sbs.value.length - 1] || null
+  const duration = Math.max(2, Math.min(10, videoDurationMax.value || 10))
+  addingStoryboard.value = true
+  try {
+    const created = await storyboardAPI.create({
+      episode_id: ep.id,
+      title: t('episode.vid.newShotTitle', { n: sbs.value.length + 1 }),
+      description: '',
+      duration,
+      scene_id: source?.scene_id ?? source?.sceneId ?? null,
+      character_ids: source ? getStoryboardCharacters(source).map(char => char.id) : [],
+      prop_ids: source ? getStoryboardProps(source).map(prop => prop.id) : [],
+    })
+    await refresh()
+    videoSelectMode.value = false
+    selectedVideoSbIds.value = []
+    const newId = created?.id ?? created?.data?.id
+    if (newId) selectedSb.value = sbs.value.find(sb => sb.id === newId) || selectedSb.value
+    await nextTick()
+    sbDescriptionInput.value?.focus()
+  } catch (e) {
+    toastError(e)
+  } finally {
+    addingStoryboard.value = false
+  }
+}
+
+function deleteStoryboard(sb) {
+  if (videoSelectMode.value || rn.value || shotDelete.value.loading) return
+  const rows = allVideoTaskRows.value
+  const position = rows.findIndex(row => String(row.id) === String(sb.id))
+  const row = position >= 0 ? rows[position] : null
+  const successor = position >= 0 ? (rows[position + 1] || rows[position - 1] || null) : null
+  shotDelete.value = {
+    open: true,
+    target: sb,
+    title: row?.title || sb?.title || '',
+    number: row ? row.index + 1 : '',
+    loading: false,
+    nextId: successor?.id ?? null,
+  }
+}
+
+async function confirmDeleteStoryboard() {
+  const target = shotDelete.value.target
+  if (!target || shotDelete.value.loading) return
+  const nextId = shotDelete.value.nextId
+  shotDelete.value.loading = true
+  try {
+    await storyboardAPI.del(target.id)
+    shotDelete.value = { open: false, target: null, title: '', number: '', loading: false, nextId: null }
+    selectedVideoSbIds.value = selectedVideoSbIds.value.filter(id => id !== target.id)
+    await refresh()
+    if (nextId != null && sbs.value.some(sb => sb.id === nextId)) {
+      selectedSb.value = sbs.value.find(sb => sb.id === nextId) || null
+    } else {
+      selectedSb.value = sbs.value[0] || null
+    }
+    toast.success(t('episode.vid.deleteDone'))
+  } catch (e) {
+    shotDelete.value.loading = false
+    toastError(e, { fallback: 'episode.vid.deleteFailed' })
+  }
 }
 
 // 旁白角色识别：按内容语言的关键词匹配（提取产物中的旁白角色不参与画面生成）
@@ -3958,6 +4282,7 @@ async function refresh() {
     const ep = drama.value.episodes?.find(e => (e.episode_number || e.episodeNumber) === episodeNumber)
     if (ep) {
       episode.value = ep
+      syncBreakdownMethodKey()
       try { chars.value = await episodeAPI.characters(ep.id) } catch { chars.value = [] }
       try { scenes.value = await episodeAPI.scenes(ep.id, { scope: 'all' }) } catch { scenes.value = [] }
       try { propItems.value = await episodeAPI.props(ep.id, { scope: 'all' }) } catch { propItems.value = [] }
@@ -3983,7 +4308,7 @@ async function refresh() {
     toastError(e)
   }
   try { mergeData.value = await mergeAPI.status(epId.value) } catch {}
-  await Promise.all([loadGenTasks(), loadExportMerges()])
+  await Promise.all([loadGenTasks(), loadExportMerges(), loadFrameAssets()])
 }
 
 function saveRaw() { episodeAPI.update(epId.value, { content: localRaw.value }); episode.value.content = localRaw.value }
@@ -4162,6 +4487,11 @@ function pollVideoPromptBatch(attempts = 240) {
   setTimeout(() => tick(attempts), 2500)
 }
 function doBreakdown() {
+  if (rn.value || methodSaving.value) return
+  if (sbs.value.length > 0) {
+    const confirmed = window.confirm(t('episode.sb.rebreakConfirm', { n: sbs.value.length, method: currentBreakdownMethodName.value }))
+    if (!confirmed) return
+  }
   const charList = bindableChars.value.length
     ? bindableChars.value.map(c => `${c.name}(ID:${c.id})`).join('、')
     : '（项目还没有角色）'
@@ -4461,6 +4791,116 @@ function getShotReferenceImages(sb) {
     pushRef(prop?.image_url || prop?.imageUrl)
   }
   return refs
+}
+
+// ===== 分镜末帧资产：只在本集生效，可设为镜头首帧作为下一镜转场开头 =====
+const frameAssets = ref([])
+const frameAssetExtracting = ref(false)
+const frameAssetBusyId = ref(null)
+
+const currentShotFirstFrame = computed(() => {
+  const sb = selectedSb.value
+  return sb?.first_frame_image || sb?.firstFrameImage || ''
+})
+const episodeFrameAssets = computed(() => frameAssets.value)
+const canExtractLastFrame = computed(() => {
+  if (isComfyVideoMode.value || previewVideoUrl.value) return false
+  const url = String(selectedSb.value?.video_url || selectedSb.value?.videoUrl || '')
+  return !!url && !/^https?:\/\//i.test(url)
+})
+
+function isCurrentShotAsset(asset) {
+  return Number(asset?.storyboard_id ?? asset?.storyboardId ?? 0) === Number(selectedSb.value?.id || 0)
+}
+function frameAssetSource(asset) {
+  return videoSourceUrl(asset?.url || '')
+}
+function frameAssetShotNumber(asset) {
+  const sourceId = Number(asset?.storyboard_id ?? asset?.storyboardId ?? 0)
+  const index = sbs.value.findIndex(item => item.id === sourceId)
+  return index >= 0 ? index + 1 : (asset?.storyboard_num ?? asset?.storyboardNum ?? '')
+}
+function setStoryboardFirstFrameLocal(storyboardId, url) {
+  const sb = sbs.value.find(item => item.id === storyboardId)
+  if (!sb) return
+  sb.first_frame_image = url
+  sb.firstFrameImage = url
+}
+async function loadFrameAssets() {
+  if (!epId.value) { frameAssets.value = []; return }
+  try {
+    frameAssets.value = (await frameAssetAPI.list(epId.value)) || []
+  } catch {
+    frameAssets.value = []
+  }
+}
+async function extractShotLastFrame(sb = selectedSb.value) {
+  if (!sb?.id || frameAssetExtracting.value) return
+  frameAssetExtracting.value = true
+  try {
+    const result = await frameAssetAPI.extractLast(sb.id)
+    const asset = result?.asset
+    const boundNext = result?.bound_next ?? result?.boundNext
+    const nextId = result?.next_storyboard_id ?? result?.nextStoryboardId
+    const previousUrl = frameAssets.value.find(item => item.id === asset?.id)?.url
+    // 重新抽帧后地址会变：本集引用旧地址的首帧同步换新
+    if (previousUrl && asset?.url && previousUrl !== asset.url) {
+      for (const item of sbs.value) {
+        if ((item.first_frame_image || item.firstFrameImage) === previousUrl) {
+          setStoryboardFirstFrameLocal(item.id, asset.url)
+        }
+      }
+    }
+    if (boundNext && nextId && asset?.url) {
+      setStoryboardFirstFrameLocal(nextId, asset.url)
+    }
+    await loadFrameAssets()
+    toast.success(boundNext ? t('episode.frameAssets.boundNext') : t('episode.frameAssets.extracted'))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.frameAssets.extractFailed' })
+  } finally {
+    frameAssetExtracting.value = false
+  }
+}
+async function setShotFirstFrame(asset) {
+  const sb = selectedSb.value
+  if (!sb?.id || !asset?.id || frameAssetBusyId.value) return
+  frameAssetBusyId.value = asset.id
+  try {
+    const result = await frameAssetAPI.setFirstFrame(sb.id, asset.id)
+    setStoryboardFirstFrameLocal(sb.id, result?.first_frame_image || asset.url)
+    toast.success(t('episode.frameAssets.firstFrameSet'))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.frameAssets.firstFrameSetFailed' })
+  } finally {
+    frameAssetBusyId.value = null
+  }
+}
+async function clearShotFirstFrame(sb = selectedSb.value) {
+  if (!sb?.id) return
+  try {
+    await frameAssetAPI.setFirstFrame(sb.id, null)
+    setStoryboardFirstFrameLocal(sb.id, null)
+    toast.success(t('episode.frameAssets.firstFrameCleared'))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.frameAssets.firstFrameClearFailed' })
+  }
+}
+async function removeFrameAsset(asset) {
+  if (!asset?.id || !epId.value) return
+  if (!window.confirm(t('episode.frameAssets.deleteConfirm'))) return
+  try {
+    await frameAssetAPI.del(epId.value, asset.id)
+    frameAssets.value = frameAssets.value.filter(item => item.id !== asset.id)
+    for (const item of sbs.value) {
+      if ((item.first_frame_image || item.firstFrameImage) === asset.url) {
+        setStoryboardFirstFrameLocal(item.id, null)
+      }
+    }
+    toast.success(t('episode.frameAssets.deleted'))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.frameAssets.deleteFailed' })
+  }
 }
 
 // 右侧参考素材面板：本集全部可绑定素材（场景单选、角色/道具多选），bound 标记是否已绑定
@@ -4927,6 +5367,9 @@ function transitionBoundaryForPair(fromId, toId) {
     video_url: null,
     first_frame_url: null,
     last_frame_url: null,
+    first_frame_upload_url: null,
+    last_frame_upload_url: null,
+    reference_image_urls: [],
     duration_requested: null,
     duration_effective: null,
     duration_actual: null,
@@ -5331,6 +5774,124 @@ async function regenerateTransitionWithPrompt(boundary) {
   }
 }
 
+// ===== 过渡参考图：出入帧槽位上传 + 追加参考图列表 =====
+const transitionRefBusy = ref({})
+function setTransitionRefBusy(key, busy) {
+  const next = { ...transitionRefBusy.value }
+  if (busy) next[key] = true
+  else delete next[key]
+  transitionRefBusy.value = next
+}
+function transitionUploadedFrameUrl(boundary, slot) {
+  const url = slot === 'first' ? boundary?.first_frame_upload_url : boundary?.last_frame_upload_url
+  return String(url || '').trim() || null
+}
+function transitionDetailEffectiveFrameUrl(boundary, slot) {
+  const uploaded = transitionUploadedFrameUrl(boundary, slot)
+  if (uploaded) return uploaded
+  const url = slot === 'first' ? boundary?.first_frame_url : boundary?.last_frame_url
+  return String(url || '').trim() || null
+}
+function transitionReferenceUrls(boundary) {
+  const list = Array.isArray(boundary?.reference_image_urls) ? boundary.reference_image_urls : []
+  return list.filter(u => String(u || '').trim())
+}
+function transitionReferenceLimit() {
+  const value = Number(transitionState.value.provider?.reference_images_max)
+  return Number.isFinite(value) && value > 0 ? value : 0
+}
+function transitionReferenceAllowed() {
+  return transitionState.value.provider?.reference_images_allowed === true
+}
+function transitionRefCountLabel(b) {
+  const n = transitionReferenceUrls(b).length
+  return n > 0 ? t('episode.export.aiTransition.refsBadge', { n }) : ''
+}
+async function saveTransitionReferences(boundary, payload) {
+  if (!boundary?.id) return false
+  try {
+    await transitionAPI.saveReferenceImages(boundary.id, payload)
+    await loadTransitions()
+    return true
+  } catch (e) {
+    toastError(e, { fallback: 'episode.export.aiTransition.actionFailed' })
+    return false
+  }
+}
+function uploadTransitionSlotImage(boundary, slot) {
+  if (!boundary?.id) return
+  pickFile('image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp', async (file) => {
+    const key = `slot:${slot}:${boundary.id}`
+    if (transitionRefBusy.value[key]) return
+    setTransitionRefBusy(key, true)
+    try {
+      const res = await uploadAPI.image(file, dramaId)
+      const field = slot === 'first' ? 'first_frame_upload_url' : 'last_frame_upload_url'
+      const ok = await saveTransitionReferences(boundary, { [field]: res.path })
+      if (ok) toast.success(t('episode.export.aiTransition.slotUpdated'))
+    } catch (e) {
+      toastError(e)
+    } finally {
+      setTransitionRefBusy(key, false)
+    }
+  })
+}
+async function resetTransitionSlot(boundary, slot) {
+  const key = `slot:${slot}:${boundary?.id}`
+  if (!boundary?.id || transitionRefBusy.value[key]) return
+  setTransitionRefBusy(key, true)
+  try {
+    const field = slot === 'first' ? 'first_frame_upload_url' : 'last_frame_upload_url'
+    const ok = await saveTransitionReferences(boundary, { [field]: null })
+    if (ok) toast.success(t('episode.export.aiTransition.slotRestored'))
+  } finally {
+    setTransitionRefBusy(key, false)
+  }
+}
+function addTransitionReferences(boundary) {
+  if (!boundary?.id) return
+  const existing = transitionReferenceUrls(boundary)
+  const limit = transitionReferenceLimit()
+  const room = limit > 0 ? limit - existing.length : 0
+  if (room <= 0) {
+    toast.info(t('episode.export.aiTransition.refsLimit', { n: limit }))
+    return
+  }
+  pickFiles('image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp', async (files) => {
+    const key = `refs:${boundary.id}`
+    if (transitionRefBusy.value[key]) return
+    setTransitionRefBusy(key, true)
+    try {
+      const uploaded = []
+      for (const file of files.slice(0, room)) {
+        try {
+          const res = await uploadAPI.image(file, dramaId)
+          uploaded.push(res.path)
+        } catch (error) {
+          toastError(error)
+        }
+      }
+      if (!uploaded.length) return
+      const ok = await saveTransitionReferences(boundary, { reference_image_urls: [...existing, ...uploaded] })
+      if (ok) toast.success(t('episode.export.aiTransition.refsDone'))
+    } finally {
+      setTransitionRefBusy(key, false)
+    }
+  })
+}
+async function removeTransitionReference(boundary, index) {
+  const key = `refs:${boundary?.id}`
+  if (!boundary?.id || transitionRefBusy.value[key]) return
+  setTransitionRefBusy(key, true)
+  try {
+    const next = transitionReferenceUrls(boundary).filter((_, i) => i !== index)
+    const ok = await saveTransitionReferences(boundary, { reference_image_urls: next })
+    if (ok) toast.success(t('episode.export.aiTransition.refsRemoved'))
+  } finally {
+    setTransitionRefBusy(key, false)
+  }
+}
+
 function openMergeDialog() {
   if (!exportSelectedReadyIds.value.length) {
     toast.error(t('episode.export.selectFirst'))
@@ -5424,6 +5985,7 @@ watch(panel, (current) => {
 }, { immediate: true })
 
 onMounted(async () => {
+  void loadBreakdownMethods()
   await refresh()
   loadConfigs()
   syncExtractStatus()
@@ -6279,6 +6841,13 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   border-color: var(--action-primary);
   box-shadow: 0 0 0 3px var(--button-focus);
 }
+.video-method-pick { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.video-method-pick .video-method-select {
+  height: 26px; padding: 0 22px 0 8px; font-size: 11px;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-1); cursor: pointer;
+}
+.video-method-select:disabled { opacity: .55; cursor: not-allowed; }
 
 /* ComfyUI 监控舞台：右侧嵌入官方工作流页面，网关校验路径票据 */
 .comfy-embed-stage {
@@ -7179,7 +7748,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .batch-video-note { margin: 4px 0 0; font-size: 11px; color: var(--text-3); line-height: 1.6; }
 .video-task-row {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) auto;
+  grid-template-columns: 56px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
@@ -7311,6 +7880,19 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   height: 24px;
   padding: 0;
 }
+.video-task-delete {
+  justify-self: end;
+  align-self: center;
+  min-width: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.15s var(--ease-out), color 0.15s var(--ease-out);
+}
+.video-task-row:hover .video-task-delete,
+.video-task-delete:focus-visible { opacity: 1; }
+.video-task-delete:hover { color: var(--error); }
 .video-task-inspector {
   min-width: 0;
   min-height: 0;
@@ -7413,6 +7995,17 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 .video-bound-ref-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 11px; }
 .video-bound-refs-empty { padding: 10px; border: 1px dashed var(--surface-outline); border-radius: var(--radius); color: var(--text-3); font-size: 11px; line-height: 1.5; }
+.frame-asset-current { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.frame-asset-current-thumb { width: 76px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid var(--surface-outline); }
+.frame-asset-current-meta { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 11px; color: var(--text-2); }
+.frame-asset-bind-hint { margin-top: 8px; font-size: 11px; line-height: 1.5; color: var(--text-3); }
+.frame-asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; margin-top: 8px; }
+.frame-asset-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--surface-outline); border-radius: var(--radius); background: var(--bg-2); }
+.frame-asset-card > img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+.frame-asset-card-foot { display: flex; align-items: center; gap: 4px; padding: 0 6px 6px; flex-wrap: wrap; }
+.frame-asset-shot { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--text-3); }
+.frame-asset-del { border: none; background: transparent; color: var(--text-3); cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 4px; }
+.frame-asset-del:hover { color: var(--error); }
 .video-param-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; white-space: nowrap; }
 .video-param-name { color: var(--text-1); font-weight: 600; flex-shrink: 0; }
 .video-param-value { color: var(--text-1); text-align: right; font-size: 11px; }
@@ -8670,6 +9263,80 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 .transition-detail-delete { color: var(--error); }
 .transition-detail-delete:hover:not(:disabled) { background: var(--error-bg); }
+.transition-slot-tag {
+  position: absolute;
+  right: 10px;
+  top: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+.transition-detail-frame { position: relative; }
+.transition-detail-slots { display: flex; gap: 10px; }
+.transition-slot-row { display: flex; gap: 8px; flex: 1; }
+.transition-slot-row .btn { flex: 1; }
+.transition-ref-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--surface-outline);
+  border-radius: 8px;
+}
+.transition-ref-head { display: flex; align-items: center; gap: 8px; }
+.transition-ref-title { font-size: 12px; font-weight: 600; }
+.transition-ref-hint { font-size: 11px; }
+.transition-ref-warning { color: var(--warning, #b58a2b); }
+.transition-ref-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.transition-ref-item {
+  position: relative;
+  width: 86px;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--surface-outline);
+}
+.transition-ref-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--media-surface);
+  cursor: pointer;
+}
+.transition-ref-remove {
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+}
+.transition-ref-remove:hover:not(:disabled) { background: var(--error); }
+.transition-ref-empty { margin: 0; font-size: 11px; }
+.ai-transition-refs-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: var(--bg-hover);
+  border: 1px solid var(--surface-outline);
+  color: var(--text-2);
+  white-space: nowrap;
+}
 .ai-transition-pickers {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -2,7 +2,7 @@
  "1": {
   "class_type": "UNETLoader",
   "inputs": {
-   "unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+   "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
    "weight_dtype": "default"
   }
  },
@@ -13,7 +13,7 @@
     "1",
     0
    ],
-   "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+   "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
    "strength_model": 1.0
   }
  },
@@ -68,7 +68,7 @@
    "ref_max_size": 1024,
    "total_frames": 121,
    "timeline_data": "{\"version\": 4, \"editMode\": \"segment\", \"timelineMode\": \"r2v\", \"totalFrames\": 121, \"frameRate\": 24.0, \"width\": 1024, \"height\": 576, \"refMaxSize\": 1024, \"output\": {\"mode\": \"fixed\", \"longEdge\": 1024, \"width\": 1024, \"height\": 576, \"maxExportFrames\": 0, \"exportMode\": \"all\", \"continuityEnabled\": false, \"continuityOverlapFrames\": 9}, \"videoClips\": [], \"video\": {\"fileName\": \"\", \"videoFile\": \"\", \"subfolder\": \"\", \"type\": \"input\", \"frames\": [], \"frameMap\": []}, \"global\": {\"taskType\": \"r2v — 参考主体生视频(Reference to Video)\", \"prompt\": \"Natural synchronized sound, no text.\", \"refs\": [], \"referenceVideo\": {}, \"continuousReference\": false, \"genImage\": {\"imageFile\": \"\"}}, \"shots\": [], \"keyframes\": [], \"segments\": [{\"id\": \"s1\", \"start\": 0, \"length\": 121, \"frameCount\": 121, \"durationSec\": 5.04, \"prompt\": \"A calm cinematic establishing shot, soft natural light, gentle camera push-in.\", \"negativePrompt\": \"bad video, distorted face, extra fingers, deformed hands, subtitles, captions, on-screen text, chinese characters, watermark, logo\", \"continuityFromPrev\": false, \"loras\": [], \"isStartFrame\": false, \"isEndFrame\": false, \"genImage\": {\"imageFile\": null, \"width\": 0, \"height\": 0}, \"endImage\": null, \"taskType\": \"\", \"refs\": []}], \"gen\": {\"defaultFrameCount\": 121}, \"runSelectEnabled\": false, \"runSelection\": []}",
-   "steps": 8,
+   "steps": 4,
    "sampler": "euler",
    "scheduler": "beta",
    "shift_video": 12.0,

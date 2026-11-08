@@ -33,6 +33,8 @@ export interface ExtractFrameOptions {
   maxEdge?: number
   /** 文件前缀，默认取源文件名；过渡调用传 sb-<id> */
   label?: string
+  /** 项目内子目录，默认 transitions/frames */
+  subDir?: string
 }
 
 interface VideoMeta {
@@ -117,10 +119,11 @@ export async function extractVideoFrame(
   const dramaId = options.dramaId ?? parseProjectStoragePath(videoRelativePath)?.dramaId
   if (!dramaId) throw new Error('过渡抽帧需要项目 ID')
 
+  const subDir = options.subDir || 'transitions/frames'
   const label = safeLabel(options.label || path.basename(videoRelativePath, path.extname(videoRelativePath)))
   const filename = `${label}-${position}-${sourceHash(videoRelativePath, stat)}.jpg`
-  const relativePath = projectStorageRelative(dramaId, 'transitions/frames', filename)
-  const absolutePath = path.join(projectSubdirPath(dramaId, 'transitions/frames'), filename)
+  const relativePath = projectStorageRelative(dramaId, subDir, filename)
+  const absolutePath = path.join(projectSubdirPath(dramaId, subDir), filename)
 
   if (fs.existsSync(absolutePath) && fs.statSync(absolutePath).size > 0) {
     try {

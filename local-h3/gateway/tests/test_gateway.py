@@ -438,6 +438,78 @@ class TestVideoSubmit(BaseCase):
         self.assertEqual(len(timeline["segments"][0]["refs"]), 2)
         self.assertEqual(len(self.fake.uploads), 2)
 
+    def test_r2v_uses_ref2va_base_and_ref2v_lora(self):
+        for quality in ("preview", "final"):
+            with self.subTest(quality=quality):
+                before = len(self.fake.graphs)
+                task_id = self._submit({
+                    "content": [
+                        {"type": "text", "text": "two heroes fight"},
+                        {"type": "image_url", "image_url": {"url": PNG_DATA_URL}, "role": "reference_image"},
+                    ],
+                    "duration": 5,
+                    "resolution_tier": "480p",
+                    "aspect_ratio": "16:9",
+                    "quality": quality,
+                })
+                result = self.h.wait_task(f"/v2/query/video_generation/{task_id}")
+                self.assertEqual(result["task"]["status"], "succeeded")
+                graph = self.fake.graphs[before]
+                self.assertEqual(
+                    graph["1"]["inputs"]["unet_name"],
+                    "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+                )
+                self.assertIn("ref2v_turbo_4step", graph["2"]["inputs"]["lora_name"])
+                self.assertNotIn("fl2v_turbo", graph["2"]["inputs"]["lora_name"])
+                self.assertEqual(graph["6"]["inputs"]["steps"], 4)
+                self.assertTrue(graph["6"]["inputs"]["task_type"].startswith("r2v"))
+
+    def test_t2v_and_fl2v_stay_on_fl2va_base(self):
+        cases = [
+            ("preview", "turbo_4step", 4),
+            ("final", "turbo_8step", 8),
+        ]
+        for quality, lora_part, steps in cases:
+            with self.subTest(quality=quality):
+                before = len(self.fake.graphs)
+                task_id = self._submit({
+                    "content": [{"type": "text", "text": "a cat walks on the moon"}],
+                    "duration": 5,
+                    "resolution_tier": "480p",
+                    "aspect_ratio": "16:9",
+                    "quality": quality,
+                })
+                result = self.h.wait_task(f"/v2/query/video_generation/{task_id}")
+                self.assertEqual(result["task"]["status"], "succeeded")
+                graph = self.fake.graphs[before]
+                self.assertEqual(
+                    graph["1"]["inputs"]["unet_name"],
+                    "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+                )
+                self.assertIn(lora_part, graph["2"]["inputs"]["lora_name"])
+                self.assertEqual(graph["6"]["inputs"]["steps"], steps)
+
+        before = len(self.fake.graphs)
+        task_id = self._submit({
+            "content": [
+                {"type": "text", "text": "turn around"},
+                {"type": "image_url", "image_url": {"url": PNG_DATA_URL}, "role": "first_frame"},
+                {"type": "image_url", "image_url": {"url": PNG_DATA_URL_2}, "role": "last_frame"},
+            ],
+            "duration": 5,
+            "resolution_tier": "480p",
+            "aspect_ratio": "16:9",
+            "quality": "final",
+        })
+        result = self.h.wait_task(f"/v2/query/video_generation/{task_id}")
+        self.assertEqual(result["task"]["status"], "succeeded")
+        graph = self.fake.graphs[before]
+        self.assertEqual(
+            graph["1"]["inputs"]["unet_name"],
+            "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        )
+        self.assertIn("fl2v_turbo_8step", graph["2"]["inputs"]["lora_name"])
+
     def test_rejects_video_and_audio_references(self):
         status, _, body = self.h.json("POST", "/v2/video_generation", {
             "content": [
@@ -758,6 +830,37 @@ class TestComfyProxy(BaseCase):
 
 
 class TestUnits(unittest.TestCase):
+    def test_mode_quality_presets_override_global_without_touching_other_modes(self):
+        video = {
+            "quality_presets": {
+                "preview": {"lora": "fl2v_4step.safetensors", "steps": 4},
+                "final": {"lora": "fl2v_8step.safetensors", "steps": 8},
+            },
+            "mode_quality_presets": {
+                "r2v": {
+                    "preview": {"lora": "ref2v_4step.safetensors", "steps": 4},
+                    "final": {"lora": "ref2v_4step.safetensors", "steps": 4},
+                },
+            },
+            "default_quality": "preview",
+        }
+        self.assertEqual(
+            gw.resolve_video_quality(video, "r2v", "final"),
+            ("final", {"lora": "ref2v_4step.safetensors", "steps": 4}),
+        )
+        self.assertEqual(
+            gw.resolve_video_quality(video, "t2v", "final"),
+            ("final", {"lora": "fl2v_8step.safetensors", "steps": 8}),
+        )
+        self.assertEqual(
+            gw.resolve_video_quality(video, "fl2v", None),
+            ("preview", {"lora": "fl2v_4step.safetensors", "steps": 4}),
+        )
+        self.assertEqual(
+            gw.resolve_video_quality(video, "r2v", "unknown"),
+            ("preview", {"lora": "ref2v_4step.safetensors", "steps": 4}),
+        )
+
     def test_frame_grid(self):
         cases = {1: 22, 3: 73, 5: 124, 10: 243, 15: 362}
         for duration, frames in cases.items():

@@ -10,6 +10,8 @@ import { getAutomationState, isAutomationRunning, startAutomation, stopAutomatio
 import { ReworkError, reworkEpisode } from '../services/rework.js'
 import { getDubbingDefaults, VIDEO_AUDIO_MODES } from '../services/app-settings.js'
 import { createComfyUiSession, previewEpisodeComfyRun, runEpisodeComfy } from '../services/comfyui-episode.js'
+import { getBreakdownMethod } from '../services/breakdown-methods.js'
+import { cleanupFrameAssetsForEpisode } from '../services/storyboard-frame-assets.js'
 
 const app = new Hono()
 
@@ -152,7 +154,7 @@ app.put('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const body = await c.req.json()
 
-  const allowed = ['content', 'script_content', 'title', 'description', 'status', 'resolution', 'video_audio_mode', 'bgm_url', 'auto_dub', 'video_config_id', 'video_mode', 'comfyui_config_id', 'comfyui_workflow_json']
+  const allowed = ['content', 'script_content', 'title', 'description', 'status', 'resolution', 'video_audio_mode', 'bgm_url', 'auto_dub', 'video_config_id', 'video_mode', 'comfyui_config_id', 'comfyui_workflow_json', 'breakdown_method']
   const updates: Record<string, any> = {}
   for (const key of allowed) {
     if (key in body) updates[key] = body[key]
@@ -195,6 +197,17 @@ app.put('/:id', async (c) => {
       return badRequest(c, error?.message || 'comfyui_config_id 无效')
     }
   }
+  if ('breakdown_method' in updates) {
+    const raw = updates.breakdown_method
+    const key = raw === null || raw === undefined ? '' : String(raw).trim()
+    if (!key) {
+      drizzleUpdates.breakdownMethod = null
+    } else if (!getBreakdownMethod(key)) {
+      return badRequest(c, '拆分方案不存在')
+    } else {
+      drizzleUpdates.breakdownMethod = key
+    }
+  }
   if ('comfyui_workflow_json' in updates) {
     try {
       drizzleUpdates.comfyuiWorkflowJson = normalizeWorkflowSnapshot(updates.comfyui_workflow_json)
@@ -217,8 +230,13 @@ app.delete('/:id', async (c) => {
   if (!ep) return notFound(c, '剧集不存在')
   // 自动化正在跑时先停：否则删掉后流水线还会继续为这集生成资产/视频，白花钱
   if (isAutomationRunning(id)) await stopAutomation(id)
-  await db.update(schema.episodes).set({ deletedAt: now(), updatedAt: now() })
-    .where(eq(schema.episodes.id, id))
+  const ts = now()
+  db.transaction((tx) => {
+    cleanupFrameAssetsForEpisode(tx, id, ts)
+    tx.update(schema.episodes).set({ deletedAt: ts, updatedAt: ts })
+      .where(eq(schema.episodes.id, id))
+      .run()
+  })
   return success(c)
 })
 

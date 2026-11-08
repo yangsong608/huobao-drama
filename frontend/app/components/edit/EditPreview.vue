@@ -27,6 +27,11 @@
         class="ed-transition-flash"
         :style="{ opacity: flashOpacity }"
       ></span>
+      <span
+        v-if="transitionState && darkFlashOpacity > 0"
+        class="ed-transition-flash is-dark"
+        :style="{ opacity: darkFlashOpacity }"
+      ></span>
       <!-- 叠加轨预览合成层：与导出 overlay/ASS 同语义（contain 基准、中心锚点、透明度×淡入淡出） -->
       <div class="ed-overlay-layer">
         <template v-for="layer in overlayLayers" :key="layer.id">
@@ -130,6 +135,7 @@ import {
   incomingTransitionStyle,
   outgoingTransitionStyle,
   whiteFlashOpacity,
+  blackFlashOpacity,
 } from '~/utils/edit-preview-transition'
 import { formatPrecise } from '~/utils/edit-timecode'
 
@@ -412,6 +418,11 @@ const flashOpacity = computed(() => (
     ? whiteFlashOpacity(transitionState.value.type, transitionState.value.progress)
     : 0
 ))
+const darkFlashOpacity = computed(() => (
+  transitionState.value
+    ? blackFlashOpacity(transitionState.value.type, transitionState.value.progress)
+    : 0
+))
 const snapshotUrl = ref('')
 
 /** 进入转场窗口时抓取当前（出场）画面；同一窗口只抓一次。 */
@@ -574,6 +585,7 @@ defineExpose({ seek, sync: seek, play, pause, video: videoRef })
 .ed-transition-flash {
   position: absolute; inset: 0; z-index: 2; background: #fff; pointer-events: none;
 }
+.ed-transition-flash.is-dark { background: #000; }
 .ed-overlay-layer {
   position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none;
 }

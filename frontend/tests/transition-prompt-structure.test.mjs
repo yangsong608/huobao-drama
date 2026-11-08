@@ -149,10 +149,10 @@ test('镜头素材下方提供过渡镜头卡片与详情弹窗', () => {
   assert.match(episode, /class="ai-transition-card"/)
   assert.match(episode, /@click="openTransitionDetail\(b\)"/)
   assert.match(episode, /const transitionDetailBoundary = computed/)
-  assert.match(episode, /transitionDetailBoundary\.first_frame_url/)
-  assert.match(episode, /transitionDetailBoundary\.last_frame_url/)
+  assert.match(episode, /transitionDetailEffectiveFrameUrl\(transitionDetailBoundary, 'first'\)/)
+  assert.match(episode, /transitionDetailEffectiveFrameUrl\(transitionDetailBoundary, 'last'\)/)
   assert.match(episode, /class="input ai-transition-prompt-input"/)
-  assert.match(episode, /openImageViewer\('\/' \+ transitionDetailBoundary\.first_frame_url/)
+  assert.match(episode, /openImageViewer\('\/' \+ transitionDetailEffectiveFrameUrl\(transitionDetailBoundary, 'first'\)/)
   assert.match(episode, /regenerateTransitionWithPrompt\(transitionDetailBoundary\)/)
 })
 

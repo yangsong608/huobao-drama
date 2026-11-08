@@ -9,6 +9,7 @@ import {
   MAX_TRANSITION_MS,
   MIN_TRANSITION_MS,
 } from './edit-plan.ts'
+import { DEFAULT_TRANSITION_MS } from './edit-transition-types.ts'
 import type {
   EditAudioEffectPreset,
   EditClip,
@@ -721,7 +722,7 @@ export function setTransition(
     return unchanged(plan, error('TRANSITION_TOO_SHORT', 'transitions', '片段太短，无法添加转场'))
   }
   const duration = clamp(
-    Math.round(Number(options.durationMs ?? 600) || 600),
+    Math.round(Number(options.durationMs ?? DEFAULT_TRANSITION_MS) || DEFAULT_TRANSITION_MS),
     MIN_TRANSITION_MS,
     Math.min(MAX_TRANSITION_MS, Math.floor(available)),
   )

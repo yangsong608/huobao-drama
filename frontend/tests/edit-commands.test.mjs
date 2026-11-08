@@ -247,6 +247,19 @@ test('转场设置、移除与空档闭合', () => {
   assert.ok(blocked.issues.some((item) => item.code === 'TRANSITION_GAP_BLOCKED'))
 })
 
+test('转场默认 1s、上限 2s，超限收敛并提示', () => {
+  const base = plan([clip('a'), clip('b')])
+  const defaulted = setTransition(base, 'a', 'b', { type: 'dissolve' })
+  assert.equal(defaulted.plan.transitions[0].durationMs, 1000, '未传时长时默认 1s')
+  assert.deepEqual(starts(defaulted), [0, 4000])
+
+  const over = setTransition(base, 'a', 'b', { type: 'zoom-in', durationMs: 3000 })
+  assert.equal(over.plan.transitions[0].durationMs, 2000, '超上限静默收敛到 2s')
+
+  const edge = setTransition(base, 'a', 'b', { durationMs: 2000 })
+  assert.equal(edge.plan.transitions[0].durationMs, 2000, '2s 恰好可用')
+})
+
 test('字幕移动解除跟随，文本可修改', () => {
   const base = plan([clip('a')], {
     subtitles: [{

@@ -8,6 +8,12 @@ import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger
 export interface TransitionPromptAnalysisInput {
   firstFramePath: string
   lastFramePath: string
+  /** 出帧槽位上传图：非空时替代 firstFramePath 参与分析 */
+  firstFrameUploadPath?: string | null
+  /** 入帧槽位上传图：非空时替代 lastFramePath 参与分析 */
+  lastFrameUploadPath?: string | null
+  /** 追加参考图路径列表（自动截取前 4 张） */
+  referenceImagePaths?: string[]
   fromNumber: number
   toNumber: number
   prevDescription: string
@@ -28,16 +34,49 @@ export interface TransitionPromptAnalysis {
 const CJK_RE = /[\u3400-\u9fff\uf900-\ufaff]/
 const MIN_PROMPT_CHARS = 8
 const MAX_PROMPT_CHARS = 800
+/** 提示词分析的追加参考图上限：控制视觉请求体积，优先保留与起止帧最相关的图 */
+const MAX_ANALYSIS_REFERENCE_IMAGES = 4
 
-export function buildTransitionPromptSystemText(localShim: boolean): string {
+export interface AnalysisImagePaths {
+  firstPath: string
+  lastPath: string
+  referencePaths: string[]
+  paths: string[]
+}
+
+/** 分析图来源：槽位上传图优先，无上传退镜头抽帧；追加参考图去重后截到上限 */
+export function resolveAnalysisImagePaths(input: Pick<
+  TransitionPromptAnalysisInput,
+  'firstFramePath' | 'lastFramePath' | 'firstFrameUploadPath' | 'lastFrameUploadPath' | 'referenceImagePaths'
+>): AnalysisImagePaths {
+  const firstPath = String(input.firstFrameUploadPath || '').trim() || String(input.firstFramePath || '').trim()
+  const lastPath = String(input.lastFrameUploadPath || '').trim() || String(input.lastFramePath || '').trim()
+  const seen = new Set<string>()
+  for (const item of input.referenceImagePaths || []) {
+    const path = String(item || '').trim()
+    if (path && !seen.has(path) && seen.size < MAX_ANALYSIS_REFERENCE_IMAGES) seen.add(path)
+  }
+  const referencePaths = [...seen]
+  return { firstPath, lastPath, referencePaths, paths: [firstPath, lastPath, ...referencePaths] }
+}
+
+export function buildTransitionPromptSystemText(
+  localShim: boolean,
+  options: { referenceImageCount?: number } = {},
+): string {
   const language = localShim
     ? '**English only** — the local H3 renderer rejects Chinese characters. Write 25-60 English words, no Chinese characters, no pinyin.'
     : '使用简体中文，40-120 个字，一到两句话。'
+  const referenceRule = (options.referenceImageCount ?? 0) > 0
+    ? localShim
+      ? `\n- The remaining ${options.referenceImageCount} image(s) are user-provided reference images (characters, wardrobe, scene, style). The transition must stay consistent with them; they are NOT the start or end frame of the transition.`
+      : `\n- 其余 ${options.referenceImageCount} 张图是用户提供的参考图（人物、服装、场景或风格），过渡画面必须与它们保持一致；它们不是过渡的起止画面。`
+    : ''
   return `你是短剧剪辑师和 AI 视频提示词工程师，负责为两个相邻镜头之间的过渡片段写生成提示词。
 
 输入两张图：
 - 第一张图是**上一镜的最后一帧**；
-- 第二张图是**下一镜的第一帧**。
+- 第二张图是**下一镜的第一帧**。${referenceRule}
 
 请比较两帧的人物、服装、场景、光线与构图，写一条 2-3 秒的过渡视频提示词，必须同时满足：
 1. 清楚描述主体动作与镜头运动（推、拉、摇、移、跟、轻微手持等），让画面从图1自然演化到图2；
@@ -91,9 +130,10 @@ export async function analyzeTransitionPromptFromFrames(
     model: input.model,
   })
   try {
+    const images = resolveAnalysisImagePaths(input)
     const result = await requestVisionText({
-      paths: [input.firstFramePath, input.lastFramePath],
-      system: buildTransitionPromptSystemText(input.localShim),
+      paths: images.paths,
+      system: buildTransitionPromptSystemText(input.localShim, { referenceImageCount: images.referencePaths.length }),
       userText: buildTransitionPromptUserText(input),
       configId: input.configId,
       model: input.model,

@@ -11,6 +11,7 @@ import {
   prepareTransitions,
   retryTransition,
   saveTransitionPrompt,
+  saveTransitionReferenceImages,
   skipTransition,
 } from '../services/transition-service.js'
 import { toSnakeCase } from '../utils/transform.js'
@@ -267,6 +268,37 @@ app.put('/transitions/:id/prompt', async (c) => {
     return success(c, row ? toSnakeCase(row) : null)
   } catch (error: any) {
     return badRequest(c, error?.message || '保存过渡提示词失败')
+  }
+})
+
+// PUT /transitions/:id/reference-images — 保存槽位上传图与追加参考图列表
+app.put('/transitions/:id/reference-images', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return badRequest(c, '过渡片段不存在')
+  const body = await readJsonBody(c)
+  const options: {
+    firstFrameUploadUrl?: string | null
+    lastFrameUploadUrl?: string | null
+    referenceImageUrls?: string[]
+  } = {}
+  if (body?.first_frame_upload_url !== undefined) options.firstFrameUploadUrl = body.first_frame_upload_url
+  if (body?.last_frame_upload_url !== undefined) options.lastFrameUploadUrl = body.last_frame_upload_url
+  if (body?.reference_image_urls !== undefined) {
+    if (!Array.isArray(body.reference_image_urls)) return badRequest(c, '参考图列表格式不正确')
+    options.referenceImageUrls = body.reference_image_urls
+  }
+  try {
+    await saveTransitionReferenceImages(id, options)
+    const row = await getTransition(id)
+    if (!row) return success(c, null)
+    let referenceImageUrls: string[] = []
+    try {
+      const parsed = JSON.parse(row.referenceImageUrls || '[]')
+      if (Array.isArray(parsed)) referenceImageUrls = parsed.filter(u => typeof u === 'string' && u.trim())
+    } catch { /* 旧数据格式异常时按空列表返回 */ }
+    return success(c, { ...toSnakeCase(row), reference_image_urls: referenceImageUrls })
+  } catch (error: any) {
+    return badRequest(c, error?.message || '保存过渡参考图失败')
   }
 })
 

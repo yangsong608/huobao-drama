@@ -24,7 +24,7 @@ process.env.MYSQL_AUTO_IMPORT = 'false'
 
 const { createSingleClipPlan, projectSettingsForAspect } = await import('../src/services/edit-plan.ts')
 const { buildEditAss, buildOverlayAss } = await import('../src/services/edit-subtitle-ass.ts')
-const { buildRenderReport, renderEditVideo, resolveExportPlan } = await import('../src/services/edit-render-plan.ts')
+const { buildRenderReport, renderEditVideo, resolveExportPlan, XFADE_BY_TYPE, isSupportedTransition } = await import('../src/services/edit-render-plan.ts')
 
 function textOverlay(plan: ReturnType<typeof basePlan>, overrides: Record<string, unknown> = {}) {
   return {
@@ -285,6 +285,46 @@ test('变速 4× 与 0.25× 导出成功（atempo 链式覆盖单实例 0.5–2�
 
 test('新增转场类型导出：左擦与圆形展开', async () => {
   for (const type of ['wipe-left', 'circle-open']) {
+    const plan = basePlan()
+    const clip2 = structuredClone(plan.clips[0])
+    clip2.id = `clp_${type}`
+    clip2.sourceInMs = 1000
+    clip2.sourceOutMs = 2000
+    plan.clips.push(clip2)
+    plan.transitions = [{
+      id: `tr_${type}`, fromClipId: plan.clips[0].id, toClipId: clip2.id,
+      type, durationMs: 300,
+    }]
+    const output = path.join(root, `transition-${type}.mp4`)
+    const { durationMs, warnings } = await renderEditVideo({ plan, outputPath: output, subtitleMode: 'none' })
+    assert.ok(!warnings.some((item) => item.code === 'TRANSITION_HARD_CUT'), `${type} 不应降级`)
+    assert.ok(Math.abs(durationMs - 1700) <= (1000 / 25) * 2, `${type}: ${durationMs}ms`)
+  }
+})
+
+test('转场映射全量：46 种类型各有 xfade 过渡名，未知类型不支持', () => {
+  const XFADER_NAMES = new Set([
+    'fade', 'wipeleft', 'wiperight', 'wipeup', 'wipedown',
+    'slideleft', 'slideright', 'slideup', 'slidedown',
+    'circlecrop', 'rectcrop', 'distance', 'fadeblack', 'fadewhite', 'radial',
+    'smoothleft', 'smoothright', 'smoothup', 'smoothdown',
+    'circleopen', 'circleclose', 'vertopen', 'vertclose', 'horzopen', 'horzclose',
+    'dissolve', 'pixelize', 'diagtl', 'diagtr', 'diagbl', 'diagbr',
+    'hlslice', 'hrslice', 'vuslice', 'vdslice', 'hblur', 'fadegrays',
+    'wipetl', 'wipetr', 'wipebl', 'wipebr', 'squeezeh', 'squeezev',
+    'zoomin', 'fadefast', 'fadeslow',
+  ])
+  const entries = Object.entries(XFADE_BY_TYPE)
+  assert.equal(entries.length, 46, `映射应含 46 种，实际 ${entries.length}`)
+  for (const [type, xfadeName] of entries) {
+    assert.ok(XFADER_NAMES.has(xfadeName), `${type} → ${xfadeName} 不是 xfade 过渡名`)
+    assert.ok(isSupportedTransition(type), `${type} 应受支持`)
+  }
+  assert.equal(isSupportedTransition('not-a-transition'), false)
+})
+
+test('新增 46 种抽样真实导出：颗粒溶解/缩放推近/左上角擦/纵向挤压', async () => {
+  for (const type of ['grain-dissolve', 'zoom-in', 'corner-wipe-tl', 'squeeze-v']) {
     const plan = basePlan()
     const clip2 = structuredClone(plan.clips[0])
     clip2.id = `clp_${type}`
