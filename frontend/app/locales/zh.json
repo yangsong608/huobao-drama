@@ -116,7 +116,9 @@
   "composables": {
     "agent": {
       "busy": "操作执行中",
-      "done": "完成"
+      "done": "完成",
+      "noSave": "本次操作没有写入任何数据：模型只读取了上下文就结束，旧数据保持不变。请重试或换用更强的文本模型。",
+      "coverageShort": "拆分已保存，但只生成 {actual} 段，低于本集覆盖下限 {floor} 段；请重新拆分或补拆缺失场次。"
     }
   },
   "index": {
@@ -1120,6 +1122,7 @@
       "saveFailed": "分镜保存失败，已恢复为服务端数据，请重试",
       "segmentStat": "{n} 段落 · {dur}s",
       "methodLabel": "拆分方式",
+      "methodHint": "切换后需点「重新拆分」才生效",
       "methodStandard": "标准短剧段落",
       "methodCurrent": "当前拆分方式：{method}",
       "methodSaved": "拆分方式已保存",

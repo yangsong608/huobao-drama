@@ -561,6 +561,7 @@
                 >
                   <option v-for="method in breakdownMethods" :key="method.key" :value="method.key">{{ method.name }}</option>
                 </select>
+                <span class="video-method-hint">{{ t('episode.sb.methodHint') }}</span>
               </label>
               <span class="dim" style="font-size:12px">{{ t('episode.prod.videos') }}</span>
               <span class="tag mono">{{ t('episode.sb.segmentStat', { n: sbs.length, dur: totalDuration }) }}</span>
@@ -5467,14 +5468,19 @@ function doBreakdown() {
   const propList = bindableProps.value.length
     ? bindableProps.value.map(p => `${p.name}(ID:${p.id})`).join('、')
     : '（项目还没有道具）'
-  runAgent('storyboard_breaker', renderPipelineRule('storyboards', {
+  const rule = renderPipelineRule('storyboards', {
     videoModel: effectiveVideoModelLabel.value,
     characters: charList,
     scenes: sceneList,
     props: propList,
-  }, DEFAULT_BREAKDOWN_RULE), dramaId, epId.value, onBreakdownDone, chatModelOverride(), chatConfigId(), (ok) => {
+  }, DEFAULT_BREAKDOWN_RULE)
+  // 已有分镜时模型容易“读完上下文就收尾”，明确整集覆盖要求，避免只复用旧分镜
+  const message = sbs.value.length
+    ? `${rule}\n\n本次为整集重新拆分：本集当前已有 ${sbs.value.length} 个分镜，必须全部重新生成，并在第一批 save_storyboards 调用中传 replace_existing: true 覆盖旧分镜；不要只读取上下文或复用旧分镜后结束。`
+    : rule
+  runAgent('storyboard_breaker', message, dramaId, epId.value, onBreakdownDone, chatModelOverride(), chatConfigId(), (ok) => {
     if (!ok) void refresh()
-  })
+  }, { requireTool: 'save_storyboards' })
 }
 
 /** 拆分完成后刷新并自动补齐缺失的视频提示词（兜住 Agent 漏写/截断） */
@@ -7882,6 +7888,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   color: var(--text-1); cursor: pointer;
 }
 .video-method-select:disabled { opacity: .55; cursor: not-allowed; }
+.video-method-hint { font-size: 11px; color: var(--text-3); }
 
 /* ComfyUI 监控舞台：右侧嵌入官方工作流页面，网关校验路径票据 */
 .comfy-embed-stage {

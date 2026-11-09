@@ -7,7 +7,7 @@ import Database from 'better-sqlite3'
 import { eq } from 'drizzle-orm'
 import { getTableColumns } from 'drizzle-orm'
 import { initSqliteSchema } from '../src/db/sqlite-schema.ts'
-import { breakdownMethods, episodes } from '../src/db/schema.ts'
+import { breakdownMethods, episodes, storyboards } from '../src/db/schema.ts'
 
 const serviceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'huobao-breakdown-service-'))
 process.env.SQLITE_PATH = path.join(serviceRoot, 'test.sqlite3')
@@ -17,6 +17,7 @@ process.env.WORKSPACE_PATH = path.join(serviceRoot, 'workspace')
 process.env.MYSQL_AUTO_IMPORT = 'false'
 const { db } = await import('../src/db/index.ts')
 const svc = await import('../src/services/breakdown-methods.ts')
+const { DEFAULT_BREAKDOWN_METHODS } = await import('../src/services/breakdown-method-defaults.ts')
 const agents = await import('../src/agents/index.ts')
 const breakdownRoutes = await import('../src/routes/breakdownMethods.ts')
 const episodeRoutes = await import('../src/routes/episodes.ts')
@@ -56,6 +57,33 @@ function newEpisode(method?: string | null) {
   return row.id
 }
 
+
+function newScriptEpisode(method: string | null, chars: number) {
+  const script = '剧'.repeat(chars)
+  const row = db.insert(episodes).values({
+    dramaId: 1,
+    episodeNumber: ++epSeq,
+    title: `第${epSeq}集`,
+    content: script,
+    scriptContent: script,
+    breakdownMethod: method,
+    createdAt: ts,
+    updatedAt: ts,
+  }).returning().get()
+  return row.id
+}
+
+function addStoryboards(episodeId: number, count: number) {
+  for (let index = 1; index <= count; index += 1) {
+    db.insert(storyboards).values({
+      episodeId,
+      storyboardNumber: index,
+      duration: 10,
+      createdAt: ts,
+      updatedAt: ts,
+    }).run()
+  }
+}
 
 function tempDatabase(): { sqlite: Database.Database; close: () => void } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'huobao-breakdown-methods-'))
@@ -233,6 +261,113 @@ test('内置方案文本符合内容要求，standard 两段为空', () => {
     assert.ok(method.skill.includes(words.skill), `${key} skill 缺少 ${words.skill}`)
     assert.ok(method.description.trim().length > 0, `${key} 缺少说明`)
   }
+})
+
+test('六个内置方案声明单段最长秒数，用于计算覆盖下限', () => {
+  const expected: Record<string, number> = {
+    standard: 15,
+    'hook-beat': 12,
+    'hook-beat-extended': 12,
+    'director-board': 10,
+    'h3-compact': 8,
+    'trailer-cut': 6,
+  }
+  for (const [key, max] of Object.entries(expected)) {
+    const seed = DEFAULT_BREAKDOWN_METHODS.find(item => item.key === key)
+    assert.ok(seed, `缺少内置方案 ${key}`)
+    assert.equal(seed.maxSegmentSeconds, max, `${key} 单段上限错误`)
+  }
+})
+
+test('五个启用方案的规则都包含剧本全覆盖、段落数下限与逐场自检', () => {
+  const expectedFloor: Record<string, string> = {
+    'hook-beat': '27 段',
+    'hook-beat-extended': '27 段',
+    'director-board': '33 段',
+    'h3-compact': '41 段',
+    'trailer-cut': '54 段',
+  }
+  for (const key of Object.keys(expectedFloor)) {
+    const seed = DEFAULT_BREAKDOWN_METHODS.find(item => item.key === key)!
+    for (const word of ['剧本全覆盖', '段落数下限', '逐场', '不得删场']) {
+      assert.ok(seed.skill.includes(word), `${key} Skill 缺少 ${word}`)
+    }
+    assert.ok(seed.prompt.includes('剧本全覆盖'), `${key} 提示词缺少剧本全覆盖`)
+    assert.ok(seed.skill.includes(`至少 ${expectedFloor[key]}`), `${key} 缺少 3000 字样例下限`)
+  }
+})
+
+test('覆盖下限按剧本字数与方案单段上限计算，并按存活分镜判定', async () => {
+  await svc.ensureBreakdownMethodsSeeded()
+
+  const extendedEp = newScriptEpisode('hook-beat-extended', 3000)
+  let coverage = svc.getEpisodeCoverage(extendedEp)!
+  assert.equal(coverage.scriptChars, 3000)
+  assert.equal(coverage.maxSegmentSeconds, 12)
+  assert.equal(coverage.targetSeconds, 360)
+  assert.equal(coverage.floor, 27)
+  assert.equal(coverage.actual, 0)
+  assert.equal(coverage.ok, false)
+
+  addStoryboards(extendedEp, 27)
+  coverage = svc.getEpisodeCoverage(extendedEp)!
+  assert.equal(coverage.actual, 27)
+  assert.equal(coverage.ok, true)
+
+  const standardEp = newScriptEpisode('standard', 3000)
+  assert.equal(svc.getEpisodeCoverage(standardEp)!.floor, 22)
+  const custom = svc.createBreakdownMethod({ name: '覆盖测试方案' })
+  const customEp = newScriptEpisode(custom.key, 3000)
+  assert.equal(svc.getEpisodeCoverage(customEp)!.maxSegmentSeconds, 15)
+  svc.deleteBreakdownMethod(custom.key)
+
+  addStoryboards(standardEp, 21)
+  assert.equal(svc.getEpisodeCoverage(standardEp)!.ok, false, '低于下限必须判定不完整')
+  const deletedEp = newScriptEpisode('hook-beat-extended', 3000)
+  addStoryboards(deletedEp, 27)
+  const removed = db.select().from(storyboards).where(eq(storyboards.episodeId, deletedEp)).all()[0]
+  db.update(storyboards).set({ deletedAt: ts }).where(eq(storyboards.id, removed.id)).run()
+  assert.equal(svc.getEpisodeCoverage(deletedEp)!.actual, 26)
+  assert.equal(svc.getEpisodeCoverage(deletedEp)!.ok, false, '软删分镜不计入覆盖')
+
+  assert.equal(svc.getEpisodeCoverage(undefined), null)
+  assert.equal(svc.getEpisodeCoverage(999999), null)
+})
+
+test('未编辑过的内置方案随版本自动升级，用户编辑保留', async () => {
+  await svc.ensureBreakdownMethodsSeeded()
+  const seed = DEFAULT_BREAKDOWN_METHODS.find(item => item.key === 'hook-beat')!
+  const oldTs = '2025-01-01T00:00:00.000Z'
+
+  try {
+    // 旧版本播种的行：创建时间与更新时间相同，代表从未编辑
+    db.update(breakdownMethods).set({
+      prompt: '旧版提示词',
+      skill: '旧版技能',
+      description: '旧版说明',
+      createdAt: oldTs,
+      updatedAt: oldTs,
+    }).where(eq(breakdownMethods.key, 'hook-beat')).run()
+    await svc.ensureBreakdownMethodsSeeded(true)
+    let row = svc.getBreakdownMethod('hook-beat')!
+    assert.equal(row.prompt, seed.prompt)
+    assert.equal(row.skill, seed.skill)
+    assert.equal(row.description, seed.description)
+
+    // 编辑过的行（更新时间晚于创建时间）必须保留
+    db.update(breakdownMethods).set({
+      prompt: '用户自定义提示词',
+      skill: '用户自定义技能',
+      updatedAt: '2025-01-02T00:00:00.000Z',
+    }).where(eq(breakdownMethods.key, 'hook-beat')).run()
+    await svc.ensureBreakdownMethodsSeeded(true)
+    row = svc.getBreakdownMethod('hook-beat')!
+    assert.equal(row.prompt, '用户自定义提示词')
+    assert.equal(row.skill, '用户自定义技能')
+  } finally {
+    svc.resetBreakdownMethod('hook-beat')
+  }
+  assert.equal(svc.getBreakdownMethod('hook-beat')!.prompt, seed.prompt)
 })
 
 test('创建、更新、复制方案并保持字段契约', () => {
@@ -514,6 +649,17 @@ test('剧集 PUT 支持 breakdown_method 合法、置空与未知 key', async ()
 
   res = await sendJson(`/episodes/${episodeId}`, 'PUT', { breakdown_method: null })
   assert.equal(res.status, 200)
+})
+
+test('Agent 路由注入覆盖下限并在生成结束后返回覆盖结果', () => {
+  const source = fs.readFileSync(new URL('../src/routes/agent.ts', import.meta.url), 'utf8')
+  assert.match(source, /getEpisodeCoverage\(episode_id\)/)
+  assert.match(source, /本次拆分覆盖要求/)
+  assert.match(source, /段落数下限/)
+  assert.match(source, /coverage: coverageResult/)
+  const afterGenerate = source.indexOf('coverageResult')
+  const generateCall = source.indexOf('agent.generate(')
+  assert.ok(afterGenerate > generateCall, '覆盖结果必须在生成结束后再计算')
 })
 
 test('名称、prompt、skill 长度边界', () => {

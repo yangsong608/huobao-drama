@@ -14,11 +14,19 @@ One storyboard = one **storyboard segment** = one video-generation task.
 - Sub-shots **never cross scenes**: a segment takes place in a single scene (`scene_id` is a segment-level binding)
 - Each sub-shot is 2-6 seconds, focused on one visual unit (one action, one reaction, one close-up)
 
+## Full Script Coverage (Highest-Priority Hard Rule)
+
+- Full script coverage outranks pacing, hooks, and shot aesthetics: every scene, every line of dialogue, and every key action in the script must appear in the storyboard. Never delete a scene, merge scenes, or keep only the climax.
+- Break down scene by scene in script order; each scene gets at least one segment. When there are many scenes, split by scene instead of compressing several scenes into one segment.
+- Segment-count floor = ceil(non-whitespace script characters × 0.12 ÷ max seconds per segment × 0.9). Under the default 8-15 second rules, use 15 seconds: a 3000-character script needs at least 22 segments; methods with shorter segments raise the floor accordingly. Falling below the floor means incomplete coverage — keep splitting.
+- Never delete an entire line of dialogue; split long lines across sub-shots instead, but never drop information. Narration supplements the picture and never replaces deleted drama.
+- Audit scene by scene before saving: map every scene → segment → sub-shot; if a scene, line, or key action is missing, split and fill it in first.
+
 ## Breakdown Process (Four Steps)
 
 1. Call `read_storyboard_context` to read the script, characters, scenes, props, and existing storyboard summaries
-2. **Beat identification**: first identify the script's narrative beats — markers such as [Opening] [Trigger] [Climax] [Resolution], or narrative turning points (location changes, rule reveals, emotional eruptions, reversals). **Beat boundaries force a segment cut**; group sub-shots within the same beat into the same segment where possible, and do not scatter a causal chain (setup-event-reaction) across different segments
-3. **Total-volume anchoring**: target total duration = script character count ÷ 500 characters/minute; segment count ≈ target total duration ÷ 12 seconds, with ±20% tolerance. Do not significantly overshoot or undershoot
+2. **Beat identification**: first identify the script's narrative beats — markers such as [Opening] [Trigger] [Climax] [Resolution], or narrative turning points (location changes, rule reveals, emotional eruptions, reversals). **Beat boundaries force a segment cut**; group sub-shots within the same beat into the same segment where possible, and do not scatter a causal chain (setup-event-reaction) across different segments. At the same time, cover every scene without deleting or merging scenes
+3. **Total-volume anchoring**: target total duration = script character count ÷ 500 characters/minute; segment count ≈ target total duration ÷ 12 seconds, with ±20% tolerance, but never below the full-coverage segment-count floor. Do not significantly overshoot or undershoot
 4. **Split sub-shots within each segment**: cut sub-shots at action-change points, viewpoint-change points, and subject-change points; after filling in all fields for each segment, call `save_storyboards` to save them in one go
 
 ## Pacing-Tier Durations

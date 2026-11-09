@@ -73,38 +73,63 @@ function isCustomized(row: BreakdownMethodRow) {
   )
 }
 
-/** 启动时按 key 补齐内置方案；已存在的行一律不覆盖，保证用户编辑与恢复默认语义 */
-export function ensureBreakdownMethodsSeeded(): Promise<void> {
+/** 启动时按 key 补齐内置方案；未编辑过的内置方案（createdAt === updatedAt）随版本升级文本，编辑过的行一律保留 */
+export function ensureBreakdownMethodsSeeded(force = false): Promise<void> {
+  const run = () => {
+    const timestamp = now()
+    db.transaction((tx) => {
+      for (const seed of DEFAULT_BREAKDOWN_METHODS) {
+        const existing = tx
+          .select()
+          .from(schema.breakdownMethods)
+          .where(eq(schema.breakdownMethods.key, seed.key))
+          .get()
+        if (!existing) {
+          tx.insert(schema.breakdownMethods).values({
+            key: seed.key,
+            name: seed.name,
+            description: seed.description,
+            prompt: seed.prompt,
+            skill: seed.skill,
+            builtin: 1,
+            sortOrder: seed.sortOrder,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }).run()
+          continue
+        }
+        const untouched = existing.builtin === 1 && existing.updatedAt === existing.createdAt
+        const outdated = existing.name !== seed.name
+          || existing.description !== seed.description
+          || existing.prompt !== seed.prompt
+          || existing.skill !== seed.skill
+        if (!untouched || !outdated) continue
+        tx.update(schema.breakdownMethods)
+          .set({
+            name: seed.name,
+            description: seed.description,
+            prompt: seed.prompt,
+            skill: seed.skill,
+            sortOrder: seed.sortOrder,
+          })
+          .where(eq(schema.breakdownMethods.key, seed.key))
+          .run()
+      }
+    })
+  }
+
+  if (force) {
+    seedPromise = Promise.resolve().then(run).catch((error) => {
+      seedPromise = null
+      throw error
+    })
+    return seedPromise
+  }
   if (!seedPromise) {
-    seedPromise = Promise.resolve()
-      .then(() => {
-        const timestamp = now()
-        db.transaction((tx) => {
-          for (const seed of DEFAULT_BREAKDOWN_METHODS) {
-            const existing = tx
-              .select({ id: schema.breakdownMethods.id })
-              .from(schema.breakdownMethods)
-              .where(eq(schema.breakdownMethods.key, seed.key))
-              .get()
-            if (existing) continue
-            tx.insert(schema.breakdownMethods).values({
-              key: seed.key,
-              name: seed.name,
-              description: seed.description,
-              prompt: seed.prompt,
-              skill: seed.skill,
-              builtin: 1,
-              sortOrder: seed.sortOrder,
-              createdAt: timestamp,
-              updatedAt: timestamp,
-            }).run()
-          }
-        })
-      })
-      .catch((error) => {
-        seedPromise = null
-        throw error
-      })
+    seedPromise = Promise.resolve().then(run).catch((error) => {
+      seedPromise = null
+      throw error
+    })
   }
   return seedPromise
 }
@@ -142,6 +167,60 @@ export function getBreakdownMethod(key: string): BreakdownMethodRow | null {
     .from(schema.breakdownMethods)
     .where(eq(schema.breakdownMethods.key, key))
     .get() ?? null
+}
+
+export interface EpisodeCoverage {
+  episodeId: number
+  scriptChars: number
+  maxSegmentSeconds: number
+  targetSeconds: number
+  floor: number
+  actual: number
+  ok: boolean
+}
+
+/** 按剧本字数与方案单段上限计算段落数下限，用于判定本次拆分是否覆盖全剧 */
+export function getEpisodeCoverage(episodeId?: number | null): EpisodeCoverage | null {
+  if (!episodeId) return null
+  const episode = db
+    .select({
+      id: schema.episodes.id,
+      content: schema.episodes.content,
+      scriptContent: schema.episodes.scriptContent,
+      breakdownMethod: schema.episodes.breakdownMethod,
+    })
+    .from(schema.episodes)
+    .where(eq(schema.episodes.id, episodeId))
+    .get()
+  if (!episode) return null
+
+  const script = (episode.scriptContent || episode.content || '').replace(/\s+/g, '')
+  const scriptChars = [...script].length
+  const seed = episode.breakdownMethod
+    ? DEFAULT_BREAKDOWN_METHODS.find(item => item.key === episode.breakdownMethod)
+    : null
+  const maxSegmentSeconds = seed?.maxSegmentSeconds ?? 15
+  const targetSeconds = Math.round(scriptChars * 0.12)
+  const floor = targetSeconds > 0 ? Math.ceil((targetSeconds / maxSegmentSeconds) * 0.9) : 0
+  const row = db
+    .select({ total: count() })
+    .from(schema.storyboards)
+    .where(and(
+      eq(schema.storyboards.episodeId, episodeId),
+      isNull(schema.storyboards.deletedAt),
+    ))
+    .get()
+  const actual = Number(row?.total ?? 0)
+
+  return {
+    episodeId,
+    scriptChars,
+    maxSegmentSeconds,
+    targetSeconds,
+    floor,
+    actual,
+    ok: actual >= floor,
+  }
 }
 
 export function createBreakdownMethod(input: BreakdownMethodInput): BreakdownMethodRow {

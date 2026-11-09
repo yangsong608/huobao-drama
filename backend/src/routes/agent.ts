@@ -4,6 +4,7 @@
 import { Hono } from 'hono'
 import { validAgentTypes } from '../agents/index.js'
 import { buildAgentRequestContext } from '../agents/context.js'
+import { getEpisodeCoverage } from '../services/breakdown-methods.js'
 import { mastra } from '../mastra/index.js'
 import { success, badRequest } from '../utils/response.js'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
@@ -64,15 +65,26 @@ app.post('/:type/chat', async (c) => {
   })
 
   const startTime = performance.now()
+  const coverage = agentType === 'storyboard_breaker' ? getEpisodeCoverage(episode_id) : null
+  const coverageBlock = coverage && coverage.scriptChars > 0
+    ? `\n\n## 本次拆分覆盖要求（系统计算，必须满足）
+- 剧本非空白字符数：${coverage.scriptChars}；目标总时长约 ${coverage.targetSeconds} 秒。
+- 当前方案单段最长 ${coverage.maxSegmentSeconds} 秒，段落数下限 = ceil(${coverage.targetSeconds} ÷ ${coverage.maxSegmentSeconds} × 0.9) = ${coverage.floor} 段。
+- 本集当前已有 ${coverage.actual} 个未删除分镜；本次必须覆盖剧本全部场次，保存后的段落数不得低于 ${coverage.floor} 段。
+- 保存前逐场核对：缺场、缺台词、缺关键动作必须补拆，不得删场、并场或用钩子替代剧情。`
+    : ''
 
   try {
     const result = await agent.generate(
-      [{ role: 'user', content: message }],
+      [{ role: 'user', content: `${message}${coverageBlock}` }],
       { maxSteps: 20, requestContext },
     )
 
     const elapsed = ((performance.now() - startTime) / 1000).toFixed(1)
     logTaskSuccess('Agent', agentType, { elapsedSeconds: elapsed })
+
+    // 生成结束后重新计算覆盖：此时分镜已保存，actual 反映本次结果
+    const coverageResult = agentType === 'storyboard_breaker' ? getEpisodeCoverage(episode_id) : null
 
     // 收集所有 tool calls 和 results
     const toolCalls = result.toolCalls || []
@@ -98,6 +110,7 @@ app.post('/:type/chat', async (c) => {
       text: result.text || '',
       toolCalls: normalizedToolCalls,
       toolResults: normalizedToolResults,
+      coverage: coverageResult,
     })
   } catch (err: any) {
     const elapsed = ((performance.now() - startTime) / 1000).toFixed(1)

@@ -116,7 +116,9 @@
   "composables": {
     "agent": {
       "busy": "Operation in progress",
-      "done": "Done"
+      "done": "Done",
+      "noSave": "Nothing was written: the model finished after only reading context. Existing data is unchanged. Retry or use a stronger text model.",
+      "coverageShort": "Storyboard saved, but only {actual} segments were generated, below this episode's coverage floor of {floor}. Re-split or add the missing scenes."
     }
   },
   "index": {
@@ -1120,6 +1122,7 @@
       "saveFailed": "Failed to save the storyboard; restored server data. Please retry.",
       "segmentStat": "{n} segments · {dur}s",
       "methodLabel": "Split method",
+      "methodHint": "Takes effect after \"Break down again\"",
       "methodStandard": "Standard short-drama segments",
       "methodCurrent": "Current split method: {method}",
       "methodSaved": "Split method saved",
