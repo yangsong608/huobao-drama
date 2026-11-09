@@ -19,10 +19,15 @@ test('代理返回 200 但缺少必需保存调用时不提示成功', () => {
   assert.match(useAgent, /toast\.error\(i18n\.global\.t\('composables\.agent\.noSave'\)\)/)
 })
 
-test('重新拆分要求 save_storyboards，并在已有分镜时显式要求整集覆盖', () => {
-  assert.match(episode, /requireTool:\s*'save_storyboards'/)
-  assert.match(episode, /replace_existing: true/)
-  assert.match(episode, /本次为整集重新拆分/)
+test('重新拆分走分块任务接口：创建/续拆/进度轮询，替换与编号由后端负责', () => {
+  assert.match(episode, /storyboardSplitAPI\.create\(/)
+  assert.match(episode, /storyboardSplitAPI\.resume\(/)
+  assert.match(episode, /storyboardSplitAPI\.latest\(/)
+  assert.match(episode, /const splitPoll = useVisibilityPolling\(/)
+  // 单次同步调用已移除：不再由页面声明 save_storyboards / replace_existing
+  assert.doesNotMatch(episode, /runAgent\('storyboard_breaker'/)
+  assert.doesNotMatch(episode, /requireTool:\s*'save_storyboards'/)
+  assert.doesNotMatch(episode, /replace_existing: true/)
 })
 
 test('四语言包含未保存错误提示', () => {

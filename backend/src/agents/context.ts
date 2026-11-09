@@ -12,6 +12,16 @@ export interface AgentRequestContextValues {
   textConfigId?: number
   /** AI 内容语言；缺省时读全局设置（app_settings.content_language） */
   language?: ContentLanguage
+  /** 分块拆分：当前块剧本（read_storyboard_context 只返回该块） */
+  storyboardChunkScript?: string
+  /** 分块拆分：块序号（0 起）、总块数与范围文案 */
+  storyboardChunkIndex?: number
+  storyboardChunkTotal?: number
+  storyboardChunkLabel?: string
+  /** 分块拆分：本块起始镜头号；分块模式由系统统一连续编号 */
+  storyboardChunkShotStart?: number
+  /** 分块拆分：块内共享状态（是否已替换旧分镜、下一镜头号） */
+  storyboardChunkState?: { replaced: boolean; nextShot: number }
 }
 
 export function buildAgentRequestContext(values: AgentRequestContextValues): RequestContext<AgentRequestContextValues> {
@@ -20,6 +30,12 @@ export function buildAgentRequestContext(values: AgentRequestContextValues): Req
   rc.set('dramaId', values.dramaId)
   if (values.modelOverride) rc.set('modelOverride', values.modelOverride)
   if (values.textConfigId) rc.set('textConfigId', values.textConfigId)
+  if (values.storyboardChunkScript) rc.set('storyboardChunkScript', values.storyboardChunkScript)
+  if (typeof values.storyboardChunkIndex === 'number') rc.set('storyboardChunkIndex', values.storyboardChunkIndex)
+  if (typeof values.storyboardChunkTotal === 'number') rc.set('storyboardChunkTotal', values.storyboardChunkTotal)
+  if (values.storyboardChunkLabel) rc.set('storyboardChunkLabel', values.storyboardChunkLabel)
+  if (typeof values.storyboardChunkShotStart === 'number') rc.set('storyboardChunkShotStart', values.storyboardChunkShotStart)
+  if (values.storyboardChunkState) rc.set('storyboardChunkState', values.storyboardChunkState)
   // 语言在构建处统一解析：4 条链路（chat/提取/图片提示词/视频提示词）都经过这里，
   // 全局设置一处生效；显式传入 values.language 可按请求覆盖
   rc.set('language', values.language ?? getContentLanguage())

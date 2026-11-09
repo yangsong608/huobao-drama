@@ -90,6 +90,15 @@ export const episodeAPI = {
   comfyRun: (id: number, opts?: { configId?: number; forceNew?: boolean }) => api.post(`/episodes/${id}/comfyui/run`, { config_id: opts?.configId, force_new: opts?.forceNew === true }),
 }
 
+// 分镜分块拆分：整集按场次切成多段逐段调用模型并即时保存，失败后可从断点续拆
+export const storyboardSplitAPI = {
+  create: (payload: { episode_id: number; drama_id: number; message: string; model?: string; config_id?: number }) =>
+    api.post('/agent/storyboard_breaker/split-jobs', payload),
+  latest: (episodeId: number) => api.get(`/agent/storyboard_breaker/split-jobs/latest/${episodeId}`),
+  get: (jobId: number) => api.get(`/agent/storyboard_breaker/split-jobs/${jobId}`),
+  resume: (jobId: number) => api.post(`/agent/storyboard_breaker/split-jobs/${jobId}/resume`),
+}
+
 export const frameAssetAPI = {
   list: (episodeId: number) => api.get(`/episodes/${episodeId}/frame-assets`),
   extractLast: (storyboardId: number) => api.post(`/storyboards/${storyboardId}/frame-assets/last`),

@@ -5,8 +5,14 @@ import { Hono } from 'hono'
 import { validAgentTypes } from '../agents/index.js'
 import { buildAgentRequestContext } from '../agents/context.js'
 import { getEpisodeCoverage } from '../services/breakdown-methods.js'
+import {
+  createStoryboardSplitJob,
+  getLatestStoryboardSplitJob,
+  getStoryboardSplitJob,
+  resumeStoryboardSplitJob,
+} from '../services/storyboard-split-jobs.js'
 import { mastra } from '../mastra/index.js'
-import { success, badRequest } from '../utils/response.js'
+import { success, badRequest, notFound } from '../utils/response.js'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 
 const app = new Hono()
@@ -28,6 +34,68 @@ function normalizeToolResult(entry: any) {
   const result = entry?.payload?.result ?? entry?.result ?? entry?.payload?.output ?? entry?.output ?? entry?.data ?? null
   return typeof result === 'string' ? result : JSON.stringify(result)
 }
+
+// ===== 分镜分块拆分任务（断点续拆） =====
+function splitJobTypeGuard(c: any) {
+  const agentType = c.req.param('type')
+  if (agentType !== 'storyboard_breaker') {
+    return badRequest(c, `该 Agent 不支持分块拆分：${agentType}`)
+  }
+  return null
+}
+
+// POST /agent/:type/split-jobs — 创建并启动分块拆分任务
+app.post('/:type/split-jobs', async (c) => {
+  const guard = splitJobTypeGuard(c)
+  if (guard) return guard
+  let body: any
+  try {
+    body = await c.req.json()
+  } catch {
+    return badRequest(c, '请求体不是合法 JSON')
+  }
+  try {
+    const result = await createStoryboardSplitJob({
+      episodeId: Number(body.episode_id),
+      dramaId: Number(body.drama_id),
+      message: body.message,
+      model: body.model || undefined,
+      configId: body.config_id || undefined,
+    })
+    return success(c, { job: result.job, already_running: result.alreadyRunning })
+  } catch (err: any) {
+    return badRequest(c, err.message || '创建拆分任务失败')
+  }
+})
+
+// GET /agent/:type/split-jobs/latest/:episodeId — 某集最近一次拆分任务
+app.get('/:type/split-jobs/latest/:episodeId', async (c) => {
+  const guard = splitJobTypeGuard(c)
+  if (guard) return guard
+  const job = getLatestStoryboardSplitJob(Number(c.req.param('episodeId')))
+  return success(c, { job })
+})
+
+// GET /agent/:type/split-jobs/:id — 按 ID 查询任务进度
+app.get('/:type/split-jobs/:id', async (c) => {
+  const guard = splitJobTypeGuard(c)
+  if (guard) return guard
+  const job = getStoryboardSplitJob(Number(c.req.param('id')))
+  if (!job) return notFound(c, '拆分任务不存在')
+  return success(c, { job })
+})
+
+// POST /agent/:type/split-jobs/:id/resume — 从断点继续拆分
+app.post('/:type/split-jobs/:id/resume', async (c) => {
+  const guard = splitJobTypeGuard(c)
+  if (guard) return guard
+  try {
+    const job = await resumeStoryboardSplitJob(Number(c.req.param('id')))
+    return success(c, { job })
+  } catch (err: any) {
+    return badRequest(c, err.message || '继续拆分失败')
+  }
+})
 
 // POST /agent/:type/chat — 非流式 Agent 对话
 app.post('/:type/chat', async (c) => {

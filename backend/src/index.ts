@@ -51,6 +51,7 @@ import { resumeInterruptedTasks } from './services/generation.js'
 import { initMcp, setMcpMainApp } from './services/mcp.js'
 import { markInterruptedAutomations, setAutomationApp } from './services/automation.js'
 import { markInterruptedNovelJobs } from './services/novel-job-runner.js'
+import { markInterruptedStoryboardSplits } from './services/storyboard-split-jobs.js'
 import { markInterruptedDubs } from './services/dubbing.js'
 import { markInterruptedTakes } from './services/line-takes.js'
 import { markInterruptedAudioJobs } from './services/audio-job-recovery.js'
@@ -184,6 +185,8 @@ markInterruptedAudioJobs()
 markInterruptedMerges()
 // V3 小说任务：进程重启后 running 一律标为 interrupted，可从前端续跑
 markInterruptedNovelJobs()
+// 分镜分块拆分：进程重启后 running 任务标为 interrupted，前端可从断点继续
+markInterruptedStoryboardSplits()
 // V1 已上传的角色音色迁移为 character_voices（幂等，失败不影响启动）
 migrateUploadedVoices()
 // 分镜拆分方案：内置方案按 key 幂等补齐，已有编辑不覆盖；失败不影响启动

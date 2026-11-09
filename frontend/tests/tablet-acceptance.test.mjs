@@ -32,11 +32,11 @@ const ENTRY_BASELINE_GZIP_KB = 310
 const ROUTE_BASELINE_GZIP_KB = 380
 const TOTAL_BASELINE_LABEL = '3.8MB'
 
-// 迁移后的 5 个文件与其轮询实例（共 9 处调用）
+// 迁移后的 5 个文件与其轮询实例（共 10 处调用）
 const MIGRATED_FILES = [
   {
     path: 'views/drama/episode.vue',
-    polls: ['breakdownPoll', 'genTasksPoll', 'transitionPoll', 'mergePoll', 'videoBatchPoll'],
+    polls: ['splitPoll', 'breakdownPoll', 'genTasksPoll', 'transitionPoll', 'mergePoll', 'videoBatchPoll'],
   },
   { path: 'components/QueuePanel.vue', polls: ['queuePoll'] },
   { path: 'components/GridSheetDialog.vue', polls: ['gridPoll'] },
@@ -198,7 +198,7 @@ test('轮询封装：可见性工厂、卸载必停与 5 个迁移点均无裸 s
     assert.equal(countSetIntervalCalls(source), 0, `${path} 仍有裸 setInterval（迁移后必须为 0）`)
     totalPolls += calls
   }
-  assert.equal(totalPolls, 9, '迁移点总数应为 9 处（episode 5 + 队列/宫格/导出/设置各 1）')
+  assert.equal(totalPolls, 10, '迁移点总数应为 10 处（episode 6 + 队列/宫格/导出/设置各 1）')
 
   // 宫格迟到响应隔离：旧一轮响应不得写状态、停新轮询或对新 id 切图
   const gridSource = readApp('components/GridSheetDialog.vue')

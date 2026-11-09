@@ -357,6 +357,27 @@ export const videoBatchItems = sqliteTable('video_batch_items', {
   updatedAt: text('updated_at').notNull(),
 })
 
+// 分镜分块拆分任务：整集剧本按场次切块逐次调用模型并即时保存，失败/重启后可从断点续拆
+export const storyboardSplitJobs = sqliteTable('storyboard_split_jobs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  /** pending / running / done / failed / interrupted */
+  status: text('status').default('pending'),
+  message: text('message').notNull(),
+  model: text('model'),
+  configId: integer('config_id'),
+  /** JSON：{ index, label, script, status, shots, error }[] */
+  chunks: text('chunks').notNull(),
+  totalChunks: integer('total_chunks').notNull().default(0),
+  completedChunks: integer('completed_chunks').notNull().default(0),
+  shotCount: integer('shot_count').notNull().default(0),
+  errorMsg: text('error_msg'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  finishedAt: text('finished_at'),
+})
+
 export const videoMerges = sqliteTable('video_merges', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   episodeId: integer('episode_id'),

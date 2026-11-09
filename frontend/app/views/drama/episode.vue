@@ -567,10 +567,15 @@
               <span class="tag mono">{{ t('episode.sb.segmentStat', { n: sbs.length, dur: totalDuration }) }}</span>
               <span class="tag mono" :title="t('episode.vid.aspectRatio')">{{ dramaAspectRatio }}</span>
               <div class="ml-auto flex gap-1">
-                <button class="btn btn-sm" :disabled="rn || methodSaving" :title="currentBreakdownMethodName" @click="doBreakdown">
-                  <Loader2 v-if="rt === 'storyboard_breaker'" :size="11" class="animate-spin" />
+                <button class="btn btn-sm" :disabled="rn || methodSaving || splitRunning || splitStarting" :title="currentBreakdownMethodName" @click="doBreakdown">
+                  <Loader2 v-if="splitRunning || splitStarting" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                  {{ sbs.length ? t('episode.sb.rebreak') : t('episode.sb.startBreak') }}
+                  {{ splitRunning ? splitProgressText : (sbs.length ? t('episode.sb.rebreak') : t('episode.sb.startBreak')) }}
+                </button>
+                <button v-if="canResumeSplit" class="btn btn-sm video-split-resume" :disabled="splitStarting" :title="splitJob?.error || t('episode.sb.resumeSplit')" @click="resumeSplit">
+                  <Loader2 v-if="splitStarting" :size="11" class="animate-spin" />
+                  <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                  {{ t('episode.sb.resumeSplit') }}
                 </button>
                 <button class="btn btn-sm" :disabled="videoPromptBatch.running || !sbs.length" @click="batchVideoPrompts">
                   <Loader2 v-if="videoPromptBatch.running" :size="11" class="animate-spin" />
@@ -595,13 +600,20 @@
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="2" y="2" width="20" height="20" rx="2.5"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="10" y1="8" x2="10" y2="16"/><line x1="13" y1="8" x2="13" y2="16"/></svg>
               </div>
               <div class="empty-title">{{ t('episode.sb.emptyTitle') }}</div>
-              <div class="empty-desc">{{ rt === 'storyboard_breaker' ? t('episode.sb.breakingElapsed', { s: breakdownElapsed }) : t('episode.sb.emptyDesc') }}</div>
+              <div class="empty-desc">{{ splitRunning ? t('episode.sb.breakingElapsed', { s: breakdownElapsed }) : t('episode.sb.emptyDesc') }}</div>
+              <div v-if="splitRunning" class="empty-desc video-split-progress">{{ splitProgressText }}</div>
+              <div v-if="canResumeSplit && splitJob" class="empty-desc video-split-failed">{{ t('episode.sb.splitFailed', { chunk: (splitJob.completed_chunks || 0) + 1, total: splitJob.total_chunks || 0, error: splitJob.error || '' }) }}</div>
               <div class="empty-desc">{{ t('episode.sb.methodCurrent', { method: currentBreakdownMethodName }) }}</div>
               <div class="locked-config-banner">{{ t('episode.vid.lockedModel') }}{{ effectiveVideoModelLabel }}</div>
-              <button class="btn btn-primary" :disabled="rn || methodSaving" :title="currentBreakdownMethodName" @click="doBreakdown">
-                <Loader2 v-if="rt === 'storyboard_breaker'" :size="13" class="animate-spin" />
+              <button v-if="canResumeSplit" class="btn btn-primary video-split-resume" :disabled="splitStarting" @click="resumeSplit">
+                <Loader2 v-if="splitStarting" :size="13" class="animate-spin" />
+                <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                {{ t('episode.sb.resumeSplit') }}
+              </button>
+              <button class="btn btn-primary" :disabled="rn || methodSaving || splitRunning || splitStarting" :title="currentBreakdownMethodName" @click="doBreakdown">
+                <Loader2 v-if="splitRunning || splitStarting" :size="13" class="animate-spin" />
                 <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                {{ t('episode.sb.startBreak') }}
+                {{ splitRunning ? splitProgressText : t('episode.sb.startBreak') }}
               </button>
               <button class="btn btn-sm" :disabled="rn || addingStoryboard" @click="addStoryboard">
                 <Loader2 v-if="addingStoryboard" :size="11" class="animate-spin" />
@@ -610,6 +622,11 @@
               </button>
             </div>
             <div v-else class="video-task-workbench has-player" ref="videoWorkbenchEl" :data-pane="tabletPane" :style="{ '--vleft': videoLeftW + 'px', '--vright': videoRightW + 'px' }">
+              <div v-if="splitRunning || (canResumeSplit && splitJob)" class="video-split-banner">
+                <Loader2 v-if="splitRunning" :size="12" class="animate-spin" />
+                <span class="video-split-banner-text">{{ splitRunning ? splitProgressText : t('episode.sb.splitFailed', { chunk: (splitJob.completed_chunks || 0) + 1, total: splitJob.total_chunks || 0, error: splitJob.error || '' }) }}</span>
+                <button v-if="canResumeSplit" class="btn btn-sm video-split-resume" :disabled="splitStarting" @click="resumeSplit">{{ t('episode.sb.resumeSplit') }}</button>
+              </div>
               <div v-if="isCompact && !isComfyVideoMode" class="video-tablet-bar">
                 <div class="video-tablet-tabs" role="tablist">
                   <button
@@ -2531,9 +2548,9 @@ import {
   Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors, Ellipsis,
   Share2, AlertCircle,
 } from 'lucide-vue-next'
-import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI } from '~/composables/useApi'
+import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, storyboardSplitAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
-import { useAgent } from '~/composables/useAgent'
+import { useAgent, coverageShortfall } from '~/composables/useAgent'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
 import { episodeResolutionKey, isLocalH3Config, videoResolutionKey, videoResolutionOptions, videoResolutionProvider, videoResolutionVendor } from '~/utils/video-resolution'
 import { videoMaxDuration, videoModelCapabilities } from '~/utils/model-capabilities'
@@ -2594,13 +2611,103 @@ const storedPanel = (() => {
 let panelRestored = !!storedPanel
 const panel = ref(['production', 'export', 'dubbing'].includes(storedPanel?.panel) ? storedPanel.panel : 'script')
 const { running: rn, runningType: rt, run: runAgent } = useAgent()
-// 拆分是同步长请求：运行期间定时刷新，Agent 已写入的分镜能逐步出现；失败也会在 onSettled 刷新
+// ===== 分镜分块拆分任务 =====
+// 整集剧本在后端按场次切块、逐块调用模型并即时保存；前端只轮询进度，失败/重启后可续拆
+const splitJob = ref(null)
+const splitStarting = ref(false)
+const splitLastCompleted = ref(0)
+const splitRunning = computed(() => ['pending', 'running'].includes(String(splitJob.value?.status || '')))
+const canResumeSplit = computed(() => ['failed', 'interrupted'].includes(String(splitJob.value?.status || '')))
+const splitProgressText = computed(() => {
+  const job = splitJob.value
+  if (!job) return ''
+  return t('episode.sb.splitProgress', {
+    done: job.completed_chunks || 0,
+    total: job.total_chunks || 0,
+    shots: job.shot_count || 0,
+  })
+})
+
+function applySplitJob(job, options = {}) {
+  if (!job) return
+  const prevStatus = splitJob.value?.status
+  splitJob.value = job
+  const completed = Number(job.completed_chunks || 0)
+  // 每完成一段先刷新，已保存的镜头能立即出现在列表里
+  if (completed > splitLastCompleted.value) {
+    splitLastCompleted.value = completed
+    void refresh()
+  }
+  if (job.status === 'done' && prevStatus !== 'done') {
+    splitPoll.stop()
+    if (!options.silent) {
+      toast.success(t('episode.sb.splitDone', { n: job.shot_count || 0 }))
+      const shortfall = coverageShortfall({ coverage: job.coverage })
+      if (shortfall) {
+        toast.warning(t('composables.agent.coverageShort', {
+          actual: shortfall.actual,
+          floor: shortfall.floor,
+        }))
+      }
+      // 只在本次会话刚跑完时补提示词；页面重载恢复旧任务不自动触发
+      void onBreakdownDone()
+    }
+    return
+  }
+  if (job.status === 'failed' || job.status === 'interrupted') {
+    splitPoll.stop()
+    if (!options.silent) {
+      toast.error(t('episode.sb.splitFailed', {
+        chunk: Number(job.completed_chunks || 0) + 1,
+        total: job.total_chunks || 0,
+        error: job.error || '',
+      }))
+    }
+    void refresh()
+  }
+}
+
+const splitPoll = useVisibilityPolling(async () => {
+  const jobId = splitJob.value?.id
+  if (!jobId || !splitRunning.value) return
+  try {
+    const result = await storyboardSplitAPI.get(jobId)
+    if (result?.job) applySplitJob(result.job)
+  } catch {
+    // 网络抖动：保持轮询，等下一次
+  }
+}, 2000)
+
+function startSplitPolling() {
+  splitPoll.stop()
+  splitPoll.start()
+}
+
+/** 进入页面恢复本集最近一次拆分任务（进度条、失败续拆提示） */
+async function restoreSplitJob() {
+  if (!epId.value) return
+  try {
+    const result = await storyboardSplitAPI.latest(epId.value)
+    const job = result?.job
+    if (!job) return
+    applySplitJob(job, { silent: true })
+    if (splitRunning.value) startSplitPolling()
+  } catch {
+    // 查询失败不阻塞页面
+  }
+}
+
+// 拆分期间每秒计时；页面隐藏即暂停，恢复可见后继续（不补计时）
 const breakdownElapsed = ref(0)
-// 拆分期间每秒计时，每 5 秒拉一次分镜；页面隐藏即暂停，恢复可见后继续（不补计时）
 const breakdownPoll = useVisibilityPolling(() => {
-  breakdownElapsed.value += 1
-  if (breakdownElapsed.value % 5 === 0) void refresh()
+  if (splitRunning.value) breakdownElapsed.value += 1
 }, 1000)
+watch(splitRunning, (value) => {
+  breakdownPoll.stop()
+  if (!value) return
+  breakdownElapsed.value = 0
+  breakdownPoll.start()
+})
 
 // ===== 分镜拆分方式：设置页管理，剧集只存 key =====
 const standardBreakdownMethod = () => ({ key: 'standard', name: t('episode.sb.methodStandard'), builtin: true, customized: false })
@@ -2663,13 +2770,6 @@ async function changeBreakdownMethod(event) {
     methodSaving.value = false
   }
 }
-watch(rt, (value) => {
-  breakdownPoll.stop()
-  if (value !== 'storyboard_breaker') return
-  breakdownElapsed.value = 0
-  breakdownPoll.start()
-})
-
 const localRaw = ref(''), localScript = ref('')
 const rawContent = computed(() => episode.value?.content || '')
 const scriptContent = computed(() => episode.value?.script_content || episode.value?.scriptContent || '')
@@ -5453,8 +5553,8 @@ function pollVideoPromptBatch(attempts = 240) {
   }
   setTimeout(() => tick(attempts), 2500)
 }
-function doBreakdown() {
-  if (rn.value || methodSaving.value) return
+async function doBreakdown() {
+  if (rn.value || methodSaving.value || splitStarting.value || splitRunning.value) return
   if (sbs.value.length > 0) {
     const confirmed = window.confirm(t('episode.sb.rebreakConfirm', { n: sbs.value.length, method: currentBreakdownMethodName.value }))
     if (!confirmed) return
@@ -5474,13 +5574,48 @@ function doBreakdown() {
     scenes: sceneList,
     props: propList,
   }, DEFAULT_BREAKDOWN_RULE)
-  // 已有分镜时模型容易“读完上下文就收尾”，明确整集覆盖要求，避免只复用旧分镜
-  const message = sbs.value.length
-    ? `${rule}\n\n本次为整集重新拆分：本集当前已有 ${sbs.value.length} 个分镜，必须全部重新生成，并在第一批 save_storyboards 调用中传 replace_existing: true 覆盖旧分镜；不要只读取上下文或复用旧分镜后结束。`
-    : rule
-  runAgent('storyboard_breaker', message, dramaId, epId.value, onBreakdownDone, chatModelOverride(), chatConfigId(), (ok) => {
-    if (!ok) void refresh()
-  }, { requireTool: 'save_storyboards' })
+  // 分块拆分在后端逐段调用并即时保存；旧分镜替换、跨段镜头编号都由系统处理，无需在指令里声明
+  splitStarting.value = true
+  try {
+    const result = await storyboardSplitAPI.create({
+      episode_id: epId.value,
+      drama_id: dramaId,
+      message: rule,
+      model: chatModelOverride(),
+      config_id: chatConfigId(),
+    })
+    if (!result?.job) {
+      toast.error(t('episode.sb.splitStartFailed'))
+      return
+    }
+    splitLastCompleted.value = Number(result.job.completed_chunks || 0)
+    applySplitJob(result.job, { silent: true })
+    if (splitRunning.value) startSplitPolling()
+    if (result.already_running) toast.info(t('episode.sb.splitAlreadyRunning'))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.sb.splitStartFailed' })
+  } finally {
+    splitStarting.value = false
+  }
+}
+
+/** 从断点继续拆分：后端跳过已完成分段，只重跑未完成分段 */
+async function resumeSplit() {
+  const job = splitJob.value
+  if (!job?.id || splitStarting.value || splitRunning.value) return
+  splitStarting.value = true
+  try {
+    const result = await storyboardSplitAPI.resume(job.id)
+    if (result?.job) {
+      applySplitJob(result.job, { silent: true })
+      if (splitRunning.value) startSplitPolling()
+      toast.success(t('episode.sb.splitResumed'))
+    }
+  } catch (e) {
+    toastError(e, { fallback: 'episode.sb.splitActionFailed' })
+  } finally {
+    splitStarting.value = false
+  }
 }
 
 /** 拆分完成后刷新并自动补齐缺失的视频提示词（兜住 Agent 漏写/截断） */
@@ -7024,6 +7159,8 @@ watch(panel, (current) => {
 onMounted(async () => {
   void loadBreakdownMethods()
   await refresh()
+  // 恢复本集最近一次分块拆分任务（运行中继续显示进度，失败/中断显示续拆入口）
+  void restoreSplitJob()
   // 恢复后端运行中的批量视频批次（关闭页面/重启应用后继续）
   void refreshVideoBatch()
   loadConfigs()
@@ -7889,6 +8026,17 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 }
 .video-method-select:disabled { opacity: .55; cursor: not-allowed; }
 .video-method-hint { font-size: 11px; color: var(--text-3); }
+/* 分块拆分进度条：运行中显示已完成段数，失败/中断后提供断点续拆 */
+.video-split-banner {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; margin: 0 0 6px;
+  font-size: 12px; color: var(--text-2);
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.video-split-banner-text { flex: 1; min-width: 0; }
+.video-split-progress { color: var(--accent); }
+.video-split-failed { color: var(--warning); }
+.video-split-resume { color: var(--accent); border-color: var(--accent); }
 
 /* ComfyUI 监控舞台：右侧嵌入官方工作流页面，网关校验路径票据 */
 .comfy-embed-stage {

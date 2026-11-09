@@ -106,6 +106,56 @@ function requireIds(context: ToolContext): { episodeId: number; dramaId: number 
   return { episodeId, dramaId }
 }
 
+interface StoryboardChunkRuntime {
+  script?: string
+  index?: number
+  total?: number
+  label?: string
+  shotStart?: number
+  state?: { replaced: boolean; nextShot: number }
+}
+
+/** 分块拆分上下文：由 storyboard-split-jobs 服务按块注入，普通单次拆分不设置 */
+function getChunkRuntime(context: ToolContext): StoryboardChunkRuntime {
+  const rc = context?.requestContext
+  return {
+    script: rc?.get('storyboardChunkScript' as never) as string | undefined,
+    index: rc?.get('storyboardChunkIndex' as never) as number | undefined,
+    total: rc?.get('storyboardChunkTotal' as never) as number | undefined,
+    label: rc?.get('storyboardChunkLabel' as never) as string | undefined,
+    shotStart: rc?.get('storyboardChunkShotStart' as never) as number | undefined,
+    state: rc?.get('storyboardChunkState' as never) as { replaced: boolean; nextShot: number } | undefined,
+  }
+}
+
+function isChunkMode(chunk: StoryboardChunkRuntime) {
+  return typeof chunk.index === 'number' && !!chunk.state
+}
+
+/** 清空整集分镜及其关联/台词/末帧资产（整集重建时调用） */
+async function clearEpisodeStoryboards(episodeId: number, ts: string) {
+  const existingStoryboardRows = await db.select().from(schema.storyboards)
+    .where(eq(schema.storyboards.episodeId, episodeId))
+  for (const storyboardId of existingStoryboardRows.map(sb => sb.id)) {
+    await db.delete(schema.storyboardCharacters)
+      .where(eq(schema.storyboardCharacters.storyboardId, storyboardId))
+    await db.delete(schema.storyboardProps)
+      .where(eq(schema.storyboardProps.storyboardId, storyboardId))
+  }
+  // 分镜整体重建时挂载台词一并软删，避免 storyboard_id 悬空成孤儿（绝对锚点台词保留）
+  await db.update(schema.storyboardLines)
+    .set({ deletedAt: ts, updatedAt: ts })
+    .where(and(
+      eq(schema.storyboardLines.episodeId, episodeId),
+      isNotNull(schema.storyboardLines.storyboardId),
+      isNull(schema.storyboardLines.deletedAt),
+    ))
+    .run()
+  await db.delete(schema.storyboards).where(eq(schema.storyboards.episodeId, episodeId))
+  // 分镜来源已整体重建，旧末帧资产随之作废，避免孤儿资产还留在本集资产列表里
+  cleanupFrameAssetsForEpisode(db, episodeId, ts)
+}
+
 const readStoryboardContext = createTool({
   id: 'read_storyboard_context',
   description: 'Read the screenplay and all project characters, scenes, and props for storyboard breakdown. Items not yet linked to this episode are still reusable; saving a storyboard links them automatically.',
@@ -114,10 +164,12 @@ const readStoryboardContext = createTool({
     const ids = requireIds(context)
     if ('error' in ids) return ids
     const { episodeId, dramaId } = ids
+    const chunk = getChunkRuntime(context)
     const [ep] = await db.select().from(schema.episodes)
       .where(eq(schema.episodes.id, episodeId))
     if (!ep) return { error: 'Episode not found' }
-    const script = ep.scriptContent || ep.content
+    // 分块拆分时只把当前块剧本交给模型，避免它读完整集后自行改范围、重复拆其它场次
+    const script = chunk.script || ep.scriptContent || ep.content
     if (!script) return { error: 'Episode has no script' }
 
     const charLinks = await db.select().from(schema.episodeCharacters)
@@ -180,8 +232,15 @@ const readStoryboardContext = createTool({
         linked_to_episode: linkedPropIds.has(p.id),
       }))
 
-    const existingStoryboardPayload = await Promise.all(existingStoryboards
-      .filter(sb => !sb.deletedAt)
+    // 分块拆分只需要最近几镜做衔接参考，避免历史分镜挤占上下文
+    const liveExistingStoryboards = existingStoryboards.filter(sb => !sb.deletedAt)
+    const visibleExistingStoryboards = isChunkMode(chunk)
+      ? [...liveExistingStoryboards]
+          .sort((a, b) => a.storyboardNumber - b.storyboardNumber)
+          .slice(-6)
+      : liveExistingStoryboards
+
+    const existingStoryboardPayload = await Promise.all(visibleExistingStoryboards
       .map(async (sb) => {
         const links = await db.select().from(schema.storyboardCharacters)
           .where(eq(schema.storyboardCharacters.storyboardId, sb.id))
@@ -218,6 +277,15 @@ const readStoryboardContext = createTool({
         description: ep.description || '',
       },
       script,
+      ...(isChunkMode(chunk)
+        ? {
+            chunk: {
+              index: (chunk.index as number) + 1,
+              total: chunk.total || 0,
+              label: chunk.label || '',
+            },
+          }
+        : {}),
       characters,
       scenes,
       props,
@@ -270,10 +338,13 @@ const saveStoryboards = createTool({
     const ids = requireIds(context)
     if ('error' in ids) return ids
     const { episodeId, dramaId } = ids
+    const chunk = getChunkRuntime(context)
+    const chunkMode = isChunkMode(chunk)
     const ts = now()
     logTaskProgress('StoryboardTool', 'save-begin', {
       episodeId,
       dramaId,
+      chunkIndex: chunkMode ? chunk.index : undefined,
       replaceExisting: replace_existing === true,
       count: storyboards.length,
       shotNumbers: storyboards.map(sb => sb.shot_number).join(','),
@@ -282,27 +353,14 @@ const saveStoryboards = createTool({
     for (const sb of storyboards) {
       await validateVideoPromptVoices(sb.video_prompt, dramaId, sb.character_ids)
     }
-    if (replace_existing === true) {
-      const existingStoryboardRows = await db.select().from(schema.storyboards)
-        .where(eq(schema.storyboards.episodeId, episodeId))
-      for (const storyboardId of existingStoryboardRows.map(sb => sb.id)) {
-        await db.delete(schema.storyboardCharacters)
-          .where(eq(schema.storyboardCharacters.storyboardId, storyboardId))
-        await db.delete(schema.storyboardProps)
-          .where(eq(schema.storyboardProps.storyboardId, storyboardId))
-      }
-      // 分镜整体重建时挂载台词一并软删，避免 storyboard_id 悬空成孤儿（绝对锚点台词保留）
-      await db.update(schema.storyboardLines)
-        .set({ deletedAt: ts, updatedAt: ts })
-        .where(and(
-          eq(schema.storyboardLines.episodeId, episodeId),
-          isNotNull(schema.storyboardLines.storyboardId),
-          isNull(schema.storyboardLines.deletedAt),
-        ))
-        .run()
-      await db.delete(schema.storyboards).where(eq(schema.storyboards.episodeId, episodeId))
-      // 分镜来源已整体重建，旧末帧资产随之作废，避免孤儿资产还留在本集资产列表里
-      cleanupFrameAssetsForEpisode(db, episodeId, ts)
+    // 分块模式由系统控制替换：仅第 1 块第一次保存时清空旧分镜；
+    // 后续块/同块后续批次即使模型按基础提示词传了 replace_existing 也只能追加
+    const shouldReplace = chunkMode
+      ? chunk.index === 0 && !chunk.state!.replaced
+      : replace_existing === true
+    if (shouldReplace) {
+      await clearEpisodeStoryboards(episodeId, ts)
+      if (chunkMode) chunk.state!.replaced = true
     }
 
     // shot_number → id 索引（含本次调用内新增的行），保证按分镜号幂等 upsert
@@ -311,10 +369,15 @@ const saveStoryboards = createTool({
     const shotToId = new Map<number, number>(
       existingRows.filter(sb => !sb.deletedAt).map(sb => [sb.storyboardNumber, sb.id]),
     )
+    // 分块模式忽略模型自带的 shot_number，按剧情顺序由系统连续编号，避免块间撞号覆盖
+    const batch = chunkMode
+      ? [...storyboards].sort((a, b) => a.shot_number - b.shot_number)
+      : storyboards
 
-    for (const sb of storyboards) {
+    for (const sb of batch) {
       await validateStoryboardBindings(episodeId, dramaId, sb.scene_id, sb.character_ids, sb.prop_ids)
-      const existingId = shotToId.get(sb.shot_number)
+      const shotNumber = chunkMode ? chunk.state!.nextShot : sb.shot_number
+      const existingId = chunkMode ? undefined : shotToId.get(shotNumber)
       if (existingId !== undefined) {
         await db.update(schema.storyboards).set({
           title: sb.title, shotType: sb.shot_type,
@@ -328,12 +391,13 @@ const saveStoryboards = createTool({
           sceneId: sb.scene_id, duration: sb.duration || 10,
           updatedAt: ts,
         }).where(eq(schema.storyboards.id, existingId))
+        if (chunkMode) chunk.state!.nextShot = shotNumber + 1
         await syncStoryboardCharacters(existingId, sb.character_ids || [])
         await syncStoryboardProps(existingId, sb.prop_ids || [])
       } else {
         const res = await db.insert(schema.storyboards).values({
           episodeId,
-          storyboardNumber: sb.shot_number,
+          storyboardNumber: shotNumber,
           title: sb.title, shotType: sb.shot_type,
           angle: sb.angle, movement: sb.movement,
           location: sb.location, time: sb.time,
@@ -346,7 +410,8 @@ const saveStoryboards = createTool({
           createdAt: ts, updatedAt: ts,
         })
         const newId = getInsertId(res)
-        shotToId.set(sb.shot_number, newId)
+        shotToId.set(shotNumber, newId)
+        if (chunkMode) chunk.state!.nextShot = shotNumber + 1
         await syncStoryboardCharacters(newId, sb.character_ids || [])
         await syncStoryboardProps(newId, sb.prop_ids || [])
       }

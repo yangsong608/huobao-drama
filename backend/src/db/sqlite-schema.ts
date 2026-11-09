@@ -337,6 +337,27 @@ export const sqliteSchemaStatements = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_video_batch_items_batch ON video_batch_items (batch_id)`,
 
+  `CREATE TABLE IF NOT EXISTS storyboard_split_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    status TEXT DEFAULT 'pending',
+    message TEXT NOT NULL,
+    model TEXT,
+    config_id INTEGER,
+    chunks TEXT NOT NULL,
+    total_chunks INTEGER NOT NULL DEFAULT 0,
+    completed_chunks INTEGER NOT NULL DEFAULT 0,
+    shot_count INTEGER NOT NULL DEFAULT 0,
+    error_msg TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_storyboard_split_jobs_episode ON storyboard_split_jobs (episode_id, created_at)`,
+
+
+
   `CREATE TABLE IF NOT EXISTS video_merges (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     episode_id INTEGER,

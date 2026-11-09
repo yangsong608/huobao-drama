@@ -179,6 +179,14 @@ export interface EpisodeCoverage {
   ok: boolean
 }
 
+/** 当前方案的单段最长秒数；空值/自定义缺失按标准方案 15 秒 */
+export function getMaxSegmentSeconds(breakdownMethod?: string | null): number {
+  const seed = breakdownMethod
+    ? DEFAULT_BREAKDOWN_METHODS.find(item => item.key === breakdownMethod)
+    : null
+  return seed?.maxSegmentSeconds ?? 15
+}
+
 /** 按剧本字数与方案单段上限计算段落数下限，用于判定本次拆分是否覆盖全剧 */
 export function getEpisodeCoverage(episodeId?: number | null): EpisodeCoverage | null {
   if (!episodeId) return null
@@ -196,10 +204,7 @@ export function getEpisodeCoverage(episodeId?: number | null): EpisodeCoverage |
 
   const script = (episode.scriptContent || episode.content || '').replace(/\s+/g, '')
   const scriptChars = [...script].length
-  const seed = episode.breakdownMethod
-    ? DEFAULT_BREAKDOWN_METHODS.find(item => item.key === episode.breakdownMethod)
-    : null
-  const maxSegmentSeconds = seed?.maxSegmentSeconds ?? 15
+  const maxSegmentSeconds = getMaxSegmentSeconds(episode.breakdownMethod)
   const targetSeconds = Math.round(scriptChars * 0.12)
   const floor = targetSeconds > 0 ? Math.ceil((targetSeconds / maxSegmentSeconds) * 0.9) : 0
   const row = db
