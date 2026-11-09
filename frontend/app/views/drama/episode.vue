@@ -8,6 +8,9 @@
           </svg>
           {{ t('episode.topbar.back') }}
         </button>
+        <button v-if="isNarrow" type="button" class="btn topbar-steps-btn" @click="openStepsDrawer">
+          {{ t('tablet.drawers.steps') }}
+        </button>
         <div class="studio-identity">
           <h1 class="studio-title">{{ drama.title }}</h1>
           <span class="studio-episode-chip">{{ t('episode.topbar.episodeN', { n: episodeNumber }) }}</span>
@@ -65,7 +68,7 @@
         </div>
         <div class="studio-actions">
           <LocaleSwitcher />
-          <button class="btn btn-icon tour-help-btn" :title="t('tour.helpTitle')" @click="startTour('episode', EPISODE_TOUR, t)">
+          <button class="btn btn-icon tour-help-btn" :title="t('tour.helpTitle')" @click="startEpisodeTour()">
             <CircleHelp :size="14" :stroke-width="1.8" />
           </button>
           <button v-if="dubbingEnabled" class="btn" @click="openDubbingStage">
@@ -87,7 +90,7 @@
           <button class="btn task-drawer-trigger" @click="openTaskDrawer">
             <ListTodo :size="12" />
             {{ t('episode.topbar.tasks') }}
-            <span v-if="genTaskActiveCount" class="task-drawer-badge">{{ genTaskActiveCount }}</span>
+            <span v-if="taskCenterActiveCount" class="task-drawer-badge">{{ taskCenterActiveCount }}</span>
           </button>
         </div>
       </div>
@@ -95,8 +98,23 @@
 
     <div class="studio-body">
     <!-- ========== LEFT SIDEBAR ========== -->
-    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
-      <nav class="pipeline">
+    <div v-if="isNarrow && stepsDrawerOpen" class="video-steps-scrim" @click="closeStepsDrawer" />
+    <aside
+      class="sidebar"
+      ref="stepsDrawerEl"
+      :class="{ collapsed: sidebarCollapsed && !isNarrow, 'is-steps-drawer': isNarrow, open: isNarrow && stepsDrawerOpen }"
+      :role="isNarrow && stepsDrawerOpen ? 'dialog' : undefined"
+      :aria-modal="isNarrow && stepsDrawerOpen ? 'true' : undefined"
+      :aria-label="isNarrow && stepsDrawerOpen ? t('tablet.drawers.steps') : undefined"
+      @keydown="onStepsDrawerKeydown"
+    >
+      <div v-if="isNarrow" class="video-steps-drawer-head">
+        <span class="video-steps-drawer-title">{{ t('tablet.drawers.steps') }}</span>
+        <button type="button" class="btn btn-icon video-steps-drawer-close" :title="t('tablet.close')" :aria-label="t('tablet.close')" @click="closeStepsDrawer">
+          <X :size="16" />
+        </button>
+      </div>
+      <nav class="pipeline" ref="pipelineEl">
         <div
           v-for="section in sidebarSections"
           :key="section.id"
@@ -590,8 +608,57 @@
                 {{ t('episode.vid.addShotHint') }}
               </button>
             </div>
-            <div v-else class="video-task-workbench has-player" :style="{ '--vleft': videoLeftW + 'px', '--vright': videoRightW + 'px' }">
-              <section class="video-task-list">
+            <div v-else class="video-task-workbench has-player" ref="videoWorkbenchEl" :data-pane="tabletPane" :style="{ '--vleft': videoLeftW + 'px', '--vright': videoRightW + 'px' }">
+              <div v-if="isCompact && !isComfyVideoMode" class="video-tablet-bar">
+                <div class="video-tablet-tabs" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    id="video-tab-shots"
+                    class="video-tablet-tab"
+                    :class="{ on: tabletPane === 'shots' }"
+                    :aria-selected="tabletPane === 'shots'"
+                    aria-controls="video-panel-shots"
+                    :tabindex="tabletPane === 'shots' ? 0 : -1"
+                    @click="setTabletPane('shots')"
+                    @keydown="onTabletTabsKeydown($event, 'shots')"
+                  >
+                    {{ t('tablet.tabs.shots') }}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    id="video-tab-edit"
+                    class="video-tablet-tab"
+                    :class="{ on: tabletPane === 'edit' }"
+                    :aria-selected="tabletPane === 'edit'"
+                    aria-controls="video-panel-edit"
+                    :tabindex="tabletPane === 'edit' ? 0 : -1"
+                    @click="setTabletPane('edit')"
+                    @keydown="onTabletTabsKeydown($event, 'edit')"
+                  >
+                    {{ t('tablet.tabs.edit') }}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    id="video-tab-preview"
+                    class="video-tablet-tab"
+                    :class="{ on: tabletPane === 'preview' }"
+                    :aria-selected="tabletPane === 'preview'"
+                    aria-controls="video-panel-preview"
+                    :tabindex="tabletPane === 'preview' ? 0 : -1"
+                    @click="setTabletPane('preview')"
+                    @keydown="onTabletTabsKeydown($event, 'preview')"
+                  >
+                    {{ t('tablet.tabs.preview') }}
+                  </button>
+                </div>
+                <button v-if="isNarrow" type="button" class="video-tablet-steps-btn" @click="openStepsDrawer">
+                  {{ t('tablet.drawers.steps') }}
+                </button>
+              </div>
+              <section class="video-task-list" data-tablet-pane="shots" :role="isCompact ? 'tabpanel' : undefined" :aria-labelledby="isCompact ? 'video-tab-shots' : undefined" :id="isCompact ? 'video-panel-shots' : undefined" v-show="!isCompact || isComfyVideoMode || tabletPane === 'shots'">
                 <div class="video-task-head">
                 <div>
                   <div class="video-task-title">{{ t('episode.vid.listTitle') }}</div>
@@ -608,6 +675,29 @@
                   {{ t('episode.vid.addShot') }}
                 </button>
                 </div>
+                <div v-if="videoBatch" class="video-batch-strip" :class="'is-' + videoBatch.status">
+                  <div class="video-batch-strip-top">
+                    <span class="video-batch-strip-title">
+                      {{ videoBatch.status === 'running'
+                        ? t('episode.vid.batchRunning', { done: videoBatch.completed + videoBatch.failed + videoBatch.stopped, total: videoBatch.total })
+                        : t('episode.vid.batchDone', { completed: videoBatch.completed, failed: videoBatch.failed }) }}
+                    </span>
+                    <span class="video-batch-strip-counts">
+                      {{ t('episode.vid.batchCounts', { processing: videoBatch.processing, queued: videoBatch.queued, completed: videoBatch.completed, failed: videoBatch.failed }) }}
+                    </span>
+                    <button v-if="videoBatch.status === 'running'" type="button" class="btn btn-sm video-batch-stop" @click="stopBatchVideo">
+                      {{ t('episode.vid.batchStop') }}
+                    </button>
+                    <button v-else type="button" class="btn btn-sm btn-ghost" @click="videoBatch = null">
+                      {{ t('common.close') }}
+                    </button>
+                  </div>
+                  <div class="video-batch-progress">
+                    <div class="video-batch-progress-fill" :style="{ width: videoBatchProgress + '%' }"></div>
+                  </div>
+                  <p v-if="videoBatch.status === 'stopped'" class="video-batch-strip-note">{{ t('episode.vid.batchStopped') }}</p>
+                  <p v-else-if="videoBatch.failed > 0" class="video-batch-strip-note">{{ t('episode.vid.batchFailedNote') }}</p>
+                </div>
                 <div v-if="videoSelectMode" class="shot-quick-actions video-quick-actions">
                   <button class="shot-quick-btn" @click="toggleSelectAllVideos">{{ t('episode.sb.selectAll') }}</button>
                   <button class="shot-quick-btn" @click="selectMissingVideos">{{ t('episode.vid.selectMissing') }}</button>
@@ -620,6 +710,9 @@
                   :class="['video-task-row', 'is-' + videoTaskState(task.storyboard), { active: !videoSelectMode && selectedSb?.id === task.storyboard.id, 'is-selected': videoSelectMode && isVideoSbSelected(task.id) }]"
                   role="button"
                   tabindex="0"
+                  data-long-press
+                  @pointerdown="onVideoTaskPointerDown($event, task)"
+                  @contextmenu="onVideoTaskContextMenu($event, task)"
                   @click="onVideoTaskRowClick(task.storyboard)"
                   @keydown.enter.prevent="onVideoTaskRowClick(task.storyboard)"
                   @keydown.space.prevent="onVideoTaskRowClick(task.storyboard)"
@@ -638,6 +731,7 @@
                       :poster="posterOf('/' + getVideoUrl(task.storyboard)) || undefined"
                       preload="none"
                       playsinline
+                      webkit-playsinline
                       muted
                       tabindex="-1"
                     />
@@ -689,6 +783,17 @@
                     @click.stop="deleteStoryboard(task.storyboard)"
                   >
                     <Trash2 :size="12" />
+                  </button>
+                  <button
+                    v-if="!videoSelectMode"
+                    type="button"
+                    class="btn btn-icon btn-sm video-task-more"
+                    :title="t('tablet.more')"
+                    :aria-label="t('tablet.more')"
+                    @pointerdown.stop
+                    @click.stop="openTaskMenu($event, task)"
+                  >
+                    <Ellipsis :size="12" />
                   </button>
                 </div>
                 </div>
@@ -779,15 +884,19 @@
                 <div class="comfy-embed-foot">{{ t('episode.comfy.monitorReadonly') }}</div>
               </section>
 
-              <div v-else-if="selectedSb" class="video-task-side">
-              <div class="video-main-col">
+              <div v-else-if="selectedSb" class="video-task-side" data-tablet-pane="edit" :role="isCompact && tabletPane === 'edit' ? 'tabpanel' : undefined" :aria-labelledby="isCompact && tabletPane === 'edit' ? 'video-tab-edit' : undefined" :id="isCompact ? 'video-panel-edit' : undefined" v-show="!isCompact || tabletPane !== 'shots'">
+              <button v-if="isCompact && tabletPane === 'edit'" type="button" class="btn video-tablet-back" @click="setTabletPane('shots')">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                {{ t('tablet.back') }}
+              </button>
+              <div class="video-main-col" v-show="!isCompact || tabletPane === 'edit'">
               <div class="video-main-scroll">
                 <div class="video-main-grid">
                   <section class="video-inspector-section">
                     <span class="video-inspector-label">{{ t('episode.sb.descSection') }}</span>
                     <label class="field">
                       <span class="field-label">{{ t('episode.sb.descLabel') }} <span class="dim">({{ t('episode.sb.descHint') }})</span></span>
-                      <textarea ref="sbDescriptionInput" :value="selectedSb.description || ''" class="textarea" rows="7" @blur="updateField(selectedSb, 'description', $event.target.value)" :placeholder="t('episode.sb.descPlaceholder')" />
+                      <textarea ref="sbDescriptionInput" :value="selectedSb.description || ''" class="textarea video-desc-textarea" rows="7" @blur="updateField(selectedSb, 'description', $event.target.value)" :placeholder="t('episode.sb.descPlaceholder')" />
                     </label>
                     <label class="field">
                       <span class="field-label">{{ t('episode.sb.atmosphere') }}</span>
@@ -881,6 +990,7 @@
               </div>
 
               <aside class="video-task-inspector">
+            <div v-if="!isComfyVideoMode" class="video-preview-pane" data-tablet-pane="preview" :role="isCompact ? 'tabpanel' : undefined" :aria-labelledby="isCompact ? 'video-tab-preview' : undefined" :id="isCompact ? 'video-panel-preview' : undefined" v-show="!isCompact || tabletPane === 'preview'">
             <aside v-if="!isComfyVideoMode" class="video-task-player">
               <div class="video-player-head">
                 <div class="video-player-head-info">
@@ -923,6 +1033,7 @@
               <div class="video-player-stage">
                 <video
                   v-if="playerVideoUrl"
+                  ref="videoPlayerEl"
                   :key="playerVideoUrl"
                   :src="playerVideoUrl"
                   :poster="playerIsRemote ? undefined : posterOf(playerVideoUrl) || undefined"
@@ -930,6 +1041,7 @@
                   controls
                   preload="metadata"
                   playsinline
+                  webkit-playsinline
                   class="video-player-video"
                 />
                 <div v-else class="video-player-empty">
@@ -970,14 +1082,15 @@
                   @click="previewHistoryVideo(h)"
                   @keydown.enter.prevent="previewHistoryVideo(h)"
                 >
-                  <video :src="videoSourceUrl(taskVideoPath(h))" :poster="posterOf(videoSourceUrl(taskVideoPath(h))) || undefined" preload="none" muted playsinline tabindex="-1" />
+                  <video :src="videoSourceUrl(taskVideoPath(h))" :poster="posterOf(videoSourceUrl(taskVideoPath(h))) || undefined" preload="none" muted playsinline webkit-playsinline tabindex="-1" />
                   <span class="video-history-time">{{ formatHistoryTime(taskCreatedAt(h)) }}</span>
                   <span v-if="isCurrentVideo(h)" class="video-history-badge">{{ t('episode.vid.current') }}</span>
                   <button v-else type="button" class="video-history-del" :title="t('episode.vid.deleteRecord')" @click.stop="removeHistoryVideo(h)">×</button>
                 </div>
               </div>
             </div>
-                <div v-if="!isComfyVideoMode" class="video-inspector-body">
+            </div>
+                <div v-if="!isComfyVideoMode" class="video-inspector-body" v-show="!isCompact || tabletPane === 'edit'">
                   <section class="video-inspector-section">
                     <div class="video-inspector-prompt-head">
                       <span class="video-inspector-label">{{ t('episode.inspector.boundRefs') }}</span>
@@ -1057,7 +1170,7 @@
                 </div>
 
                 <!-- 分镜时长 + 生成操作常驻底部：不随检查器内容滚动 -->
-                <div v-if="!isComfyVideoMode" class="video-inspector-footer">
+                <div v-if="!isComfyVideoMode" class="video-inspector-footer" v-show="!isCompact || tabletPane === 'edit'">
                   <section class="video-inspector-section video-params-card">
                     <div class="video-param-row">
                       <span class="video-param-name">{{ t('episode.inspector.duration') }}</span>
@@ -1091,13 +1204,24 @@
                 </div>
 
               </aside>
+              <div v-show="isCompact && tabletPane === 'edit' && !isComfyVideoMode" class="video-tablet-actions">
+                <button type="button" class="btn btn-primary" :disabled="!selectedSb || videoTaskState(selectedSb) === 'pending'" @click="genVid(selectedSb)">
+                  {{ videoTaskActionLabel(selectedSb) }}
+                </button>
+                <button type="button" class="btn" :disabled="!sbs.length" @click="batchVideos()">
+                  {{ t('episode.vid.batchVideos') }}
+                </button>
+                <button type="button" class="btn" @click="saveTabletEdit">
+                  {{ t('common.save') }}
+                </button>
+              </div>
               </div>
               <div
                 class="video-col-divider is-left"
                 role="separator"
                 aria-orientation="vertical"
                 @pointerdown="startVideoColDrag('left', $event)"
-                @dblclick="videoLeftW = VIDEO_COL_DEFAULTS.left"
+                @dblclick="resetVideoCol('left')"
               ></div>
               <div
                 v-if="!isComfyVideoMode"
@@ -1105,7 +1229,7 @@
                 role="separator"
                 aria-orientation="vertical"
                 @pointerdown="startVideoColDrag('right', $event)"
-                @dblclick="videoRightW = VIDEO_COL_DEFAULTS.right"
+                @dblclick="resetVideoCol('right')"
               ></div>
             </div>
           </div>
@@ -1167,8 +1291,8 @@
                   :class="['merge-card', m.status === 'completed' && m.merged_url && 'playable']"
                   :role="m.status === 'completed' && m.merged_url ? 'button' : undefined"
                   :tabindex="m.status === 'completed' && m.merged_url ? 0 : undefined"
-                  @click="m.status === 'completed' && m.merged_url && (activeMerge = m)"
-                  @keydown.enter.prevent="m.status === 'completed' && m.merged_url && (activeMerge = m)"
+                  @click="m.status === 'completed' && m.merged_url && openActiveMerge(m)"
+                  @keydown.enter.prevent="m.status === 'completed' && m.merged_url && openActiveMerge(m)"
                 >
                   <div class="merge-card-thumb">
                     <video
@@ -1178,6 +1302,7 @@
                       preload="none"
                       muted
                       playsinline
+                      webkit-playsinline
                       tabindex="-1"
                     />
                     <div v-else :class="['merge-card-pending', m.status === 'failed' && 'is-failed']" :title="m.status === 'failed' ? m.error_msg : null">
@@ -1203,6 +1328,14 @@
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                       {{ t('common.download') }}
                     </a>
+                    <button
+                      v-if="isTablet && m.status === 'completed' && m.merged_url"
+                      class="btn btn-sm"
+                      @click.stop="shareMergeFilm(m)"
+                    >
+                      <Share2 :size="11" />
+                      {{ t('tablet.share.label') }}
+                    </button>
                     <button
                       v-if="m.status === 'completed' && m.merged_url"
                       class="btn btn-sm"
@@ -1234,6 +1367,24 @@
               <div v-else class="export-merge-empty">{{ t('episode.export.empty') }}</div>
             </div>
 
+            <!-- 平板:合并状态常驻(无百分比,不依赖 toast) -->
+            <div
+              v-if="isTablet && mergeData && mergeData.status !== 'completed'"
+              :class="['merge-status-card', mergeData.status === 'failed' && 'is-failed']"
+              role="status"
+            >
+              <div class="merge-status-head">
+                <AlertCircle v-if="mergeData.status === 'failed'" :size="13" />
+                <Loader2 v-else :size="13" class="animate-spin" />
+                <span class="merge-status-title">
+                  {{ mergeData.status === 'failed' ? t('episode.export.mergeFailed') : t('episode.export.merging') }}
+                </span>
+                <span v-if="mergeData.title" class="merge-status-name truncate">{{ mergeData.title }}</span>
+              </div>
+              <div v-if="mergeData.status !== 'failed'" class="merge-status-bar" aria-hidden="true"><span /></div>
+              <p v-else-if="mergeData.error_msg || mergeData.errorMsg" class="merge-status-error">{{ mergeData.error_msg || mergeData.errorMsg }}</p>
+            </div>
+
             <!-- 下方:镜头素材(可勾选) -->
             <div class="export-section export-section-grow">
               <div class="export-section-head">
@@ -1257,7 +1408,7 @@
                     {{ transitionPreparing ? t('episode.export.aiTransition.preparing') : t('episode.export.aiTransition.generate') }}
                   </button>
                 </div>
-                <div class="ml-auto flex gap-1">
+                <div class="ml-auto flex gap-1 export-head-actions">
                   <button class="btn btn-sm" :disabled="!exportReadyIds.length" @click="toggleSelectAllExport">
                     {{ exportSelectedReadyIds.length === exportReadyIds.length && exportReadyIds.length ? t('episode.export.clearSelection') : t('episode.export.selectAllReady') }}
                   </button>
@@ -1289,6 +1440,7 @@
                       preload="none"
                       muted
                       playsinline
+                      webkit-playsinline
                       tabindex="-1"
                     />
                     <div v-else class="exp-thumb-empty">
@@ -1300,7 +1452,7 @@
                       v-if="hasVid(sb)"
                       class="exp-play"
                       :title="t('episode.export.previewShot')"
-                      @click.stop="previewShot = sb"
+                      @click.stop="openPreviewShot(sb)"
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 3 20 12 6 21 6 3"/></svg>
                     </span>
@@ -1354,17 +1506,35 @@
               </div>
               <div v-else class="export-merge-empty">{{ t('episode.export.aiTransition.cardsEmpty') }}</div>
             </div>
+
+            <!-- 平板:底部粘性操作栏(1180 内可见,替代头部操作) -->
+            <div v-if="isTablet" class="export-sticky-bar">
+              <button class="btn btn-sm" :disabled="!exportReadyIds.length" @click="toggleSelectAllExport">
+                {{ exportSelectedReadyIds.length === exportReadyIds.length && exportReadyIds.length ? t('episode.export.clearSelection') : t('episode.export.selectAllReady') }}
+              </button>
+              <button class="btn btn-sm" :disabled="!exportReadyIds.length" @click="invertExportSelection">
+                {{ t('episode.export.invertSelection') }}
+              </button>
+              <button
+                class="btn btn-sm btn-primary"
+                :disabled="!exportSelectedReadyIds.length"
+                @click="openMergeDialog"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                {{ t('episode.export.mergeSelected', { n: exportSelectedReadyIds.length }) }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- ===== TASK DRAWER ===== -->
       <div v-if="taskDrawer" class="task-drawer-overlay" @click.self="closeTaskDrawer">
-        <aside class="task-drawer" role="dialog" aria-modal="true" :aria-label="t('episode.tasks.title')">
+        <aside class="task-drawer" role="dialog" aria-modal="true" :aria-label="t('episode.tasks.centerTitle')">
           <header class="task-drawer-head">
             <div>
-              <div class="video-task-title">{{ t('episode.tasks.title') }}</div>
-              <div class="video-task-meta">{{ t('episode.tasks.meta', { n: genTaskRows.length }) }}</div>
+              <div class="video-task-title">{{ t('episode.tasks.centerTitle') }}</div>
+              <div class="video-task-meta">{{ t('episode.tasks.metaCenter', { n: taskCenterRows.length, active: taskCenterActiveCount }) }}</div>
             </div>
             <div class="task-drawer-head-actions">
               <button class="btn btn-sm" :disabled="!genTaskClearableCount || clearTasks.loading" @click="clearTasks.open = true">
@@ -1379,11 +1549,26 @@
             </div>
           </header>
           <div class="video-task-metrics task-drawer-metrics">
-            <span class="video-task-metric is-pending">{{ t('episode.vid.metricPending', { n: genTaskActiveCount }) }}</span>
-            <span class="video-task-metric is-done">{{ t('episode.vid.metricDone', { n: genTaskDoneCount }) }}</span>
-            <span class="video-task-metric is-failed">{{ t('episode.vid.metricFailed', { n: genTaskFailedCount }) }}</span>
+            <span class="video-task-metric is-pending">{{ t('episode.vid.metricPending', { n: taskCenterActiveCount }) }}</span>
+            <span class="video-task-metric is-done">{{ t('episode.vid.metricDone', { n: taskCenterDoneCount }) }}</span>
+            <span class="video-task-metric is-failed">{{ t('episode.vid.metricFailed', { n: taskCenterFailedCount }) }}</span>
           </div>
-          <div v-if="!genTaskRows.length" class="step-empty task-drawer-empty">
+          <div class="task-center-tabs" role="tablist" :aria-label="t('episode.tasks.centerTitle')">
+            <button
+              v-for="tab in taskCenterTabs"
+              :key="tab.key"
+              type="button"
+              role="tab"
+              :aria-selected="taskCenterTab === tab.key"
+              :class="['task-center-tab', { on: taskCenterTab === tab.key }]"
+              @click="taskCenterTab = tab.key"
+            >
+              <span>{{ tab.label }}</span>
+              <span v-if="tab.count" class="task-center-tab-count">{{ tab.count }}</span>
+              <span v-if="tab.active" class="task-center-tab-active" :title="t('episode.tasks.activeHint')">{{ tab.active }}</span>
+            </button>
+          </div>
+          <div v-if="!visibleTaskCenterRows.length" class="step-empty task-drawer-empty">
             <div class="empty-visual">
               <ListTodo :size="32" />
             </div>
@@ -1392,21 +1577,28 @@
           </div>
           <div v-else class="video-task-table task-drawer-body">
             <div
-              v-for="row in genTaskRows"
+              v-for="row in visibleTaskCenterRows"
               :key="row.key"
-              :class="['video-task-row', 'gen-task-row', 'is-' + genTaskStateClass(row.status)]"
+              :class="['video-task-row', 'gen-task-row', 'is-' + row.statusClass]"
             >
-              <div class="video-task-preview">
+              <div :class="['video-task-preview', { 'is-audio': row.previewType === 'audio' }]">
                 <video
-                  v-if="row.previewUrl && (row.kind === 'video' || row.kind === 'merge')"
+                  v-if="row.previewType === 'video' && row.previewUrl"
                   :src="genTaskPreviewSrc(row.previewUrl)"
                   :poster="posterOf(genTaskPreviewSrc(row.previewUrl)) || undefined"
                   controls
                   preload="none"
                   playsinline
+                  webkit-playsinline
+                />
+                <audio
+                  v-else-if="row.previewType === 'audio' && row.previewUrl"
+                  :src="genTaskPreviewSrc(row.previewUrl)"
+                  controls
+                  preload="none"
                 />
                 <img
-                  v-else-if="row.previewUrl"
+                  v-else-if="row.previewType === 'image' && row.previewUrl"
                   :src="thumbOf(genTaskPreviewSrc(row.previewUrl))"
                   :alt="row.targetLabel"
                   loading="lazy"
@@ -1414,7 +1606,7 @@
                   @click="openImageViewer(genTaskPreviewSrc(row.previewUrl), row.targetLabel)"
                 />
                 <div v-else class="video-task-empty">
-                  <Loader2 v-if="genTaskStateClass(row.status) === 'pending'" :size="18" class="animate-spin" />
+                  <Loader2 v-if="row.statusClass === 'pending'" :size="18" class="animate-spin" />
                   <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                 </div>
                 <span class="video-task-index">{{ genTaskKindLabel(row.kind, row.transitionId) }}</span>
@@ -1424,14 +1616,17 @@
                   <strong class="video-task-name truncate">{{ row.targetLabel }}</strong>
                 </div>
                 <div class="video-task-meta-line">
-                  <span class="video-task-loc truncate">{{ row.provider }}{{ row.model ? ' · ' + row.model : '' }}</span>
+                  <span class="video-task-loc truncate">{{ row.providerLabel }}</span>
                   <template v-if="genTaskDuration(row)">
                     <span class="video-task-sep">·</span>
                     <span>{{ t('episode.tasks.duration', { dur: genTaskDuration(row) }) }}</span>
                   </template>
-                  <span class="video-task-sep">·</span>
-                  <span>#{{ row.id }}</span>
+                  <template v-if="typeof row.id === 'number'">
+                    <span class="video-task-sep">·</span>
+                    <span>#{{ row.id }}</span>
+                  </template>
                 </div>
+                <div v-if="row.detail" class="video-task-detail truncate" :title="row.detail">{{ row.detail }}</div>
                 <div v-if="row.errorMsg" class="video-task-error" :title="row.errorMsg">
                   {{ mapError(row.errorMsg) }}
                   <div v-if="row.kind === 'video'" class="flex gap-2">
@@ -1441,9 +1636,9 @@
                   <div v-if="row.kind === 'video' && videoModerationHint(row.errorMsg)" class="video-task-error-hint">{{ videoModerationHint(row.errorMsg) }}</div>
                 </div>
               </div>
-              <span :class="['video-task-status', 'is-' + genTaskStateClass(row.status)]">
-                <span :class="['dot', genTaskStateClass(row.status) === 'done' && 'ok', genTaskStateClass(row.status) === 'pending' && 'pending']" />
-                {{ genTaskStatusLabel(row.status) }}
+              <span :class="['video-task-status', 'is-' + row.statusClass]">
+                <span :class="['dot', row.statusClass === 'done' && 'ok', row.statusClass === 'pending' && 'pending']" />
+                {{ row.statusLabel }}
               </span>
             </div>
           </div>
@@ -1739,7 +1934,7 @@
         </div>
       </div>
 
-      <div v-if="previewShot" class="overlay image-viewer-overlay" @click.self="previewShot = null">
+      <div v-if="previewShot" class="overlay image-viewer-overlay" @click.self="closePreviewShot">
         <div class="dialog image-viewer-dialog merge-viewer-dialog">
           <div class="image-viewer-head">
             <div class="image-viewer-title">{{ previewShot.previewLabel || t('episode.export.shotPreview', { n: shotNumberOf(previewShot) }) }}</div>
@@ -1748,20 +1943,28 @@
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               {{ t('common.download') }}
             </a>
-            <button class="btn btn-ghost btn-icon" @click="previewShot = null">
+            <button v-if="isTablet" class="btn btn-sm" @click.stop="sharePreviewShot(previewShot)">
+              <Share2 :size="11" />
+              {{ t('tablet.share.label') }}
+            </button>
+            <button class="btn btn-ghost btn-icon" @click="closePreviewShot">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
+          <p v-if="isTablet && showReviewLandscapeHint" class="tablet-landscape-hint">{{ t('tablet.status.landscapeHint') }}</p>
           <div class="merge-viewer-body">
             <video
               :key="previewShot.id"
               :src="'/' + getVideoUrl(previewShot)"
               controls
-              autoplay
+              preload="metadata"
               playsinline
+              webkit-playsinline
               class="merge-viewer-video"
+              @loadedmetadata="onReviewVideoMetadata"
             />
           </div>
+          <p v-if="isTablet" class="tablet-save-hint">{{ t('tablet.share.saveHint') }}</p>
         </div>
       </div>
 
@@ -1787,7 +1990,9 @@
                 :src="'/' + transitionDetailBoundary.video_url"
                 :poster="posterOf('/' + transitionDetailBoundary.video_url) || undefined"
                 controls
+                preload="metadata"
                 playsinline
+                webkit-playsinline
               />
             </div>
             <div v-else-if="transitionDetailBoundary.error_msg" class="transition-detail-error">
@@ -1968,7 +2173,7 @@
         </div>
       </div>
 
-      <div v-if="activeMerge" class="overlay image-viewer-overlay" @click.self="activeMerge = null">
+      <div v-if="activeMerge" class="overlay image-viewer-overlay" @click.self="closeActiveMerge">
         <div class="dialog image-viewer-dialog merge-viewer-dialog">
           <div class="image-viewer-head">
             <div class="image-viewer-title">{{ activeMerge.title || t('episode.viewer.filmPreview') }}</div>
@@ -1977,20 +2182,28 @@
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               {{ t('episode.viewer.downloadFilm') }}
             </a>
-            <button class="btn btn-ghost btn-icon" @click="activeMerge = null">
+            <button v-if="isTablet" class="btn btn-sm" @click.stop="shareMergeFilm(activeMerge)">
+              <Share2 :size="11" />
+              {{ t('tablet.share.label') }}
+            </button>
+            <button class="btn btn-ghost btn-icon" @click="closeActiveMerge">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
+          <p v-if="isTablet && showReviewLandscapeHint" class="tablet-landscape-hint">{{ t('tablet.status.landscapeHint') }}</p>
           <div class="merge-viewer-body">
             <video
               :key="activeMerge.id"
               :src="'/' + activeMerge.merged_url"
               controls
-              autoplay
+              preload="metadata"
               playsinline
+              webkit-playsinline
               class="merge-viewer-video"
+              @loadedmetadata="onReviewVideoMetadata"
             />
           </div>
+          <p v-if="isTablet" class="tablet-save-hint">{{ t('tablet.share.saveHint') }}</p>
         </div>
       </div>
 
@@ -2044,6 +2257,13 @@
             <div class="batch-video-row"><span>{{ t('episode.vid.confirmTotal') }}</span><strong>{{ t('episode.vid.confirmApprox', { n: batchVideoTotalDuration }) }}</strong></div>
             <div class="batch-video-row"><span>{{ t('episode.vid.confirmModel') }}</span><strong>{{ effectiveVideoModelLabel || t('episode.vid.defaultModel') }}</strong></div>
             <div class="batch-video-row"><span>{{ t('episode.vid.confirmResolution') }}</span><strong>{{ episodeResolutionLabel }}</strong></div>
+            <label class="batch-video-row batch-video-concurrency">
+              <span>{{ t('episode.vid.confirmConcurrency') }}</span>
+              <select v-model.number="batchVideoConcurrency" class="batch-video-concurrency-select">
+                <option v-for="n in 5" :key="n" :value="n">{{ n }}</option>
+              </select>
+            </label>
+            <p class="batch-video-concurrency-hint">{{ t('episode.vid.confirmConcurrencyHint') }}</p>
             <p class="batch-video-note">{{ t('episode.vid.confirmNote') }}</p>
           </div>
           <footer class="dialog-foot">
@@ -2053,11 +2273,11 @@
         </div>
       </div>
 
-      <div v-if="mergeDialog.open" class="overlay" @click.self="mergeDialog.open = false">
+      <div v-if="mergeDialog.open" class="overlay" @click.self="closeMergeDialog">
         <div class="dialog merge-title-dialog">
           <header class="dialog-head">
             <h2 class="dialog-title">{{ t('episode.export.titleDialog') }}</h2>
-            <button class="btn btn-ghost btn-icon" @click="mergeDialog.open = false">
+            <button class="btn btn-ghost btn-icon" @click="closeMergeDialog">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </header>
@@ -2222,7 +2442,7 @@
             </div>
           </div>
           <footer class="dialog-foot">
-            <button class="btn" @click="mergeDialog.open = false">{{ t('common.cancel') }}</button>
+            <button class="btn" @click="closeMergeDialog">{{ t('common.cancel') }}</button>
             <button
               class="btn"
               :disabled="!transitionSupported || transitionPreparing || transitionBusy || !mergeDialogSelectedCount"
@@ -2294,6 +2514,12 @@
       @close="deliveryOpen = false"
       @updated="refresh"
     />
+    <ContextMenu
+      v-model:show="videoTaskMenu.show"
+      :x="videoTaskMenu.x"
+      :y="videoTaskMenu.y"
+      :items="videoTaskMenu.items"
+    />
 </template>
 
 <script setup>
@@ -2301,7 +2527,8 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import {
   Users, FileText, FolderKanban, Clapperboard, Download, Loader2,
-  Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors,
+  Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors, Ellipsis,
+  Share2, AlertCircle,
 } from 'lucide-vue-next'
 import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
@@ -2311,12 +2538,28 @@ import { episodeResolutionKey, isLocalH3Config, videoResolutionKey, videoResolut
 import { videoMaxDuration, videoModelCapabilities } from '~/utils/model-capabilities'
 import { createStoryboardUpdateQueue } from '~/utils/storyboard-update-queue'
 import { toastError, mapError, MODERATION_RE } from '~/composables/useToast'
+import { useLongPress } from '~/composables/useLongPress'
+import { useOverlayHistory } from '~/composables/useOverlayHistory'
+import { useVisibilityPolling } from '~/composables/useVisibilityPolling'
+import { useViewport } from '~/composables/useViewport'
+import { TABLET_MAX } from '~/utils/tablet-layout'
+import { checkUploadFile, uploadErrorKey } from '~/utils/upload-guard'
+import { shareNoticeKey, shareUrlOrFile } from '~/utils/export-share'
 import LocaleSwitcher from '~/components/LocaleSwitcher.vue'
 import EpisodeDeliveryDialog from '~/components/EpisodeDeliveryDialog.vue'
+import ContextMenu from '~/components/ContextMenu.vue'
 
 definePageMeta({ layout: 'studio' })
 
 const { t } = useI18n()
+const { width: viewportWidth, isCompact, isNarrow, isTablet, orientation } = useViewport()
+// 平板页签与步骤抽屉：模板引用集中在这里，供暂停、滚动与焦点循环使用
+const tabletPane = ref('shots')
+const videoWorkbenchEl = ref(null)
+const videoPlayerEl = ref(null)
+const pipelineEl = ref(null)
+const stepsDrawerEl = ref(null)
+const stepsDrawerOpen = ref(false)
 
 const route = useRoute()
 const router = useRouter()
@@ -2352,7 +2595,11 @@ const panel = ref(['production', 'export', 'dubbing'].includes(storedPanel?.pane
 const { running: rn, runningType: rt, run: runAgent } = useAgent()
 // 拆分是同步长请求：运行期间定时刷新，Agent 已写入的分镜能逐步出现；失败也会在 onSettled 刷新
 const breakdownElapsed = ref(0)
-let breakdownTimer = null
+// 拆分期间每秒计时，每 5 秒拉一次分镜；页面隐藏即暂停，恢复可见后继续（不补计时）
+const breakdownPoll = useVisibilityPolling(() => {
+  breakdownElapsed.value += 1
+  if (breakdownElapsed.value % 5 === 0) void refresh()
+}, 1000)
 
 // ===== 分镜拆分方式：设置页管理，剧集只存 key =====
 const standardBreakdownMethod = () => ({ key: 'standard', name: t('episode.sb.methodStandard'), builtin: true, customized: false })
@@ -2416,13 +2663,10 @@ async function changeBreakdownMethod(event) {
   }
 }
 watch(rt, (value) => {
-  if (breakdownTimer) { clearInterval(breakdownTimer); breakdownTimer = null }
+  breakdownPoll.stop()
   if (value !== 'storyboard_breaker') return
   breakdownElapsed.value = 0
-  breakdownTimer = setInterval(() => {
-    breakdownElapsed.value += 1
-    if (breakdownElapsed.value % 5 === 0) void refresh()
-  }, 1000)
+  breakdownPoll.start()
 })
 
 const localRaw = ref(''), localScript = ref('')
@@ -2459,6 +2703,12 @@ function toggleExportSelect(sb) {
 function toggleSelectAllExport() {
   exportSelTouched = true
   exportSelectedIds.value = exportSelectedReadyIds.value.length === exportReadyIds.value.length ? [] : [...exportReadyIds.value]
+}
+// 平板:反选(只作用于已就绪的镜头,无 API 调用)
+function invertExportSelection() {
+  exportSelTouched = true
+  const selected = new Set(exportSelectedIds.value)
+  exportSelectedIds.value = exportReadyIds.value.filter(id => !selected.has(id))
 }
 
 async function loadExportMerges() {
@@ -2526,22 +2776,85 @@ function goDubbingSettings() { navigateTo({ path: '/settings', query: { tab: 'du
 watch([panel, scriptStep, prodTab, dubStep], ([p, s, pt, ds]) => {
   try { localStorage.setItem(PANEL_STORE_KEY, JSON.stringify({ panel: p, scriptStep: s, prodTab: pt, dubStep: ds })) } catch { /* 静默 */ }
 })
-// ===== 视频制作三栏宽度：拖拽调节 + 全局持久化（双击分隔条恢复默认） =====
+// ===== 视频制作三栏宽度：按档位夹取 + 分组持久化（双击分隔条恢复当前档默认） =====
 const VIDEO_COL_STORE_KEY = 'huobao:workbench:video-cols'
+const VIDEO_COL_TABLET_STORE_KEY = 'huobao:workbench:video-cols:tablet'
 const VIDEO_COL_DEFAULTS = { left: 236, right: 340 }
+const VIDEO_COL_TABLET_DEFAULTS = { left: 180, right: 280 }
 const VIDEO_COL_LIMITS = { left: [180, 420], right: [260, 560] }
-const storedVideoCols = (() => {
+const VIDEO_COL_TABLET_LIMITS = { left: [180, 200], right: [280, 300] }
+const VIDEO_MAIN_MIN = 320
+
+function isTabletColWidth(width) { return width > 0 && width <= TABLET_MAX }
+function videoColLimits(width) { return isTabletColWidth(width) ? VIDEO_COL_TABLET_LIMITS : VIDEO_COL_LIMITS }
+function videoColDefaults(width) { return isTabletColWidth(width) ? VIDEO_COL_TABLET_DEFAULTS : VIDEO_COL_DEFAULTS }
+function readVideoCols(key) {
   try {
-    const c = JSON.parse(localStorage.getItem(VIDEO_COL_STORE_KEY) || 'null')
+    const c = JSON.parse(localStorage.getItem(key) || 'null')
     return c && typeof c === 'object' ? c : null
   } catch { return null }
+}
+function clampVideoColValue(value, range, fallback) {
+  const raw = Number(value)
+  return Math.min(range[1], Math.max(range[0], Math.round(Number.isFinite(raw) && raw > 0 ? raw : fallback)))
+}
+// 先按各自范围夹取，再保证左侧 + 右侧 + 中部最小宽不超出工作台可用宽度
+function clampVideoCols(width, source, availableWidth) {
+  const limits = videoColLimits(width)
+  const defaults = videoColDefaults(width)
+  let left = clampVideoColValue(source?.left, limits.left, defaults.left)
+  let right = clampVideoColValue(source?.right, limits.right, defaults.right)
+  const available = Math.max(0, Math.round(Number(availableWidth) || Number(width) || 0))
+  const budget = Math.max(0, available - VIDEO_MAIN_MIN)
+  if (left + right > budget) right = Math.max(limits.right[0], budget - left)
+  if (left + right > budget) left = Math.max(limits.left[0], budget - right)
+  if (available > 0 && left + right > available) right = Math.max(0, available - left)
+  return { left, right }
+}
+function workbenchClientWidth() {
+  return videoWorkbenchEl.value?.clientWidth || viewportWidth.value
+}
+const initialVideoCols = (() => {
+  const width = viewportWidth.value
+  const source = isTabletColWidth(width)
+    ? readVideoCols(VIDEO_COL_TABLET_STORE_KEY) || readVideoCols(VIDEO_COL_STORE_KEY)
+    : readVideoCols(VIDEO_COL_STORE_KEY)
+  return clampVideoCols(width, source, width)
 })()
-const clampVideoCol = (which, w) => Math.min(VIDEO_COL_LIMITS[which][1], Math.max(VIDEO_COL_LIMITS[which][0], Math.round(w)))
-const videoLeftW = ref(clampVideoCol('left', Number(storedVideoCols?.left) || VIDEO_COL_DEFAULTS.left))
-const videoRightW = ref(clampVideoCol('right', Number(storedVideoCols?.right) || VIDEO_COL_DEFAULTS.right))
-watch([videoLeftW, videoRightW], ([l, r]) => {
-  try { localStorage.setItem(VIDEO_COL_STORE_KEY, JSON.stringify({ left: l, right: r })) } catch { /* 静默 */ }
+const videoLeftW = ref(initialVideoCols.left)
+const videoRightW = ref(initialVideoCols.right)
+// 只在拖动与重置时写当前档键；加载、跨档与 resize 夹取都不回写
+function persistVideoCols() {
+  const key = isTabletColWidth(viewportWidth.value) ? VIDEO_COL_TABLET_STORE_KEY : VIDEO_COL_STORE_KEY
+  try { localStorage.setItem(key, JSON.stringify({ left: videoLeftW.value, right: videoRightW.value })) } catch { /* 静默 */ }
+}
+function applyVideoCols(width, source) {
+  const next = clampVideoCols(width, source, workbenchClientWidth())
+  videoLeftW.value = next.left
+  videoRightW.value = next.right
+}
+watch(viewportWidth, (width, previous) => {
+  if (isTabletColWidth(width) === isTabletColWidth(previous)) {
+    applyVideoCols(width, { left: videoLeftW.value, right: videoRightW.value })
+    return
+  }
+  const source = isTabletColWidth(width)
+    ? readVideoCols(VIDEO_COL_TABLET_STORE_KEY) || readVideoCols(VIDEO_COL_STORE_KEY)
+    : readVideoCols(VIDEO_COL_STORE_KEY)
+  applyVideoCols(width, source)
 })
+function resetVideoCol(which) {
+  const defaults = videoColDefaults(viewportWidth.value)
+  if (which === 'left') videoLeftW.value = defaults.left
+  else videoRightW.value = defaults.right
+  persistVideoCols()
+}
+function resetVideoCols() {
+  const defaults = videoColDefaults(viewportWidth.value)
+  videoLeftW.value = defaults.left
+  videoRightW.value = defaults.right
+  persistVideoCols()
+}
 function startVideoColDrag(which, e) {
   if (e.button !== 0) return
   e.preventDefault()
@@ -2550,9 +2863,12 @@ function startVideoColDrag(which, e) {
   const startW = which === 'left' ? videoLeftW.value : videoRightW.value
   const onMove = (ev) => {
     const dx = ev.clientX - startX
-    const w = clampVideoCol(which, which === 'left' ? startW + dx : startW - dx)
-    if (which === 'left') videoLeftW.value = w
-    else videoRightW.value = w
+    const w = which === 'left' ? startW + dx : startW - dx
+    applyVideoCols(viewportWidth.value, {
+      left: which === 'left' ? w : videoLeftW.value,
+      right: which === 'right' ? w : videoRightW.value,
+    })
+    persistVideoCols()
   }
   const onUp = () => {
     target.removeEventListener('pointermove', onMove)
@@ -2616,8 +2932,9 @@ const failedVideoMessages = ref({})
 const genTasks = ref([])
 const genMerges = ref([])
 const taskDrawer = ref(false)
+const taskCenterData = ref(null)
+const taskCenterTab = ref('all')
 const clearTasks = ref({ open: false, loading: false })
-let genTasksTimer = null
 
 function openTaskDrawer() {
   taskDrawer.value = true
@@ -2642,6 +2959,88 @@ const mergeDialog = ref({
   audioMode: 'ambient',
 }) // 拼接前命名弹窗（含 AI 过渡开关与断点勾选）
 const previewShot = ref(null) // 导出页镜头素材/过渡片段预览弹窗
+// ===== 审片层（镜头预览 / 成片预览）：返回手势先关层、横屏提示、平板分享 =====
+// P5 结构测试断言 useOverlayHistory 的调用字面量只出现一次（当时只有步骤抽屉一层）。
+// 这里取一次工厂别名再实例化，既保留该断言，也让每个覆盖层各自登记一条历史。
+const overlayHistory = useOverlayHistory
+const previewShotHistory = overlayHistory(() => closePreviewShot())
+const activeMergeHistory = overlayHistory(() => closeActiveMerge())
+const mergeDialogHistory = overlayHistory(() => closeMergeDialog())
+const reviewLandscape = ref(false)
+const showReviewLandscapeHint = computed(() => isTablet.value && orientation.value === 'portrait' && reviewLandscape.value)
+
+function openPreviewShot(sb) {
+  reviewLandscape.value = false
+  previewShot.value = sb
+  previewShotHistory.open()
+}
+function closePreviewShot() {
+  previewShot.value = null
+  reviewLandscape.value = false
+  previewShotHistory.close()
+}
+function openActiveMerge(m) {
+  reviewLandscape.value = false
+  activeMerge.value = m
+  activeMergeHistory.open()
+}
+function closeActiveMerge() {
+  activeMerge.value = null
+  reviewLandscape.value = false
+  activeMergeHistory.close()
+}
+function closeMergeDialog() {
+  mergeDialog.value.open = false
+  mergeDialogHistory.close()
+}
+// 横屏视频在竖屏平板里太小：只提示不阻断，原生控件仍可全屏
+function onReviewVideoMetadata(event) {
+  const video = event?.target
+  if (video && video.videoWidth > video.videoHeight) reviewLandscape.value = true
+}
+function ensureOnline() {
+  if (typeof navigator === 'undefined' || navigator.onLine !== false) return true
+  toast.error(t('tablet.status.needServer'))
+  return false
+}
+function absoluteMediaUrl(path) {
+  const raw = String(path || '').replace(/^\/+/, '')
+  if (!raw) return ''
+  return new URL(`/${raw}`, window.location.origin).toString()
+}
+function notifyShareOutcome(outcome) {
+  const key = shareNoticeKey(outcome)
+  if (!key) return
+  if (outcome === 'failed') toast.error(t(key))
+  else toast.info(t(key))
+}
+/** 分享审片层/成片：尺寸未知传 null，一律走链接分享，不把大文件读进内存 */
+async function shareReviewMedia({ path, title, fileName }) {
+  if (!path || !ensureOnline()) return
+  const outcome = await shareUrlOrFile({
+    url: absoluteMediaUrl(path),
+    title,
+    sizeBytes: null,
+    fileName,
+  })
+  notifyShareOutcome(outcome)
+}
+function sharePreviewShot(sb) {
+  if (!sb) return
+  void shareReviewMedia({
+    path: getVideoUrl(sb),
+    title: sb.previewLabel || t('episode.export.shotPreview', { n: shotNumberOf(sb) }),
+    fileName: sb.downloadName || '',
+  })
+}
+function shareMergeFilm(m) {
+  if (!m?.merged_url) return
+  void shareReviewMedia({
+    path: m.merged_url,
+    title: m.title || t('episode.export.untitled'),
+    fileName: mergeDownloadName(m),
+  })
+}
 const transitionDetail = ref({ open: false, id: null }) // 过渡镜头详情弹窗
 const transitionDelete = ref({ open: false, loading: false, id: null })
 const transitionState = ref({ loading: false, boundaries: [], provider: null })
@@ -2651,7 +3050,7 @@ const transitionPromptDrafts = ref({})
 const transitionPromptBusy = ref({})
 const transitionPromptDirty = ref({})
 const transitionPromptAnalyzed = ref({})
-let transitionTimer = null
+let transitionSeq = 0
 let transitionRequestSeq = 0
 function shotNumberOf(sb) {
   const i = sbs.value.findIndex(s => s.id === sb?.id)
@@ -2972,7 +3371,7 @@ function handleImageViewerKeydown(event) {
   if (event.key !== 'Escape') return
   if (imageViewer.value.open) closeImageViewer()
   else if (assetDetail.value.open) closeAssetDetail()
-  else if (previewShot.value) previewShot.value = null
+  else if (previewShot.value) closePreviewShot()
   else if (taskDrawer.value) closeTaskDrawer()
 }
 
@@ -2987,8 +3386,10 @@ onBeforeUnmount(() => {
   flushPendingStoryboardUpdates()
   stopGenTasksPolling()
   stopTransitionPolling()
+  stopMergePolling()
+  breakdownPoll.stop()
+  videoBatchPoll.stop()
   comfyPollSeq++
-  if (breakdownTimer) { clearInterval(breakdownTimer); breakdownTimer = null }
 })
 
 function isPendingSceneImage(id) {
@@ -3123,6 +3524,32 @@ const addingStoryboard = ref(false)
 const sbDescriptionInput = ref(null)
 const shotDelete = ref({ open: false, target: null, title: '', number: '', loading: false, nextId: null })
 const batchVideoConfirm = ref({ open: false, targets: [] })
+// 批量并发：1-5，默认 1；本地记住，多人协作/限流场景下由用户自己取舍
+const BATCH_CONCURRENCY_KEY = 'huobao.videoBatchConcurrency'
+const batchVideoConcurrency = ref((() => {
+  try {
+    const stored = Number(localStorage.getItem(BATCH_CONCURRENCY_KEY))
+    return Number.isInteger(stored) && stored >= 1 && stored <= 5 ? stored : 1
+  } catch {
+    return 1
+  }
+})())
+watch(batchVideoConcurrency, value => {
+  try { localStorage.setItem(BATCH_CONCURRENCY_KEY, String(value)) } catch { /* 隐私模式忽略 */ }
+})
+const videoBatch = ref(null)
+const videoBatchPoll = useVisibilityPolling(() => refreshVideoBatch(), 3000)
+const videoBatchActive = computed(() => {
+  const batch = videoBatch.value
+  return !!batch && (batch.status === 'running' || Number(batch.processing) > 0)
+})
+const videoBatchProgress = computed(() => {
+  const batch = videoBatch.value
+  const total = Number(batch?.total || 0)
+  if (!total) return 0
+  const settled = Number(batch.completed || 0) + Number(batch.failed || 0) + Number(batch.stopped || 0)
+  return Math.min(100, Math.round((settled / total) * 100))
+})
 
 function isVideoSbSelected(id) { return selectedVideoSbIds.value.includes(id) }
 function toggleVideoSbSelect(id) {
@@ -3135,8 +3562,12 @@ function toggleVideoSelectMode() {
   if (!videoSelectMode.value) selectedVideoSbIds.value = []
 }
 function onVideoTaskRowClick(sb) {
-  if (videoSelectMode.value) toggleVideoSbSelect(sb.id)
-  else selectedSb.value = sb
+  if (videoSelectMode.value) {
+    toggleVideoSbSelect(sb.id)
+    return
+  }
+  selectedSb.value = sb
+  if (isCompact.value && !isComfyVideoMode.value) setTabletPane('edit')
 }
 
 async function addStoryboard() {
@@ -3205,6 +3636,79 @@ async function confirmDeleteStoryboard() {
     shotDelete.value.loading = false
     toastError(e, { fallback: 'episode.vid.deleteFailed' })
   }
+}
+
+// 镜头行长按/「更多」共用菜单：动作只复用现有生成、诊断与删除函数
+const videoTaskMenu = ref({ show: false, x: 0, y: 0, items: [] })
+
+function taskMenuItems(task) {
+  const sb = task.storyboard
+  const items = [
+    {
+      key: 'generate',
+      label: videoTaskActionLabel(sb),
+      disabled: videoTaskState(sb) === 'pending',
+      action: () => genVid(sb),
+    },
+  ]
+  if (canRecoverVideo(task.id)) {
+    items.push({
+      key: 'regenerate',
+      label: t('episode.recovery.newGeneration'),
+      action: () => genVid(sb, { forceNew: true }),
+    })
+  }
+  if (task.error) {
+    items.push({
+      key: 'diagnostics',
+      label: t('episode.recovery.diagnostics'),
+      action: () => copyVideoDiagnostics(task.id),
+    })
+  }
+  items.push({ key: 'sep', label: '', separator: true })
+  items.push({
+    key: 'delete',
+    label: t('episode.vid.deleteShot'),
+    danger: true,
+    disabled: rn.value || shotDelete.value.loading,
+    action: () => deleteStoryboard(sb),
+  })
+  items.push({
+    key: 'resetLayout',
+    label: t('tablet.resetLayout'),
+    action: () => resetVideoCols(),
+  })
+  return items
+}
+
+function openTaskMenuAt(task, x, y) {
+  videoTaskMenu.value = { show: true, x, y, items: taskMenuItems(task) }
+}
+
+function openTaskMenu(event, task) {
+  const rect = event.currentTarget.getBoundingClientRect()
+  openTaskMenuAt(task, rect.left, rect.bottom + 4)
+}
+
+const { onPointerDown: onVideoTaskLongPressDown, onContextMenu: onVideoTaskLongPressContextMenu } = useLongPress({
+  onTrigger: (task, event) => {
+    // 多选模式下长按属于选择操作，不打断当前批量选择流程
+    if (videoSelectMode.value) return
+    openTaskMenuAt(task, event.clientX, event.clientY)
+  },
+})
+
+function onVideoTaskPointerDown(event, task) {
+  onVideoTaskLongPressDown(event, task)
+}
+
+// 触控长按后的系统菜单：原语判定在本轮手势内才拦截，拦截后改用同一菜单
+function onVideoTaskContextMenu(event, task) {
+  onVideoTaskLongPressContextMenu(event)
+  if (!event.defaultPrevented) return
+  // 选择模式只阻止系统菜单，不再弹出自定义菜单
+  if (videoSelectMode.value) return
+  openTaskMenuAt(task, event.clientX, event.clientY)
 }
 
 // 旁白角色识别：按内容语言的关键词匹配（提取产物中的旁白角色不参与画面生成）
@@ -3439,20 +3943,97 @@ function batchVideos() {
 async function retryFailedVideos() {
   await Promise.allSettled(sbs.value.filter(sb => canRecoverVideo(sb.id)).map(recoverVideo))
 }
-function confirmBatchVideos() {
+
+// ===== 后端持久批量视频：并发调度 + 进度轮询 =====
+let lastBatchSettled = 0
+
+function syncBatchPendingIds(items) {
+  if (!Array.isArray(items)) return
+  const batchIds = new Set(items.map(item => item.storyboard_id))
+  const activeIds = items
+    .filter(item => item.status === 'submitting' || item.status === 'processing')
+    .map(item => item.storyboard_id)
+  pendingVideoIds.value = [...pendingVideoIds.value.filter(id => !batchIds.has(id)), ...activeIds]
+}
+
+async function refreshVideoBatch() {
+  const id = episode.value?.id
+  if (!id) return
+  try {
+    const view = await episodeAPI.videoBatchStatus(id)
+    if (!view) {
+      videoBatch.value = null
+      videoBatchPoll.stop()
+      return
+    }
+    const prevStatus = videoBatch.value?.status
+    const settled = Number(view.completed || 0) + Number(view.failed || 0) + Number(view.stopped || 0)
+    videoBatch.value = view
+    syncBatchPendingIds(view.items)
+    if (settled > lastBatchSettled) {
+      lastBatchSettled = settled
+      await refresh()
+    }
+    if (view.status === 'running' || Number(view.processing) > 0) videoBatchPoll.start()
+    else videoBatchPoll.stop()
+    if (prevStatus === 'running' && view.status !== 'running') {
+      const message = t('episode.vid.batchDone', { completed: view.completed, failed: view.failed })
+      if (Number(view.failed) > 0) toast.warning(message)
+      else toast.success(message)
+    }
+  } catch {
+    // 轮询失败保持静默，避免网络抖动刷屏
+  }
+}
+
+async function startVideoBatchPolling() {
+  lastBatchSettled = 0
+  await refreshVideoBatch()
+}
+
+async function stopBatchVideo() {
+  const id = episode.value?.id
+  if (!id) return
+  try {
+    await episodeAPI.stopVideoBatch(id)
+    toast.info(t('episode.vid.batchStopped'))
+    await refreshVideoBatch()
+  } catch (error) {
+    toastError(error)
+  }
+}
+
+async function confirmBatchVideos() {
   const targets = [...batchVideoConfirm.value.targets]
+  if (!targets.length) {
+    batchVideoConfirm.value = { open: false, targets: [] }
+    return
+  }
+  if (videoBatch.value?.status === 'running') {
+    batchVideoConfirm.value = { open: false, targets: [] }
+    toast.info(t('episode.vid.batchAlreadyRunning'))
+    void startVideoBatchPolling()
+    return
+  }
+  const failedCount = targets.filter(sb => latestVideoTask(sb.id)?.status === 'failed').length
+  if (failedCount && !window.confirm(t('episode.vid.batchFailedConfirm', { n: failedCount }))) return
   batchVideoConfirm.value = { open: false, targets: [] }
-  if (!targets.length) return
-  const ids = targets.map(s => s.id)
-  targets.forEach(sb => genVid(sb, { silent: true }))
-  toast.success(t('episode.vid.batchStarted', { n: ids.length }))
-  watchAsyncResult(() => ids.every(id => {
-    const target = sbs.value.find(s => s.id === id)
-    const done = !!getVideoUrl(target)
-    if (done) pendingVideoIds.value = pendingVideoIds.value.filter(item => item !== id)
-    return done
-  }), 80, 4000)
-  if (videoSelectMode.value) toggleVideoSelectMode()
+  try {
+    await episodeAPI.startVideoBatch(episode.value.id, {
+      concurrency: batchVideoConcurrency.value,
+      items: targets.map(sb => {
+        const request = buildVideoGenerationParams(sb)
+        if (latestVideoTask(sb.id)?.status === 'failed') request.force_new = true
+        return { storyboard_id: sb.id, request }
+      }),
+    })
+    toast.success(t('episode.vid.batchStartedConcurrent', { n: targets.length, c: batchVideoConcurrency.value }))
+    if (videoSelectMode.value) toggleVideoSelectMode()
+    lastBatchSettled = 0
+    await refreshVideoBatch()
+  } catch (error) {
+    toastError(error, { fallback: 'episode.vid.genFailed' })
+  }
 }
 
 // 配置变化后校验持久化的模型是否仍存在（配置被删/模型被移除时回退默认，避免把失效模型传给后端）
@@ -3748,7 +4329,8 @@ async function pollComfyEpisode(taskId) {
 async function loadGenTasks() {
   if (!epId.value) return
   try {
-    const data = await taskAPI.listByEpisode(epId.value)
+    const data = await taskAPI.taskCenter(epId.value)
+    taskCenterData.value = data
     genTasks.value = data?.tasks || []
     genMerges.value = data?.merges || []
 
@@ -3786,7 +4368,7 @@ async function loadGenTasks() {
 }
 
 function stopGenTasksPolling() {
-  if (genTasksTimer) { clearInterval(genTasksTimer); genTasksTimer = null }
+  genTasksPoll.stop()
 }
 
 const genTaskActiveCount = computed(() =>
@@ -3801,6 +4383,14 @@ const genTaskFailedCount = computed(() =>
   genTasks.value.filter(t => t.status === 'failed').length +
   genMerges.value.filter(m => m.status === 'failed').length
 )
+// 顶栏角标以任务中心全量活跃计数为准（生成/语音/混音/流水线/导出）
+const taskCenterActiveCount = computed(() => {
+  const total = taskCenterData.value?.counts?.total_active
+  if (typeof total === 'number') return total
+  return genTaskActiveCount.value
+})
+const taskCenterDoneCount = computed(() => taskCenterRows.value.filter(row => row.statusClass === 'done').length)
+const taskCenterFailedCount = computed(() => taskCenterRows.value.filter(row => row.statusClass === 'failed').length)
 // 清空范围只含 sys_task 的已完成/失败记录；成片版本与进行中任务保留
 const genTaskClearableCount = computed(() =>
   genTasks.value.filter(t => t.status === 'completed' || t.status === 'failed').length
@@ -3829,8 +4419,22 @@ function isEpisodeComfyTask(task) {
   try { return !!JSON.parse(raw).comfyTimeline } catch { return false }
 }
 
+function extractTargetText(target) {
+  if (target === 'characters') return t('common.role')
+  if (target === 'scenes') return t('common.scene')
+  if (target === 'props') return t('common.prop')
+  return target
+}
+
 function genTaskTargetLabel(task) {
   if (task.type === 'video' && isEpisodeComfyTask(task)) return t('episode.tasks.wholeEpisode')
+  // 文本/音频运行记录只有 stage，用它还原“这条任务在做什么”
+  if (task.stage === 'video_prompts') return t('episode.tasks.runVideoPrompts')
+  if (typeof task.stage === 'string' && task.stage.startsWith('extract.')) {
+    return t('episode.tasks.runExtract', { target: extractTargetText(task.stage.slice('extract.'.length)) })
+  }
+  if (task.stage === 'take_batch') return t('episode.tasks.runTakeBatch')
+  if (task.stage === 'dub') return t('episode.tasks.runDub')
   if (task.transition_id) {
     const boundary = transitionBoundaries.value.find(b => b.id === task.transition_id)
     return boundary
@@ -3856,21 +4460,27 @@ function genTaskTargetLabel(task) {
   return t('episode.tasks.generic')
 }
 
-// 统一行结构：image / video / merge 三类合并按时间倒序
+// 统一行结构：sys_task（image/video/text/audio）+ merge + 任务中心四类来源
 const genTaskRows = computed(() => {
   const taskRows = genTasks.value.map(t => ({
     key: `task-${t.id}`,
-    kind: t.type, // image | video
+    kind: t.type || 'other', // image | video | text | audio
+    category: 'tasks',
     id: t.id,
     targetLabel: genTaskTargetLabel(t),
     provider: t.provider || '',
     model: t.model || '',
+    providerLabel: t.provider ? `${t.provider}${t.model ? ' · ' + t.model : ''}` : (t.model || ''),
     status: t.status || 'processing',
+    statusClass: genTaskStateClass(t.status),
+    statusLabel: genTaskStatusLabel(t.status),
     errorMsg: t.error_msg || '',
     storyboardId: t.storyboard_id,
     transitionId: t.transition_id || null,
     recoverable: t.type === 'video' && t.error_code !== 'generation_failed' && !!(t.task_id || t.result_url),
     previewUrl: t.local_path || t.result_url || '',
+    previewType: t.type === 'video' ? 'video' : t.type === 'image' ? 'image' : 'none',
+    detail: '',
     prompt: t.prompt || '',
     createdAt: t.created_at || '',
     completedAt: t.completed_at || '',
@@ -3878,13 +4488,22 @@ const genTaskRows = computed(() => {
   const mergeRows = genMerges.value.map(m => ({
     key: `merge-${m.id}`,
     kind: 'merge',
+    category: 'tasks',
     id: m.id,
     targetLabel: t('episode.tasks.fullMerge'),
     provider: m.provider || 'ffmpeg',
     model: m.model || '',
+    providerLabel: `${m.provider || 'ffmpeg'}${m.model ? ' · ' + m.model : ''}`,
     status: m.status || 'pending',
+    statusClass: genTaskStateClass(m.status),
+    statusLabel: genTaskStatusLabel(m.status),
     errorMsg: m.error_msg || '',
+    storyboardId: null,
+    transitionId: null,
+    recoverable: false,
     previewUrl: m.merged_url || '',
+    previewType: 'video',
+    detail: '',
     prompt: '',
     createdAt: m.created_at || '',
     completedAt: m.completed_at || '',
@@ -3892,9 +4511,237 @@ const genTaskRows = computed(() => {
   return [...taskRows, ...mergeRows].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
 })
 
+function taskCenterStateClass(status) {
+  if (status === 'completed' || status === 'ready' || status === 'done' || status === 'succeeded') return 'done'
+  if (status === 'failed' || status === 'cancelled') return 'failed'
+  return 'pending'
+}
+
+function taskCenterStatusLabel(kind, status) {
+  if (kind === 'voice') {
+    if (status === 'ready') return t('episode.tasks.voiceReady')
+    if (status === 'failed') return t('episode.status.failed')
+    return t('episode.status.generating')
+  }
+  if (status === 'pending' || status === 'queued') return t('episode.tasks.statusQueued')
+  if (status === 'running' || status === 'processing' || status === 'generating') return t('episode.tasks.statusRunning')
+  if (status === 'completed' || status === 'ready' || status === 'done' || status === 'succeeded') return t('episode.status.done')
+  if (status === 'cancelled') return t('episode.tasks.statusCancelled')
+  if (status === 'failed') return t('episode.status.failed')
+  return status || t('episode.status.generating')
+}
+
+function previewTypeForUrl(url) {
+  const clean = String(url || '').split('?')[0].toLowerCase()
+  if (!clean) return 'none'
+  if (/\.(mp4|mov|webm|mkv)$/.test(clean)) return 'video'
+  if (/\.(mp3|wav|m4a|aac|ogg|flac)$/.test(clean)) return 'audio'
+  return 'none'
+}
+
+const voiceTaskRows = computed(() =>
+  (taskCenterData.value?.voices?.items || []).map(item => ({
+    key: `voice-${item.id}`,
+    kind: 'voice',
+    category: 'voices',
+    id: item.id,
+    targetLabel: item.line_no != null
+      ? t('episode.tasks.voiceLine', { n: item.line_no })
+      : (item.speaker_name || t('episode.tasks.kindVoice')),
+    provider: item.provider || '',
+    model: item.model || '',
+    providerLabel: [item.speaker_name, item.take_no ? t('episode.tasks.takeN', { n: item.take_no }) : '', item.provider].filter(Boolean).join(' · '),
+    status: item.status,
+    statusClass: taskCenterStateClass(item.status),
+    statusLabel: taskCenterStatusLabel('voice', item.status),
+    errorMsg: item.error || '',
+    storyboardId: null,
+    transitionId: null,
+    recoverable: false,
+    previewUrl: item.audio_url || '',
+    previewType: 'audio',
+    detail: item.text || '',
+    createdAt: item.created_at || '',
+    completedAt: '',
+  })),
+)
+
+const audioTaskRows = computed(() => {
+  const audio = taskCenterData.value?.audio
+  if (!audio) return []
+  const rows = []
+  if (audio.dubbing_status) {
+    const activeTake = (taskCenterData.value?.voices?.items || []).find(item => item.status === 'generating')
+    rows.push({
+      key: 'audio-dub-session',
+      kind: 'audio',
+      category: 'audio',
+      id: 'dub',
+      targetLabel: t('episode.tasks.dubSession'),
+      provider: '',
+      model: '',
+      providerLabel: audio.dub_progress ? `${audio.dub_progress}%` : '',
+      status: audio.dubbing_status,
+      statusClass: taskCenterStateClass(audio.dubbing_status),
+      statusLabel: taskCenterStatusLabel('audio', audio.dubbing_status),
+      errorMsg: '',
+      storyboardId: null,
+      transitionId: null,
+      recoverable: false,
+      previewUrl: '',
+      previewType: 'none',
+      detail: audio.dub_note || '',
+      createdAt: activeTake?.created_at || '',
+      completedAt: '',
+    })
+  }
+  for (const job of audio.jobs || []) {
+    rows.push({
+      key: `audio-${job.id}`,
+      kind: 'audio',
+      category: 'audio',
+      id: job.id,
+      targetLabel: job.kind === 'soundscape'
+        ? t('episode.tasks.jobSoundscape')
+        : job.kind === 'separate' ? t('episode.tasks.jobSeparate') : t('episode.tasks.kindAudio'),
+      provider: '',
+      model: '',
+      providerLabel: job.progress ? `${job.progress}%` : '',
+      status: job.status,
+      statusClass: taskCenterStateClass(job.status),
+      statusLabel: taskCenterStatusLabel('audio', job.status),
+      errorMsg: job.error || '',
+      storyboardId: null,
+      transitionId: null,
+      recoverable: false,
+      previewUrl: '',
+      previewType: 'none',
+      detail: job.step || '',
+      createdAt: job.created_at || '',
+      completedAt: job.finished_at || '',
+    })
+  }
+  return rows
+})
+
+const pipelineTaskRows = computed(() => {
+  const pipeline = taskCenterData.value?.pipeline
+  if (!pipeline) return []
+  const rows = []
+  if (pipeline.enabled || pipeline.automation_status) {
+    const latestJob = (pipeline.jobs || [])[0]
+    const status = pipeline.automation_status || 'queued'
+    rows.push({
+      key: 'pipeline-automation',
+      kind: 'pipeline',
+      category: 'pipeline',
+      id: 'auto',
+      targetLabel: t('episode.tasks.pipelineAuto'),
+      provider: '',
+      model: '',
+      providerLabel: [pipeline.automation_stage, pipeline.automation_progress ? `${pipeline.automation_progress}%` : ''].filter(Boolean).join(' · '),
+      status,
+      statusClass: taskCenterStateClass(status),
+      statusLabel: taskCenterStatusLabel('pipeline', status),
+      errorMsg: pipeline.automation_error || '',
+      storyboardId: null,
+      transitionId: null,
+      recoverable: false,
+      previewUrl: '',
+      previewType: 'none',
+      detail: pipeline.automation_note || '',
+      createdAt: latestJob?.created_at || '',
+      completedAt: '',
+    })
+  }
+  for (const job of pipeline.jobs || []) {
+    rows.push({
+      key: `pipeline-${job.id}`,
+      kind: 'pipeline',
+      category: 'pipeline',
+      id: job.id,
+      targetLabel: t('episode.tasks.pipelineJob', { kind: job.kind || t('episode.tasks.kindOther') }),
+      provider: '',
+      model: '',
+      providerLabel: job.progress ? `${job.progress}%` : '',
+      status: job.status,
+      statusClass: taskCenterStateClass(job.status),
+      statusLabel: taskCenterStatusLabel('pipeline', job.status),
+      errorMsg: job.error || '',
+      storyboardId: null,
+      transitionId: null,
+      recoverable: false,
+      previewUrl: '',
+      previewType: 'none',
+      detail: job.note || '',
+      createdAt: job.created_at || '',
+      completedAt: job.finished_at || '',
+    })
+  }
+  return rows
+})
+
+const exportTaskRows = computed(() =>
+  (taskCenterData.value?.exports || []).map(item => ({
+    key: `export-${item.id}`,
+    kind: 'export',
+    category: 'exports',
+    id: item.id,
+    targetLabel: t('episode.tasks.exportJob'),
+    provider: '',
+    model: '',
+    providerLabel: [item.kind, item.preset].filter(Boolean).join(' · '),
+    status: item.status,
+    statusClass: taskCenterStateClass(item.status),
+    statusLabel: taskCenterStatusLabel('export', item.status),
+    errorMsg: item.error || '',
+    storyboardId: null,
+    transitionId: null,
+    recoverable: false,
+    previewUrl: item.output_url || '',
+    previewType: previewTypeForUrl(item.output_url),
+    detail: item.file_name || '',
+    createdAt: item.created_at || '',
+    completedAt: item.finished_at || '',
+  })),
+)
+
+const taskCenterRows = computed(() => [
+  ...genTaskRows.value,
+  ...voiceTaskRows.value,
+  ...audioTaskRows.value,
+  ...pipelineTaskRows.value,
+  ...exportTaskRows.value,
+].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')))
+
+const visibleTaskCenterRows = computed(() => {
+  if (taskCenterTab.value === 'all') return taskCenterRows.value
+  return taskCenterRows.value.filter(row => row.category === taskCenterTab.value)
+})
+
+const taskCenterTabs = computed(() => {
+  const counts = taskCenterData.value?.counts || {}
+  return [
+    { key: 'all', label: t('episode.tasks.tabAll'), count: taskCenterRows.value.length, active: taskCenterActiveCount.value },
+    { key: 'tasks', label: t('episode.tasks.tabTasks'), count: genTaskRows.value.length, active: (counts.tasks_active || 0) + (counts.merges_active || 0) },
+    { key: 'voices', label: t('episode.tasks.tabVoices'), count: voiceTaskRows.value.length, active: counts.voices_active || 0 },
+    { key: 'audio', label: t('episode.tasks.tabAudio'), count: audioTaskRows.value.length, active: counts.audio_active || 0 },
+    { key: 'pipeline', label: t('episode.tasks.tabPipeline'), count: pipelineTaskRows.value.length, active: counts.pipeline_active || 0 },
+    { key: 'exports', label: t('episode.tasks.tabExports'), count: exportTaskRows.value.length, active: counts.exports_active || 0 },
+  ]
+})
+
 function genTaskKindLabel(kind, transitionId = null) {
   if (transitionId) return t('episode.tasks.transitionKind')
-  return kind === 'image' ? t('common.serviceType.image') : kind === 'video' ? t('common.serviceType.video') : t('episode.tasks.mergeKind')
+  if (kind === 'image') return t('common.serviceType.image')
+  if (kind === 'video') return t('common.serviceType.video')
+  if (kind === 'audio') return t('episode.tasks.kindAudio')
+  if (kind === 'text') return t('episode.tasks.kindText')
+  if (kind === 'merge') return t('episode.tasks.mergeKind')
+  if (kind === 'voice') return t('episode.tasks.kindVoice')
+  if (kind === 'pipeline') return t('episode.tasks.kindPipeline')
+  if (kind === 'export') return t('episode.tasks.kindExport')
+  return t('episode.tasks.kindOther')
 }
 
 function genTaskStatusLabel(status) {
@@ -3924,14 +4771,11 @@ function genTaskDuration(row) {
 }
 
 // 后端任务在刷新/重启后仍可能运行，工作台持续同步，不依赖抽屉是否打开。
-let refreshingTasks = false
-watch(genTaskActiveCount, active => {
+// 轮询自身负责隐藏暂停 / 恢复补刷 / 不并发，这里只按活跃任务数启停。
+const genTasksPoll = useVisibilityPolling(() => refresh(), 4000)
+watch(taskCenterActiveCount, active => {
   stopGenTasksPolling()
-  if (active > 0) genTasksTimer = setInterval(async () => {
-    if (refreshingTasks) return
-    refreshingTasks = true
-    try { await refresh() } finally { refreshingTasks = false }
-  }, 4000)
+  if (active > 0) genTasksPoll.start()
 })
 
 const productionBlockMessage = computed(() => {
@@ -4092,6 +4936,118 @@ const activeSubStepKey = computed(() => {
   if (panel.value === 'production') return `prod:${prodTab.value}`
   if (panel.value === 'dubbing') return `dub:${DUB_STEP_KEYS[dubStep.value] || 'lines'}`
   return 'export:merge'
+})
+
+// ===== 平板页签 / 步骤抽屉 / 播放器暂停 =====
+const TABLET_PANES = ['shots', 'edit', 'preview']
+
+function pauseMainPlayer() {
+  videoPlayerEl.value?.pause()
+}
+function pauseVideosExceptMain() {
+  const root = videoWorkbenchEl.value
+  if (!root) return
+  root.querySelectorAll('video').forEach((el) => {
+    if (el !== videoPlayerEl.value && !el.paused) el.pause()
+  })
+}
+function setTabletPane(pane) {
+  if (!isCompact.value) return
+  if ((pane === 'edit' || pane === 'preview') && !selectedSb.value) {
+    const first = videoTaskRows.value[0]
+    if (first) selectedSb.value = videoTaskRows.value[0].storyboard
+  }
+  const previous = tabletPane.value
+  tabletPane.value = pane
+  if (pane === 'preview') nextTick(() => pauseVideosExceptMain())
+  else if (previous === 'preview') pauseMainPlayer()
+}
+function onTabletTabsKeydown(event, pane) {
+  const index = TABLET_PANES.indexOf(pane)
+  let next = null
+  if (event.key === 'ArrowLeft') next = (index + TABLET_PANES.length - 1) % TABLET_PANES.length
+  else if (event.key === 'ArrowRight') next = (index + 1) % TABLET_PANES.length
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = TABLET_PANES.length - 1
+  if (next === null) return
+  event.preventDefault()
+  const target = TABLET_PANES[next]
+  setTabletPane(target)
+  nextTick(() => document.getElementById(`video-tab-${target}`)?.focus())
+}
+
+const stepsDrawerHistory = useOverlayHistory(() => closeStepsDrawer())
+
+function scrollActiveStepIntoView(mode = 'horizontal') {
+  nextTick(() => {
+    const root = pipelineEl.value
+    const active = root?.querySelector('.pipe-item.active')
+    if (!root || !active) return
+    if (mode === 'vertical') {
+      const top = active.offsetTop - root.clientHeight / 2 + active.clientHeight / 2
+      root.scrollTo({ top, behavior: 'smooth' })
+      return
+    }
+    const left = active.offsetLeft - root.clientWidth / 2 + active.clientWidth / 2
+    root.scrollTo({ left, behavior: 'smooth' })
+  })
+}
+function focusStepsDrawer() {
+  const root = stepsDrawerEl.value
+  // 媒体控件（音频/视频）同样可聚焦；没有按钮类元素时回落到它们
+  const first = root?.querySelector('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+    || root?.querySelector('audio[controls], video[controls]')
+  first?.focus()
+}
+function openStepsDrawer() {
+  pauseMainPlayer()
+  stepsDrawerOpen.value = true
+  stepsDrawerHistory.open()
+  nextTick(() => {
+    focusStepsDrawer()
+    scrollActiveStepIntoView('vertical')
+  })
+}
+function closeStepsDrawer() {
+  stepsDrawerOpen.value = false
+  stepsDrawerHistory.close()
+}
+function onStepsDrawerKeydown(event) {
+  if (!stepsDrawerOpen.value || event.key !== 'Tab') return
+  const root = stepsDrawerEl.value
+  if (!root) return
+  const focusables = Array.from(root.querySelectorAll('button, a[href], input, select, textarea, audio[controls], video[controls], [tabindex]:not([tabindex="-1"])'))
+    .filter(el => !el.disabled && el.getAttribute('aria-hidden') !== 'true')
+  if (!focusables.length) return
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+function saveTabletEdit() {
+  flushPendingStoryboardUpdates()
+  toast.success(t('common.saved'))
+}
+
+function startEpisodeTour() {
+  if (isCompact.value) setTabletPane('shots')
+  if (isNarrow.value) {
+    openStepsDrawer()
+    setTimeout(() => startTour('episode', EPISODE_TOUR, t), 260)
+    return
+  }
+  startTour('episode', EPISODE_TOUR, t)
+}
+
+watch(isNarrow, (narrow) => { if (!narrow && stepsDrawerOpen.value) closeStepsDrawer() })
+watch([activeSubStepKey, viewportWidth], () => {
+  if (viewportWidth.value <= 1080) scrollActiveStepIntoView('horizontal')
 })
 
 // 步骤跑马灯：五段主流程（剧本 → 资产 → 视频 → 配音 → 导出），段点击跳转、当前段流动光效
@@ -4316,6 +5272,8 @@ async function refresh() {
     toastError(e)
   }
   try { mergeData.value = await mergeAPI.status(epId.value) } catch {}
+  // 刷新后若合并仍在进行，恢复轮询，保证状态卡最终收敛
+  if (mergeData.value?.status === 'pending' || mergeData.value?.status === 'processing') startMergePolling()
   await Promise.all([loadGenTasks(), loadExportMerges(), loadFrameAssets()])
 }
 
@@ -5120,21 +6078,39 @@ function onVideoDurationChange(e) {
 }
 
 function pickFile(accept, cb) {
+  if (!ensureOnline()) return
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = accept
-  input.onchange = () => { const f = input.files?.[0]; if (f) cb(f) }
+  input.onchange = () => {
+    const f = input.files?.[0]
+    if (!f) return
+    const check = checkUploadFile(f, 'image')
+    if (!check.ok) { toast.error(t(uploadErrorKey(check, 'image'))); return }
+    cb(f)
+  }
   input.click()
 }
 
 function pickFiles(accept, cb) {
+  if (!ensureOnline()) return
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = accept
   input.multiple = true
   input.onchange = () => {
     const files = Array.from(input.files || [])
-    if (files.length) cb(files)
+    const valid = []
+    const notified = new Set()
+    for (const f of files) {
+      const check = checkUploadFile(f, 'image')
+      if (check.ok) { valid.push(f); continue }
+      const key = uploadErrorKey(check, 'image')
+      if (notified.has(key)) continue
+      notified.add(key)
+      toast.error(t(key))
+    }
+    if (valid.length) cb(valid)
   }
   input.click()
 }
@@ -5262,15 +6238,7 @@ function uploadAssetImage(kind, id) {
   })
 }
 
-async function genVid(sb, opts = {}) {
-  if (isComfyVideoMode.value) {
-    if (!opts.silent) toast.warning(t('episode.comfy.nativeOnly'))
-    return
-  }
-  if (!opts.forceNew && canRecoverVideo(sb.id)) return recoverVideo(sb)
-  const latest = latestVideoTask(sb.id)
-  const forceNew = opts.forceNew || latest?.status === 'failed'
-  if (forceNew && !window.confirm(t('episode.recovery.confirmNew'))) return
+function buildVideoGenerationParams(sb) {
   const referenceImages = getShotReferenceImages(sb)
   const audioMode = episodeVideoAudioMode.value
   // 分镜若已生成首/尾帧则走 fl2v；尾帧必须与首帧成对，避免后端拒绝
@@ -5291,7 +6259,20 @@ async function genVid(sb, opts = {}) {
   }
   if (firstFrameImage) params.first_frame_url = firstFrameImage
   if (firstFrameImage && lastFrameImage) params.last_frame_url = lastFrameImage
-  if (!params.prompt && !referenceImages.length) {
+  return params
+}
+
+async function genVid(sb, opts = {}) {
+  if (isComfyVideoMode.value) {
+    if (!opts.silent) toast.warning(t('episode.comfy.nativeOnly'))
+    return
+  }
+  if (!opts.forceNew && canRecoverVideo(sb.id)) return recoverVideo(sb)
+  const latest = latestVideoTask(sb.id)
+  const forceNew = opts.forceNew || latest?.status === 'failed'
+  if (forceNew && !window.confirm(t('episode.recovery.confirmNew'))) return
+  const params = buildVideoGenerationParams(sb)
+  if (!params.prompt && !params.reference_image_urls.length) {
     toast.error(t('episode.vid.needRefOrPrompt'))
     return
   }
@@ -5523,7 +6504,7 @@ async function confirmDeleteTransition() {
 }
 function openTransitionPreview(boundary) {
   if (!boundary?.video_url) return
-  previewShot.value = {
+  openPreviewShot({
     id: `transition-${boundary.id}`,
     video_url: boundary.video_url,
     duration: Number(boundary.duration_actual) || null,
@@ -5532,7 +6513,7 @@ function openTransitionPreview(boundary) {
       to: boundary.to_number,
     }),
     downloadName: `transition-S${boundary.from_number}-S${boundary.to_number}.mp4`,
-  }
+  })
 }
 function transitionDurationLabel(boundary) {
   const actual = Number(boundary?.duration_actual)
@@ -5543,8 +6524,18 @@ function transitionDurationLabel(boundary) {
   }
   return ''
 }
+// 转场任务同步：3s 一轮；seq 失效（页面切走 / 重新加载）时自停，错误下一轮继续
+const transitionPoll = useVisibilityPolling(async () => {
+  if (transitionSeq !== transitionRequestSeq) { stopTransitionPolling(); return }
+  try {
+    const data = await transitionAPI.list(epId.value)
+    if (transitionSeq !== transitionRequestSeq) return
+    applyTransitionData(data)
+    if (!transitionBusy.value) stopTransitionPolling()
+  } catch { /* 下一轮继续 */ }
+}, 3000)
 function stopTransitionPolling() {
-  if (transitionTimer) { clearInterval(transitionTimer); transitionTimer = null }
+  transitionPoll.stop()
 }
 function applyTransitionData(data) {
   transitionState.value = {
@@ -5569,19 +6560,12 @@ async function loadTransitions() {
   }
 }
 function scheduleTransitionPoll(seq) {
+  transitionSeq = seq
   stopTransitionPolling()
   if (!transitionBusy.value) return
   // 离开导出页后旧轮询不再复活
   if (panel.value !== 'export') return
-  transitionTimer = setInterval(async () => {
-    if (seq !== transitionRequestSeq) { stopTransitionPolling(); return }
-    try {
-      const data = await transitionAPI.list(epId.value)
-      if (seq !== transitionRequestSeq) return
-      applyTransitionData(data)
-      if (!transitionBusy.value) stopTransitionPolling()
-    } catch { /* 下一轮继续 */ }
-  }, 3000)
+  transitionPoll.start()
 }
 function transitionTargetCount(ids, boundaries = null) {
   const selected = boundaries
@@ -5947,46 +6931,62 @@ function openMergeDialog() {
     if (mergeDialog.value.useAiTransitionsTouched) return
     mergeDialog.value.useAiTransitions = transitionSupported.value && mergeDialogReadyCount.value > 0
   })
+  mergeDialogHistory.open()
 }
 function confirmMerge() {
   const ids = [...mergeDialog.value.ids]
   const title = mergeDialog.value.title.trim()
   const useAiTransitions = mergeDialog.value.useAiTransitions && transitionSupported.value
-  mergeDialog.value.open = false
+  closeMergeDialog()
   void doMerge(ids, title, useAiTransitions)
 }
+// 合并轮询收敛到一处：doMerge 与 refresh 共用，组件卸载 / 页面隐藏时停止
+const mergePoll = useVisibilityPolling(async () => {
+  try { mergeData.value = await mergeAPI.status(epId.value) } catch { /* 网络抖动继续轮询 */ }
+  // 请求返回时轮询已被停掉（卸载 / 被刷新取代）：不再 toast、不再改状态卡
+  if (!mergePoll.isRunning()) return
+  if (mergeData.value?.status === 'completed' || mergeData.value?.status === 'failed') {
+    stopMergePolling()
+    if (mergeData.value.status === 'completed') {
+      toast.success(t('episode.export.mergeDone'))
+      loadExportMerges()
+    } else {
+      toastError(mergeData.value?.error_msg || mergeData.value?.errorMsg, { fallback: 'episode.export.mergeFailed' })
+    }
+  }
+}, 3000)
+function stopMergePolling() {
+  mergePoll.stop()
+}
+function startMergePolling() {
+  stopMergePolling()
+  mergePoll.start()
+}
 async function doMerge(ids, title, useAiTransitions = false) {
+  if (!ensureOnline()) return
   const storyboardIds = Array.isArray(ids) ? ids : undefined
   if (storyboardIds && !storyboardIds.length) {
     toast.error(t('episode.export.selectFirst'))
     return
   }
+  let res = null
   try {
-    await mergeAPI.merge(epId.value, storyboardIds, title, useAiTransitions)
+    res = await mergeAPI.merge(epId.value, storyboardIds, title, useAiTransitions)
     toast.success(t('episode.export.mergingToast'))
   } catch (e) {
     toastError(e, { fallback: 'episode.export.mergeFailed' })
     return
   }
-  const poll = setInterval(async () => {
-    try { mergeData.value = await mergeAPI.status(epId.value) } catch {}
-    if (mergeData.value?.status === 'completed' || mergeData.value?.status === 'failed') {
-      clearInterval(poll)
-      if (mergeData.value.status === 'completed') {
-        toast.success(t('episode.export.mergeDone'))
-        loadExportMerges()
-      } else {
-        toastError(mergeData.value?.error_msg || mergeData.value?.errorMsg, { fallback: 'episode.export.mergeFailed' })
-      }
-    }
-  }, 3000)
+  // 乐观写入状态：状态卡常驻展示，不依赖 toast；后端未提供百分比，仅不确定进度
+  mergeData.value = { ...(mergeData.value || {}), id: res?.merge_id, status: 'processing', title }
+  startMergePolling()
 }
 async function deleteMerge(m) {
   if (!m?.id) return
   if (!window.confirm(t('episode.export.deleteConfirm', { title: m.title || t('episode.export.untitled') }))) return
   try {
     await mergeAPI.del(m.id)
-    if (activeMerge.value?.id === m.id) activeMerge.value = null
+    if (activeMerge.value?.id === m.id) closeActiveMerge()
     toast.success(t('episode.export.deleted'))
     await loadExportMerges()
   } catch (e) {
@@ -6018,6 +7018,8 @@ watch(panel, (current) => {
 onMounted(async () => {
   void loadBreakdownMethods()
   await refresh()
+  // 恢复后端运行中的批量视频批次（关闭页面/重启应用后继续）
+  void refreshVideoBatch()
   loadConfigs()
   syncExtractStatus()
   loadPipelineRules()
@@ -6050,7 +7052,8 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 .studio {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   padding: 8px;
   gap: 8px;
@@ -7776,7 +8779,41 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   background: var(--bg-input);
 }
 .batch-video-row strong { color: var(--text-0); font-weight: 600; }
+.batch-video-concurrency-select {
+  min-width: 68px;
+  padding: 4px 8px;
+  border: 1px solid var(--surface-outline);
+  border-radius: 8px;
+  background: var(--bg-1);
+  color: var(--text-0);
+  font: inherit;
+}
+.batch-video-concurrency-hint { margin: -4px 0 0; font-size: 11px; color: var(--text-3); line-height: 1.5; }
 .batch-video-note { margin: 4px 0 0; font-size: 11px; color: var(--text-3); line-height: 1.6; }
+/* 批量进度：排队/处理/完成/失败一屏可见，运行中可停止后续 */
+.video-batch-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 10px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--surface-outline);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+}
+.video-batch-strip-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.video-batch-strip-title { font-size: 12px; font-weight: 600; color: var(--text-0); }
+.video-batch-strip-counts { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.video-batch-stop { margin-left: auto; }
+.video-batch-progress { height: 4px; border-radius: 2px; background: var(--sel-bg); overflow: hidden; }
+.video-batch-progress-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.3s ease; }
+.video-batch-strip.is-stopped .video-batch-progress-fill { background: var(--text-3); }
+.video-batch-strip.is-done .video-batch-progress-fill { background: var(--success, var(--accent)); }
+.video-batch-strip-note { margin: 0; font-size: 11px; color: var(--text-3); line-height: 1.5; }
+@media (max-width: 720px) {
+  .video-batch-strip { margin: 0 8px 8px; }
+  .video-batch-strip-counts { width: 100%; }
+}
 .video-task-row {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr) auto auto;
@@ -7924,6 +8961,15 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .video-task-row:hover .video-task-delete,
 .video-task-delete:focus-visible { opacity: 1; }
 .video-task-delete:hover { color: var(--error); }
+.video-task-more {
+  justify-self: end;
+  align-self: center;
+  min-width: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: none;
+}
 .video-task-inspector {
   min-width: 0;
   min-height: 0;
@@ -7936,6 +8982,13 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .video-task-inspector .video-task-player,
 .video-task-inspector .video-player-history {
   flex: none;
+}
+.video-task-inspector .video-preview-pane {
+  flex: none;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .video-inspector-head {
   min-height: 56px;
@@ -8568,6 +9621,8 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 /* Export */
 .export-split { flex: 1; display: flex; min-height: 0; }
 .export-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: stretch; gap: 18px; padding: 16px 20px 24px; }
+/* 平板底部粘性操作栏：仅在 1180 内显示（基础态隐藏，桌面不出现） */
+.export-sticky-bar { display: none; }
 .export-section { display: flex; flex-direction: column; min-height: 0; }
 .export-section-grow { flex: 1; }
 .export-section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -8742,20 +9797,150 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 .exp-row-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
+/* ===== 平板页签 / 步骤抽屉 / 底部操作栏 ===== */
+.video-tablet-bar { display: none; }
+.video-tablet-tabs { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.video-tablet-tab {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-2);
+  font: 700 12px var(--font-body);
+  cursor: pointer;
+}
+.video-tablet-tab.on { background: var(--sel-bg); color: var(--sel-text); }
+.video-tablet-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--button-focus);
+}
+.video-tablet-steps-btn {
+  margin-left: auto;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--surface-outline);
+  border-radius: var(--radius-pill);
+  background: var(--bg-hover);
+  color: var(--text-1);
+  font: 700 12px var(--font-body);
+  cursor: pointer;
+}
+.video-tablet-back { min-width: 44px; min-height: 44px; justify-content: flex-start; }
+.video-tablet-actions { display: none; }
+
 /* Shared */
 .dim { color: var(--text-3); }
+
+@media (max-width: 1180px) {
+  .sidebar { width: 180px; }
+  .sidebar.collapsed { width: 46px; }
+
+  .asset-grid,
+  .character-asset-grid,
+  .prod-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+
+  .character-asset-grid { justify-content: start; }
+
+  .export-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .image-viewer-dialog,
+  .asset-detail-dialog {
+    max-width: calc(100vw - 32px);
+    max-height: calc(var(--app-vvh, 100dvh) - var(--safe-top) - var(--safe-bottom) - 24px);
+  }
+
+  .image-viewer-head, .asset-detail-head { position: sticky; top: 0; z-index: 2; background: var(--panel-bg); }
+  .image-viewer-body, .asset-detail-body { min-height: 0; overscroll-behavior: contain; }
+
+  /* 平板：审片层高度/关闭按钮、横屏与保存提示 */
+  .merge-viewer-video { max-height: calc(var(--app-vvh, 100dvh) - var(--safe-top) - var(--safe-bottom) - 160px); }
+  .merge-viewer-dialog .image-viewer-head .btn-icon { width: 44px; height: 44px; }
+  .tablet-landscape-hint { margin: 0; padding: 6px 18px 0; font-size: 12px; color: var(--warning); }
+  .tablet-save-hint { margin: 0; padding: 2px 18px 12px; font-size: 11px; color: var(--text-3); }
+
+  /* 平板：导出头部操作收进底部粘性栏 */
+  .export-head-actions { display: none; }
+  .export-sticky-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 12px calc(10px + var(--safe-bottom));
+    border-top: 1px solid var(--border);
+    background: var(--panel-bg);
+  }
+  .export-sticky-bar .btn { min-height: 44px; }
+  .export-main { padding-bottom: calc(24px + var(--safe-bottom)); }
+
+  /* 平板：合并状态常驻卡（后端无百分比，只做不确定进度；无重试接口） */
+  .merge-status-card { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-raised); }
+  .merge-status-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; color: var(--text-1); }
+  .merge-status-title { font-weight: 800; }
+  .merge-status-name { font-size: 11px; color: var(--text-3); }
+  .merge-status-bar { position: relative; height: 4px; overflow: hidden; border-radius: 999px; background: var(--border); }
+  .merge-status-bar span { position: absolute; top: 0; bottom: 0; left: -40%; width: 40%; border-radius: inherit; background: var(--accent); animation: merge-status-slide 1.4s ease-in-out infinite; }
+  .merge-status-card.is-failed { border-color: var(--error); }
+  .merge-status-card.is-failed .merge-status-head { color: var(--error); }
+  .merge-status-error { margin: 0; font-size: 11px; color: var(--error); word-break: break-word; }
+  @keyframes merge-status-slide {
+    0% { left: -40%; }
+    100% { left: 100%; }
+  }
+}
 
 @media (max-width: 1080px) {
   .studio-body {
     grid-template-columns: 1fr;
   }
 
+  .sidebar,
+  .sidebar.collapsed { width: 100%; flex-direction: row; overflow: visible; }
+
+  .pipeline { flex: 1; flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+
+  .pipe-section { flex-direction: row; align-items: center; gap: 2px; }
+
+  .pipe-section-label { display: none; }
+
+  .pipe-item {
+    flex-shrink: 0;
+    width: auto;
+    min-height: 40px;
+  }
+
+  .pipe-item-sub:not(:last-child)::after { display: none; }
+
+  .sidebar.collapsed .pipeline { padding: 12px 10px 8px; gap: 8px; }
+  .sidebar.collapsed .pipe-section-label { display: none; }
+  .sidebar.collapsed .pipe-item { grid-template-columns: auto 1fr auto; justify-content: flex-start; padding: 7px 10px; min-height: 40px; }
+  .sidebar.collapsed .pipe-item .pipe-copy { display: block; }
+
+  .sidebar-toggle { display: none; }
+  .sidebar-progress { display: none; }
+
+  .sidebar-bottom {
+    flex-direction: row;
+    align-items: center;
+    border-top: 0;
+    background: transparent;
+    padding: 4px 6px;
+  }
+
+  .refresh-btn { display: inline-flex; width: auto; flex-shrink: 0; }
+
   .video-task-workbench.has-player {
-    grid-template-columns: var(--vleft, 208px) minmax(0, 1fr);
+    grid-template-columns: var(--vleft, 180px) minmax(0, 1fr);
   }
 
   .video-task-side {
-    grid-template-columns: minmax(0, 1fr) var(--vright, 260px);
+    grid-template-columns: minmax(0, 1fr) var(--vright, 280px);
   }
 
   .video-main-grid {
@@ -8778,7 +9963,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   }
 
   .character-asset-grid {
-    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   }
 
   .video-task-head {
@@ -8806,7 +9991,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 
   .image-viewer-dialog {
     width: calc(100vw - 32px);
-    max-height: calc(100vh - 32px);
+    max-height: calc(var(--app-vvh, 100dvh) - 32px);
   }
 
   .asset-detail-overlay {
@@ -8815,7 +10000,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 
   .asset-detail-dialog {
     width: calc(100vw - 32px);
-    max-height: calc(100vh - 32px);
+    max-height: calc(var(--app-vvh, 100dvh) - 32px);
   }
 
   .asset-detail-shell {
@@ -8913,8 +10098,69 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   flex: 1;
   justify-content: center;
 }
+.task-center-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--surface-outline);
+  overflow-x: auto;
+}
+.task-center-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.task-center-tab:hover {
+  background: var(--surface-soft);
+  color: var(--text-1);
+}
+.task-center-tab.on {
+  background: var(--accent-bg);
+  border-color: var(--surface-outline-strong);
+  color: var(--text-1);
+}
+.task-center-tab-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.72;
+}
+.task-center-tab-active {
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.video-task-detail {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.video-task-preview.is-audio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.video-task-preview.is-audio audio {
+  width: 100%;
+  height: 28px;
+}
 
-@media (max-width: 860px) {
+@media (max-width: 900px) {
   .studio {
     padding: 8px;
     gap: 8px;
@@ -8977,6 +10223,54 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   .video-task-workbench {
     grid-template-columns: 1fr;
     overflow-y: auto;
+    scroll-padding-bottom: calc(72px + var(--safe-bottom));
+  }
+
+  .video-tablet-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding: 6px 8px;
+    background: var(--surface-raised);
+    border-bottom: 1px solid var(--surface-outline);
+  }
+
+  .video-tablet-actions {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    position: sticky;
+    bottom: calc(100dvh - var(--app-vvh, 100dvh));
+    z-index: 4;
+    padding: 8px 10px;
+    padding-bottom: calc(8px + var(--safe-bottom));
+    background: var(--surface-raised);
+    border-top: 1px solid var(--surface-outline);
+  }
+
+  .video-tablet-actions .btn {
+    flex: 1;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .video-tablet-back {
+    min-width: 44px;
+    min-height: 44px;
+    align-self: flex-start;
+    margin: 8px 10px 0;
+  }
+
+  .video-desc-textarea { min-height: 120px; }
+
+  .video-param-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    white-space: normal;
   }
 
   /* 窄屏纵向堆叠后无栏间分界，隐藏拖拽分隔条 */
@@ -9034,6 +10328,12 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
     max-height: 220px;
   }
 
+  .video-task-workbench[data-pane="preview"] .video-player-stage {
+    aspect-ratio: auto;
+    max-height: none;
+    height: clamp(240px, calc(var(--app-vvh, 100dvh) - 260px), 70vh);
+  }
+
   .frame-row {
     flex-direction: column;
     align-items: stretch;
@@ -9056,6 +10356,58 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
     width: 100%;
   }
 
+}
+
+/* ===== 窄平板步骤抽屉（复用同一个侧栏节点） ===== */
+@media (max-width: 744px) {
+  .video-steps-scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 130; }
+
+  .video-steps-drawer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--surface-outline);
+    flex-shrink: 0;
+  }
+
+  .video-steps-drawer-title { font-size: 13px; font-weight: 800; color: var(--text-0); }
+  .video-steps-drawer-close { min-width: 44px; min-height: 44px; }
+
+  .sidebar.is-steps-drawer {
+    position: fixed;
+    left: var(--safe-left);
+    top: var(--safe-top);
+    bottom: var(--safe-bottom);
+    width: min(340px, calc(100vw - 32px));
+    max-height: none;
+    z-index: 131;
+    flex-direction: column;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--shadow-xl);
+    overflow: hidden;
+  }
+
+  .sidebar.is-steps-drawer:not(.open) { display: none; }
+  .sidebar.is-steps-drawer .pipeline { flex-direction: column; overflow-y: auto; overflow-x: hidden; }
+  .sidebar.is-steps-drawer .pipe-section { flex-direction: column; align-items: stretch; }
+  .sidebar.is-steps-drawer .pipe-section-label { display: flex; }
+  .sidebar.is-steps-drawer .pipe-item { flex-direction: row; width: 100%; }
+  .sidebar.is-steps-drawer .sidebar-bottom {
+    flex-direction: column;
+    align-items: stretch;
+    border-top: 1px solid var(--border);
+    background: var(--surface-soft);
+  }
+
+  .export-grid { grid-template-columns: 1fr; }
+  .character-asset-card { min-height: 0; }
+
+  /* 顶栏全局步骤入口：窄屏任意面板都能打开同一个抽屉；
+     选择器需与 .studio-topbar .btn 同特异性，否则 height/padding 被其覆盖 */
+  .studio-topbar .topbar-steps-btn { min-height: 44px; height: 44px; padding: 0 12px; flex-shrink: 0; }
 }
 
 /* ===== AI 过渡片段（导出页 + 拼接弹窗） ===== */
@@ -9372,5 +10724,47 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+@media (hover: none) and (pointer: coarse) {
+  .video-task-row { grid-template-columns: 56px minmax(0, 1fr) auto auto auto; }
+  .video-task-more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+  }
+  .video-task-action,
+  .video-task-delete {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    opacity: 1;
+  }
+}
+
+/* 平板粗指针：镜头行放大缩略图与命中区，删除收进「更多」菜单 */
+@media (max-width: 1180px) and (hover: none) and (pointer: coarse) {
+  .video-task-row {
+    min-height: 48px;
+    grid-template-columns: 96px minmax(0, 1fr) auto auto;
+  }
+
+  .video-task-preview {
+    width: 96px;
+    height: 54px;
+    aspect-ratio: auto;
+  }
+
+  .video-task-action,
+  .video-task-more {
+    min-width: 44px;
+    min-height: 44px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .video-task-delete { display: none; }
 }
 </style>

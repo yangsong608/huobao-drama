@@ -46,6 +46,7 @@ import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { jobsAPI } from '~/composables/useApi'
 import { toastError } from '~/composables/useToast'
+import { useVisibilityPolling } from '~/composables/useVisibilityPolling'
 import BaseSelect from '~/components/BaseSelect.vue'
 
 const { t } = useI18n()
@@ -57,7 +58,8 @@ const loading = ref(false)
 const saving = ref(false)
 const concurrencyOptions = [1, 2, 3, 4].map(n => ({ label: String(n), value: n }))
 
-let timer = null
+// 队列状态 3s 轮询：隐藏暂停、恢复补刷一次、上一轮未完成不重入；卸载由封装停止
+const queuePoll = useVisibilityPolling(() => load(), 3000)
 let hydrating = false
 
 async function load() {
@@ -125,9 +127,8 @@ watch(concurrency, async (value, old) => {
 
 onMounted(() => {
   load()
-  timer = setInterval(load, 3000)
+  queuePoll.start()
 })
-onBeforeUnmount(() => clearInterval(timer))
 </script>
 
 <style scoped>

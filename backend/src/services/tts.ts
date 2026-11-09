@@ -16,6 +16,7 @@ import { now } from '../utils/response.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import { STORAGE_ROOT } from '../utils/paths.js'
 import { ffmpeg } from '../utils/ffmpeg.js'
+import { withKeyedSlot } from './keyed-semaphore.js'
 import {
   buildCloneRequest,
   buildDesignRequest,
@@ -317,26 +318,16 @@ function concatWav(parts: Buffer[]): Buffer {
   return Buffer.concat([header, ...datas])
 }
 
-// ---- 并发信号量：本地单卡默认 1，可配 2–4 ----
-let activeCount = 0
-const waiters: (() => void)[] = []
-
-async function withSlot<T>(limit: number, task: () => Promise<T>): Promise<T> {
-  if (activeCount >= limit) {
-    await new Promise<void>((resolve) => waiters.push(resolve))
-  }
-  activeCount += 1
-  try {
-    return await task()
-  } finally {
-    activeCount -= 1
-    const next = waiters.shift()
-    if (next) next()
-  }
-}
-
 // ---- 同 hash 并发去重 ----
 const inFlight = new Map<string, Promise<SynthResult>>()
+
+/** 接口标识：优先配置 id，其次服务商 + 地址 + 模型，保证不同接口互不阻塞 */
+function ttsInterfaceKey(config: AudioConfig, model: string): string {
+  const identity = config.id
+    ? `cfg-${config.id}`
+    : `${config.provider}|${config.baseUrl}|${model}`
+  return `tts:${identity}`
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -347,6 +338,7 @@ function recordSynthesisFailure(params: SynthParams, model: string, error: TtsEr
     db.insert(schema.sysTask).values({
       type: 'audio',
       stage: 'synthesize',
+      episodeId: params.meta?.episodeId ?? null,
       status: 'failed',
       provider,
       model,
@@ -479,7 +471,7 @@ export async function synthesize(params: SynthParams, deps: SynthDeps = {}): Pro
     }
   }
 
-  const task = withSlot(limit, run)
+  const task = withKeyedSlot(ttsInterfaceKey(config, model), limit, run)
   inFlight.set(hash, task)
   try {
     return await task

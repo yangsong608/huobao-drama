@@ -1,5 +1,5 @@
 <template>
-  <div ref="viewport" class="line-list" @scroll="onScroll">
+  <div ref="viewport" class="line-list" :style="{ '--line-row-h': `${rowHeight}px` }" @scroll="onScroll">
     <div v-if="speakerFilter && speakers.length > 1" class="line-speakers">
       <button
         type="button"
@@ -19,7 +19,7 @@
         v-for="row in visibleRows"
         :key="row.line.id"
         :class="['line-row', `is-${row.line.status}`, row.line.stale && 'is-stale', activeLineId === row.line.id && 'is-active']"
-        :style="{ transform: `translateY(${row.index * ROW_HEIGHT}px)` }"
+        :style="{ transform: `translateY(${row.index * rowHeight}px)` }"
       >
         <div class="line-head">
           <input
@@ -136,6 +136,7 @@
 </template>
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { useViewport } from '~/composables/useViewport'
 import type { StoryboardLine, VoiceProfile, VoiceProfileList } from '~/composables/useApi'
 
 const props = withDefaults(defineProps<{
@@ -185,8 +186,13 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const { isCoarsePointer } = useViewport()
 const ROW_HEIGHT = 104
+/** 粗指针下全局按钮 44px，104px 虚拟行放不下，触摸行高切到 132px */
+const TOUCH_ROW_HEIGHT = 132
 const OVERSCAN = 6
+
+const rowHeight = computed(() => (isCoarsePointer.value ? TOUCH_ROW_HEIGHT : ROW_HEIGHT))
 
 const viewport = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
@@ -197,8 +203,8 @@ const selectedIds = ref<number[]>([])
 let observer: ResizeObserver | null = null
 
 const startIndex = computed(() =>
-  Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN))
-const totalHeight = computed(() => filteredLines.value.length * ROW_HEIGHT)
+  Math.max(0, Math.floor(scrollTop.value / rowHeight.value) - OVERSCAN))
+const totalHeight = computed(() => filteredLines.value.length * rowHeight.value)
 const speakerLabel = (line: StoryboardLine) => line.speakerName || t('workbench.narrator')
 const speakers = computed(() => {
   const counts = new Map<string, number>()
@@ -223,7 +229,7 @@ watch(activeSpeaker, () => {
   if (viewport.value) viewport.value.scrollTop = 0
 })
 const visibleRows = computed(() => {
-  const count = Math.ceil(viewportHeight.value / ROW_HEIGHT) + OVERSCAN * 2
+  const count = Math.ceil(viewportHeight.value / rowHeight.value) + OVERSCAN * 2
   return filteredLines.value
     .slice(startIndex.value, startIndex.value + count)
     .map((line, i) => ({ line, index: startIndex.value + i }))
@@ -375,7 +381,7 @@ onBeforeUnmount(() => {
 .line-row {
   position: absolute;
   inset: 0 0 auto 0;
-  height: calc(104px - 6px);
+  height: calc(var(--line-row-h, 104px) - 6px);
   display: flex;
   flex-direction: column;
   gap: 3px;

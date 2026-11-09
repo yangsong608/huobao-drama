@@ -141,6 +141,15 @@
   /* z-index 分层：页面内部 1–40；模态 .overlay 100–120；菜单 1000；全屏阻塞 2000 */
   --z-menu: 1000;
   --z-blocking: 2000;
+
+  /* 安全区与触控尺寸：浏览器内 env() 无安全区时自然为 0，不改变桌面取值 */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --tap-min: 44px;
+  --tap-compact: 36px;
+  --touch-input-font: 16px;
 }
 
 :root[data-theme="dark"] {
@@ -241,6 +250,39 @@
 }
 
 html, body, #__nuxt { height: 100%; }
+
+/* === 触控基础工具类 ===
+   仅关键操作按需使用，不批量放大现有按钮与字号；
+   桌面默认分支不改变任何现有取值。 */
+.touch-target { min-width: var(--tap-min); min-height: var(--tap-min); }
+.touch-target-sm { min-width: var(--tap-compact); min-height: var(--tap-compact); }
+/* 供后续表单按需声明触控字号（基础值与粗指针令牌一致，均 >= 16px） */
+.touch-input { font-size: var(--touch-input-font); }
+
+/* 长按表面：关闭系统 callout 与文本选择；输入类元素保持可选 */
+[data-long-press] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+[data-long-press] input,
+[data-long-press] textarea,
+[data-long-press] [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  /* 触控输入框 >= 16px，避免 iOS 聚焦时自动放大页面；
+     元素选择器会被 .input / .textarea 类选择器与组件 scoped 样式覆盖，
+     故补齐类选择器并加 !important，确保粗指针下真正生效 */
+  input, textarea, select, .input, .textarea, select.input { font-size: max(16px, 1em) !important; }
+  /* 关键按钮/工具统一满足 44px 触控命中区；.touch-target 系列保持既有声明 */
+  button, .btn { min-height: var(--tap-min); }
+  input[type='range'] { min-height: 44px; }
+  .touch-target { min-width: var(--tap-min); min-height: var(--tap-min); }
+  .touch-target-sm { min-width: var(--tap-compact); min-height: var(--tap-compact); }
+}
 
 body {
   font-family: var(--font-body);
@@ -572,3 +614,25 @@ select.input { appearance: auto; cursor: pointer; padding-right: 14px; }
   color: var(--text-3);
 }
 .app-menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+
+/* === 平板浏览：弹窗高度、滚链与触控输入 ===
+   仅新增窄屏 / 粗指针分支，桌面默认分支不变。
+   .dialog-body 已是 overflow-y:auto，底部 .dialog-foot 为独立兄弟节点，天然常驻。 */
+@media (max-width: 1180px) {
+  .dialog { max-height: calc(var(--app-vvh, 100dvh) - var(--safe-top) - var(--safe-bottom) - 24px); }
+  .dialog-body { overscroll-behavior: contain; }
+  /* 有覆盖层时锁住页面滚动，避免平板背景跟随滚动手势；放进 ≤1180 分支，桌面弹窗的滚动行为保持不变 */
+  html.huobao-overlay-open .page { overflow: hidden; }
+}
+@media (hover: none) and (pointer: coarse) {
+  .dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  .dialog textarea,
+  .dialog select { font-size: 16px; }
+}
+
+/* 粗指针下按钮命中区统一 44px：基础 .btn/.btn-sm/.btn-icon 在文件后段声明，
+   会覆盖前面的粗指针块；此块置于末尾确保真正生效 */
+@media (hover: none) and (pointer: coarse) {
+  button, .btn, .btn-sm, .btn-icon { min-height: var(--tap-min); }
+  .btn-icon { min-width: var(--tap-min); }
+}

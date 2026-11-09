@@ -131,6 +131,14 @@
               {{ t('export.play') }}
             </a>
             <button
+              v-if="isTablet && outputRecord.outputUrl && outputRecord.status === 'completed'"
+              class="ex-btn"
+              type="button"
+              @click="shareRecord(outputRecord)"
+            >
+              {{ t('tablet.share.label') }}
+            </button>
+            <button
               v-if="!outputRecord.isCurrent"
               class="ex-btn"
               type="button"
@@ -139,6 +147,7 @@
               {{ t('export.setCurrent') }}
             </button>
           </div>
+          <p v-if="isTablet" class="ex-hint ex-save-hint">{{ t('tablet.share.saveHint') }}</p>
         </div>
         <p v-else class="ex-hint">{{ t('export.noOutput') }}</p>
       </section>
@@ -200,6 +209,14 @@
             {{ t('export.download') }}
           </a>
           <button
+            v-if="isTablet && record.outputUrl && record.status === 'completed'"
+            class="ex-btn is-tiny"
+            type="button"
+            @click="shareRecord(record)"
+          >
+            {{ t('tablet.share.label') }}
+          </button>
+          <button
             v-if="record.kind === 'video' && record.status === 'completed' && !record.isCurrent"
             class="ex-btn is-tiny"
             type="button"
@@ -252,8 +269,11 @@ import {
   RefreshCw,
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
+import { toast } from 'vue-sonner'
 import type { ExportKind, ExportRecord, ExportStatus } from '~/composables/useApi'
 import BaseSelect from '~/components/BaseSelect.vue'
+import { useViewport } from '~/composables/useViewport'
+import { shareNoticeKey, shareUrlOrFile } from '~/utils/export-share'
 
 const props = defineProps<{
   episodeId: number | null
@@ -266,6 +286,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const { isTablet } = useViewport()
 
 const {
   checks,
@@ -280,9 +301,9 @@ const {
   subtitleMode,
   setPreset,
   setSubtitleMode,
-  start,
+  start: startExport,
   cancel,
-  retry,
+  retry: retryExport,
   setCurrent,
   remove: removeExport,
   refresh,
@@ -292,6 +313,24 @@ const {
   episodeId: () => props.episodeId,
   dramaId: () => props.dramaId,
 })
+
+/** 离线守卫：断网时不发起导出，直接提示需要连接服务器 */
+function ensureOnline() {
+  if (typeof navigator === 'undefined' || navigator.onLine !== false) return true
+  toast.error(t('tablet.status.needServer'))
+  return false
+}
+
+// 模板仍调用 start('mix') / retry(id)，这里包一层离线守卫
+function start(kind: ExportKind, overrides: Parameters<typeof startExport>[1] = {}) {
+  if (!ensureOnline()) return null
+  return startExport(kind, overrides)
+}
+
+function retry(id: number) {
+  if (!ensureOnline()) return false
+  return retryExport(id)
+}
 
 watch(
   () => props.episodeId,
@@ -404,6 +443,28 @@ function fileUrl(url: string | null) {
 
 function playMix(record: ExportRecord) {
   playingUrl.value = fileUrl(record.outputUrl)
+}
+
+function fileNameFromUrl(url: string | null) {
+  if (!url) return ''
+  const path = url.split('?')[0].split('#')[0]
+  return path.split('/').filter(Boolean).pop() || ''
+}
+
+/** 平板分享：文件 ≤100MB 用 File，尺寸未知或超限走链接；提示按结果类型区分 */
+async function shareRecord(record: ExportRecord) {
+  if (!record.outputUrl || !ensureOnline()) return
+  const url = new URL(fileUrl(record.outputUrl), window.location.origin).toString()
+  const outcome = await shareUrlOrFile({
+    url,
+    title: `${kindLabel(record.kind)} · ${presetLabel(record.preset)}`,
+    sizeBytes: record.sizeBytes,
+    fileName: fileNameFromUrl(record.outputUrl),
+  })
+  const key = shareNoticeKey(outcome)
+  if (!key) return
+  if (outcome === 'failed') toast.error(t(key))
+  else toast.info(t(key))
 }
 
 function kindLabel(kind: ExportKind | null) {
@@ -585,5 +646,13 @@ async function remove(id: number) {
 @media (max-width: 1080px) {
   .ex-stage { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
   .ex-main, .ex-side { overflow: visible; }
+}
+
+/* 平板：分享/下载等动作至少 44px 命中区 */
+@media (max-width: 1180px) {
+  .ex-row .ex-btn,
+  .ex-record-actions .ex-btn { min-height: 44px; }
+  .ex-record-actions .ex-btn { padding: 0 10px; font-size: 10.5px; }
+  .ex-save-hint { display: block; }
 }
 </style>

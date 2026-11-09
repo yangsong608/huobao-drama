@@ -1,6 +1,13 @@
 <template>
   <div v-if="open" class="wb-mask" @click.self="close">
-    <aside class="wb" role="dialog" :aria-label="t('workbench.quickPreview')">
+    <aside
+      ref="panelEl"
+      class="wb"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="t('workbench.quickPreview')"
+      @keydown="onPanelKeydown"
+    >
       <header class="wb-head">
         <div class="wb-title">
           <Mic :size="15" />
@@ -76,6 +83,7 @@ import { AlertCircle, ArrowRight, Mic, RefreshCw } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { StoryboardLine } from '~/composables/useApi'
+import { useOverlayHistory } from '~/composables/useOverlayHistory'
 import LineList from '~/components/LineList.vue'
 import SubtitlePreview from '~/components/SubtitlePreview.vue'
 
@@ -111,6 +119,36 @@ const {
 const player = ref<HTMLAudioElement | null>(null)
 const preview = ref<{ seekTo: (ms: number) => void } | null>(null)
 const selectedLine = ref<StoryboardLine | null>(null)
+const panelEl = ref<HTMLElement | null>(null)
+
+// 快速预览是整页级覆盖层：登记返回层，Tab 在面板内循环，关闭后焦点归还触发元素
+const panelHistory = useOverlayHistory(close)
+
+function focusPanel() {
+  const root = panelEl.value
+  if (!root) return
+  const focusables = Array.from(root.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, audio[controls], video[controls], [tabindex]:not([tabindex="-1"])'))
+    .filter(el => !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true')
+  focusables[0]?.focus()
+}
+
+function onPanelKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Tab') return
+  const root = panelEl.value
+  if (!root) return
+  const focusables = Array.from(root.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, audio[controls], video[controls], [tabindex]:not([tabindex="-1"])'))
+    .filter(el => !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true')
+  if (!focusables.length) return
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
 
 function mediaUrl(url: string) {
   return url.startsWith('/') || /^https?:\/\//i.test(url) ? url : `/${url}`
@@ -150,6 +188,15 @@ function close() {
 watch(() => [props.open, props.episodeId], ([open]) => {
   if (open) void load()
 }, { immediate: true })
+
+watch(() => props.open, (open) => {
+  if (open) {
+    panelHistory.open()
+    nextTick(focusPanel)
+  } else {
+    panelHistory.close()
+  }
+}, { immediate: true })
 </script>
 
 <style scoped>
@@ -188,4 +235,13 @@ watch(() => [props.open, props.episodeId], ([open]) => {
 .wb-foot-title { font-size: 11.5px; font-weight: 600; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wb-foot-text { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wb-audio { width: min(320px, 48%); height: 32px; }
+@media (max-width: 1180px) {
+  .wb { max-height: var(--app-vvh, 100dvh); padding-bottom: calc(14px + var(--safe-bottom, 0px)); }
+  .wb-close { min-width: var(--tap-min, 44px); min-height: var(--tap-min, 44px); }
+}
+@media (max-width: 900px) {
+  .wb { width: 100%; }
+  .wb-audio { width: 100%; min-height: 44px; }
+  .wb-foot { flex-wrap: wrap; }
+}
 </style>

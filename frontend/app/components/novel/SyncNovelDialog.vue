@@ -72,6 +72,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Loader2, RefreshCw, X } from 'lucide-vue-next'
 import { novelAPI } from '~/composables/useNovelApi'
+import { useOverlayHistory } from '~/composables/useOverlayHistory'
 
 const props = defineProps<{ open: boolean; novel: any; importId: number | null }>()
 const emit = defineEmits<{
@@ -134,6 +135,13 @@ function close() {
   if (submitting.value) return
   emit('update:open', false)
 }
+
+// 返回键 / 返回手势先关弹窗（提交中保持原状）
+const overlay = useOverlayHistory(() => close())
+watch(() => props.open, (open) => {
+  if (open) overlay.open()
+  else overlay.close()
+})
 
 async function load() {
   if (!props.open || !props.importId || !props.novel?.id) return

@@ -51,9 +51,14 @@ import { resumeInterruptedTasks } from './services/generation.js'
 import { initMcp, setMcpMainApp } from './services/mcp.js'
 import { markInterruptedAutomations, setAutomationApp } from './services/automation.js'
 import { markInterruptedNovelJobs } from './services/novel-job-runner.js'
+import { markInterruptedDubs } from './services/dubbing.js'
+import { markInterruptedTakes } from './services/line-takes.js'
+import { markInterruptedAudioJobs } from './services/audio-job-recovery.js'
+import { markInterruptedMerges } from './services/ffmpeg-merge.js'
 import { migrateUploadedVoices } from './services/voice-profile.js'
 import { ensureBreakdownMethodsSeeded } from './services/breakdown-methods.js'
 import { startQueueWorker } from './services/queue-worker.js'
+import { resumeVideoBatches, setVideoBatchApp, startVideoBatchWorker } from './services/video-batch.js'
 import { logTaskWarn } from './utils/task-logger.js'
 import { refreshFfmpegConfig } from './utils/ffmpeg.js'
 import { DATA_ROOT } from './utils/paths.js'
@@ -171,6 +176,12 @@ console.log(`🚀 Huobao Drama TS server on http://${hostname === '0.0.0.0' ? 'l
 await resumeInterruptedTasks()
 // 上次进程遗留的自动化标为中断（生成任务恢复后再判断，避免与 recover 冲突）
 await markInterruptedAutomations()
+// 整集配音为进程内任务，重启后 running 状态无法续跑，标为中断
+markInterruptedDubs()
+// 语音 Take / 混音作业 / 成片合并同样是进程内任务，重启后未完成行收敛为 failed
+markInterruptedTakes()
+markInterruptedAudioJobs()
+markInterruptedMerges()
 // V3 小说任务：进程重启后 running 一律标为 interrupted，可从前端续跑
 markInterruptedNovelJobs()
 // V1 已上传的角色音色迁移为 character_voices（幂等，失败不影响启动）
@@ -185,10 +196,14 @@ try {
 // 应用设置中的自定义 FFmpeg 目录（db 已注入读取器），启动即生效
 refreshFfmpegConfig()
 
-// MCP / 自动化都通过内部 app.fetch 调 REST，先注入实例
+// MCP / 自动化 / 批量视频都通过内部 app.fetch 调 REST，先注入实例
 setMcpMainApp(app)
 setAutomationApp(app)
+setVideoBatchApp(app)
 await initMcp()
 startQueueWorker()
+// 批量视频：先恢复上次批次（接管已提交任务、回队未提交项），再启动 3 秒调度
+await resumeVideoBatches()
+startVideoBatchWorker()
 
 serve({ fetch: app.fetch, port, hostname })

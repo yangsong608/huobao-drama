@@ -31,6 +31,7 @@ import { generateTake } from './line-takes.js'
 import { getDubbingDefaults } from './app-settings.js'
 import { startEpisodeExport, getExport, cancelExport } from './export-service.js'
 import { logTaskError, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { failAiTaskRun, finishAiTaskRun, patchAiTaskRun, startAiTaskRun } from './ai-task-runs.js'
 
 export type SubtitleMode = 'soft' | 'burn' | 'none'
 export type OriginalAudioMode = 'keep' | 'duck' | 'mute'
@@ -63,6 +64,7 @@ export interface DubState {
 }
 
 const running = new Map<number, { state: DubState; cancelled: boolean; exportId?: number }>()
+const taskRuns = new Map<number, number | null>()
 
 export function getDubbingState(episodeId: number): DubState {
   const local = running.get(episodeId)
@@ -92,6 +94,7 @@ function setProgress(episodeId: number, state: DubState, progress: number, note:
   state.progress = Math.max(0, Math.min(100, Math.round(progress)))
   state.note = note
   updateEpisode(episodeId, { dubProgress: state.progress, dubNote: note })
+  patchAiTaskRun(taskRuns.get(episodeId), { params: { progress: state.progress, note } })
 }
 
 export function stopDubbing(episodeId: number): boolean {
@@ -419,6 +422,13 @@ export function startDubbing(episodeId: number, options: DubOptions = {}): DubSt
   const state: DubState = { status: 'running', progress: 1, note: '准备中', episodeId, startedAt: now() }
   const job = { state, cancelled: false }
   running.set(episodeId, job)
+  taskRuns.set(episodeId, startAiTaskRun({
+    type: 'audio',
+    stage: 'dub',
+    episodeId,
+    dramaId: episode.dramaId,
+    params: { progress: 1, note: '准备中' },
+  }))
   updateEpisode(episodeId, { dubStatus: 'running', dubProgress: 1, dubNote: '准备中' })
 
   void runDubbing(episodeId, episode.dramaId, options, job).catch((error: any) => {
@@ -429,6 +439,8 @@ export function startDubbing(episodeId: number, options: DubOptions = {}): DubSt
       job.state.error = undefined
       job.state.finishedAt = now()
       updateEpisode(episodeId, { dubStatus: 'stopped', dubNote: '已停止' })
+      failAiTaskRun(taskRuns.get(episodeId), '已停止', { progress: job.state.progress, note: '已停止' })
+      taskRuns.delete(episodeId)
       logTaskProgress('Dub', 'stopped', { episodeId })
       running.delete(episodeId)
       return
@@ -438,6 +450,8 @@ export function startDubbing(episodeId: number, options: DubOptions = {}): DubSt
     job.state.note = message
     job.state.finishedAt = now()
     updateEpisode(episodeId, { dubStatus: 'failed', dubNote: message.slice(0, 500) })
+    failAiTaskRun(taskRuns.get(episodeId), message, { progress: job.state.progress, note: message })
+    taskRuns.delete(episodeId)
     logTaskError('Dub', 'episode', { episodeId, error: message })
     running.delete(episodeId)
   })
@@ -522,10 +536,26 @@ async function runDubbing(episodeId: number, dramaId: number, options: DubOption
   state.outputUrl = outputUrl
   state.subtitleUrl = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()?.subtitleUrl || undefined
   state.finishedAt = now()
+  finishAiTaskRun(taskRuns.get(episodeId), { progress: 100, note, output_url: outputUrl })
+  taskRuns.delete(episodeId)
   logTaskSuccess('Dub', 'episode', {
     episodeId, exportId: record.id, output: outputUrl, failed: synth.failed, durationMs: record.durationMs,
   })
   running.delete(episodeId)
+}
+
+/** 服务启动时收尾上次进程遗留的配音状态：running 一律标为中断失败 */
+export function markInterruptedDubs(): number {
+  const stuck = db.select().from(schema.episodes)
+    .where(eq(schema.episodes.dubStatus, 'running'))
+    .all()
+  for (const episode of stuck) {
+    updateEpisode(episode.id, {
+      dubStatus: 'failed',
+      dubNote: '服务重启，配音任务中断，请重新开始',
+    })
+  }
+  return stuck.length
 }
 
 /** 只出字幕（不混音），供字幕预览/下载 */

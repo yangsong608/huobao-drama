@@ -22,6 +22,7 @@
 <script setup>
 import { Trash2, Loader2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
+import { useOverlayHistory, isTopOverlay } from '~/composables/useOverlayHistory'
 
 const { t } = useI18n()
 
@@ -41,14 +42,31 @@ const effectiveTitle = computed(() => props.title || t('components.confirmDialog
 const effectiveConfirmText = computed(() => props.confirmText || t('common.delete'))
 const effectiveLoadingText = computed(() => props.loadingText || t('common.deleteLoading'))
 
+// 返回键 / 返回手势先关弹窗，关闭后焦点回到触发元素（不回滚页面）
+function cancel() {
+  emit('cancel')
+}
+const overlay = useOverlayHistory(cancel)
+
 function onKeydown(e) {
-  if (e.key === 'Escape') emit('cancel')
+  // Escape 与 useOverlayHistory 的全局监听可能同时命中：先处理者 preventDefault，
+  // 另一方直接返回，保证同一次按键只引发一次 cancel；叠加弹窗只有栈顶响应键盘
+  if (e.defaultPrevented || !isTopOverlay(cancel)) return
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    cancel()
+  }
   if (e.key === 'Enter') emit('confirm')
 }
 
 watch(() => props.open, (v) => {
-  if (v) window.addEventListener('keydown', onKeydown)
-  else window.removeEventListener('keydown', onKeydown)
+  if (v) {
+    window.addEventListener('keydown', onKeydown)
+    overlay.open()
+  } else {
+    window.removeEventListener('keydown', onKeydown)
+    overlay.close()
+  }
 })
 
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))

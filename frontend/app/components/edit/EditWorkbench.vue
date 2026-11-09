@@ -19,10 +19,11 @@
       @open-revisions="openRevisions"
       @rough-cut="runRoughCut"
       @suggest-subtitles="runSubtitleSuggest"
-      @open-export="exportOpen = true"
-      @shortcuts="shortcutsOpen = true"
-      @toggle-media="mediaOpen = !mediaOpen"
-      @toggle-subtitles="subtitlesOpen = !subtitlesOpen"
+      @open-export="openExportDialog"
+      @shortcuts="openShortcuts"
+      @toggle-media="onToggleMedia"
+      @toggle-inspector="onToggleInspector"
+      @toggle-subtitles="onToggleSubtitles"
     />
 
     <div v-if="saveStatus === 'error'" class="ed-banner is-error">
@@ -39,7 +40,18 @@
       <button class="is-muted" type="button" @click="clearMessage">×</button>
     </div>
 
-    <div class="ed-main" :class="{ 'is-empty': !plan.clips.length, 'is-media-open': mediaOpen }">
+    <!-- 抽屉遮罩：仅窄屏抽屉打开时出现，点击关闭；不销毁预览与时间线 -->
+    <div v-if="isCompact && drawer" class="ed-drawer-mask" @click="closeDrawer"></div>
+
+    <div
+      class="ed-main"
+      :class="{
+        'is-empty': !plan.clips.length,
+        'is-media-open': mediaOpen,
+        'is-drawer-media': mediaDrawerOpen,
+        'is-inspector-hidden': inspectorHidden,
+      }"
+    >
       <EditSidebar
         class="ed-media-slot"
         :films="films"
@@ -47,6 +59,8 @@
         :current-film-id="currentFilmId"
         :active-film-id="activeFilmId"
         :can-edit="canEdit"
+        :drawer="mediaDrawerOpen"
+        @close="closeDrawer"
         @open="switchFilm"
         @refresh="loadFilms"
         @rename="renameFilm"
@@ -129,7 +143,7 @@
             @cue-op="onCueOp"
             @toggle-subtitles="showSubtitles = !showSubtitles"
             @fit-view="fitView"
-            @open-subtitles="subtitlesOpen = true"
+            @open-subtitles="onOpenSubtitles"
             @remove-clip="removeClipById"
             @duplicate-clip="duplicateClipById"
             @add-marker="addMarkerAt"
@@ -142,6 +156,7 @@
 
       <EditClipInspector
         v-if="plan.clips.length"
+        :class="{ 'is-landscape': isLandscape }"
         :plan="plan"
         :layout="layout"
         :clip-id="selectedClipId"
@@ -151,6 +166,8 @@
         :readonly="!canEdit"
         :cue="selectedCue"
         :overlay="selectedOverlay"
+        :drawer="inspectorDrawerOpen"
+        @close="closeDrawer"
         @trim-start="trimSelectedStart"
         @trim-end="trimSelectedEnd"
         @speed="setSelectedSpeed"
@@ -190,10 +207,10 @@
 
     <!-- 字幕覆盖层渲染在 EditPreview 内部（EditSubtitleOverlay），此处只负责状态与安全区开关 -->
     <EditSubtitleList
-      :open="subtitlesOpen"
+      :open="isCompact ? subtitlesDrawerOpen : subtitlesOpen"
       :cues="plan.subtitles"
       :selected-cue-id="selectedCueId"
-      @close="subtitlesOpen = false"
+      @close="closeSubtitleList"
       @select="selectCueFromList"
       @add="addCueAtPlayheadCmd"
     />
@@ -297,6 +314,9 @@ import { editAPI, filmAPI } from '~/composables/useApi'
 import { DEFAULT_TRANSITION_MS } from '~/utils/edit-transition-types'
 import { useEditClock } from '~/composables/useEditClock'
 import { useEditPlan } from '~/composables/useEditPlan'
+import { useViewport } from '~/composables/useViewport'
+import { useOverlayHistory } from '~/composables/useOverlayHistory'
+import { isDrawerOpen, nextDrawer } from '~/utils/edit-panel'
 import {
   addCueAtPlayhead,
   applyAppearanceToAll,
@@ -523,6 +543,73 @@ const selectedOverlay = computed(() => (
 ))
 const showSafeArea = ref(false)
 const subtitlesOpen = ref(false)
+
+// ---- 窄屏抽屉（媒体 / 检查器 / 字幕）：三者互斥，历史层只有一层 ----
+const { isTablet, isCompact, orientation } = useViewport()
+const isLandscape = computed(() => orientation.value === 'landscape')
+const drawer = ref(null)
+const inspectorCollapsed = ref(false)
+const mediaDrawerOpen = computed(() => isCompact.value && isDrawerOpen(drawer.value, 'media'))
+const inspectorDrawerOpen = computed(() => isCompact.value && isDrawerOpen(drawer.value, 'inspector'))
+const subtitlesDrawerOpen = computed(() => isCompact.value && isDrawerOpen(drawer.value, 'subtitles'))
+// 检查器 901–1180 可折叠；≤900 交给抽屉；≥1181 保持常显
+const inspectorHidden = computed(() => isTablet.value && !isCompact.value && inspectorCollapsed.value)
+
+const drawerOverlay = useOverlayHistory(closeDrawer)
+
+function closeDrawer() {
+  drawer.value = null
+  drawerOverlay.close()
+}
+
+function toggleDrawer(name) {
+  const wasOpen = drawer.value !== null
+  const next = nextDrawer(drawer.value, name)
+  drawer.value = next
+  if (next === null) drawerOverlay.close()
+  else if (!wasOpen) drawerOverlay.open()
+}
+
+// 时间线「打开字幕」语义：同抽屉已开时保持不动，不误关
+function openDrawer(name) {
+  const wasOpen = drawer.value !== null
+  drawer.value = name
+  if (!wasOpen) drawerOverlay.open()
+}
+
+// 顶栏三个抽屉开关：≤900 用互斥抽屉；901–1180 沿用原行为/折叠；≥1181 不变
+function onToggleMedia() {
+  if (isCompact.value) toggleDrawer('media')
+  else mediaOpen.value = !mediaOpen.value
+}
+
+function onToggleInspector() {
+  if (isCompact.value) {
+    toggleDrawer('inspector')
+    return
+  }
+  if (isTablet.value) inspectorCollapsed.value = !inspectorCollapsed.value
+}
+
+function onToggleSubtitles() {
+  if (isCompact.value) toggleDrawer('subtitles')
+  else subtitlesOpen.value = !subtitlesOpen.value
+}
+
+function onOpenSubtitles() {
+  if (isCompact.value) openDrawer('subtitles')
+  else subtitlesOpen.value = true
+}
+
+function closeSubtitleList() {
+  if (isCompact.value) closeDrawer()
+  else subtitlesOpen.value = false
+}
+
+// 回到宽屏时清掉抽屉态与历史层，避免遗留已失效的返回标记
+watch(isCompact, (compact) => {
+  if (!compact && drawer.value !== null) closeDrawer()
+})
 // 字幕轨显示状态：默认显示，工具栏「字幕 ▾ → 显示/隐藏字幕轨」切换（与 EditTimeline 的 prop 默认一致）
 const showSubtitles = ref(true)
 const actionBusy = computed(() => roughCutBusy.value || subtitleBusy.value)
@@ -1395,7 +1482,19 @@ async function runSubtitleSuggest() {
 }
 
 function openRevisions() {
+  // 窄屏下版本抽屉要盖在顶部，先收起三抽屉（含历史层），避免叠层
+  if (isCompact.value) closeDrawer()
   revisionsOpen.value = true
+}
+
+function openShortcuts() {
+  if (isCompact.value) closeDrawer()
+  shortcutsOpen.value = true
+}
+
+function openExportDialog() {
+  if (isCompact.value) closeDrawer()
+  exportOpen.value = true
 }
 
 async function loadRevisions() {
@@ -1530,6 +1629,9 @@ function isTyping(target) {
 }
 
 function onKeydown(event) {
+  if (event.defaultPrevented) return
+  // 抽屉的 Escape 交给 useOverlayHistory 关闭，避免同时清空片段选中
+  if (event.key === 'Escape' && drawer.value) return
   if (conflict.value) return
   if (shortcutsOpen.value) {
     if (event.key === 'Escape') {
@@ -1715,15 +1817,24 @@ onBeforeUnmount(() => {
 .ed-shortcuts dt { flex: 0 0 92px; color: var(--text-3); font-family: ui-monospace, SFMono-Regular, monospace; }
 .ed-shortcuts dd { margin: 0; color: var(--text-1); }
 @media (max-width: 1180px) {
-  .ed-main { grid-template-columns: 220px minmax(0, 1fr) 272px; }
-  .ed-main.is-empty { grid-template-columns: 220px minmax(0, 1fr); }
+  .ed-main { grid-template-columns: 200px minmax(320px, 1fr) 260px; }
+  .ed-main.is-empty { grid-template-columns: 200px minmax(320px, 1fr); }
+  /* 检查器可折叠：901–1180 收起后变两列 */
+  .ed-main.is-inspector-hidden { grid-template-columns: 200px minmax(320px, 1fr); }
+  .ed-main.is-inspector-hidden .ed-inspector { display: none; }
 }
 @media (max-width: 900px) {
-  .ed-main, .ed-main.is-empty { grid-template-columns: minmax(0, 1fr); }
-  .ed-media-slot { display: none; }
-  .ed-main.is-media-open .ed-media-slot {
-    display: flex; position: fixed; left: 0; top: 52px; bottom: 0;
-    width: min(280px, 82vw); z-index: 60; box-shadow: 0 0 30px rgba(0, 0, 0, .45);
+  .ed-main, .ed-main.is-empty, .ed-main.is-inspector-hidden { grid-template-columns: minmax(0, 1fr); }
+  /* 抽屉遮罩：位于抽屉之下、工作台内容之上；点击关闭 */
+  .ed-drawer-mask { position: fixed; inset: 0; z-index: 55; background: rgba(0, 0, 0, .45); }
+  /* 媒体抽屉：左侧全高，宽度 min(320px, 100vw) */
+  .ed-main:not(.is-drawer-media) .ed-media-slot { display: none; }
+  .ed-main.is-drawer-media .ed-media-slot {
+    display: flex; position: fixed; left: 0; top: 0; bottom: 0;
+    width: min(320px, 100vw); z-index: 60;
+    padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 0 30px rgba(0, 0, 0, .45);
   }
+  .ed-main.is-inspector-hidden .ed-inspector { display: none; }
 }
 </style>

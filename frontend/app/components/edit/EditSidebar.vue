@@ -6,16 +6,28 @@
       <button class="ed-side-icon" type="button" :title="t('edit.refresh')" @click="$emit('refresh')">
         <RefreshCw :size="14" />
       </button>
+      <button
+        v-if="drawer"
+        class="ed-side-close"
+        type="button"
+        :title="t('tablet.close')"
+        :aria-label="t('tablet.close')"
+        @click="$emit('close')"
+      >
+        <X :size="16" />
+      </button>
     </div>
     <div v-if="loading" class="ed-side-state"><Loader2 :size="18" class="is-spin" /></div>
     <p v-else-if="!films.length" class="ed-side-state">{{ t('films.empty') }}</p>
     <ul v-else class="ed-film-list">
-      <li v-for="film in films" :key="film.id">
+      <li v-for="film in films" :key="film.id" class="ed-film-row">
         <button
           type="button"
           class="ed-film-card"
           :class="{ 'is-active': film.id === activeFilmId, 'is-current': film.id === currentFilmId }"
           :title="film.title"
+          data-long-press
+          @pointerdown="onFilmPointerDown($event, film)"
           @click="$emit('open', film)"
           @contextmenu.prevent="openMenu(film, $event)"
         >
@@ -26,6 +38,16 @@
             <span v-if="film.id === currentFilmId" class="ed-film-flag">{{ t('films.current') }}</span>
             <span v-if="film.edit_project_id" class="ed-film-flag is-edited">{{ t('films.edited') }}</span>
           </span>
+        </button>
+        <button
+          class="ed-film-more"
+          type="button"
+          :title="t('tablet.more')"
+          :aria-label="t('tablet.more')"
+          @pointerdown.stop
+          @click.stop="openFilmMore($event, film)"
+        >
+          <Ellipsis :size="14" />
         </button>
       </li>
     </ul>
@@ -41,8 +63,9 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Loader2, RefreshCw } from 'lucide-vue-next'
+import { Ellipsis, Loader2, RefreshCw, X } from 'lucide-vue-next'
 import ContextMenu from '~/components/ContextMenu.vue'
+import { useLongPress } from '~/composables/useLongPress'
 
 const props = defineProps({
   films: { type: Array, default: () => [] },
@@ -50,9 +73,10 @@ const props = defineProps({
   currentFilmId: { type: Number, default: 0 },
   activeFilmId: { type: Number, default: 0 },
   canEdit: { type: Boolean, default: false },
+  drawer: { type: Boolean, default: false },
 })
 const emit = defineEmits([
-  'open', 'refresh', 'rename', 'remove', 'set-current', 'open-mix', 'open-exports', 'new-concat',
+  'open', 'refresh', 'rename', 'remove', 'set-current', 'open-mix', 'open-exports', 'new-concat', 'close',
 ])
 const { t } = useI18n()
 
@@ -61,11 +85,28 @@ const menuX = ref(0)
 const menuY = ref(0)
 const menuFilm = ref(null)
 
-function openMenu(film, event) {
+function openMenuAt(film, x, y) {
   menuFilm.value = film
-  menuX.value = event.clientX
-  menuY.value = event.clientY
+  menuX.value = x
+  menuY.value = y
   menuShow.value = true
+}
+
+function openMenu(film, event) {
+  openMenuAt(film, event.clientX, event.clientY)
+}
+
+function openFilmMore(event, film) {
+  const rect = event.currentTarget.getBoundingClientRect()
+  openMenuAt(film, rect.left, rect.bottom + 4)
+}
+
+const { onPointerDown: onFilmLongPressDown } = useLongPress({
+  onTrigger: (film, event) => openMenu(film, event),
+})
+
+function onFilmPointerDown(event, film) {
+  onFilmLongPressDown(event, film)
 }
 const menuItems = computed(() => {
   const film = menuFilm.value
@@ -128,6 +169,12 @@ function formatDuration(ms) {
   color: var(--text-1); cursor: pointer;
 }
 .ed-side-icon:hover { background: var(--bg-hover); }
+.ed-side-close {
+  width: 24px; height: 24px; flex: 0 0 24px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: 7px; background: transparent;
+  color: var(--text-1); cursor: pointer;
+}
+.ed-side-close:hover { background: var(--bg-hover); }
 .ed-side-state {
   flex: 1; display: flex; align-items: center; justify-content: center;
   padding: 20px 12px; color: var(--text-3); font-size: 11px; text-align: center;
@@ -138,11 +185,13 @@ function formatDuration(ms) {
   flex: 1; min-height: 0; margin: 0; padding: 8px; overflow-y: auto;
   list-style: none; display: flex; flex-direction: column; gap: 6px;
 }
+.ed-film-row { position: relative; }
 .ed-film-card {
   width: 100%; padding: 8px 10px; display: flex; flex-direction: column; gap: 5px;
   border: 1px solid var(--border); border-radius: 8px; background: var(--bg-2);
   color: var(--text-0); text-align: left; cursor: pointer;
 }
+.ed-film-more { display: none; }
 .ed-film-card:hover { background: var(--bg-hover); }
 .ed-film-card.is-current { border-color: var(--accent); }
 .ed-film-card.is-active { background: var(--accent-bg); border-color: var(--accent); }
@@ -162,4 +211,17 @@ function formatDuration(ms) {
   color: var(--accent-text); white-space: nowrap;
 }
 .ed-film-flag.is-edited { background: var(--warning-bg); color: var(--warning); }
+@media (hover: none) and (pointer: coarse) {
+  .ed-film-card { min-height: 44px; padding-right: 56px; }
+  .ed-film-more {
+    position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; padding: 0;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg-2); color: var(--text-1); cursor: pointer;
+  }
+}
+@media (max-width: 1180px) and (hover: none) and (pointer: coarse) {
+  .ed-side-close { min-width: 44px; min-height: 44px; }
+}
 </style>

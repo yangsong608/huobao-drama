@@ -8,6 +8,7 @@ import { buildAgentRequestContext } from '../agents/context.js'
 import { logTaskError, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 import { renderPipelineRule } from './pipeline-rules.js'
 import { withStoryBible } from './drama-story-bible.js'
+import { failAiTaskRun, finishAiTaskRun, startAiTaskRun } from './ai-task-runs.js'
 
 export type ExtractTarget = 'characters' | 'scenes' | 'props'
 export const EXTRACT_TARGETS: ExtractTarget[] = ['characters', 'scenes', 'props']
@@ -70,17 +71,27 @@ export function startExtraction(episodeId: number, dramaId: number, target: Extr
 
   const task: ExtractTask = { status: 'running', started_at: new Date().toISOString() }
   tasks.set(key, task)
+  const runTaskId = startAiTaskRun({
+    type: 'text',
+    stage: `extract.${target}`,
+    episodeId,
+    dramaId,
+    model: opts.model || null,
+    params: { target },
+  })
 
   logTaskStart('Extract', target, { episodeId, dramaId, model: opts.model || undefined, configId: opts.configId || undefined })
   runExtraction(episodeId, dramaId, target, opts)
     .then(() => {
       task.status = 'done'
       task.finished_at = new Date().toISOString()
+      finishAiTaskRun(runTaskId, { target })
     })
     .catch((err: any) => {
       task.status = 'error'
       task.finished_at = new Date().toISOString()
       task.error = err?.message || '提取失败'
+      failAiTaskRun(runTaskId, task.error || '提取失败', { target })
       logTaskError('Extract', target, { episodeId, error: err?.message })
     })
   return true

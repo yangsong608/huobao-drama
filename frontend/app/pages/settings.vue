@@ -1,10 +1,27 @@
 <template>
-  <div class="settings-page">
+  <div class="settings-page" :class="{ 'is-dialog-open': settingsDialogOpen }">
     <div class="settings-layout">
-      <aside class="settings-nav">
-        <div class="nav-group">
-          <div class="nav-group-label">{{ t('settings.groupBase') }}</div>
-          <button v-for="nt in baseTabs" :key="nt.id" :class="['nav-item', { active: tab === nt.id }]" @click="tab = nt.id">
+      <aside class="settings-nav" ref="navRef">
+        <div
+          class="nav-group"
+          role="tablist"
+          :aria-orientation="isCompact ? 'horizontal' : 'vertical'"
+          :aria-label="t('settings.groupBase')"
+        >
+          <div class="nav-group-label" aria-hidden="true">{{ t('settings.groupBase') }}</div>
+          <button
+            v-for="nt in baseTabs"
+            :id="`settings-tab-${nt.id}`"
+            :key="nt.id"
+            type="button"
+            role="tab"
+            :aria-selected="tab === nt.id"
+            :aria-controls="`settings-panel-${nt.id}`"
+            :tabindex="tab === nt.id ? 0 : -1"
+            :class="['nav-item', { active: tab === nt.id }]"
+            @click="tab = nt.id"
+            @keydown="onSettingsTabKeydown($event, nt.id)"
+          >
             <component :is="nt.icon" :size="14" />
             {{ nt.label }}
           </button>
@@ -14,6 +31,7 @@
       <div class="settings-content">
 
         <!-- ===== 通用（内容语言） ===== -->
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general" tabindex="0" :hidden="tab !== 'general'">
         <div v-if="tab === 'general'" class="settings-scroll">
           <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.general.title') }}</h2>
@@ -132,8 +150,10 @@
             <p class="config-empty">{{ t('settings.general.ffmpegDirHint') }}</p>
           </section>
         </div>
+        </div>
 
         <!-- ===== AI 服务配置 ===== -->
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-ai" aria-labelledby="settings-tab-ai" tabindex="0" :hidden="tab !== 'ai'">
         <div v-if="tab === 'ai'" class="settings-scroll">
           <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.ai.title') }}</h2>
@@ -204,6 +224,7 @@
               </button>
             </div>
           </section>
+          <div class="settings-table-scroll">
           <div class="sections">
             <section v-for="st in serviceTypes" :key="st.type" class="card svc-group">
               <div class="svc-group-head">
@@ -249,10 +270,13 @@
               <p v-if="!byType(st.type).length" class="config-empty">{{ t('settings.common.empty') }}</p>
             </section>
           </div>
+          </div>
+        </div>
         </div>
 
         <!-- ===== 配音默认 ===== -->
-        <div v-else-if="tab === 'dubbing'" class="settings-scroll">
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-dubbing" aria-labelledby="settings-tab-dubbing" tabindex="0" :hidden="tab !== 'dubbing'">
+        <div v-if="tab === 'dubbing'" class="settings-scroll">
           <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.dubbing.title') }}</h2>
             <p class="settings-desc">{{ t('settings.dubbing.desc') }}</p>
@@ -578,9 +602,11 @@
             <p v-if="!bgmItems.length" class="config-empty">{{ t('settings.dubbing.bgmEmpty') }}</p>
           </section>
         </div>
+        </div>
 
         <!-- ===== 小说生成 ===== -->
-        <div v-else-if="tab === 'novel'" class="settings-scroll">
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-novel" aria-labelledby="settings-tab-novel" tabindex="0" :hidden="tab !== 'novel'">
+        <div v-if="tab === 'novel'" class="settings-scroll">
           <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.novel.title') }}</h2>
             <p class="settings-desc">{{ t('settings.novel.desc') }}</p>
@@ -765,9 +791,11 @@
           </template>
           <p v-else class="config-empty">{{ t('common.loading') }}</p>
         </div>
+        </div>
 
         <!-- ===== 风格预设 ===== -->
-        <div v-else-if="tab === 'styles'" class="settings-scroll">
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-styles" aria-labelledby="settings-tab-styles" tabindex="0" :hidden="tab !== 'styles'">
+        <div v-if="tab === 'styles'" class="settings-scroll">
           <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.styles.title') }}</h2>
             <p class="settings-desc">{{ t('settings.styles.desc') }}</p>
@@ -802,9 +830,11 @@
             <p v-if="!stylePresets.length" class="config-empty">{{ t('settings.styles.empty') }}</p>
           </section>
         </div>
+        </div>
 
         <!-- ===== 流程规则（AI 改写 / 资产提取 / 分镜拆分 / 视频提示词） ===== -->
-        <div v-else-if="tab === 'rules'" class="settings-scroll">
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-rules" aria-labelledby="settings-tab-rules" tabindex="0" :hidden="tab !== 'rules'">
+        <div v-if="tab === 'rules'" class="settings-scroll">
           <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.rules.title') }}</h2>
             <p class="settings-desc">{{ t('settings.rules.desc') }}</p>
@@ -852,9 +882,11 @@
             <p class="config-empty">{{ t('settings.rules.agentHint') }}</p>
           </section>
         </div>
+        </div>
 
         <!-- ===== 分镜拆分方案 ===== -->
-        <div v-else-if="tab === 'breakdown'" class="settings-scroll">
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-breakdown" aria-labelledby="settings-tab-breakdown" tabindex="0" :hidden="tab !== 'breakdown'">
+        <div v-if="tab === 'breakdown'" class="settings-scroll">
           <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.breakdown.title') }}</h2>
             <p class="settings-desc">{{ t('settings.breakdown.subtitle') }}</p>
@@ -940,18 +972,22 @@
             </section>
           </div>
         </div>
+        </div>
 
         <!-- ===== 任务队列 ===== -->
-        <div v-else-if="tab === 'queue'" class="settings-scroll">
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-queue" aria-labelledby="settings-tab-queue" tabindex="0" :hidden="tab !== 'queue'">
+        <div v-if="tab === 'queue'" class="settings-scroll">
           <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.queue.title') }}</h2>
             <p class="settings-desc">{{ t('settings.queue.desc') }}</p>
           </div>
           <QueuePanel />
         </div>
+        </div>
 
         <!-- ===== 存储位置 ===== -->
-        <div v-else-if="tab === 'storage'" class="settings-scroll">
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-storage" aria-labelledby="settings-tab-storage" tabindex="0" :hidden="tab !== 'storage'">
+        <div v-if="tab === 'storage'" class="settings-scroll">
           <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.storage.title') }}</h2>
             <p class="settings-desc">{{ t('settings.storage.desc') }}</p>
@@ -997,9 +1033,11 @@
             <p v-if="!isDesktopMode" class="config-empty">{{ t('settings.storage.serverNote') }}</p>
           </section>
         </div>
+        </div>
 
         <!-- ===== MCP 服务 ===== -->
-        <div v-else-if="tab === 'mcp'" class="settings-scroll">
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-mcp" aria-labelledby="settings-tab-mcp" tabindex="0" :hidden="tab !== 'mcp'">
+        <div v-if="tab === 'mcp'" class="settings-scroll">
           <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.mcp.title') }}</h2>
             <p class="settings-desc">{{ t('settings.mcp.desc') }}</p>
@@ -1072,14 +1110,18 @@
                 <span class="svc-group-title">{{ t('settings.mcp.toolsTitle') }}</span>
               </div>
             </div>
+            <div class="settings-table-scroll">
             <div class="storage-breakdown">
               <span v-for="name in (mcpStatus.tools || [])" :key="name" class="tag mono">{{ name }}</span>
             </div>
+            </div>
           </section>
+        </div>
         </div>
 
         <!-- ===== 关于更新 ===== -->
-        <div v-else-if="tab === 'about'" class="settings-scroll">
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-about" aria-labelledby="settings-tab-about" tabindex="0" :hidden="tab !== 'about'">
+        <div v-if="tab === 'about'" class="settings-scroll">
           <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.about.title') }}</h2>
             <p class="settings-desc">{{ t('settings.about.desc') }}</p>
@@ -1151,9 +1193,11 @@
           <p v-if="desktopBridge" class="config-empty">{{ t('settings.about.note') }}</p>
           <p v-else class="config-empty">{{ t('settings.about.serverNote') }}</p>
         </div>
+        </div>
 
         <!-- ===== Agent 配置（左侧 tab 切换，Prompt 与 Skills 整合在同一 Agent 下） ===== -->
-        <div v-else-if="tab === 'agents'" class="skills-layout">
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-agents" aria-labelledby="settings-tab-agents" tabindex="0" :hidden="tab !== 'agents'">
+        <div v-if="tab === 'agents'" class="skills-layout">
           <!-- Agent 左侧 tab 列表 -->
           <aside class="skills-agent-list">
             <div class="skills-agent-title">{{ t('settings.skills.agentList') }}</div>
@@ -1246,7 +1290,8 @@
               </div>
 
               <!-- Skill 列表 -->
-              <div class="skill-list" v-else>
+              <div class="settings-table-scroll" v-else>
+              <div class="skill-list">
                 <div v-for="s in currentSkills" :key="s.id" class="card skill-card">
                   <div class="skill-card-head" @click="toggleSkillEdit(s.id)">
                     <FileText :size="14" style="color:var(--accent);flex-shrink:0" />
@@ -1281,18 +1326,20 @@
                   </div>
                 </div>
               </div>
+              </div>
             </template>
           </div>
         </div>
+      </div>
       </div>
     </div>
 
     <!-- AI Config Dialog -->
     <div v-if="cfgDialog" class="overlay" @click.self="cfgDialog = false">
-      <form class="dialog config-dialog" @submit.prevent="saveCfg">
+      <form class="dialog config-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-cfg-title" @submit.prevent="saveCfg" @keydown="onSettingsDialogKeydown">
         <div class="dialog-head">
           <div>
-            <div class="dialog-title">{{ cfgEditId ? t('settings.cfg.editTitle') : t('settings.cfg.addTitle', { type: serviceMeta[cfgForm.service_type].label }) }}</div>
+            <div class="dialog-title" id="settings-cfg-title">{{ cfgEditId ? t('settings.cfg.editTitle') : t('settings.cfg.addTitle', { type: serviceMeta[cfgForm.service_type].label }) }}</div>
             <div class="dialog-sub">{{ t('settings.cfg.sub') }}</div>
           </div>
           <span class="tag tag-accent ml-auto">{{ serviceMeta[cfgForm.service_type].label }}</span>
@@ -1670,9 +1717,9 @@
 
     <!-- Add Skill Dialog -->
     <div v-if="addSkillDialog" class="overlay" @click.self="addSkillDialog = false">
-      <form class="dialog skill-dialog" @submit.prevent="confirmAddSkill">
+      <form class="dialog skill-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-skill-title" @submit.prevent="confirmAddSkill" @keydown="onSettingsDialogKeydown">
         <div class="dialog-head">
-          <div class="dialog-title">{{ t('settings.skills.addTitle', { agent: selectedAgentLabel }) }}</div>
+          <div class="dialog-title" id="settings-skill-title">{{ t('settings.skills.addTitle', { agent: selectedAgentLabel }) }}</div>
         </div>
         <div class="dialog-body skill-dialog-body">
           <label class="field">
@@ -1697,10 +1744,10 @@
 
     <!-- Style Preset Dialog -->
     <div v-if="styleDialog" class="overlay" @click.self="styleDialog = false">
-      <form class="dialog config-dialog" @submit.prevent="saveStyle">
+      <form class="dialog config-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-style-title" @submit.prevent="saveStyle" @keydown="onSettingsDialogKeydown">
         <div class="dialog-head">
           <div>
-            <div class="dialog-title">{{ styleEditId ? t('settings.styleDialog.editTitle') : t('settings.styleDialog.addTitle') }}</div>
+            <div class="dialog-title" id="settings-style-title">{{ styleEditId ? t('settings.styleDialog.editTitle') : t('settings.styleDialog.addTitle') }}</div>
             <div class="dialog-sub">{{ t('settings.styleDialog.sub') }}</div>
           </div>
           <span class="tag tag-accent ml-auto"><Palette :size="12" /> {{ t('settings.styleDialog.tag') }}</span>
@@ -1736,10 +1783,10 @@
     </div>
     <!-- 从参考图生成风格 -->
     <div v-if="styleRefDialog" class="overlay" @click.self="styleRefDialog = false">
-      <div class="dialog config-dialog">
+      <div class="dialog config-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-style-ref-title" @keydown="onSettingsDialogKeydown">
         <div class="dialog-head">
           <div>
-            <div class="dialog-title">{{ t('settings.styleRef.title') }}</div>
+            <div class="dialog-title" id="settings-style-ref-title">{{ t('settings.styleRef.title') }}</div>
             <div class="dialog-sub">{{ t('settings.styleRef.sub') }}</div>
           </div>
           <span class="tag tag-accent ml-auto"><Sparkles :size="12" /> {{ t('settings.styleRef.tag') }}</span>
@@ -1779,8 +1826,8 @@
 
     <!-- 迁移确认（自建 dialog：ConfirmDialog 的删除语义/Enter 快捷键不合此处） -->
     <div v-if="migrateDialog" class="overlay" @click.self="!migrating && (migrateDialog = false)">
-      <form class="dialog" @submit.prevent="startMigrate">
-        <div class="dialog-head"><span class="dialog-title">{{ t('settings.migrate.title') }}</span></div>
+      <form class="dialog" role="dialog" aria-modal="true" aria-labelledby="settings-migrate-title" @submit.prevent="startMigrate" @keydown="onSettingsDialogKeydown">
+        <div class="dialog-head"><span class="dialog-title" id="settings-migrate-title">{{ t('settings.migrate.title') }}</span></div>
         <div class="dialog-body">
           <div class="field">
             <span class="field-label">{{ t('settings.migrate.newDir') }}</span>
@@ -1854,6 +1901,9 @@ import { aiConfigAPI, promptAPI, skillsAPI, storageAPI, stylePresetAPI, settings
 import { useDesktopBridge } from '~/composables/useDesktopBridge'
 import { useMigrateState } from '~/composables/useMigrateState'
 import { useTheme } from '~/composables/useTheme'
+import { useViewport } from '~/composables/useViewport'
+import { useOverlayHistory } from '~/composables/useOverlayHistory'
+import { useVisibilityPolling } from '~/composables/useVisibilityPolling'
 import { providerIconUrl } from '~/composables/useProviderIcon'
 import { startTour, autoTour } from '~/composables/useTour'
 import { confirmUnifiedLanguage } from '~/composables/useUnifiedLanguage'
@@ -3248,25 +3298,24 @@ const migrating = ref(false)
 
 const isDesktopMode = computed(() => storageInfo.value?.mode === 'desktop' && !!desktopBridge)
 
-let usagePollTimer = null
+// 存储占用 2s 轮询至新鲜（后端 stale-while-revalidate）；隐藏暂停、卸载必停
+const usagePoll = useVisibilityPolling(async () => {
+  try {
+    storageInfo.value = await storageAPI.info()
+    if (storageInfo.value?.usage && !storageInfo.value?.usageStale) usagePoll.stop()
+  } catch { /* 轮询错误静默 */ }
+}, 2000)
 
 function stopUsagePoll() {
-  if (usagePollTimer) { clearInterval(usagePollTimer); usagePollTimer = null }
+  usagePoll.stop()
 }
 
 async function loadStorage() {
   try {
     storageInfo.value = await storageAPI.info()
-    // 占用为空或统计已过期时 2s 轮询至新鲜（后端 stale-while-revalidate）
+    // 占用为空或统计已过期时轮询至新鲜
     stopUsagePoll()
-    if (storageInfo.value?.usageStale || !storageInfo.value?.usage) {
-      usagePollTimer = setInterval(async () => {
-        try {
-          storageInfo.value = await storageAPI.info()
-          if (storageInfo.value?.usage && !storageInfo.value?.usageStale) stopUsagePoll()
-        } catch { /* 轮询错误静默 */ }
-      }, 2000)
-    }
+    if (storageInfo.value?.usageStale || !storageInfo.value?.usage) usagePoll.start()
   } catch (e) { toastError(e, { fallback: 'settings.storage.loadFailed' }) }
 }
 
@@ -3457,6 +3506,90 @@ watch(tab, (t) => {
   }
 })
 
+// ===== 平板：页签 roving tabindex + 本地弹窗返回层/焦点陷阱 =====
+const { isCompact } = useViewport()
+const navRef = ref(null)
+
+const settingsDialogOpen = computed(() => Boolean(
+  cfgDialog.value || addSkillDialog.value || styleDialog.value || styleRefDialog.value || migrateDialog.value,
+))
+
+function closeSettingsDialogs() {
+  cfgDialog.value = false
+  addSkillDialog.value = false
+  styleDialog.value = false
+  styleRefDialog.value = false
+  // 迁移进行中不允许被返回键/关闭打断
+  if (!migrating.value) migrateDialog.value = false
+}
+
+const settingsOverlay = useOverlayHistory(closeSettingsDialogs)
+
+watch(settingsDialogOpen, (open) => {
+  if (open) {
+    settingsOverlay.open()
+    nextTick(focusFirstDialogControl)
+  } else {
+    settingsOverlay.close()
+  }
+})
+
+function dialogFocusables(root) {
+  if (!root) return []
+  // settings.vue 为纯 JS script setup：TS 泛型会被当作比较运算，用 JSDoc 显式标注为 HTMLElement
+  /** @type {NodeListOf<HTMLElement>} */
+  const nodes = root.querySelectorAll('button, a[href], input, select, textarea, audio[controls], video[controls], [tabindex]:not([tabindex="-1"])')
+  return Array.from(nodes)
+    .filter(el => !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true' && el.offsetParent !== null)
+}
+
+function focusFirstDialogControl() {
+  const dialog = document.querySelector('.settings-page .overlay .dialog')
+  dialogFocusables(dialog)[0]?.focus()
+}
+
+function onSettingsDialogKeydown(event) {
+  if (event.key !== 'Tab') return
+  const focusables = dialogFocusables(event.currentTarget)
+  if (!focusables.length) return
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+function onSettingsTabKeydown(event, id) {
+  const handled = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End']
+  if (!handled.includes(event.key)) return
+  const items = baseTabs.value
+  const index = items.findIndex(item => item.id === id)
+  if (index < 0) return
+  let next = index
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % items.length
+  else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + items.length) % items.length
+  else if (event.key === 'Home') next = 0
+  else next = items.length - 1
+  event.preventDefault()
+  const nextId = items[next].id
+  tab.value = nextId
+  nextTick(() => document.getElementById(`settings-tab-${nextId}`)?.focus())
+}
+
+function scrollActiveTabIntoView() {
+  if (!isCompact.value) return
+  void nextTick(() => {
+    const active = navRef.value?.querySelector('.nav-item.active')
+    active?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+  })
+}
+
+watch(tab, scrollActiveTabIntoView, { immediate: true })
+
 onBeforeUnmount(stopUsagePoll)
 </script>
 
@@ -3539,6 +3672,8 @@ onBeforeUnmount(stopUsagePoll)
 .nav-item:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--button-focus); }
 
 .settings-content { flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+/* 12 个常驻 tabpanel 只靠 hidden 切换可见性，不设 display 覆盖 */
+.settings-tabpanel { height: 100%; min-height: 0; }
 .settings-scroll { height: 100%; overflow-y: auto; padding: 20px 28px 48px; animation: fadeUp 0.3s var(--ease-out); }
 /* 各分组卡片之间的间距（通用页内容语言/外观等） */
 .settings-scroll > .card + .card { margin-top: 14px; }
@@ -4057,7 +4192,43 @@ onBeforeUnmount(stopUsagePoll)
   padding-top: 14px;
   border-top: 1px solid var(--border);
 }
+@media (max-width: 1180px) {
+  .settings-nav { width: 180px; }
+  .settings-page.is-dialog-open .settings-scroll { overflow: hidden; }
+}
 @media (max-width: 900px) {
+  .settings-layout { flex-direction: column; }
+  .settings-nav {
+    width: auto; flex-direction: row; align-items: center; gap: 6px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    padding: 8px 10px calc(8px + var(--safe-bottom, 0px));
+    border-right: none; border-bottom: 1px solid var(--border);
+  }
+  .nav-group { flex-direction: row; align-items: center; gap: 4px; }
+  .nav-group-label { display: none; }
+  .nav-item { width: auto; flex: 0 0 auto; min-height: var(--tap-min, 44px); white-space: nowrap; }
+  .settings-content, .settings-tabpanel { min-height: 0; }
+  .settings-scroll { padding: 16px; }
+  .field-row, .cfg-setting-grid, .huobao-quick-row, .breakdown-layout { grid-template-columns: 1fr; }
+  .config-row { flex-wrap: wrap; }
+  .media-dir-actions { flex: 1 1 100%; }
+  .skills-layout { flex-direction: column; overflow: hidden; height: 100%; }
+  .skills-agent-list {
+    flex: 0 0 auto;
+    width: auto; flex-direction: row; overflow-x: auto;
+    border-right: none; border-bottom: 1px solid var(--border); padding: 8px 10px;
+  }
+  .skills-main { flex: 1; min-height: 0; height: auto; }
+  .settings-table-scroll { overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+  .config-dialog, .skill-dialog {
+    width: calc(100vw - 32px);
+    max-height: calc(var(--app-vvh, 100dvh) - var(--safe-top, 0px) - var(--safe-bottom, 0px) - 24px);
+  }
   .breakdown-layout { grid-template-columns: 1fr; }
+}
+
+/* 粗指针：复合选择器的 scoped 特异性高于全局兜底，需在本页补足命中区 */
+@media (hover: none) and (pointer: coarse) {
+  .btn-icon.btn-sm { min-width: var(--tap-min); min-height: var(--tap-min); }
 }
 </style>

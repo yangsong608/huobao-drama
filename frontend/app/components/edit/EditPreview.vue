@@ -8,6 +8,7 @@
         :muted="audioMode === 'mix'"
         :style="videoStyle"
         playsinline
+        webkit-playsinline
         preload="metadata"
         @loadedmetadata="onLoadedMetadata"
         @ended="$emit('ended')"
@@ -43,6 +44,7 @@
             :style="layer.css"
             muted
             playsinline
+            webkit-playsinline
             preload="auto"
             @pointerdown.stop="$emit('select-overlay', layer.id)"
           />

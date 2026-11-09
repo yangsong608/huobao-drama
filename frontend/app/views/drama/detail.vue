@@ -629,6 +629,11 @@
       </div>
     </div>
 
+    <!-- 平板 / 窄屏底部粘性主操作：新建剧集常驻拇指可达 -->
+    <div class="ep-sticky-actions">
+      <button class="btn btn-primary" @click="openAddEpisode">{{ t('detail.head.addEpisode') }}</button>
+    </div>
+
     <div v-if="storageDialog" class="overlay" @click.self="closeStorage">
       <div class="dialog storage-dialog">
         <div class="dialog-head">
@@ -740,7 +745,7 @@
     </div>
 
     <div v-if="addDialog" class="overlay" @click.self="addDialog = false">
-      <div class="dialog ep-dialog">
+      <div class="dialog ep-dialog" role="dialog" aria-modal="true" :aria-label="t('detail.epCreate.title')">
         <div class="dialog-head">
           <div class="dialog-title">{{ t('detail.epCreate.title') }}</div>
           <button class="btn btn-icon btn-sm btn-ghost ml-auto dialog-close" @click="addDialog = false">
@@ -848,7 +853,9 @@ import GridSheetDialog from '~/components/GridSheetDialog.vue'
 import ScriptImportDialog from '~/components/ScriptImportDialog.vue'
 import NarratorVoiceDialog from '~/components/NarratorVoiceDialog.vue'
 import { useDesktopBridge } from '~/composables/useDesktopBridge'
+import { useOverlayHistory } from '~/composables/useOverlayHistory'
 import { episodeResolutionKey, videoCapabilityOptions, videoResolutionOptions, videoResolutionProvider } from '~/utils/video-resolution'
+import { checkUploadFile, uploadErrorKey } from '~/utils/upload-guard'
 
 const { t, locale } = useI18n()
 
@@ -984,6 +991,13 @@ const episodeToDelete = ref(null)
 const deletingEpisode = ref(false)
 const episodeToRework = ref(null)
 const reworkingEpisode = ref(false)
+
+// 创建剧集弹窗：返回键 / 返回手势先关弹窗，关闭后焦点回到触发按钮
+const epCreateOverlay = useOverlayHistory(() => { addDialog.value = false })
+watch(addDialog, (open) => {
+  if (open) epCreateOverlay.open()
+  else epCreateOverlay.close()
+})
 
 // 视频分辨率：创建集时固定（持久化到 episodes.resolution），集卡片上可修改。
 // 档位与文案与制作页顶栏共用 utils/video-resolution，按「本集锁定的视频模型」展示，
@@ -1419,12 +1433,21 @@ function isUploading(m) { return uploadingMaterials.value.has(pendingKey(m)) }
 function uploadMaterial(m) {
   const key = pendingKey(m)
   if (uploadingMaterials.value.has(key)) return
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    toast.error(t('tablet.status.needServer'))
+    return
+  }
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp'
   input.onchange = async () => {
     const file = input.files?.[0]
     if (!file) return
+    const check = checkUploadFile(file, 'image')
+    if (!check.ok) {
+      toast.error(t(uploadErrorKey(check, 'image')))
+      return
+    }
     uploadingMaterials.value = new Set(uploadingMaterials.value).add(key)
     try {
       const res = await uploadAPI.image(file, dramaId)
@@ -2454,12 +2477,45 @@ onMounted(() => {
 .ep-auto-switch .switch.on::after { transform: translateX(14px); }
 .ep-auto-switch input:focus-visible + .switch { box-shadow: 0 0 0 3.5px var(--button-focus); }
 
-@media (max-width: 860px) {
-  .page { padding: 16px 16px 32px; }
+/* 底部粘性主操作栏：只在小屏平板 / 手机出现，桌面保持无此栏 */
+.ep-sticky-actions { display: none; }
+
+/* 平板：卡片列宽随可用宽度收缩，元数据允许换行，不再横向截断 */
+@media (max-width: 1180px) {
+  .ep-grid { grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr)); }
+  .ep-card { min-height: 48px; }
+  .ep-meta-row { flex-wrap: wrap; overflow: visible; }
+}
+@media (max-width: 900px) {
+  .page { padding: 16px 16px calc(88px + var(--safe-bottom)); }
   .page-head { flex-wrap: wrap; }
   .ep-grid { grid-template-columns: 1fr; }
+  .ep-badges { flex-wrap: wrap; }
+  .ep-meta-row { white-space: normal; }
   .ep-actions { opacity: 1; } /* 移动端始终显示操作按钮 */
   .dialog-foot { flex-wrap: wrap; gap: 10px; }
   .dialog-foot-copy { display: none; }
+}
+
+/* 触控设备：行尾操作（删除 / 进入制作）满足 44px 命中区 */
+@media (hover: none) and (pointer: coarse) {
+  .ep-card-foot .btn,
+  .ep-delete,
+  .ep-enter { min-height: 44px; min-width: 44px; }
+}
+
+/* ≤900：底部粘性「新建剧集」常驻可点，避开安全区 */
+@media (max-width: 900px) {
+  .ep-sticky-actions {
+    display: flex; gap: 8px; align-items: center;
+    position: sticky; bottom: 0; z-index: 5;
+    margin: 12px -16px 0;
+    padding: 10px 16px calc(10px + var(--safe-bottom));
+    background: var(--surface-base);
+    border-top: 1px solid var(--border);
+    max-height: calc(var(--app-vvh, 100dvh) - var(--safe-top) - 80px);
+    overflow-y: auto;
+  }
+  .ep-sticky-actions .btn { flex: 1; min-height: 44px; }
 }
 </style>

@@ -10,7 +10,13 @@
 <style scoped>
 .shell {
   display: flex; flex-direction: column;
-  height: 100vh; overflow: hidden;
+  height: 100vh;
+  height: 100dvh;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+  overflow: hidden;
   background: var(--bg-base);
 }
 

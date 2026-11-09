@@ -107,8 +107,11 @@ export function startTour(id: string, steps: TourStep[], t: (key: string) => str
   return true
 }
 
-/** 首次进入自动引导：看过或元素未就绪则跳过 */
+/** 首次进入自动引导：看过、窄屏（≤900）或元素未就绪则跳过 */
 export function autoTour(id: string, steps: TourStep[], t: (key: string) => string) {
+  // 平板竖屏 / 手机不自动播放：浮层会遮挡首屏且缩放下不易关闭；
+  // 帮助按钮的手动 startTour 不受影响，也不写「已看过」标记
+  if (typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) return
   if (tourSeen(id)) return
   startTour(id, steps, t)
 }

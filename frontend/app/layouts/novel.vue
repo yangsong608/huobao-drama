@@ -51,6 +51,11 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => ({
 <style scoped>
 .novel-shell {
   height: 100vh;
+  height: 100dvh;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
   display: flex;
   flex-direction: column;
   overflow: hidden;

@@ -2,7 +2,9 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NModal } from 'naive-ui'
+import { Ellipsis } from 'lucide-vue-next'
 import { filmAPI, type FilmSummary } from '~/composables/useApi'
+import { useLongPress } from '~/composables/useLongPress'
 import ContextMenu, { type MenuItem } from './ContextMenu.vue'
 
 const props = withDefaults(defineProps<{
@@ -82,7 +84,10 @@ async function load() {
 
 watch(() => props.show, (show) => {
   if (show) void load()
-  else { menuShow.value = false }
+  else {
+    menuShow.value = false
+    cancelFilmLongPress()
+  }
 })
 watch(() => props.episodeId, () => {
   if (props.show) void load()
@@ -100,6 +105,26 @@ function onContextMenu(event: MouseEvent, film: FilmSummary) {
   menuX.value = event.clientX
   menuY.value = event.clientY
   menuShow.value = true
+}
+
+function openFilmMenuAt(x: number, y: number, film: FilmSummary) {
+  menuFilm.value = film
+  menuX.value = x
+  menuY.value = y
+  menuShow.value = true
+}
+
+function openFilmMenu(event: MouseEvent, film: FilmSummary) {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  openFilmMenuAt(rect.left, rect.bottom + 4, film)
+}
+
+const { onPointerDown: onFilmLongPressDown, cancel: cancelFilmLongPress } = useLongPress<FilmSummary>({
+  onTrigger: (film, event) => openFilmMenuAt(event.clientX, event.clientY, film),
+})
+
+function onFilmPointerDown(event: PointerEvent, film: FilmSummary) {
+  onFilmLongPressDown(event, film)
 }
 
 // 模式主按钮：混音=更换源成片，剪辑=在剪辑中打开，列表=普通选择
@@ -155,12 +180,24 @@ const menuItems = computed<MenuItem[]>(() => {
           v-for="film in films"
           :key="film.id"
           :class="['film-card', { selected: film.id === props.modelValue, current: film.is_current }]"
+          data-long-press
+          @pointerdown="onFilmPointerDown($event, film)"
           @click="choose(film)"
           @contextmenu="onContextMenu($event, film)"
         >
           <div class="film-card-head">
             <span class="film-title" :title="film.title">{{ film.title }}</span>
             <span class="film-kind">{{ kindLabel(film.kind) }}</span>
+            <button
+              class="film-more"
+              type="button"
+              :title="t('tablet.more')"
+              :aria-label="t('tablet.more')"
+              @pointerdown.stop
+              @click.stop="openFilmMenu($event, film)"
+            >
+              <Ellipsis :size="14" />
+            </button>
           </div>
           <div class="film-card-meta">
             <span v-if="film.is_current" class="badge badge-current">{{ label('films.current', '当前') }}</span>
@@ -233,4 +270,22 @@ const menuItems = computed<MenuItem[]>(() => {
 .badge-current { background: var(--primary, #4f7cff); color: #fff; }
 .badge-edited { background: var(--success-soft, rgba(76, 175, 80, 0.14)); color: var(--success, #3d9a41); }
 .film-time { margin-left: auto; }
+.film-more { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .film-card { min-height: 44px; }
+  .film-more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 1px solid var(--border, #e0e0e0);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-dim, #666);
+    cursor: pointer;
+  }
+}
 </style>

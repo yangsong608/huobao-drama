@@ -355,6 +355,15 @@ export function deleteTake(takeId: number): { lineId: number; fallbackTakeId: nu
   })
 }
 
+/** 进程重启后，遗留的 generating Take 永远等不到结果，统一收敛为 failed。 */
+export function markInterruptedTakes(): number {
+  const result = db.update(schema.lineTakes)
+    .set({ status: 'failed', error: '服务重启，语音生成中断，请重新生成' })
+    .where(eq(schema.lineTakes.status, 'generating'))
+    .run()
+  return Number(result.changes || 0)
+}
+
 export function takeStatus(episodeId: number): {
   total: number
   ready: number

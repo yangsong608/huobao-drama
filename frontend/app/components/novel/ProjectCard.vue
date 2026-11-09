@@ -174,6 +174,10 @@ const progress = computed(() => {
 .more-wrap:focus-within {
   opacity: 1;
 }
+/* 触控设备没有 hover：删除入口常驻可见 */
+@media (hover: none) and (pointer: coarse) {
+  .more-wrap { opacity: 1; }
+}
 .cover-more {
   color: var(--text-2);
   background: color-mix(in srgb, var(--bg-0) 82%, transparent);

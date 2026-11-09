@@ -100,4 +100,16 @@ watch(() => props.open, (value) => {
   background: var(--bg-2); color: var(--text-0); font-size: 11px; cursor: pointer;
 }
 .ed-sub-list footer button:hover { border-color: var(--accent); }
+@media (max-width: 900px) {
+  /* 窄屏改为右侧全高抽屉：贴边、去圆角、底部让出安全区，列表内部滚动 */
+  .ed-sub-list {
+    top: 0; right: 0; bottom: 0; width: min(320px, 100vw); border-radius: 0;
+    border-top: 0; border-right: 0; border-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .ed-sub-list header button { min-width: 44px; min-height: 44px; }
+  .ed-sub-search { height: 44px; font-size: 16px; }
+  .ed-sub-list li { min-height: 44px; align-items: center; }
+  .ed-sub-list footer button { min-height: 44px; }
+}
 </style>

@@ -1,99 +1,105 @@
 <template>
   <article
-    :class="['mx-th', { 'is-active': active, 'is-virtual': track.virtual, 'is-muted': track.effectiveMuted }]"
+    :class="['mx-th', { 'is-active': active, 'is-virtual': track.virtual, 'is-muted': track.effectiveMuted, 'is-folded': folded }]"
     :style="{ height: `${height}px`, '--track-color': track.color || '#38bdf8' }"
     @click="emit('select', track)"
   >
-    <header class="mx-th-head">
-      <span class="mx-th-dot" />
-      <span class="mx-th-role">{{ roleLabel }}</span>
-      <input
-        v-if="!track.virtual"
-        class="mx-th-name"
-        :value="track.name"
-        :title="track.name"
-        :aria-label="t('mix.trackName')"
-        @click.stop
-        @change="rename"
-      />
-      <span v-else class="mx-th-name is-readonly" :title="track.name">{{ track.name }}</span>
-      <span v-if="track.origin === 'soundscape'" class="mx-th-auto is-ai" :title="t('mix.soundscape.aiTrack')">{{ t('mix.soundscape.aiBadge') }}</span>
-      <span v-if="track.virtual" class="mx-th-auto">{{ t('mix.trackVirtual') }}</span>
-      <button
-        v-if="!track.virtual"
-        :class="['mx-th-icon', { on: track.locked }]"
-        type="button"
-        :title="track.locked ? t('mix.trackUnlock') : t('mix.trackLock')"
-        @click.stop="toggle('locked')"
-      >
-        <Lock v-if="track.locked" :size="11" />
-        <LockOpen v-else :size="11" />
-      </button>
-      <button
-        v-if="!track.virtual"
-        :class="['mx-th-icon', { on: track.hidden }]"
-        type="button"
-        :title="track.hidden ? t('mix.trackShow') : t('mix.trackHide')"
-        @click.stop="toggle('hidden')"
-      >
-        <EyeOff v-if="track.hidden" :size="11" />
-        <Eye v-else :size="11" />
-      </button>
-      <button
-        v-if="!track.virtual"
-        class="mx-th-icon is-danger"
-        type="button"
-        :title="t('mix.trackRemove')"
-        @click.stop="emit('remove', track)"
-      >
-        <Trash2 :size="11" />
-      </button>
-    </header>
+    <template v-if="!folded">
+      <header class="mx-th-head">
+        <span class="mx-th-dot" />
+        <span class="mx-th-role">{{ roleLabel }}</span>
+        <input
+          v-if="!track.virtual"
+          class="mx-th-name"
+          :value="track.name"
+          :title="track.name"
+          :aria-label="t('mix.trackName')"
+          @click.stop
+          @change="rename"
+        />
+        <span v-else class="mx-th-name is-readonly" :title="track.name">{{ track.name }}</span>
+        <span v-if="track.origin === 'soundscape'" class="mx-th-auto is-ai" :title="t('mix.soundscape.aiTrack')">{{ t('mix.soundscape.aiBadge') }}</span>
+        <span v-if="track.virtual" class="mx-th-auto">{{ t('mix.trackVirtual') }}</span>
+        <button
+          v-if="!track.virtual"
+          :class="['mx-th-icon', { on: track.locked }]"
+          type="button"
+          :title="track.locked ? t('mix.trackUnlock') : t('mix.trackLock')"
+          @click.stop="toggle('locked')"
+        >
+          <Lock v-if="track.locked" :size="11" />
+          <LockOpen v-else :size="11" />
+        </button>
+        <button
+          v-if="!track.virtual"
+          :class="['mx-th-icon', { on: track.hidden }]"
+          type="button"
+          :title="track.hidden ? t('mix.trackShow') : t('mix.trackHide')"
+          @click.stop="toggle('hidden')"
+        >
+          <EyeOff v-if="track.hidden" :size="11" />
+          <Eye v-else :size="11" />
+        </button>
+        <button
+          v-if="!track.virtual"
+          class="mx-th-icon is-danger"
+          type="button"
+          :title="t('mix.trackRemove')"
+          @click.stop="emit('remove', track)"
+        >
+          <Trash2 :size="11" />
+        </button>
+      </header>
+    </template>
 
     <div class="mx-th-row">
       <button :class="['mx-th-toggle', { on: track.muted }]" type="button" :title="t('mix.trackMute')" @click.stop="toggle('muted')">{{ t('mix.trackMuteShort') }}</button>
       <button :class="['mx-th-toggle', { on: track.solo }]" type="button" :title="t('mix.trackSolo')" @click.stop="toggle('solo')">{{ t('mix.trackSoloShort') }}</button>
-      <button v-if="!track.virtual" :class="['mx-th-toggle', { on: track.ducking }]" type="button" :title="t('mix.trackDuck')" @click.stop="toggle('ducking')">{{ t('mix.trackDuckShort') }}</button>
-      <button :class="['mx-th-toggle', { on: track.loop }]" type="button" :title="t('mix.trackLoop')" @click.stop="toggle('loop')">{{ t('mix.trackLoopShort') }}</button>
-      <span v-if="track.virtual" class="mx-th-note">{{ t(track.role === 'voice' ? 'mix.trackVirtualVoiceHint' : 'mix.trackVirtualHint', { n: track.clips.length }) }}</span>
-      <span v-else class="mx-th-clips">{{ t('mix.clipCount', { n: track.clips.length }) }}</span>
+      <template v-if="!folded">
+        <button v-if="!track.virtual" :class="['mx-th-toggle', { on: track.ducking }]" type="button" :title="t('mix.trackDuck')" @click.stop="toggle('ducking')">{{ t('mix.trackDuckShort') }}</button>
+        <button :class="['mx-th-toggle', { on: track.loop }]" type="button" :title="t('mix.trackLoop')" @click.stop="toggle('loop')">{{ t('mix.trackLoopShort') }}</button>
+        <span v-if="track.virtual" class="mx-th-note">{{ t(track.role === 'voice' ? 'mix.trackVirtualVoiceHint' : 'mix.trackVirtualHint', { n: track.clips.length }) }}</span>
+        <span v-else class="mx-th-clips">{{ t('mix.clipCount', { n: track.clips.length }) }}</span>
+      </template>
     </div>
 
-    <div class="mx-th-row is-faders">
-      <span class="mx-th-fader-label" :title="t('mix.trackVolume')">{{ volumePct }}%</span>
-      <input
-        class="mx-th-range"
-        type="range"
-        min="0"
-        max="200"
-        step="1"
-        :value="volumePct"
-        :aria-label="t('mix.trackVolume')"
-        @pointerdown.stop="emit('begin-change')"
-        @pointerup.stop="emit('end-change')"
-        @input.stop="setVolume"
-        @change.stop="emit('end-change')"
-      />
-      <span class="mx-th-fader-label is-pan" :title="t('mix.trackPan')">{{ panLabel }}</span>
-      <input
-        class="mx-th-range is-pan"
-        type="range"
-        min="-100"
-        max="100"
-        step="1"
-        :value="panPct"
-        :aria-label="t('mix.trackPan')"
-        @pointerdown.stop="emit('begin-change')"
-        @pointerup.stop="emit('end-change')"
-        @input.stop="setPan"
-        @change.stop="emit('end-change')"
-      />
-      <span
-        class="mx-th-meter"
-        :title="t('mix.levelGain')"
-        aria-hidden="true"
-      ><i :style="{ height: `${meterPct}%` }" /></span>
-    </div>
+    <template v-if="!folded">
+      <div class="mx-th-row is-faders">
+        <span class="mx-th-fader-label" :title="t('mix.trackVolume')">{{ volumePct }}%</span>
+        <input
+          class="mx-th-range"
+          type="range"
+          min="0"
+          max="200"
+          step="1"
+          :value="volumePct"
+          :aria-label="t('mix.trackVolume')"
+          @pointerdown.stop="emit('begin-change')"
+          @pointerup.stop="emit('end-change')"
+          @input.stop="setVolume"
+          @change.stop="emit('end-change')"
+        />
+        <span class="mx-th-fader-label is-pan" :title="t('mix.trackPan')">{{ panLabel }}</span>
+        <input
+          class="mx-th-range is-pan"
+          type="range"
+          min="-100"
+          max="100"
+          step="1"
+          :value="panPct"
+          :aria-label="t('mix.trackPan')"
+          @pointerdown.stop="emit('begin-change')"
+          @pointerup.stop="emit('end-change')"
+          @input.stop="setPan"
+          @change.stop="emit('end-change')"
+        />
+        <span
+          class="mx-th-meter"
+          :title="t('mix.levelGain')"
+          aria-hidden="true"
+        ><i :style="{ height: `${meterPct}%` }" /></span>
+      </div>
+    </template>
 
     <span
       v-if="!track.virtual"
@@ -116,6 +122,8 @@ import type { StageTrack } from '~/composables/useMixStage'
 const props = defineProps<{
   track: StageTrack
   active: boolean
+  /** 紧凑档折叠：只保留 M/S，折叠仅影响渲染，不改轨道数据 */
+  folded?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -257,4 +265,10 @@ function onResizeUp(event: PointerEvent) {
 .mx-th-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; cursor: ns-resize; }
 .mx-th-resize::after { content: ''; position: absolute; left: 50%; bottom: 2px; width: 22px; height: 1px; margin-left: -11px; background: var(--border-strong); opacity: 0; }
 .mx-th:hover .mx-th-resize::after { opacity: .8; }
+/* 折叠态只保留 M/S 与左侧色条：隐藏底部改高把手，避免误拖改轨道高度 */
+.mx-th.is-folded .mx-th-resize { display: none; }
+/* 折叠态只剩 M/S：粗指针下放大到 44×44，保证触控可点 */
+@media (max-width: 1180px) and (hover: none) and (pointer: coarse) {
+  .mx-th.is-folded .mx-th-toggle { min-width: 44px; min-height: 44px; }
+}
 </style>

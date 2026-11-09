@@ -302,7 +302,9 @@ export const sysTask = sqliteTable('sys_task', {
   configBaseUrl: text('config_base_url'),
   stage: text('stage'),
   errorCode: text('error_code'),
-  type: text('type').notNull(), // image | video
+  type: text('type').notNull(), // image | video | audio | text
+  /** 直接归属剧集；写任务时解析，历史任务为空时仍按下方关联键归属 */
+  episodeId: integer('episode_id'),
   storyboardId: integer('storyboard_id'),
   /** AI 过渡任务指向 video_transitions.id；此时 storyboard_id 为空 */
   transitionId: integer('transition_id'),
@@ -324,6 +326,35 @@ export const sysTask = sqliteTable('sys_task', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   completedAt: text('completed_at'),
+})
+
+// 批量视频任务：后端持久化调度，一集同时只保留一个运行中批次
+export const videoBatchJobs = sqliteTable('video_batch_jobs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id'),
+  /** running / done / stopped */
+  status: text('status').default('running'),
+  concurrency: integer('concurrency').default(1),
+  stopRequested: integer('stop_requested', { mode: 'boolean' }).default(false),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  finishedAt: text('finished_at'),
+})
+
+export const videoBatchItems = sqliteTable('video_batch_items', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  batchId: integer('batch_id').notNull(),
+  storyboardId: integer('storyboard_id').notNull(),
+  position: integer('position').notNull(),
+  /** queued / submitting / processing / completed / failed / stopped */
+  status: text('status').default('queued'),
+  /** sys_task.id；submitting 时为空，重启后据此接管已提交任务 */
+  taskId: integer('task_id'),
+  requestJson: text('request_json'),
+  error: text('error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
 })
 
 export const videoMerges = sqliteTable('video_merges', {

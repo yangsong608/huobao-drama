@@ -151,4 +151,15 @@ watch(() => props.open, (open) => {
 .mix-export-dialog .btn.btn-primary { border-color: var(--accent, #4f7cff); background: var(--accent, #4f7cff); color: var(--action-primary-text, #fff); }
 .mix-export-dialog .btn.btn-primary:hover { background: var(--action-primary-hover, #3d66d9); color: #fff; }
 .mix-export-dialog .btn:disabled { opacity: .5; cursor: default; }
+@media (max-width: 1180px) {
+  .mix-export-dialog {
+    max-height: calc(var(--app-vvh, 100vh) - var(--safe-top) - var(--safe-bottom) - 24px);
+  }
+  .mix-export-dialog .actions {
+    position: sticky;
+    bottom: 0;
+    padding-top: 8px;
+    background: var(--bg-0, #fff);
+  }
+}
 </style>

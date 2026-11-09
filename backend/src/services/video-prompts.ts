@@ -8,6 +8,7 @@ import { mastra } from '../mastra/index.js'
 import { buildAgentRequestContext } from '../agents/context.js'
 import { logTaskError, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 import { renderPipelineRule } from './pipeline-rules.js'
+import { failAiTaskRun, finishAiTaskRun, patchAiTaskRun, startAiTaskRun } from './ai-task-runs.js'
 
 export interface VideoPromptBatchStatus {
   status: 'running' | 'done' | 'error'
@@ -56,6 +57,20 @@ export async function startVideoPromptBatch(
     started_at: new Date().toISOString(),
   }
   tasks.set(episodeId, task)
+  const runTaskId = startAiTaskRun({
+    type: 'text',
+    stage: 'video_prompts',
+    episodeId,
+    dramaId,
+    model: opts.model || null,
+    params: { total: pending.length, completed: 0, failed: 0 },
+  })
+  const progress = (currentStoryboardId?: number) => ({
+    total: task.total,
+    completed: task.completed,
+    failed: task.failed,
+    ...(currentStoryboardId ? { current_storyboard_id: currentStoryboardId } : {}),
+  })
 
   logTaskStart('VideoPrompt', 'batch', { episodeId, dramaId, total: pending.length, model: opts.model || undefined })
   ;(async () => {
@@ -90,18 +105,21 @@ export async function startVideoPromptBatch(
         task.failed++
         logTaskError('VideoPrompt', 'batch-shot', { storyboardId: sb.id, error: err?.message })
       }
+      patchAiTaskRun(runTaskId, { params: progress() })
     }
   })()
     .then(() => {
       task.status = 'done'
       task.finished_at = new Date().toISOString()
       task.current_storyboard_id = undefined
+      finishAiTaskRun(runTaskId, progress())
       logTaskSuccess('VideoPrompt', 'batch', { episodeId, total: task.total, completed: task.completed, failed: task.failed })
     })
     .catch((err: any) => {
       task.status = 'error'
       task.finished_at = new Date().toISOString()
       task.error = err?.message || '批量生成失败'
+      failAiTaskRun(runTaskId, task.error || '批量生成失败', progress())
       logTaskError('VideoPrompt', 'batch', { episodeId, error: err?.message })
     })
   return { started: true, total: pending.length }

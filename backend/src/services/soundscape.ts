@@ -2,7 +2,7 @@
  * 声音场景生成任务编排（设计 11）
  *
  * dubbing_jobs(kind='soundscape') + 内存 active Map：
- * 单集互斥、全局 ComfyUI 串行、sourceHash 缓存、取消与重启恢复。
+ * 单集互斥、同 ComfyUI 配置串行、sourceHash 缓存、取消与重启恢复。
  */
 import fs from 'fs'
 import path from 'path'
@@ -21,6 +21,7 @@ import {
   readComfySettings,
 } from './adapters/comfyui.js'
 import { readGatewaySlug } from './adapters/comfyui-gateway.js'
+import { withKeyedChain } from './keyed-semaphore.js'
 import {
   assertAudioWorkflowPrompt,
   cancelComfyPrompt,
@@ -159,14 +160,6 @@ function previewKey(request: SoundscapeRequest, setup: SoundscapeSetup): string 
     normalizeLoudness: setup.normalizeLoudness,
     fixedSeed: setup.fixedSeed,
   })
-}
-
-let comfyChain: Promise<unknown> = Promise.resolve()
-
-function serializeComfy<T>(task: () => Promise<T>): Promise<T> {
-  const run = comfyChain.then(task, task)
-  comfyChain = run.then(() => undefined, () => undefined)
-  return run
 }
 
 function requireEpisode(episodeId: number, dramaId?: number) {
@@ -726,7 +719,10 @@ async function executeSoundscape(params: ExecuteSoundscapeParams): Promise<void>
       counts.reused += 1
     } else {
       try {
-        const result = await serializeComfy(async () => {
+        const comfyKey = setup.config?.id
+          ? `comfy:cfg-${setup.config.id}`
+          : `comfy:${setup.config?.provider || ''}|${setup.config?.baseUrl || ''}`
+        const result = await withKeyedChain(comfyKey, async () => {
           if (memory.controller.signal.aborted) throw new Error('任务已取消')
           return generate({
             config: requireSetupConfig(setup),

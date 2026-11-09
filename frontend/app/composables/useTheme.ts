@@ -10,6 +10,11 @@ import { computed, readonly, ref, watch, type ComputedRef } from 'vue'
 
 export const THEME_STORAGE_KEY = 'huobao:theme'
 
+/** 浏览器地址栏/任务栏主题色：浅色与 studio.css --surface-base 一致 */
+export const MANIFEST_THEME_COLOR = '#f7f8fa'
+/** 深色主题色：与 studio.css :root[data-theme="dark"] --surface-base 一致 */
+export const THEME_COLOR_DARK = '#0b0f16'
+
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
 
@@ -36,8 +41,20 @@ export const resolvedTheme: ComputedRef<ResolvedTheme> = computed(() =>
   themeMode.value === 'system' ? (systemDark.value ? 'dark' : 'light') : themeMode.value,
 )
 
+/** 同步 <meta name="theme-color">：移动端地址栏/状态栏跟随主题；缺失时创建，不新增 media 变体 */
+function applyThemeColorMeta(theme: ResolvedTheme) {
+  let meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+  if (!meta) {
+    meta = document.createElement('meta')
+    meta.setAttribute('name', 'theme-color')
+    document.head.appendChild(meta)
+  }
+  meta.setAttribute('content', theme === 'dark' ? THEME_COLOR_DARK : MANIFEST_THEME_COLOR)
+}
+
 function applyTheme() {
   document.documentElement.dataset.theme = resolvedTheme.value
+  applyThemeColorMeta(resolvedTheme.value)
 }
 
 if (typeof window !== 'undefined') {

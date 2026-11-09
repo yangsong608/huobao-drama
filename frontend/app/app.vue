@@ -2,6 +2,8 @@
   <NuxtLayout>
     <NuxtPage />
   </NuxtLayout>
+  <!-- 离线 / 新版本提示：studio 布局没有 AppHeader，必须挂全局 -->
+  <PwaStatus />
   <Toaster position="top-right" :duration="3000" :theme="resolvedTheme" />
   <MigrateOverlay />
 </template>
@@ -11,12 +13,17 @@ import { onMounted } from 'vue'
 import { Toaster, toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import MigrateOverlay from '~/components/MigrateOverlay.vue'
+import PwaStatus from '~/components/PwaStatus.vue'
 import { useDesktopBridge } from '~/composables/useDesktopBridge'
 import { useMigrateState } from '~/composables/useMigrateState'
 import { useTheme } from '~/composables/useTheme'
+import { useViewport } from '~/composables/useViewport'
 
 const { t } = useI18n()
 const { resolvedTheme } = useTheme()
+
+// 应用壳全局调用一次：挂载视口监听并向根元素写入 --app-vvh
+useViewport()
 
 // 响应式文档标题（nuxt.config.ts 的静态 title 仅作 SSR/兜底）
 useHead(() => ({ title: t('app.title') }))
@@ -63,7 +70,7 @@ onMounted(() => {
   border: 1px solid var(--border) !important;
   border-radius: var(--radius-lg) !important;
   box-shadow: var(--shadow-elevated) !important;
-  max-width: 340px;
+  max-width: min(340px, calc(100vw - 24px));
 }
 .huobao-tour-popover .driver-popover-title {
   color: var(--text-0) !important;

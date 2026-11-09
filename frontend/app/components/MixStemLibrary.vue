@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { AudioWaveform, Loader2, Play, Trash2, Plus, Upload } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
+import { toast } from 'vue-sonner'
+import { checkUploadFile, uploadErrorKey } from '~/utils/upload-guard'
 
 const props = defineProps<{
   separation: { status?: string; progress?: number; step?: string; error?: string } | null
@@ -57,11 +59,25 @@ watch(() => props.assets.length, () => {
   if (page.value > pageCount.value) page.value = pageCount.value
 })
 
+function openImportPicker() {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    toast.error(t('tablet.status.needServer'))
+    return
+  }
+  importInput.value?.click()
+}
+
 function onImportChange(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
-  if (file) emit('import-audio', file)
   input.value = ''
+  if (!file) return
+  const check = checkUploadFile(file, 'audio')
+  if (!check.ok) {
+    toast.error(t(uploadErrorKey(check, 'audio')))
+    return
+  }
+  emit('import-audio', file)
 }
 </script>
 
@@ -85,7 +101,7 @@ function onImportChange(event: Event) {
       <AudioWaveform :size="12" />
       {{ t('mix.stems.extract') }}
     </button>
-    <button class="mx-btn is-plain" type="button" :disabled="busy" @click="importInput?.click()">
+    <button class="mx-btn is-plain" type="button" :disabled="busy" @click="openImportPicker">
       <Upload :size="12" />
       {{ t('mix.stems.importAudio') }}
     </button>

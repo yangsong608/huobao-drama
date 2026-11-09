@@ -22,6 +22,7 @@ import { normalizeVideoAudioMode, type VideoAudioMode } from './video-audio.js'
 import { bootstrapCurrentFilmIfEmpty } from './film-hub.js'
 import type { AIConfig, ComfyTimelineTask, ImageProviderAdapter } from './adapters/types'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn, redactUrl } from '../utils/task-logger.js'
+import { withProviderSlot } from './provider-concurrency.js'
 
 type TaskType = 'image' | 'video'
 
@@ -182,6 +183,7 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
     const id = await createTask('video', config, {
       storyboardId: params.storyboardId,
       transitionId: params.transitionId,
+      episodeId: params.episodeId,
       dramaId: params.dramaId,
       prompt: params.prompt,
       model: params.model || config.model,
@@ -249,12 +251,28 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
   }
 }
 
+async function resolveEpisodeId(fields: { episodeId?: number; storyboardId?: number; transitionId?: number }): Promise<number | null> {
+  if (fields.episodeId) return fields.episodeId
+  if (fields.storyboardId) {
+    const [sb] = await db.select({ episodeId: schema.storyboards.episodeId })
+      .from(schema.storyboards).where(eq(schema.storyboards.id, fields.storyboardId))
+    return sb?.episodeId ?? null
+  }
+  if (fields.transitionId) {
+    const [tr] = await db.select({ episodeId: schema.videoTransitions.episodeId })
+      .from(schema.videoTransitions).where(eq(schema.videoTransitions.id, fields.transitionId))
+    return tr?.episodeId ?? null
+  }
+  return null
+}
+
 async function createTask(
   type: TaskType,
   config: AIConfig,
   fields: {
     storyboardId?: number
     transitionId?: number
+    episodeId?: number
     dramaId?: number
     sceneId?: number
     characterId?: number
@@ -268,6 +286,7 @@ async function createTask(
   const res = await db.insert(schema.sysTask).values({
     type,
     ...fields,
+    episodeId: await resolveEpisodeId(fields),
     provider: config.provider,
     configId: config.id,
     configBaseUrl: config.baseUrl,
@@ -279,7 +298,7 @@ async function createTask(
   })
 
   const id = getInsertId(res)
-  runBackground(id, () => processTask(id, config))
+  runBackground(id, () => processTask(id, config, type))
   return id
 }
 
@@ -292,7 +311,15 @@ function parseTaskParams(raw: string | null | undefined): Record<string, any> {
   }
 }
 
-async function processTask(id: number, config: AIConfig) {
+async function processTask(id: number, config: AIConfig, type: TaskType) {
+  // 视频按接口共享并发上限（默认 5），不同服务商/配置互不占用槽位
+  if (type === 'video') {
+    return withProviderSlot('video', config, () => runTask(id, config))
+  }
+  return runTask(id, config)
+}
+
+async function runTask(id: number, config: AIConfig) {
   try {
     const [record] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, id))
     if (!record) return

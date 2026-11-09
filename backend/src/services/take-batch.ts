@@ -16,6 +16,7 @@ import {
   type LineRow,
 } from './line-takes.js'
 import type { ContextMode } from './line-context.js'
+import { failAiTaskRun, finishAiTaskRun, patchAiTaskRun, startAiTaskRun } from './ai-task-runs.js'
 
 export type TakeBatchFilter = 'pending' | 'failed' | 'audio_stale' | 'all'
 
@@ -40,6 +41,8 @@ export interface TakeBatchJob {
   cancelRequested: boolean
   startedAt: string
   finishedAt: string | null
+  /** sys_task 运行记录 id；批量 Take 在任务中心可见 */
+  runTaskId?: number | null
 }
 
 export interface TakeBatchDeps {
@@ -96,6 +99,17 @@ function finish(job: TakeBatchJob, status: TakeBatchJob['status']) {
   job.currentLineId = null
   job.status = status
   job.finishedAt = now()
+  const params = {
+    job_id: job.id,
+    total: job.total,
+    done: job.done,
+    ok: job.ok,
+    failed: job.failed,
+    skipped: job.skipped,
+  }
+  if (status === 'done') finishAiTaskRun(job.runTaskId, params)
+  else if (status === 'cancelled') failAiTaskRun(job.runTaskId, '已停止', params)
+  else failAiTaskRun(job.runTaskId, job.errors[0]?.message || '批量生成失败', params)
 }
 
 export function getTakeBatch(jobId: string): TakeBatchJob | null {
@@ -132,6 +146,12 @@ export function startTakeBatch(
     finishedAt: null,
   }
   jobs.set(job.id, job)
+  job.runTaskId = startAiTaskRun({
+    type: 'audio',
+    stage: 'take_batch',
+    episodeId,
+    params: { job_id: job.id, total: 0, done: 0, ok: 0, failed: 0, skipped: 0 },
+  })
   void runTakeBatch(job, episodeId, input, deps)
   return job
 }
@@ -145,6 +165,15 @@ export async function runTakeBatch(
   try {
     const lines = selectLines(episodeId, input)
     job.total = lines.length
+    const progress = () => ({
+      job_id: job.id,
+      total: job.total,
+      done: job.done,
+      ok: job.ok,
+      failed: job.failed,
+      skipped: job.skipped,
+    })
+    patchAiTaskRun(job.runTaskId, { params: progress() })
     if (!lines.length) {
       finish(job, 'done')
       return
@@ -172,6 +201,7 @@ export async function runTakeBatch(
         if (!text) {
           job.skipped += 1
           job.done += 1
+          patchAiTaskRun(job.runTaskId, { params: progress() })
           continue
         }
 
@@ -193,6 +223,7 @@ export async function runTakeBatch(
           }
         }
         job.done += 1
+        patchAiTaskRun(job.runTaskId, { params: progress() })
       }
     }
 

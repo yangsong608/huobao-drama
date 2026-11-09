@@ -4,6 +4,7 @@
       <canvas
         ref="canvasRef"
         class="mx-tl-canvas"
+        data-long-press
         :style="{ width: `${contentWidth}px`, height: `${contentHeight}px`, cursor }"
         :aria-label="t('mix.timelineAria')"
         @pointerdown="onPointerDown"
@@ -30,8 +31,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { mixAPI, type PeaksPayload } from '~/composables/useApi'
+import { useLongPress } from '~/composables/useLongPress'
 import type { StageClip, StageTrack } from '~/composables/useMixStage'
+import { usePinchZoom } from '~/composables/usePinchZoom'
 import { useTheme } from '~/composables/useTheme'
+import { useViewport } from '~/composables/useViewport'
+import { capWaveformDpr, mixEdgeHitPx, mixAnchoredScrollLeft } from '~/utils/mix-layout'
+import { clampZoom, distanceBetween } from '~/utils/touch'
 import { fitTimelineZoom, TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '~/utils/timeline-zoom'
 
 const props = defineProps<{
@@ -71,6 +77,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const { resolvedTheme } = useTheme()
+/** 平板粗指针：片段边缘命中放宽到 22px，波形按 DPR 封顶 */
+const { isCoarsePointer, isTablet } = useViewport()
 
 const RULER_H = 30
 const VIDEO_LANE_H = 58
@@ -112,13 +120,21 @@ let resizeObserver: ResizeObserver | null = null
 let raf = 0
 let edgeRaf = 0
 let edgeDirection = 0
+let pinching = false
+let activePointerId: number | null = null
+// 触控指针显式捕获集合：每根手指各自捕获，双指期间不会丢事件
+const touchCapture = new Set<number>()
 let lastPointerClient = { x: 0, y: 0 }
 let interaction: {
-  kind: 'move' | 'trim-start' | 'trim-end' | 'seek'
+  kind: 'move' | 'trim-start' | 'trim-end' | 'seek' | 'pan'
   clip: StageClip | null
   track: StageTrack | null
   startX: number
   startY: number
+  startClientX: number
+  startClientY: number
+  startScrollLeft: number
+  changeOpen: boolean
   originalStart: number
   originalEnd: number
   originalSource: number
@@ -385,7 +401,7 @@ function draw() {
   if (!canvas) return
   const width = contentWidth.value
   const height = contentHeight.value
-  const dpr = window.devicePixelRatio || 1
+  const dpr = capWaveformDpr(window.devicePixelRatio || 1, window.innerWidth)
   if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
     canvas.width = Math.round(width * dpr)
     canvas.height = Math.round(height * dpr)
@@ -643,6 +659,8 @@ function drawClip(
 }
 
 function scheduleDraw() {
+  // 双指缩放期间画布尺寸/缩放连续变化，暂停重绘，手势结束后统一补画
+  if (pinching) return
   if (raf) return
   raf = requestAnimationFrame(() => {
     raf = 0
@@ -676,7 +694,7 @@ function clipAt(x: number, y: number): { track: StageTrack; clip: StageClip; edg
     const right = toX(clip.endMs)
     if (x < left || x > right) continue
     const width = Math.max(1, right - left)
-    const edgeSize = Math.min(7, width / 3)
+    const edgeSize = mixEdgeHitPx(width, isCoarsePointer.value && isTablet.value)
     const edge = x <= left + edgeSize ? 'start' : x >= right - edgeSize ? 'end' : null
     return { track: lane.track, clip, edge }
   }
@@ -689,6 +707,131 @@ function pointOf(event: PointerEvent | MouseEvent): { x: number; y: number } {
   const rect = canvas.getBoundingClientRect()
   return { x: event.clientX - rect.left, y: event.clientY - rect.top }
 }
+
+function capturePointer(event: PointerEvent) {
+  activePointerId = event.pointerId
+  try {
+    canvasRef.value?.setPointerCapture(event.pointerId)
+  } catch {
+    // 某些环境不支持指针捕获，退化为普通事件流
+  }
+}
+
+function releasePointer(event?: PointerEvent) {
+  const canvas = canvasRef.value
+  const pointerId = event?.pointerId ?? activePointerId
+  activePointerId = null
+  if (!canvas || pointerId == null) return
+  try {
+    if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId)
+  } catch {
+    // 已释放或指针失效时忽略
+  }
+}
+
+/** 触控指针逐个显式捕获：第二根手指按下时也挂到画布上，避免手势中断 */
+function captureTouchPointer(event: PointerEvent) {
+  if (event.pointerType !== 'touch') return
+  touchCapture.add(event.pointerId)
+  try {
+    canvasRef.value?.setPointerCapture(event.pointerId)
+  } catch {
+    // 不支持捕获的环境退化为普通事件流
+  }
+}
+
+function releaseTouchPointer(event: PointerEvent) {
+  const pointerId = event.pointerId
+  touchCapture.delete(pointerId)
+  const canvas = canvasRef.value
+  try {
+    if (canvas?.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId)
+  } catch {
+    // 已释放或指针失效时忽略
+  }
+}
+
+function releaseAllTouchPointers() {
+  const canvas = canvasRef.value
+  for (const pointerId of [...touchCapture]) {
+    try {
+      if (canvas?.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId)
+    } catch {
+      // 忽略已失效指针
+    }
+  }
+  touchCapture.clear()
+}
+
+/** 取消当前拖拽/裁剪，必要时补发 end-change，避免父级持有未结束的变更 */
+function cancelActiveInteraction() {
+  releasePointer()
+  stopEdgeScroll()
+  if (interaction && interaction.changeOpen) emit('end-change')
+  interaction = null
+  if (moveTarget.value) {
+    moveTarget.value = null
+    scheduleDraw()
+  }
+  cursor.value = 'default'
+}
+
+function zoomAtFocal(next: number, clientX: number) {
+  const wrap = wrapRef.value
+  if (!wrap) return
+  const offsetX = clientX - wrap.getBoundingClientRect().left
+  pendingAnchor = { timeSec: (wrap.scrollLeft + offsetX) / props.zoom, offsetX }
+  emit('zoom', clampZoom(next, MIN_ZOOM, MAX_ZOOM))
+}
+
+const {
+  onPointerDown: onLongPressDown,
+  onContextMenu: onLongPressContextMenu,
+  cancel: cancelLongPress,
+} = useLongPress<{ track: StageTrack; clip: StageClip; clientX: number; clientY: number }>({
+  onTrigger: (payload, event) => {
+    cancelActiveInteraction()
+    emit('select', payload.track, payload.clip)
+    emit('context-clip', payload.track, payload.clip, event.clientX, event.clientY)
+  },
+})
+
+function onClipLongPressDown(
+  event: PointerEvent,
+  hit: { track: StageTrack; clip: StageClip; clientX: number; clientY: number },
+) {
+  onLongPressDown(event, hit)
+}
+
+const {
+  onPointerDown: onPinchPointerDown,
+  onPointerMove: onPinchPointerMove,
+  onPointerUp: onPinchPointerUp,
+  cancel: cancelPinch,
+  active: pinchActive,
+} = usePinchZoom({
+  min: MIN_ZOOM,
+  max: MAX_ZOOM,
+  getValue: () => props.zoom,
+  onStart: () => {
+    pinching = true
+    cancelLongPress()
+    cancelActiveInteraction()
+    // cancelActiveInteraction 释放了交互指针；双指各自的捕获需要重新挂回画布
+    for (const pointerId of touchCapture) {
+      try {
+        canvasRef.value?.setPointerCapture(pointerId)
+      } catch {
+        // 忽略已失效指针
+      }
+    }
+  },
+  onChange: (next, focal) => zoomAtFocal(next, focal.clientX),
+  onEnd: () => {
+    pinching = false
+    scheduleDraw()
+  },
+})
 
 function snapEdge(value: number, exclude: StageClip | null): number {
   const raw = Math.max(0, Math.round(value))
@@ -744,27 +887,52 @@ function isVirtualDialogue(track: StageTrack, clip: StageClip): boolean {
 
 function onPointerDown(event: PointerEvent) {
   if (event.button !== 0) return
+  // 每一根触控手指先显式捕获，双指缩放的第二指也不会因事件丢失而卡死
+  captureTouchPointer(event)
   const canvas = canvasRef.value
   if (!canvas) return
+  // 双指缩放优先：第二指按下时直接接管，不再进入片段/轨道命中
+  if (onPinchPointerDown(event)) return
+  if (pinching) {
+    // 未收到 onEnd 的残留手势（指针在窗口外抬起）自愈，避免永久停止重绘
+    pinching = false
+    scheduleDraw()
+  }
   const { x, y } = pointOf(event)
   hideHover()
 
   if (y >= scrollTop.value && y < scrollTop.value + RULER_H) {
-    interaction = { kind: 'seek', clip: null, track: null, startX: x, startY: y, originalStart: 0, originalEnd: 0, originalSource: 0, moved: false }
-    canvas.setPointerCapture(event.pointerId)
+    interaction = {
+      kind: 'seek', clip: null, track: null,
+      startX: x, startY: y, startClientX: event.clientX, startClientY: event.clientY,
+      startScrollLeft: 0, changeOpen: false,
+      originalStart: 0, originalEnd: 0, originalSource: 0, moved: false,
+    }
+    capturePointer(event)
     emit('seek', Math.min(toMs(x), props.durationMs))
     return
   }
 
   if (inVideoLane(y)) {
-    interaction = { kind: 'seek', clip: null, track: null, startX: x, startY: y, originalStart: 0, originalEnd: 0, originalSource: 0, moved: false }
-    canvas.setPointerCapture(event.pointerId)
+    interaction = {
+      kind: 'seek', clip: null, track: null,
+      startX: x, startY: y, startClientX: event.clientX, startClientY: event.clientY,
+      startScrollLeft: 0, changeOpen: false,
+      originalStart: 0, originalEnd: 0, originalSource: 0, moved: false,
+    }
+    capturePointer(event)
     emit('seek', Math.min(toMs(x), props.durationMs))
     return
   }
 
   const hit = clipAt(x, y)
   if (hit) {
+    onClipLongPressDown(event, {
+      track: hit.track,
+      clip: hit.clip,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    })
     emit('select', hit.track, hit.clip)
     const virtualMove = isVirtualDialogue(hit.track, hit.clip)
     const editable = !hit.track.locked && !hit.clip.locked && (!hit.track.virtual || virtualMove)
@@ -775,13 +943,17 @@ function onPointerDown(event: PointerEvent) {
         track: hit.track,
         startX: x,
         startY: y,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startScrollLeft: 0,
+        changeOpen: true,
         originalStart: hit.clip.startMs,
         originalEnd: hit.clip.endMs,
         originalSource: hit.clip.sourceStartMs,
         moved: false,
       }
       emit('begin-change')
-      canvas.setPointerCapture(event.pointerId)
+      capturePointer(event)
       cursor.value = 'ew-resize'
       return
     }
@@ -792,13 +964,17 @@ function onPointerDown(event: PointerEvent) {
         track: hit.track,
         startX: x,
         startY: y,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startScrollLeft: 0,
+        changeOpen: !virtualMove,
         originalStart: hit.clip.startMs,
         originalEnd: hit.clip.endMs,
         originalSource: hit.clip.sourceStartMs,
         moved: false,
       }
       if (!virtualMove) emit('begin-change')
-      canvas.setPointerCapture(event.pointerId)
+      capturePointer(event)
       cursor.value = 'grabbing'
       return
     }
@@ -808,19 +984,45 @@ function onPointerDown(event: PointerEvent) {
 
   const lane = laneAt(y)
   if (lane) {
+    // 空白轨道：触控按住平移时间轴，鼠标保持原有 seek 行为
+    if (event.pointerType === 'touch') {
+      const wrap = wrapRef.value
+      if (!wrap) return
+      interaction = {
+        kind: 'pan', clip: null, track: lane.track,
+        startX: x, startY: y, startClientX: event.clientX, startClientY: event.clientY,
+        startScrollLeft: wrap.scrollLeft, changeOpen: false,
+        originalStart: 0, originalEnd: 0, originalSource: 0, moved: false,
+      }
+      capturePointer(event)
+      cursor.value = 'grab'
+      return
+    }
     emit('select-track', lane.track)
     emit('seek', Math.min(toMs(x), props.durationMs))
-    interaction = { kind: 'seek', clip: null, track: lane.track, startX: x, startY: y, originalStart: 0, originalEnd: 0, originalSource: 0, moved: false }
-    canvas.setPointerCapture(event.pointerId)
+    interaction = {
+      kind: 'seek', clip: null, track: lane.track,
+      startX: x, startY: y, startClientX: event.clientX, startClientY: event.clientY,
+      startScrollLeft: 0, changeOpen: false,
+      originalStart: 0, originalEnd: 0, originalSource: 0, moved: false,
+    }
+    capturePointer(event)
     cursor.value = 'pointer'
   }
 }
 
 function onPointerMove(event: PointerEvent) {
   lastPointerClient = { x: event.clientX, y: event.clientY }
+  // 双指手势优先消费移动，期间不更新 hover / 拖拽
+  if (onPinchPointerMove(event)) return
   const { x, y } = pointOf(event)
   if (!interaction) {
     updateHover(x, y)
+    return
+  }
+  if (interaction.kind === 'pan') {
+    const wrap = wrapRef.value
+    if (wrap) wrap.scrollLeft = Math.max(0, interaction.startScrollLeft - (event.clientX - interaction.startClientX))
     return
   }
   if (interaction.kind === 'seek') {
@@ -832,7 +1034,11 @@ function onPointerMove(event: PointerEvent) {
   stopEdgeScroll()
   const clip = interaction.clip
   if (!clip) return
-  interaction.moved = true
+  if (!interaction.moved) {
+    // 触控需超过 8px 才进入拖拽/裁剪，避免点按即误改
+    if (event.pointerType === 'touch' && distanceBetween(event.clientX, event.clientY, interaction.startClientX, interaction.startClientY) < 8) return
+    interaction.moved = true
+  }
   const deltaMs = ((x - interaction.startX) / props.zoom) * 1000
   if (interaction.kind === 'move') {
     const duration = interaction.originalEnd - interaction.originalStart
@@ -860,16 +1066,22 @@ function onPointerMove(event: PointerEvent) {
 }
 
 function onPointerUp(event: PointerEvent) {
-  const canvas = canvasRef.value
-  if (canvas?.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId)
+  onPinchPointerUp(event)
+  releaseTouchPointer(event)
+  releasePointer(event)
   stopEdgeScroll()
-  if (interaction && interaction.kind !== 'seek') emit('end-change')
+  if (interaction && interaction.kind !== 'seek' && interaction.kind !== 'pan') emit('end-change')
   if (moveTarget.value) {
     moveTarget.value = null
     scheduleDraw()
   }
   interaction = null
   cursor.value = 'default'
+  // 抬起后手势已结束的残留 pinching 必须复位，否则 scheduleDraw 被永久短路
+  if (!pinchActive.value && pinching) {
+    pinching = false
+    scheduleDraw()
+  }
 }
 
 function onPointerLeave() {
@@ -888,6 +1100,8 @@ function onDoubleClick(event: MouseEvent) {
 }
 
 function onContextMenu(event: MouseEvent) {
+  // 触控长按后的系统菜单位于本轮手势内时阻止，鼠标右键不受影响
+  onLongPressContextMenu(event)
   const { x, y } = pointOf(event)
   const hit = clipAt(x, y)
   if (hit) {
@@ -973,13 +1187,9 @@ function onScroll() {
 function onWheel(event: WheelEvent) {
   if (event.metaKey || event.ctrlKey) {
     event.preventDefault()
-    const wrap = wrapRef.value
-    if (!wrap) return
-    const offsetX = event.clientX - wrap.getBoundingClientRect().left
-    pendingAnchor = { timeSec: (wrap.scrollLeft + offsetX) / props.zoom, offsetX }
+    if (!wrapRef.value) return
     const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2
-    const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, props.zoom * factor))
-    emit('zoom', next)
+    zoomAtFocal(props.zoom * factor, event.clientX)
     return
   }
   if (event.shiftKey) {
@@ -1076,13 +1286,24 @@ watch(
     }
     nextTick(() => {
       const wrap = wrapRef.value
-      if (wrap) wrap.scrollLeft = Math.max(0, anchor.timeSec * props.zoom - anchor.offsetX)
+      // 旧公式 Math.max(0, anchor.timeSec * props.zoom - anchor.offsetX) 现由 mixAnchoredScrollLeft 承担（含非法值回落）
+      if (wrap) wrap.scrollLeft = mixAnchoredScrollLeft(anchor.timeSec, props.zoom, anchor.offsetX)
       scheduleDraw()
     })
   },
 )
 
 watch(resolvedTheme, scheduleDraw)
+
+function onWindowBlur() {
+  cancelPinch()
+  releaseAllTouchPointers()
+  cancelLongPress()
+  cancelActiveInteraction()
+  // cancelPinch 仅在 active 时回调 onEnd；失焦时强制复位，防止 pinching 卡在 true
+  pinching = false
+  scheduleDraw()
+}
 
 onMounted(() => {
   const wrap = wrapRef.value
@@ -1094,13 +1315,20 @@ onMounted(() => {
     })
     resizeObserver.observe(wrap)
   }
+  window.addEventListener('blur', onWindowBlur)
   ensurePeaks()
   draw()
 })
 
 onBeforeUnmount(() => {
-  resizeObserver?.disconnect()
+  cancelPinch()
+  releaseAllTouchPointers()
+  cancelLongPress()
+  releasePointer()
   stopEdgeScroll()
+  pinching = false
+  window.removeEventListener('blur', onWindowBlur)
+  resizeObserver?.disconnect()
   if (raf) cancelAnimationFrame(raf)
 })
 

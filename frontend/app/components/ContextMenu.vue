@@ -130,4 +130,21 @@ watch(() => props.show, async (show) => {
 .item.disabled { opacity: 0.45; cursor: not-allowed; }
 .shortcut { font-size: 11px; color: var(--text-dim, #999); }
 .separator { height: 1px; margin: 4px 6px; background: var(--border, #e0e0e0); }
+
+/* 粗指针：限制在可视视口内滚动，菜单项放大到可触控尺寸；桌面默认分支不变 */
+@media (hover: none) and (pointer: coarse) {
+  .context-menu {
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .item {
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: 14px;
+  }
+  .shortcut {
+    display: none;
+  }
+}
 </style>

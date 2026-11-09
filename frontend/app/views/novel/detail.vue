@@ -661,10 +661,20 @@ onMounted(load)
   background: var(--success-bg);
   color: var(--success);
 }
-@media (max-width: 760px) {
-  .page { padding: 16px 16px 32px; }
+/* 平板宽度：正文列不再铺满整宽，保持阅读行宽（图谱 / 罗盘画布不在本文件内，交互不变） */
+@media (max-width: 1180px) {
+  .detail-grid,
+  .detail-chapters {
+    max-width: min(100%, 860px);
+    margin-inline: auto;
+  }
+}
+@media (max-width: 900px) {
   .page-head { flex-wrap: wrap; }
   .detail-grid { grid-template-columns: 1fr; }
   .page-tabs { width: 100%; }
+}
+@media (max-width: 743px) {
+  .page { padding: 16px 16px 32px; }
 }
 </style>

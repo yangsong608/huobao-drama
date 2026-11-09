@@ -132,6 +132,7 @@ import { Loader2, Sparkles, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { useNovelStore } from '~/stores/novel'
 import { settingsAPI } from '~/composables/useApi'
+import { useOverlayHistory } from '~/composables/useOverlayHistory'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ 'update:open': [value: boolean]; created: [novel: any] }>()
@@ -205,6 +206,13 @@ function close() {
   if (store.saving) return
   emit('update:open', false)
 }
+
+// 返回键 / 返回手势先关弹窗，关闭后焦点回到触发按钮
+const overlay = useOverlayHistory(() => close())
+watch(() => props.open, (open) => {
+  if (open) overlay.open()
+  else overlay.close()
+})
 
 function parseGenre(raw: string): string[] {
   return [...new Set(raw.split(/[,，、]/).map((item) => item.trim()).filter(Boolean))]

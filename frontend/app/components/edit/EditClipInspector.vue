@@ -1,5 +1,30 @@
 <template>
-  <aside class="ed-inspector">
+  <aside
+    class="ed-inspector"
+    :class="{ 'is-drawer': drawer }"
+    :style="drawer ? { '--ed-insp-vh': `${drawerVh}dvh` } : undefined"
+  >
+    <!-- 抽屉模式头：拖拽手柄（仅竖屏）+ 标题 + 关闭；桌面无此 chrome -->
+    <div v-if="drawer" class="ed-insp-drawer-head">
+      <button
+        class="ed-insp-grip"
+        type="button"
+        :aria-label="t('tablet.drawers.inspector')"
+        @pointerdown="onGripPointerDown"
+      >
+        <span></span>
+      </button>
+      <b>{{ t('tablet.drawers.inspector') }}</b>
+      <button
+        class="ed-insp-close"
+        type="button"
+        :title="t('tablet.close')"
+        :aria-label="t('tablet.close')"
+        @click="$emit('close')"
+      >
+        <X :size="16" />
+      </button>
+    </div>
     <template v-if="cue">
       <header class="ed-insp-head">
         <b>{{ t('edit.subtitleEditTitle') }}</b>
@@ -20,10 +45,10 @@
         <h4>{{ t('edit.subtitleTime') }}</h4>
         <div class="ed-row">
           <label>{{ t('edit.startTime') }}
-            <input :value="formatClockMs(cue.startMs)" @change="onStartInput($event)" />
+            <input inputmode="numeric" :value="formatClockMs(cue.startMs)" @change="onStartInput($event)" />
           </label>
           <label>{{ t('edit.endTime') }}
-            <input :value="formatClockMs(cue.endMs)" @change="onEndInput($event)" />
+            <input inputmode="numeric" :value="formatClockMs(cue.endMs)" @change="onEndInput($event)" />
           </label>
         </div>
         <div class="ed-row">
@@ -125,10 +150,10 @@
         <h4>{{ t('edit.overlayWindow') }}</h4>
         <div class="ed-row">
           <label>{{ t('edit.startTime') }}
-            <input :value="formatClockMs(overlay.startMs)" @change="onOverlayStartInput($event)" />
+            <input inputmode="numeric" :value="formatClockMs(overlay.startMs)" @change="onOverlayStartInput($event)" />
           </label>
           <label>{{ t('edit.endTime') }}
-            <input :value="formatClockMs(overlay.endMs)" @change="onOverlayEndInput($event)" />
+            <input inputmode="numeric" :value="formatClockMs(overlay.endMs)" @change="onOverlayEndInput($event)" />
           </label>
         </div>
         <div class="ed-row">
@@ -565,11 +590,12 @@
 
 <script setup>
 import { useI18n } from 'vue-i18n'
-import { MousePointer2, Scissors, Trash2 } from 'lucide-vue-next'
+import { MousePointer2, Scissors, Trash2, X } from 'lucide-vue-next'
 import { formatClock, SUBTITLE_FONT_WHITELIST, AUDIO_EFFECT_PRESETS, resolveCueAppearance } from '~/utils/edit-plan'
 import { formatPrecise, formatClockMs, parseClockMs, frameDurationMs } from '~/utils/edit-timecode'
 import { DEFAULT_TRANSITION_MS, COMMON_TRANSITION_TYPES, transitionTypeOption } from '~/utils/edit-transition-types'
 import { FILTER_PRESETS } from '~/utils/edit-filter-presets'
+import { clampInspectorDrawerVh } from '~/utils/edit-panel'
 
 const props = defineProps({
   plan: { type: Object, required: true },
@@ -581,6 +607,7 @@ const props = defineProps({
   readonly: { type: Boolean, default: false },
   cue: { type: Object, default: null },
   overlay: { type: Object, default: null },
+  drawer: { type: Boolean, default: false },
 })
 const emit = defineEmits([
   'trim-start', 'trim-end', 'speed', 'gap', 'fades', 'split', 'remove',
@@ -591,6 +618,7 @@ const emit = defineEmits([
   'pitch-set', 'effect-set',
   'overlay-time', 'overlay-align-start', 'overlay-align-end', 'overlay-transform',
   'overlay-opacity', 'overlay-fades', 'overlay-text', 'overlay-remove',
+  'close',
 ])
 const { t } = useI18n()
 
@@ -780,6 +808,42 @@ function onOverlayEndInput(event) {
 function onTextBgToggle(checked) {
   emit('overlay-text', { backgroundColor: checked ? '#000000' : null })
 }
+
+// ---- 抽屉模式：竖屏下拖动顶部手柄调整高度（35–80dvh） ----
+const drawerVh = ref(55)
+let gripPointerId = null
+let gripStartY = 0
+let gripStartVh = 55
+
+function onGripPointerMove(event) {
+  if (gripPointerId === null || event.pointerId !== gripPointerId) return
+  const deltaVh = ((gripStartY - event.clientY) / Math.max(1, window.innerHeight)) * 100
+  drawerVh.value = clampInspectorDrawerVh(gripStartVh + deltaVh)
+}
+
+function releaseGrip(event) {
+  if (gripPointerId === null) return
+  if (event && event.pointerId !== gripPointerId) return
+  gripPointerId = null
+  window.removeEventListener('pointermove', onGripPointerMove)
+  window.removeEventListener('pointerup', releaseGrip)
+  window.removeEventListener('pointercancel', releaseGrip)
+}
+
+function onGripPointerDown(event) {
+  if (event.pointerType && event.pointerType !== 'touch') return
+  gripPointerId = event.pointerId
+  gripStartY = event.clientY
+  gripStartVh = drawerVh.value
+  if (typeof event.currentTarget.setPointerCapture === 'function') {
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+  window.addEventListener('pointermove', onGripPointerMove)
+  window.addEventListener('pointerup', releaseGrip)
+  window.addEventListener('pointercancel', releaseGrip)
+}
+
+onBeforeUnmount(() => releaseGrip(null))
 </script>
 
 <style scoped>
@@ -857,4 +921,60 @@ function onTextBgToggle(checked) {
 .ed-insp-warnings { margin: 0; padding-left: 14px; display: flex; flex-direction: column; gap: 4px; }
 .ed-insp-warnings li { font-size: 9px; color: var(--text-2); line-height: 1.4; }
 .ed-insp-warnings b { color: var(--warning); font-weight: 600; }
+/* 抽屉头默认不渲染（仅 drawer 模式出现） */
+.ed-insp-drawer-head { display: none; }
+@media (max-width: 900px) {
+  /* 窄屏检查器默认隐藏，仅作为底部/右侧抽屉打开时显示 */
+  .ed-inspector { display: none; }
+  .ed-inspector.is-drawer {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+    z-index: 61; width: auto; height: var(--ed-insp-vh, 55dvh);
+    max-height: calc(var(--app-vvh, 100dvh) - 12px);
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+    border: 1px solid var(--border); border-bottom: 0;
+    border-radius: 16px 16px 0 0; background: var(--bg-1);
+    box-shadow: 0 -14px 36px rgb(0 0 0 / 35%); overflow-y: auto;
+  }
+  .ed-insp-drawer-head {
+    display: flex; align-items: center; gap: 8px; flex: 0 0 auto;
+    padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  .ed-insp-drawer-head b {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 12px; color: var(--text-0);
+  }
+  .ed-insp-grip {
+    width: 44px; height: 32px; flex: 0 0 44px; display: inline-flex;
+    align-items: center; justify-content: center;
+    border: 0; background: transparent; cursor: grab; touch-action: none;
+  }
+  .ed-insp-grip span { width: 36px; height: 4px; border-radius: 2px; background: var(--border); }
+  .ed-insp-close {
+    width: 44px; height: 44px; flex: 0 0 44px; display: inline-flex;
+    align-items: center; justify-content: center;
+    border: 0; border-radius: 8px; background: transparent; color: var(--text-1); cursor: pointer;
+  }
+  .ed-insp-close:hover { background: var(--bg-hover); }
+  /* 横屏：贴右侧全高、无圆角；手柄无意义故隐藏 */
+  .ed-inspector.is-drawer.is-landscape {
+    top: 0; left: auto; right: 0; bottom: 0; width: min(360px, 60vw);
+    height: auto; max-height: none; padding-bottom: 12px;
+    border: 0; border-left: 1px solid var(--border); border-radius: 0;
+    box-shadow: -14px 0 36px rgb(0 0 0 / 35%);
+  }
+  .ed-inspector.is-drawer.is-landscape .ed-insp-grip { display: none; }
+}
+@media (max-width: 1180px) and (hover: none) and (pointer: coarse) {
+  /* 粗指针：输入/选择框 16px 防聚焦缩放，操作按钮至少 36px */
+  .ed-inspector input, .ed-inspector textarea, .ed-inspector select { font-size: 16px; }
+  .ed-inspector .ed-insp-row button,
+  .ed-inspector .ed-insp-actions button,
+  .ed-inspector .ed-insp-drawer-head button { min-height: 36px; }
+}
+@media (max-width: 744px) {
+  /* 窄屏：信息网格与并排表单行改为单列 */
+  .ed-insp-grid { grid-template-columns: minmax(0, 1fr); }
+  .ed-row { flex-direction: column; align-items: stretch; }
+  .ed-row input[type='range'] { width: 100%; }
+}
 </style>

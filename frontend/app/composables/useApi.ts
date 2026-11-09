@@ -33,6 +33,13 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
       const ms = Math.round(performance.now() - start)
       console.log(`%c[API] %c${method} ${path} %cERROR %c${ms}ms`, 'color:#888', 'color:#ef5350', 'color:#ef5350;font-weight:bold', 'color:#888', err.message)
     }
+    // 网络级失败（断网/DNS/连接重置）通知 PWA 提示层复测健康；错误对象、状态码与重试行为不变
+    if (
+      typeof window !== 'undefined'
+      && (err instanceof TypeError || /Failed to fetch|Load failed|NetworkError|network/.test(err?.message || ''))
+    ) {
+      window.dispatchEvent(new CustomEvent('huobao:network-error'))
+    }
     throw err
   }
 }
@@ -71,6 +78,13 @@ export const episodeAPI = {
   extractStatus: (id: number) => api.get(`/episodes/${id}/extract-status`),
   generateVideoPrompts: (id: number, model?: string, configId?: number, storyboardIds?: number[]) => api.post(`/episodes/${id}/generate-video-prompts`, { model: model || undefined, config_id: configId || undefined, storyboard_ids: storyboardIds?.length ? storyboardIds : undefined }),
   videoPromptsStatus: (id: number) => api.get(`/episodes/${id}/video-prompts-status`),
+  // 后端持久批量视频：并发 1-5，返回最新批次进度
+  startVideoBatch: (id: number, payload: {
+    concurrency: number
+    items: Array<{ storyboard_id: number; request: Record<string, any> }>
+  }) => api.post(`/episodes/${id}/video-batch`, payload),
+  videoBatchStatus: (id: number) => api.get(`/episodes/${id}/video-batch`),
+  stopVideoBatch: (id: number) => api.post(`/episodes/${id}/video-batch/stop`),
   comfyWorkflow: (id: number, configId?: number) => api.get(`/episodes/${id}/comfyui/workflow${configId ? `?config_id=${configId}` : ''}`),
   comfyUiSession: (id: number, configId?: number) => api.get(`/episodes/${id}/comfyui/ui-session${configId ? `?config_id=${configId}` : ''}`),
   comfyRun: (id: number, opts?: { configId?: number; forceNew?: boolean }) => api.post(`/episodes/${id}/comfyui/run`, { config_id: opts?.configId, force_new: opts?.forceNew === true }),
@@ -133,12 +147,12 @@ export const editAPI = {
     return api.post(`/episodes/${episodeId}/edit/frames`, body)
   },
   // 图片素材上传（Task 19，multipart 走既有 uploadForm 封装），返回 { url, width, height, fingerprint }
-  uploadImage(episodeId: number, file: File) {
-    return uploadForm(`/episodes/${episodeId}/edit/assets/images`, file)
+  uploadImage(episodeId: number, file: File, options?: UploadOptions) {
+    return uploadForm(`/episodes/${episodeId}/edit/assets/images`, file, {}, options)
   },
   // 视频素材上传：后端落入项目 edit/assets 并返回可直接插入时间线的 source
-  uploadVideo(episodeId: number, file: File) {
-    return uploadForm<{ url: string; source: any }>(`/episodes/${episodeId}/edit/assets/videos`, file)
+  uploadVideo(episodeId: number, file: File, options?: UploadOptions) {
+    return uploadForm<{ url: string; source: any }>(`/episodes/${episodeId}/edit/assets/videos`, file, {}, options)
   },
   // 剪辑导出（Task 21）：返回 { export_id }；状态行字段与后端 getEditExportStatus 同构
   render(episodeId: number, body: {
@@ -336,9 +350,84 @@ export const voiceProfileAPI = {
   },
 }
 
-async function uploadForm<T = any>(path: string, file: File, fields: Record<string, string> = {}): Promise<T> {  const fd = new FormData()
+export interface UploadOptions {
+  signal?: AbortSignal
+  onProgress?: (percent: number) => void
+}
+
+/**
+ * 上传进度/取消（平板）：只有传入 options 时才用 XHR；
+ * 未传 options 时继续走原来的 fetch 路径，行为逐字不变。
+ */
+function uploadFormXhr<T>(url: string, fd: FormData, options: UploadOptions): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    let settled = false
+    const signal = options.signal
+
+    const cleanup = () => {
+      if (signal) signal.removeEventListener('abort', onAbort)
+    }
+    const fail = (error: Error) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error)
+    }
+    const done = (value: T) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(value)
+    }
+    function onAbort() {
+      xhr.abort()
+    }
+
+    xhr.open('POST', url)
+    xhr.upload.onprogress = (event) => {
+      if (!options.onProgress) return
+      const total = event.lengthComputable ? event.total : 0
+      const percent = total > 0 ? Math.round((event.loaded / total) * 100) : 0
+      options.onProgress(Math.min(100, Math.max(0, percent)))
+    }
+    xhr.onabort = () => fail(new DOMException('Aborted', 'AbortError'))
+    xhr.onerror = () => fail(new Error('network error'))
+    xhr.onload = () => {
+      let json: any = null
+      try {
+        json = JSON.parse(xhr.responseText)
+      } catch {
+        json = null
+      }
+      if (xhr.status < 200 || xhr.status >= 300 || !json || (json.code && json.code >= 400)) {
+        fail(new Error(json?.message || `${xhr.status}`))
+        return
+      }
+      done((json.data ?? json) as T)
+    }
+
+    if (signal) {
+      if (signal.aborted) {
+        fail(new DOMException('Aborted', 'AbortError'))
+        return
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+    }
+    xhr.send(fd)
+  })
+}
+
+async function uploadForm<T = any>(
+  path: string,
+  file: File,
+  fields: Record<string, string> = {},
+  options?: UploadOptions,
+): Promise<T> {
+  const fd = new FormData()
   fd.append('file', file)
   for (const [key, value] of Object.entries(fields)) fd.append(key, value)
+  if (options) return uploadFormXhr<T>(`${BASE}${path}`, fd, options)
   const resp = await fetch(`${BASE}${path}`, { method: 'POST', body: fd })
   const json = await resp.json()
   if (!resp.ok || (json.code && json.code >= 400)) throw new Error(json.message || `${resp.status}`)
@@ -1289,6 +1378,16 @@ export const taskAPI = {
   },
   // 按集聚合生成任务（sys_task + video_merges）
   listByEpisode: (episodeId: number) => api.get<{ tasks: any[]; merges: any[] }>(`/episodes/${episodeId}/generation-tasks`),
+  // 任务中心：生成任务 + 语音 Take + 混音作业 + 流水线 + 导出
+  taskCenter: (episodeId: number) => api.get<{
+    counts: Record<string, number>
+    tasks: any[]
+    merges: any[]
+    voices: { counts: Record<string, number>; items: any[] }
+    audio: any
+    pipeline: any
+    exports: any[]
+  }>(`/episodes/${episodeId}/task-center`),
   // 清空本集已完成/失败任务（保留进行中与成片）
   clearByEpisode: (episodeId: number) => api.del<{ deleted: number }>(`/episodes/${episodeId}/generation-tasks`),
 }

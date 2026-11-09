@@ -14,8 +14,10 @@
             />
             <span>{{ uploading ? t('edit.uploading') : t('edit.uploadVideo') }}</span>
           </label>
+          <button v-if="uploading" type="button" class="ed-cancel" @click="cancelUpload">{{ t('common.cancel') }}</button>
           <button type="button" class="ed-close" @click="$emit('close')">×</button>
         </header>
+        <p v-if="uploading" class="ed-progress" role="status">{{ uploadProgress }}%</p>
         <p class="ed-hint">{{ t('edit.insertVideoNote') }}</p>
         <p v-if="error" class="ed-error">{{ error }}</p>
         <div class="ed-vid-grid">
@@ -47,6 +49,7 @@ import { Film } from 'lucide-vue-next'
 import { editAPI } from '~/composables/useApi'
 import { mediaUrl } from '~/utils/edit-plan'
 import { formatPrecise } from '~/utils/edit-timecode'
+import { checkUploadFile, uploadErrorKey } from '~/utils/upload-guard'
 
 // 视频选择器：分镜视频 + 项目 edit/assets 已上传视频。
 // 点击只 emit('insert')，插入位置与命令由 EditWorkbench 负责。
@@ -62,7 +65,9 @@ const storyboards = ref([])
 const videos = ref([])
 const loading = ref(false)
 const uploading = ref(false)
+const uploadProgress = ref(0)
 const error = ref('')
+let uploadAbort = null
 
 const items = computed(() => {
   const fromStoryboards = storyboards.value
@@ -106,16 +111,38 @@ async function onUpload(event) {
   const file = event.target?.files?.[0]
   event.target.value = ''
   if (!file) return
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    error.value = t('tablet.status.needServer')
+    return
+  }
+  const check = checkUploadFile(file, 'video')
+  if (!check.ok) {
+    error.value = t(uploadErrorKey(check, 'video'))
+    return
+  }
   uploading.value = true
+  uploadProgress.value = 0
   error.value = ''
+  const controller = new AbortController()
+  uploadAbort = controller
   try {
-    await editAPI.uploadVideo(props.episodeId, file)
+    await editAPI.uploadVideo(props.episodeId, file, {
+      signal: controller.signal,
+      onProgress: (percent) => { uploadProgress.value = percent },
+    })
     await loadSources()
   } catch (cause) {
-    error.value = cause?.message || t('edit.actionFailed')
+    // 用户取消是正常路径，保持静默
+    if (cause?.name !== 'AbortError') error.value = cause?.message || t('edit.actionFailed')
   } finally {
+    uploadAbort = null
     uploading.value = false
+    uploadProgress.value = 0
   }
+}
+
+function cancelUpload() {
+  uploadAbort?.abort()
 }
 
 watch(() => props.open, (value) => {
@@ -153,6 +180,11 @@ watch(() => props.open, (value) => {
   margin: 0; padding: 6px 9px; border-radius: 7px; font-size: 11px;
   background: color-mix(in srgb, var(--action-danger) 10%, var(--bg-1)); color: var(--action-danger);
 }
+.ed-progress { margin: 0; font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.ed-cancel {
+  height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--bg-2); color: var(--text-1); font-size: 11px; cursor: pointer; white-space: nowrap;
+}
 .ed-vid-grid {
   flex: 1; min-height: 0; overflow-y: auto;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
@@ -178,4 +210,11 @@ watch(() => props.open, (value) => {
   font-size: 10px; color: var(--text-2);
 }
 .ed-empty { margin: 0; padding: 18px 0; text-align: center; font-size: 11px; color: var(--text-3); }
+
+/* 平板：上传/取消/关闭至少 44×44，避免误触 */
+@media (max-width: 1180px) {
+  .ed-upload,
+  .ed-cancel { height: 44px; min-width: 44px; padding: 0 14px; }
+  .ed-close { width: 44px; height: 44px; }
+}
 </style>

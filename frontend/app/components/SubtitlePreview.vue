@@ -9,6 +9,8 @@
         :controls="controls"
         :muted="muted"
         preload="metadata"
+        playsinline
+        webkit-playsinline
         @loadedmetadata="onLoadedMetadata"
         @durationchange="onLoadedMetadata"
         @timeupdate="onTimeUpdate"
@@ -208,4 +210,12 @@ defineExpose({ play, pause, seekTo, videoEl, currentMs, durationMs })
 .sub-range { flex: 1; accent-color: var(--accent); }
 .sub-time { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .sub-hint { margin: 0; font-size: 11px; color: var(--text-3); }
+
+/* 平板：字幕抬到原生控件与安全区之上，避免被进度条/Home 指示条遮挡 */
+@media (max-width: 1180px) {
+  .sub-caption {
+    bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+    font-size: 14px;
+  }
+}
 </style>

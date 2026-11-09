@@ -1,6 +1,6 @@
 <template>
   <div v-if="open" class="overlay" @click.self="close">
-    <div class="dialog import-dialog">
+    <div class="dialog import-dialog" role="dialog" aria-modal="true" :aria-label="t('scriptImport.title')">
       <div class="dialog-head">
         <div class="dialog-head-copy">
           <div class="dialog-title">{{ t('scriptImport.title') }}</div>
@@ -86,6 +86,7 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { scriptImportAPI } from '~/composables/useApi'
 import { toastError } from '~/composables/useToast'
+import { useOverlayHistory } from '~/composables/useOverlayHistory'
 
 const props = defineProps<{ open: boolean; dramaId: number }>()
 const emit = defineEmits<{ close: []; done: [] }>()
@@ -157,6 +158,13 @@ function close() {
   if (committing.value) return
   emit('close')
 }
+
+// 返回键 / 返回手势先关弹窗（提交中保持原状，不中断导入）
+const overlay = useOverlayHistory(() => close())
+watch(() => props.open, (open) => {
+  if (open) overlay.open()
+  else overlay.close()
+})
 </script>
 
 <style scoped>
@@ -180,5 +188,9 @@ function close() {
 .import-warn { margin: 0; font-size: 11px; color: var(--action-warning, #c48a1b); }
 @media (max-width: 820px) {
   .import-body { grid-template-columns: 1fr; }
+}
+/* scoped 的 90vh 优先级高于全局 .dialog 的高度上限，≤1180 必须显式按可视视口收敛，否则 iOS 上会超出安全区 */
+@media (max-width: 1180px) {
+  .import-dialog { max-height: calc(var(--app-vvh, 100dvh) - var(--safe-top) - var(--safe-bottom) - 24px); }
 }
 </style>

@@ -57,6 +57,7 @@
 <script setup>
 import { useI18n } from 'vue-i18n'
 import { editAPI } from '~/composables/useApi'
+import { useVisibilityPolling } from '~/composables/useVisibilityPolling'
 import { collectExportWarnings } from '~/utils/edit-export-warnings'
 
 // 导出确认弹窗（设计 6.10）：只读展示计划降级清单（后端 buildRenderReport 同名 code），
@@ -79,7 +80,9 @@ const setCurrent = ref(false)
 const preset = ref('vertical-hd')
 const progressText = ref('')
 const error = ref('')
-let pollTimer = 0
+// 导出状态 2s 轮询：exportId 通过闭包传入，隐藏暂停、卸载必停
+let exportId = 0
+const exportPoll = useVisibilityPolling(() => pollStatus(exportId), 2000)
 
 const warnings = computed(() => collectExportWarnings(props.plan))
 
@@ -104,8 +107,7 @@ function close() {
 }
 
 function stopPolling() {
-  clearInterval(pollTimer)
-  pollTimer = 0
+  exportPoll.stop()
 }
 
 function startExport() {
@@ -125,9 +127,10 @@ async function runExport() {
       base_version: props.version,
     }
     if (props.projectId > 0) body.project_id = props.projectId
-    const { export_id: exportId } = await editAPI.render(props.episodeId, body)
+    const { export_id: id } = await editAPI.render(props.episodeId, body)
     stopPolling()
-    pollTimer = setInterval(() => void pollStatus(exportId), 2000)
+    exportId = id
+    exportPoll.start()
     await pollStatus(exportId)
   } catch (cause) {
     error.value = cause?.message || t('edit.exportFailed')
@@ -139,6 +142,8 @@ async function pollStatus(exportId) {
   try {
     // 状态行字段与后端 getEditExportStatus 同构（snake_case）
     const status = await editAPI.renderStatus(props.episodeId, exportId)
+    // 弹窗关闭 / 组件卸载后迟到的响应：不改状态、不 emit
+    if (!exportPoll.isRunning()) return
     progressText.value = `${t('edit.exportProgress')} ${Math.round(Number(status.progress) || 0)}%`
     if (status.status !== 'completed' && status.status !== 'failed') return
     stopPolling()
@@ -210,5 +215,8 @@ onBeforeUnmount(stopPolling)
 .ed-error {
   margin: 0; padding: 6px 9px; border-radius: 7px; font-size: 11px;
   background: color-mix(in srgb, var(--action-danger) 10%, var(--bg-1)); color: var(--action-danger);
+}
+@media (hover: none) and (pointer: coarse) {
+  .ed-close { min-width: var(--tap-min); min-height: var(--tap-min); }
 }
 </style>

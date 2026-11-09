@@ -110,6 +110,7 @@ import { useI18n } from 'vue-i18n'
 import BaseSelect from '~/components/BaseSelect.vue'
 import { gridAPI, characterAPI, sceneAPI, propAPI } from '~/composables/useApi'
 import { toastError } from '~/composables/useToast'
+import { useVisibilityPolling } from '~/composables/useVisibilityPolling'
 
 const props = defineProps<{
   open: boolean
@@ -166,28 +167,36 @@ function urlOf(raw: string | null | undefined) {
   return /^https?:\/\//i.test(raw) || raw.startsWith('/') ? raw : `/${raw}`
 }
 
-let timer: any = null
-function stopPoll() { if (timer) { clearInterval(timer); timer = null } }
-
-async function poll(id: number) {
-  stopPoll()
-  let attempts = 0
-  timer = setInterval(async () => {
-    attempts += 1
-    try {
-      const data = await gridAPI.get(id)
-      sheet.value = { ...sheet.value, ...data }
-      if (data.status === 'generated') {
-        stopPoll()
-        await split(id)
-      } else if (data.status === 'failed' || attempts > 80) {
-        stopPoll()
-        if (data.status === 'failed') toast.error(t('grid.statusFailed'))
-      }
-    } catch {
-      if (attempts > 80) stopPoll()
+// 宫格生成 3s 轮询：attempts 跨轮累计（上限 80 次），隐藏暂停、卸载必停
+let attempts = 0
+let pollId = 0
+const gridPoll = useVisibilityPolling(async () => {
+  if (!pollId) return
+  const id = pollId
+  attempts += 1
+  try {
+    const data = await gridAPI.get(id)
+    // 迟到响应：期间已关闭或已切到新 sheet 时，不得写状态、停新轮询或对新 id 切图
+    if (id !== pollId || !gridPoll.isRunning()) return
+    sheet.value = { ...sheet.value, ...data }
+    if (data.status === 'generated') {
+      stopPoll()
+      await split(id)
+    } else if (data.status === 'failed' || attempts > 80) {
+      stopPoll()
+      if (data.status === 'failed') toast.error(t('grid.statusFailed'))
     }
-  }, 3000)
+  } catch {
+    if (id === pollId && attempts > 80) stopPoll()
+  }
+}, 3000)
+function stopPoll() { gridPoll.stop() }
+
+function poll(id: number) {
+  stopPoll()
+  attempts = 0
+  pollId = id
+  gridPoll.start()
 }
 
 async function create() {

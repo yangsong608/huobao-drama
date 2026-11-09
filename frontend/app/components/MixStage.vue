@@ -20,6 +20,17 @@
         </button>
       </div>
       <div class="mx-top-actions">
+        <button
+          v-if="selectedClip && !soundscapeRunning"
+          class="mx-more"
+          type="button"
+          :title="t('tablet.more')"
+          :aria-label="t('tablet.more')"
+          @pointerdown.stop
+          @click.stop="openSelectedClipMenu($event)"
+        >
+          <Ellipsis :size="14" />
+        </button>
         <template v-if="$slots.actions">
           <slot name="actions" />
           <span class="mx-divider" />
@@ -129,10 +140,27 @@
       </div>
     </div>
 
+    <div v-if="inspectorDrawer && inspectorOpen" class="mx-drawer-mask" @click="closeInspectorDrawer"></div>
+
     <div :class="['mx-body', { 'is-inspector-closed': !inspectorOpen }]">
       <aside class="mx-heads">
-        <div class="mx-heads-label">{{ t('mix.trackColumn') }}</div>
-        <div class="mx-heads-clip" @wheel="onHeadsWheel">
+        <div class="mx-heads-label">
+          {{ t('mix.trackColumn') }}
+          <button
+            v-if="compactHeads"
+            class="mx-heads-fold"
+            type="button"
+            :title="headsFolded ? t('mix.trackUnfold') : t('mix.trackFold')"
+            :aria-label="headsFolded ? t('mix.trackUnfold') : t('mix.trackFold')"
+            :aria-expanded="headsFolded"
+            :aria-controls="compactHeads ? 'mx-heads-clip' : undefined"
+            @click="headsFolded = !headsFolded"
+          >
+            <PanelLeftOpen v-if="headsFolded" :size="12" />
+            <PanelLeftClose v-else :size="12" />
+          </button>
+        </div>
+        <div id="mx-heads-clip" class="mx-heads-clip" @wheel="onHeadsWheel">
           <div class="mx-heads-inner" :style="{ transform: `translateY(-${scrollTop}px)` }">
             <div v-if="videoUrl" class="mx-heads-video" :style="{ height: `${VIDEO_LANE_H}px` }">
               <Film :size="12" />
@@ -145,6 +173,7 @@
               :key="track._uid"
               :track="track"
               :active="activeTrackUid === track._uid"
+              :folded="headsFolded"
               @select="onSelectTrack"
               @update="onTrackUpdate"
               @remove="requestRemoveTrack"
@@ -237,6 +266,7 @@
 
       <MixClipInspector
         v-show="inspectorOpen"
+        :drawer="inspectorDrawer"
         :clip="selectedClip"
         :track="inspectorTrack"
         :tracks="tracks"
@@ -271,6 +301,7 @@
         @cancel-separation="onCancelSeparation"
         @begin-change="beginChange"
         @end-change="endChange"
+        @close="closeInspectorDrawer"
       >
         <template v-if="$slots.settings" #settings>
           <slot name="settings" />
@@ -434,18 +465,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import {
   AudioLines,
   AudioWaveform,
   ChevronDown,
+  Ellipsis,
   Film,
   Loader2,
   Magnet,
   Maximize2,
   Minus,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
   Pause,
@@ -475,6 +509,8 @@ import type {
 import { useExportSession } from '~/composables/useExportSession'
 import { useMixPlayback } from '~/composables/useMixPlayback'
 import { useMixStage, type StageClip, type StageTrack } from '~/composables/useMixStage'
+import { useOverlayHistory } from '~/composables/useOverlayHistory'
+import { useViewport } from '~/composables/useViewport'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
 import ContextMenu, { type MenuItem } from '~/components/ContextMenu.vue'
 import AppMenu from '~/components/AppMenu.vue'
@@ -488,6 +524,12 @@ import MixStemLibrary from '~/components/MixStemLibrary.vue'
 import MixTimeline from '~/components/MixTimeline.vue'
 import MixTrackHead from '~/components/MixTrackHead.vue'
 import SubtitlePreview from '~/components/SubtitlePreview.vue'
+import {
+  isCompactMixContainer,
+  isShortLandscape,
+  shouldAutoOpenInspectorDrawer,
+  shouldUseInspectorDrawer,
+} from '~/utils/mix-layout'
 
 const props = defineProps<{
   episodeId: number | null
@@ -616,6 +658,13 @@ const soundscapeError = ref('')
 const sourcePickerOpen = ref(false)
 const exportOpen = ref(false)
 
+/** 视口宽高与容器测量：抽屉与折叠只看数据，不在模板里读 window */
+const { width: viewportWidth, height: viewportHeight } = useViewport()
+const containerWidth = ref(0)
+const headsFolded = ref(false)
+const audioHintShown = ref(false)
+let stageResizeObserver: ResizeObserver | null = null
+
 const playback = useMixPlayback({
   tracks: () => tracks.value,
   buses: () => buses.value,
@@ -635,11 +684,63 @@ function readInspectorPreference(): boolean {
 }
 
 function toggleInspector() {
+  if (inspectorDrawer.value) {
+    if (inspectorOpen.value) closeInspectorDrawer()
+    else openInspectorDrawer()
+    return
+  }
   inspectorOpen.value = !inspectorOpen.value
   try {
     localStorage.setItem('huobao:mix:inspector', inspectorOpen.value ? '1' : '0')
   } catch { /* localStorage 不可用时仅本次生效 */ }
 }
+
+/** 检查器改右侧抽屉：容器 ≤900，或短横屏（1180×700 内） */
+const inspectorDrawer = computed(() => shouldUseInspectorDrawer({
+  viewportWidth: viewportWidth.value,
+  viewportHeight: viewportHeight.value,
+  containerWidth: containerWidth.value,
+}))
+/** 紧凑轨道头：容器 ≤900 或短横屏时允许折叠到只剩 M/S */
+const compactHeads = computed(() => isCompactMixContainer(viewportWidth.value, containerWidth.value)
+  || isShortLandscape(viewportWidth.value, viewportHeight.value))
+watch(compactHeads, (on) => {
+  if (!on) headsFolded.value = false
+})
+
+function openInspectorDrawer() {
+  inspectorOpen.value = true
+  inspectorOverlay.open()
+}
+function closeInspectorDrawer() {
+  inspectorOpen.value = false
+  // 只收起抽屉，选中与轨道焦点保持不变
+  inspectorOverlay.close()
+}
+/** 返回手势 / Escape 与关闭按钮共用同一个历史层，返回时 close() 只做焦点恢复 */
+const inspectorOverlay = useOverlayHistory(closeInspectorDrawer)
+
+watch(inspectorDrawer, (on) => {
+  if (!on) return
+  // 自动打开只认容器 ≤900（由 onSelectClip 判定）；进入抽屉模式时只做两件事：
+  // 无选中则释放空间；已选中且抽屉本已打开则补登记返回层
+  if (!selectedClip.value) { closeInspectorDrawer() }
+  else if (inspectorOpen.value) { inspectorOverlay.open() }
+}, { immediate: true })
+
+onMounted(() => {
+  if (rootRef.value) containerWidth.value = rootRef.value.clientWidth
+  if (typeof ResizeObserver === 'undefined' || !rootRef.value) return
+  stageResizeObserver = new ResizeObserver((entries) => {
+    const entry = entries[0]
+    if (entry) containerWidth.value = entry.contentRect.width
+  })
+  stageResizeObserver.observe(rootRef.value)
+})
+onBeforeUnmount(() => {
+  stageResizeObserver?.disconnect()
+  stageResizeObserver = null
+})
 
 const cues = computed(() => props.cues ?? [])
 const videoUrl = computed(() => String(props.videoUrl || '').trim())
@@ -857,6 +958,10 @@ onBeforeUnmount(() => emit('soundscape-busy', false))
 function onSelectClip(track: StageTrack, clip: StageClip) {
   activeTrackUid.value = track._uid
   selectClip(track, clip)
+  // 900 档内选中即开抽屉；短横屏但容器够宽时保持三栏，交给顶部检查器按钮
+  if (shouldAutoOpenInspectorDrawer({ viewportWidth: viewportWidth.value, containerWidth: containerWidth.value })) {
+    openInspectorDrawer()
+  }
 }
 function onSelectTrack(track: StageTrack | null) {
   activeTrackUid.value = track?._uid ?? null
@@ -1143,6 +1248,11 @@ function onContextClip(track: StageTrack, clip: StageClip, x: number, y: number)
   }
   openContextMenu(x, y, items)
 }
+function openSelectedClipMenu(event: MouseEvent) {
+  if (!selectedClip.value || !selectedTrack.value || soundscapeRunning.value) return
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  onContextClip(selectedTrack.value, selectedClip.value, rect.left, rect.bottom + 4)
+}
 function onContextTrack(track: StageTrack, x: number, y: number) {
   const items: MenuItem[] = [
     { key: 'mute', label: t('mix.trackMute'), action: () => onTrackUpdate(track, { muted: !track.muted }) },
@@ -1372,6 +1482,8 @@ async function togglePlay() {
     pauseTransport()
     return
   }
+  // 首次播放必须落在用户手势内解锁音频上下文（iOS/Android 都会先挂起）
+  playback.unlock()
   if (videoPreview.value) {
     const el = videoPreview.value.videoEl
     if (el?.ended) {
@@ -1388,7 +1500,10 @@ async function togglePlay() {
     await videoPreview.value.play()
     if (videoPreview.value?.videoEl?.paused) {
       renderedMode.value = false
-      if (hasAnyAudio.value && await startRealtimeFrom(videoCurrentMs())) return
+      if (hasAnyAudio.value && await startRealtimeFrom(videoCurrentMs())) {
+        maybeShowAudioHint()
+        return
+      }
       playing.value = false
       toast.error(t('mix.videoPlayFailed'))
     }
@@ -1402,7 +1517,16 @@ async function togglePlay() {
   if (!await startRealtimeFrom(playheadMs.value)) {
     playing.value = false
     toast.error(t('mix.noAudio'))
+    return
   }
+  maybeShowAudioHint()
+}
+/** 音频被浏览器挂起时只提示一次「点击播放启用声音」，桌面手势内恢复则不弹 */
+function maybeShowAudioHint() {
+  if (audioHintShown.value) return
+  if (!playback.suspended.value) return
+  audioHintShown.value = true
+  toast.info(t('tablet.audio.soundBlocked'))
 }
 function onPreviewTime() {
   const audio = previewAudio.value
@@ -1702,6 +1826,7 @@ defineExpose({ seekTo, pause, play: togglePlay })
 .mx-status.is-dirty { color: var(--warning); }
 .mx-status.is-saving { color: var(--accent-text); }
 .mx-top-actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+.mx-more { display: none; }
 .mx-chip { padding: 0 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 9px; line-height: 16px; color: var(--text-2); white-space: nowrap; }
 .mx-chip.is-accent { border-color: var(--accent-glow); background: var(--accent-bg); color: var(--accent-text); }
 .mx-chip.is-warning { border-color: transparent; background: var(--warning-bg); color: var(--warning); }
@@ -1741,9 +1866,12 @@ defineExpose({ seekTo, pause, play: togglePlay })
 .mx-monitor-hint { margin: 0; font-size: 9.5px; color: var(--text-3); }
 .mx-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 288px minmax(0, 1fr) 316px; }
 .mx-body.is-inspector-closed { grid-template-columns: 288px minmax(0, 1fr); }
+.mx-drawer-mask { position: fixed; inset: 0; z-index: 55; background: rgba(0, 0, 0, .45); }
 .mx-stage.is-generating .mx-body { pointer-events: none; opacity: .72; }
 .mx-heads { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-1); overflow: hidden; }
 .mx-heads-label { flex: none; height: 30px; display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid var(--border); font-size: 9px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); }
+.mx-heads-fold { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-0); color: var(--text-2); cursor: pointer; }
+.mx-heads-fold:hover { border-color: var(--accent); color: var(--text-0); }
 .mx-heads-clip { flex: 1; min-height: 0; overflow: hidden; }
 .mx-heads-inner { will-change: transform; }
 .mx-heads-video { display: flex; align-items: center; gap: 6px; padding: 0 10px; border-bottom: 1px solid var(--border); background: var(--bg-0); color: var(--text-1); font-size: 10.5px; font-weight: 600; box-sizing: border-box; }
@@ -1783,5 +1911,87 @@ defineExpose({ seekTo, pause, play: togglePlay })
   .mx-canvas { grid-row: 1; }
   .mx-body :deep(.mx-ins) { grid-column: 1 / -1; grid-row: 2; border-left: none; border-top: 1px solid var(--border); }
   .mx-transport-group.is-master { padding-left: 0; border-left: none; }
+}
+/* 900 容器档：两栏 + 右侧抽屉，必须重置 960 档的 230px 检查器行 */
+@media (max-width: 1180px) {
+  @container mx-stage (max-width: 900px) {
+    .mx-body {
+      grid-template-columns: clamp(96px, 18cqi, 180px) minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+    }
+    .mx-body.is-inspector-closed {
+      grid-template-columns: clamp(96px, 18cqi, 180px) minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+    }
+    .mx-heads, .mx-canvas { grid-row: 1; }
+    .mx-body :deep(.mx-ins) {
+      grid-column: auto;
+      grid-row: auto;
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: min(360px, calc(100vw - 24px));
+      height: var(--app-vvh, 100vh);
+      max-height: 100%;
+      z-index: 60;
+      border-left: 1px solid var(--border);
+      border-top: none;
+      box-shadow: -12px 0 32px rgba(0, 0, 0, .35);
+    }
+    .mx-body :deep(.mx-th) { padding: 4px 6px 5px; }
+    .mx-body :deep(.mx-th-name) { display: none; }
+    .mx-body :deep(.mx-th-row.is-faders) { display: none; }
+    .mx-body :deep(.mx-th-row:not(.is-faders)) { flex-wrap: wrap; }
+    .mx-body :deep(.mx-th-icon.is-danger) { display: none; }
+  }
+}
+@media (hover: none) and (pointer: coarse) {
+  .mx-more {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 44px; min-height: 44px; padding: 0;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg-0); color: var(--text-1); cursor: pointer;
+  }
+  .mx-btn, .mx-icon { min-width: 44px; min-height: 44px; }
+}
+@media (max-width: 1180px) and (hover: none) and (pointer: coarse) {
+  .mx-time-input { height: 44px; width: 72px; font-size: 16px; }
+  .mx-master-range { width: 140px; height: 20px; }
+  .mx-transport-group.is-master { gap: 8px; }
+  .mx-heads-label { position: relative; z-index: 2; }
+  .mx-heads-fold { position: relative; }
+  .mx-heads-fold::after { content: ''; position: absolute; inset: -10px -10px -12px -10px; }
+}
+@media (max-width: 1180px) and (max-height: 700px) {
+  .mx-monitor { padding: 3px 8px; gap: 8px; }
+  .mx-monitor-stage { width: 160px; }
+  .mx-monitor-stage :deep(.sub-stage) { max-height: 90px; }
+  .mx-monitor-hint { display: none; }
+  .mx-body {
+    grid-template-columns: clamp(96px, 18cqi, 180px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .mx-body.is-inspector-closed {
+    grid-template-columns: clamp(96px, 18cqi, 180px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .mx-heads, .mx-canvas { grid-row: 1; }
+  .mx-body :deep(.mx-ins) {
+    grid-column: auto;
+    grid-row: auto;
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: min(360px, calc(100vw - 24px));
+    height: var(--app-vvh, 100vh);
+    max-height: 100%;
+    z-index: 60;
+    border-left: 1px solid var(--border);
+    border-top: none;
+    box-shadow: -12px 0 32px rgba(0, 0, 0, .35);
+  }
+  .mx-transport { min-height: 44px; padding: 2px 8px; row-gap: 4px; }
+  .mx-time-input { height: 44px; width: 68px; font-size: 16px; }
+  .mx-master-range { width: 120px; }
 }
 </style>

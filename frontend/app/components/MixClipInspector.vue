@@ -1,9 +1,23 @@
 <template>
-  <div class="mx-ins">
+  <div
+    :class="['mx-ins', { 'is-drawer': drawer }]"
+    :role="drawer ? 'dialog' : undefined"
+    :aria-label="drawer ? t('mix.inspector') : undefined"
+  >
     <header class="mx-ins-head">
       <SlidersHorizontal :size="12" />
       <h4>{{ t('mix.inspector') }}</h4>
       <span :class="['mx-ins-state', { 'is-dirty': dirty && !saving }]">{{ saveState }}</span>
+      <button
+        v-if="drawer"
+        class="mx-ins-close"
+        type="button"
+        :title="t('tablet.close')"
+        :aria-label="t('tablet.close')"
+        @click="emit('close')"
+      >
+        <X :size="14" />
+      </button>
     </header>
 
     <div class="mx-ins-scroll">
@@ -367,7 +381,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { SlidersHorizontal } from 'lucide-vue-next'
+import { SlidersHorizontal, X } from 'lucide-vue-next'
 import BaseSelect from '~/components/BaseSelect.vue'
 import AppMenu from '~/components/AppMenu.vue'
 import AppMenuItem from '~/components/AppMenuItem.vue'
@@ -396,6 +410,8 @@ const props = defineProps<{
   saving?: boolean
   dirty?: boolean
   canEdit?: boolean
+  /** 平板抽屉形态：根节点变 dialog，header 出现关闭按钮 */
+  drawer?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -419,6 +435,7 @@ const emit = defineEmits<{
   'cancel-separation': []
   'begin-change': []
   'end-change': []
+  'close': []
 }>()
 
 const { t } = useI18n()
@@ -639,6 +656,12 @@ function setBusNumber(bus: MixBus, key: 'duckRatio' | 'duckAttackMs' | 'duckRele
 .mx-ins-head h4 { margin: 0; font-size: 11.5px; font-weight: 700; color: var(--text-0); }
 .mx-ins-state { margin-left: auto; font-size: 9.5px; color: var(--text-3); }
 .mx-ins-state.is-dirty { color: var(--warning); }
+.mx-ins-close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer; }
+.mx-ins-close:hover { background: var(--bg-hover); color: var(--text-0); }
+@media (max-width: 1180px) and (hover: none) and (pointer: coarse) {
+  .mx-ins-head { height: auto; min-height: 44px; }
+  .mx-ins-close { min-width: 44px; min-height: 44px; }
+}
 .mx-ins-scroll { flex: 1; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
 .mx-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-0); }
 .mx-card.is-sep { border-color: var(--accent-glow); }

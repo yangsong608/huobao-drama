@@ -70,6 +70,8 @@ export function useMixPlayback(options: MixPlaybackOptions) {
   const playing = ref(false)
   const loading = ref(false)
   const missing = ref<string[]>([])
+  /** 上下文被浏览器挂起（未获得用户手势）时为 true，供宿主提示「点击播放启用声音」 */
+  const suspended = ref(false)
 
   let ctx: AudioContext | null = null
   let masterGain: GainNode | null = null
@@ -89,6 +91,8 @@ export function useMixPlayback(options: MixPlaybackOptions) {
     const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
     if (!Ctor) return null
     ctx = new Ctor()
+    suspended.value = ctx.state === 'suspended'
+    ctx.onstatechange = () => { suspended.value = ctx?.state === 'suspended' }
     return ctx
   }
 
@@ -300,6 +304,7 @@ export function useMixPlayback(options: MixPlaybackOptions) {
     const audio = ensureContext()
     if (!audio) return false
     await audio.resume().catch(() => {})
+    suspended.value = audio.state === 'suspended'
     const gen = ++generation
     loading.value = false
     stopSources()
@@ -341,6 +346,13 @@ export function useMixPlayback(options: MixPlaybackOptions) {
     startMs = at
   }
 
+  /** 用户手势内解锁音频上下文（iOS 首次播放必须） */
+  function unlock() {
+    const audio = ensureContext()
+    if (!audio) return
+    void audio.resume().catch(() => {}).finally(() => { suspended.value = audio.state === 'suspended' })
+  }
+
   function seek(ms: number) {
     const target = Math.max(0, Math.round(ms))
     if (!playing.value) {
@@ -365,6 +377,7 @@ export function useMixPlayback(options: MixPlaybackOptions) {
 
   function dispose() {
     pause()
+    suspended.value = false
     masterGain?.disconnect()
     masterGain = null
     for (const gain of busGains.values()) gain.disconnect()
@@ -385,6 +398,7 @@ export function useMixPlayback(options: MixPlaybackOptions) {
     playing,
     loading,
     missing,
+    suspended,
     play,
     pause,
     seek,
@@ -392,6 +406,7 @@ export function useMixPlayback(options: MixPlaybackOptions) {
     applyMixState,
     positionMs,
     reset,
+    unlock,
     dispose,
   }
 }

@@ -94,25 +94,25 @@ test('Tailwind 深色选择器与小说作用域生效', () => {
   assert.match(config, /preflight:\s*false/)
 })
 
-test('共享 header 在 720px 以下收为图标并保留 title', () => {
+test('共享 header 在 743px 以下收为图标并保留 title', () => {
   const header = read('components/AppHeader.vue')
   for (const key of ['projects', 'novels', 'settings']) {
     assert.match(header, new RegExp(`:title="t\\('layout\\.nav\\.${key}'\\)"`))
   }
   assert.match(header, /class="nav-label"/)
-  assert.match(header, /@media \(max-width: 720px\)/)
+  assert.match(header, /@media \(max-width: 743px\)/)
   assert.match(header, /\.nav-label \{ display: none; \}/)
 })
 
 test('小说列表与详情在窄屏下收窄内边距与列数', () => {
   const list = read('pages/novels/index.vue')
-  assert.match(list, /@media \(max-width: 760px\)/)
+  assert.match(list, /@media \(max-width: 743px\)/)
   assert.match(list, /\.page \{ padding: 16px 16px 40px; \}/)
   assert.match(list, /\.project-grid \{ grid-template-columns: 1fr; \}/)
   assert.match(list, /\.search-box \{ width: 100%;/)
 
   const detail = read('views/novel/detail.vue')
-  assert.match(detail, /@media \(max-width: 760px\)/)
+  assert.match(detail, /@media \(max-width: 743px\)/)
   assert.match(detail, /\.page \{ padding: 16px 16px 32px; \}/)
   assert.match(detail, /\.detail-grid \{ grid-template-columns: 1fr; \}/)
   assert.match(detail, /\.page-tabs/)

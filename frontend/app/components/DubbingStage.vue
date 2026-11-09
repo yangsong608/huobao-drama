@@ -1,7 +1,7 @@
 <template>
   <div class="dubbing-stage">
     <header class="dub-head">
-      <div class="dub-steps">
+      <div class="dub-steps" ref="stepsEl">
         <button
           v-for="(step, index) in stepDefs"
           :key="step.key"
@@ -20,6 +20,17 @@
         <button class="btn btn-sm" type="button" :disabled="loading" @click="load">
           <RefreshCw :size="11" :class="{ 'animate-spin': loading }" />
           {{ t('common.refresh') }}
+        </button>
+        <button
+          v-if="dubDrawer"
+          class="btn btn-sm"
+          type="button"
+          :aria-expanded="inspectorOpen"
+          aria-controls="dub-inspector"
+          @click="toggleInspector"
+        >
+          <SlidersHorizontal :size="11" />
+          {{ t('tablet.drawers.params') }}
         </button>
         <button class="btn btn-sm" type="button" @click="emit('open-preview')">
           {{ t('workbench.quickPreview') }}
@@ -425,8 +436,25 @@
         </template>
       </section>
 
-      <aside v-if="currentStep === 2" class="dub-inspector is-take">
+      <div v-if="dubDrawer && inspectorOpen" class="dub-drawer-mask" @click="closeInspector" />
+      <aside
+        v-if="!dubDrawer || inspectorOpen"
+        id="dub-inspector"
+        ref="inspectorEl"
+        :class="['dub-inspector', { 'is-take': currentStep === 2, 'is-drawer': dubDrawer, 'is-bottom-drawer': dubBottomDrawer }]"
+        :role="dubDrawer ? 'dialog' : undefined"
+        :aria-modal="dubDrawer ? 'true' : undefined"
+        :aria-labelledby="dubDrawer ? 'dub-inspector-title' : undefined"
+        @keydown="onInspectorKeydown"
+      >
+        <div v-if="dubDrawer" class="dub-inspector-bar">
+          <span id="dub-inspector-title" class="dub-inspector-bar-title">{{ t('tablet.drawers.inspector') }}</span>
+          <button class="btn btn-icon" type="button" :title="t('tablet.close')" :aria-label="t('tablet.close')" @click="closeInspector">
+            <X :size="16" />
+          </button>
+        </div>
         <TakeInspector
+          v-if="currentStep === 2"
           :line="activeLine"
           :takes="activeTakes"
           :preview="activePreview"
@@ -449,56 +477,56 @@
           @bind-speaker="onInspectorBindSpeaker"
           @bind-character="onInspectorBindCharacter"
         />
-      </aside>
-      <aside v-else class="dub-inspector">
-        <section class="dub-inspector-card">
-          <div class="dub-inspector-head">
-            <h4>{{ stepDefs[currentStep].label }}</h4>
-            <span v-if="state" :class="['dub-chip', `is-${state.status}`]">{{ statusLabel }}</span>
-          </div>
-          <p class="dub-inspector-hint">{{ stepDefs[currentStep].hint }}</p>
-          <dl class="dub-metrics">
-            <div><dt>{{ t('workbench.stepLines') }}</dt><dd>{{ lines.length }}</dd></div>
-            <div><dt>{{ t('workbench.stepVoices') }}</dt><dd>{{ voiceReadyCount }}/{{ voiceTotalCount }}</dd></div>
-            <div><dt>{{ t('workbench.stepGenerate') }}</dt><dd>{{ readyCount }}/{{ lines.length }}</dd></div>
-            <div><dt>{{ t('workbench.stepPreview') }}</dt><dd>{{ timelineCues.length }}</dd></div>
-          </dl>
-        </section>
+        <template v-else>
+          <section class="dub-inspector-card">
+            <div class="dub-inspector-head">
+              <h4>{{ stepDefs[currentStep].label }}</h4>
+              <span v-if="state" :class="['dub-chip', `is-${state.status}`]">{{ statusLabel }}</span>
+            </div>
+            <p class="dub-inspector-hint">{{ stepDefs[currentStep].hint }}</p>
+            <dl class="dub-metrics">
+              <div><dt>{{ t('workbench.stepLines') }}</dt><dd>{{ lines.length }}</dd></div>
+              <div><dt>{{ t('workbench.stepVoices') }}</dt><dd>{{ voiceReadyCount }}/{{ voiceTotalCount }}</dd></div>
+              <div><dt>{{ t('workbench.stepGenerate') }}</dt><dd>{{ readyCount }}/{{ lines.length }}</dd></div>
+              <div><dt>{{ t('workbench.stepPreview') }}</dt><dd>{{ timelineCues.length }}</dd></div>
+            </dl>
+          </section>
 
-        <section class="dub-inspector-card">
-          <h4>{{ t('workbench.progressTitle') }}</h4>
-          <ol class="dub-checklist">
-            <li
-              v-for="(step, index) in stepDefs"
-              :key="step.key"
-              :class="{ done: stepDone(index), current: currentStep === index }"
-              @click="goStep(index)"
-            >
-              <span class="dub-check-dot">
-                <CheckCircle2 v-if="stepDone(index)" :size="11" />
-                <span v-else>{{ index + 1 }}</span>
-              </span>
-              <span class="dub-check-label">{{ step.label }}</span>
-            </li>
-          </ol>
-        </section>
+          <section class="dub-inspector-card">
+            <h4>{{ t('workbench.progressTitle') }}</h4>
+            <ol class="dub-checklist">
+              <li
+                v-for="(step, index) in stepDefs"
+                :key="step.key"
+                :class="{ done: stepDone(index), current: currentStep === index }"
+                @click="goStep(index)"
+              >
+                <span class="dub-check-dot">
+                  <CheckCircle2 v-if="stepDone(index)" :size="11" />
+                  <span v-else>{{ index + 1 }}</span>
+                </span>
+                <span class="dub-check-label">{{ step.label }}</span>
+              </li>
+            </ol>
+          </section>
 
-        <section v-if="state?.status === 'running'" class="dub-inspector-card">
-          <h4>{{ t('workbench.progressTitle') }}</h4>
-          <div class="dub-progress">
-            <div class="dub-bar"><span :style="{ width: (state.progress || 0) + '%' }" /></div>
-            <span>{{ state.progress }}% · {{ state.note }}</span>
-          </div>
-        </section>
-        <section v-else-if="state?.error" class="dub-inspector-card">
-          <h4>{{ t('workbench.failed') }}</h4>
-          <p class="dub-error">{{ state.error }}</p>
-        </section>
+          <section v-if="state?.status === 'running'" class="dub-inspector-card">
+            <h4>{{ t('workbench.progressTitle') }}</h4>
+            <div class="dub-progress">
+              <div class="dub-bar"><span :style="{ width: (state.progress || 0) + '%' }" /></div>
+              <span>{{ state.progress }}% · {{ state.note }}</span>
+            </div>
+          </section>
+          <section v-else-if="state?.error" class="dub-inspector-card">
+            <h4>{{ t('workbench.failed') }}</h4>
+            <p class="dub-error">{{ state.error }}</p>
+          </section>
 
-        <section class="dub-inspector-card">
-          <button class="btn btn-sm" type="button" @click="emit('open-preview')">{{ t('workbench.quickPreview') }}</button>
-          <p class="dub-hint">{{ t('workbench.quickPreviewHint') }}</p>
-        </section>
+          <section class="dub-inspector-card">
+            <button class="btn btn-sm" type="button" @click="emit('open-preview')">{{ t('workbench.quickPreview') }}</button>
+            <p class="dub-hint">{{ t('workbench.quickPreviewHint') }}</p>
+          </section>
+        </template>
       </aside>
     </div>
 
@@ -553,11 +581,14 @@ import {
   ScanSearch,
   SlidersHorizontal,
   UserPlus,
+  X,
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { episodeAPI, type MergeDecision, type StoryboardLine, type TakeOverrides } from '~/composables/useApi'
 import type { NewLinePayload } from '~/composables/useDubbingSession'
+import { useViewport } from '~/composables/useViewport'
+import { useOverlayHistory } from '~/composables/useOverlayHistory'
 import { useVoiceProfiles } from '~/composables/useVoiceProfiles'
 import BaseSelect from '~/components/BaseSelect.vue'
 import DialogueMergeDialog from '~/components/DialogueMergeDialog.vue'
@@ -664,6 +695,79 @@ const stepDefs = computed(() => [
 ])
 
 const currentStep = computed(() => Math.max(0, Math.min(props.step || 0, stepDefs.value.length - 1)))
+
+// ===== 平板：步骤条横向滚动 + 检查器抽屉 =====
+const { isTablet, isCompact } = useViewport()
+// 平板（≤1180）检查器变抽屉；紧凑（≤900）再变底部抽屉
+const dubDrawer = computed(() => isTablet.value)
+const dubBottomDrawer = computed(() => isCompact.value)
+const inspectorOpen = ref(false)
+const inspectorEl = ref<HTMLElement | null>(null)
+const stepsEl = ref<HTMLElement | null>(null)
+const drawerHistory = useOverlayHistory(closeInspector)
+
+function focusInspector() {
+  const root = inspectorEl.value
+  if (!root) return
+  const focusables = Array.from(root.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, audio[controls], video[controls], [tabindex]:not([tabindex="-1"])'))
+    .filter(el => !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true')
+  focusables[0]?.focus()
+}
+
+function openInspector() {
+  if (!dubDrawer.value) return
+  inspectorOpen.value = true
+  drawerHistory.open()
+  nextTick(focusInspector)
+}
+
+function closeInspector() {
+  if (!inspectorOpen.value) return
+  inspectorOpen.value = false
+  drawerHistory.close()
+}
+
+function toggleInspector() {
+  inspectorOpen.value ? closeInspector() : openInspector()
+}
+
+function onInspectorKeydown(event: KeyboardEvent) {
+  if (!dubDrawer.value || !inspectorOpen.value || event.key !== 'Tab') return
+  const root = inspectorEl.value
+  if (!root) return
+  const focusables = Array.from(root.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, audio[controls], video[controls], [tabindex]:not([tabindex="-1"])'))
+    .filter(el => !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true')
+  if (!focusables.length) return
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+function scrollActiveStepIntoView() {
+  void nextTick(() => {
+    const root = stepsEl.value
+    const active = root?.querySelector('.dub-step.active')
+    if (!root || !active) return
+    const rootRect = root.getBoundingClientRect()
+    const activeRect = active.getBoundingClientRect()
+    const left = root.scrollLeft + activeRect.left - rootRect.left - (root.clientWidth - active.clientWidth) / 2
+    root.scrollTo({ left, behavior: 'smooth' })
+  })
+}
+
+watch([currentStep, isTablet], () => {
+  if (isTablet.value) scrollActiveStepIntoView()
+}, { immediate: true })
+watch(dubDrawer, on => {
+  if (!on) closeInspector()
+})
+
 const mixLineTexts = computed<Record<number, string>>(() => {
   const map: Record<number, string> = {}
   for (const line of lines.value) map[line.id] = line.text
@@ -968,6 +1072,7 @@ function inspectLine(line: StoryboardLine) {
     takes.loadTakes(line.id),
     takes.previewContext(line.id, 'light'),
   ])
+  if (dubDrawer.value) openInspector()
 }
 
 async function requestTakePreview(mode: 'off' | 'light' | 'deep') {
@@ -1234,8 +1339,40 @@ watch(() => props.step, step => {
 .dub-player-text { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dub-player-audio { width: min(360px, 50%); height: 34px; }
 .mono { font-family: var(--font-mono); color: var(--text-1); }
-@media (max-width: 1100px) {
+/* 短横屏：混音台交给外层滚动，480px 最小高度在这里让位 */
+@media (max-width: 1180px) and (max-height: 700px) {
+  .dub-mix-stage :deep(.mx-stage) { min-height: 0; }
+}
+@media (max-width: 1180px) {
   .dub-body, .dub-body.is-generate { grid-template-columns: minmax(0, 1fr); }
-  .dub-inspector { display: none; }
+  .dub-steps { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+  .dub-step { flex: 0 0 auto; min-height: var(--tap-min, 44px); }
+  .dub-head-actions .btn { min-height: var(--tap-min, 44px); }
+  .dub-inspector.is-drawer {
+    position: fixed; top: var(--safe-top, 0px); right: 0; bottom: 0; z-index: 60;
+    width: min(360px, calc(100vw - 24px));
+    max-height: var(--app-vvh, 100dvh);
+    overflow-y: auto;
+    padding: 12px calc(12px + var(--safe-right, 0px)) calc(12px + var(--safe-bottom, 0px)) 12px;
+    border-left: 1px solid var(--border);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-elevated, 0 8px 28px rgba(0, 0, 0, .28));
+  }
+  .dub-drawer-mask { position: fixed; inset: 0; z-index: 55; background: rgba(0, 0, 0, .36); }
+  .dub-inspector-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .dub-inspector-bar-title { font-size: 12px; font-weight: 700; color: var(--text-1); }
+  .dub-player { position: sticky; bottom: 0; z-index: 30; padding-bottom: calc(8px + var(--safe-bottom, 0px)); background: var(--bg-1); }
+  .dub-player-audio { min-height: 44px; }
+}
+@media (max-width: 900px) {
+  .dub-inspector.is-drawer.is-bottom-drawer {
+    top: auto; left: 0; right: 0; width: auto;
+    bottom: calc(128px + var(--safe-bottom, 0px));
+    max-height: min(70vh, calc(var(--app-vvh, 100dvh) - 128px - var(--safe-bottom, 0px) - 16px));
+    border-left: none; border-top: 1px solid var(--border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+  .dub-player { flex-wrap: wrap; }
+  .dub-player-audio { width: 100%; }
 }
 </style>

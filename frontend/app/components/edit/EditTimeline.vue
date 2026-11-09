@@ -1,5 +1,5 @@
 <template>
-  <section class="ed-timeline">
+  <section ref="rootRef" class="ed-timeline">
     <header class="ed-timeline-head">
       <b>{{ t('edit.timeline') }}</b>
       <span>{{ t('edit.clipCount', { n: plan.clips.length }) }}</span>
@@ -32,6 +32,12 @@
         <button class="ed-tool is-text" type="button" :disabled="!selectedClipId || readonly" @click="removeSelected">
           {{ t('edit.delete') }}
         </button>
+        <button
+          class="ed-tool is-text ed-tool-more" type="button"
+          :disabled="!selectedClipId || readonly"
+          :title="t('tablet.more')" :aria-label="t('tablet.more')"
+          @click="openSelectedClipMenu($event)"
+        >{{ t('tablet.more') }}</button>
         <button class="ed-tool is-text" type="button" @click="$emit('fit-view')">
           {{ t('edit.fitView') }}
         </button>
@@ -61,7 +67,7 @@
         <span class="ed-head">{{ t('edit.audioTrack') }}</span>
       </div>
 
-      <div ref="scrollRef" class="ed-tl-scroll">
+      <div ref="scrollRef" class="ed-tl-scroll" :class="{ 'is-pinching': pinching }">
         <div class="ed-tl-stage" :style="{ width: `${stageWidth}px` }">
           <div class="ed-tl-ruler" @pointerdown="onRulerDown">
             <span
@@ -106,13 +112,14 @@
               v-for="view in clipViews"
               :key="view.clip_id"
               class="ed-tl-clip"
+              data-long-press
               :class="{
                 'is-selected': view.clip_id === selectedClipId,
                 'is-dragging': drag?.kind === 'move' && drag?.clipId === view.clip_id,
               }"
               :style="clipStyle(view)"
-              @pointerdown.stop="startDrag($event, 'move', { clipId: view.clip_id })"
-              @contextmenu.prevent.stop="openClipMenu($event, view)"
+              @pointerdown.stop="onClipPointerDown($event, view)"
+              @contextmenu.prevent.stop="onClipContextMenu($event, view)"
             >
               <span class="ed-tl-clip-label">{{ view.label }}</span>
               <span class="ed-tl-clip-time">{{ formatPrecise(view.content_duration_ms) }}</span>
@@ -200,7 +207,11 @@
             <span class="ed-tl-marker-flag"></span>
           </div>
 
-          <div class="ed-tl-playhead" :style="{ left: `${playheadLeft}px` }"></div>
+          <div
+            class="ed-tl-playhead"
+            :style="{ left: `${playheadLeft}px` }"
+            @pointerdown.stop="startDrag($event, 'playhead')"
+          ></div>
           <div
             v-if="snapLine !== null"
             class="ed-tl-snapline"
@@ -223,6 +234,7 @@
 
 <script setup>
 import { useI18n } from 'vue-i18n'
+import { nextTick } from 'vue'
 import { Magnet, Scissors, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import ContextMenu from '~/components/ContextMenu.vue'
 import EditAudioWave from './EditAudioWave.vue'
@@ -231,6 +243,11 @@ import { formatPrecise } from '~/utils/edit-timecode'
 import { TRANSITION_TYPES } from '~/utils/edit-transition-types'
 import { activeClipIndex } from '~/utils/edit-layout'
 import { collectSnapPoints, snapTime } from '~/utils/edit-snap'
+import { distanceBetween } from '~/utils/touch'
+import { useLongPress } from '~/composables/useLongPress'
+import { usePinchZoom } from '~/composables/usePinchZoom'
+import { EDIT_ZOOM_MIN, EDIT_ZOOM_MAX, anchoredScrollLeft, clampEditZoom } from '~/utils/edit-zoom'
+import { TABLET_MAX } from '~/utils/tablet-layout'
 
 const props = defineProps({
   plan: { type: Object, required: true },
@@ -255,11 +272,127 @@ const emit = defineEmits([
 const { t } = useI18n()
 
 const scrollRef = ref(null)
+const rootRef = ref(null)
 const zoom = ref(1)
 const snapEnabled = ref(true)
 const pad = 24
 const drag = ref(null)
 const snapLine = ref(null)
+const pinching = ref(false)
+// 触控在片段上的按下只挂起拖拽：超过 8px 才真正进入拖拽，避免长按/滚动被 preventDefault 吞掉
+let pendingClipDrag = null
+
+function clearPendingClipDrag() {
+  pendingClipDrag = null
+}
+
+// 指针捕获：按 pointerId 记录，双指/多指各自独立，不会被第二指覆盖
+const dragCaptures = new Map()
+
+function captureDragPointerOn(el, pointerId) {
+  if (!el || typeof el.setPointerCapture !== 'function' || pointerId === undefined) return
+  try {
+    el.setPointerCapture(pointerId)
+    dragCaptures.set(pointerId, { el, pointerId })
+  } catch {
+    dragCaptures.delete(pointerId)
+  }
+}
+
+function captureDragPointer(event) {
+  captureDragPointerOn(event.currentTarget, event.pointerId)
+}
+
+function releaseOneCapture(capture) {
+  try {
+    if (capture.el.hasPointerCapture?.(capture.pointerId)) {
+      capture.el.releasePointerCapture(capture.pointerId)
+    }
+  } catch {
+    // 元素已卸载或指针已失效时忽略
+  }
+}
+
+// 传 pointerId 只释放该指针；不传则释放全部（失焦、卸载）
+function releaseDragPointer(pointerId) {
+  if (pointerId !== undefined && pointerId !== null) {
+    const capture = dragCaptures.get(pointerId)
+    if (!capture) return
+    dragCaptures.delete(pointerId)
+    releaseOneCapture(capture)
+    return
+  }
+  for (const capture of dragCaptures.values()) releaseOneCapture(capture)
+  dragCaptures.clear()
+}
+
+// ---- 双指缩放（P7）：窗口 capture 阶段接入，只接管落在时间线内的触控指针 ----
+const pinch = usePinchZoom({
+  min: EDIT_ZOOM_MIN,
+  max: EDIT_ZOOM_MAX,
+  getValue: () => zoom.value,
+  onChange: (next, focal) => {
+    const scroll = scrollRef.value
+    if (!scroll) {
+      zoom.value = clampEditZoom(next)
+      return
+    }
+    const rect = scroll.getBoundingClientRect()
+    const focalX = focal.clientX - rect.left
+    // 以实际缩放为基准：适配缩放可低于 EDIT_ZOOM_MIN，钳制后算比率会让锚点漂移；
+    // 但双指起点仍按 0.25 计算（P7 裁决），低于 0.25 的适配态首帧会跳到下限
+    const current = Number(zoom.value) > 0 ? Number(zoom.value) : EDIT_ZOOM_MIN
+    const ratio = next / current
+    const targetScroll = anchoredScrollLeft({
+      scrollLeft: scroll.scrollLeft,
+      focalX,
+      padPx: pad,
+      ratio,
+    })
+    // 缩放先落到状态，滚动位置等 DOM 宽度更新后的下一帧再写回，避免被旧宽度截断
+    zoom.value = clampEditZoom(next)
+    void nextTick(() => {
+      if (scrollRef.value) scrollRef.value.scrollLeft = targetScroll
+    })
+  },
+  onStart: () => {
+    // 双指开始即让位：清空单指挂起/拖拽与长按，避免与片段拖拽串扰
+    clearPendingClipDrag()
+    releaseDragPointer()
+    drag.value = null
+    snapLine.value = null
+    cancelClipLongPress()
+    pinching.value = true
+  },
+  onEnd: () => {
+    pinching.value = false
+  },
+})
+const pinchActive = pinch.active
+
+function isTimelinePointer(target) {
+  const root = rootRef.value
+  if (!root || !target || typeof root.contains !== 'function') return false
+  return root.contains(target)
+}
+
+function onPinchPointerDown(event) {
+  if (event.pointerType !== 'touch') return
+  // 桌面宽度不变式 ≥1181：触屏笔记本也不接管双指缩放
+  if (window.innerWidth > TABLET_MAX) return
+  if (!isTimelinePointer(event.target)) return
+  pinch.onPointerDown(event)
+}
+
+function onPinchPointerMove(event) {
+  if (event.pointerType !== 'touch') return
+  pinch.onPointerMove(event)
+}
+
+function onPinchPointerUp(event) {
+  if (event.pointerType !== 'touch') return
+  pinch.onPointerUp(event)
+}
 
 const pxPerMs = computed(() => 0.04 * zoom.value)
 const duration = computed(() => Math.max(1000, Number(props.layout.duration_ms) || 0))
@@ -412,7 +545,7 @@ function overlayStyle(view) {
 }
 
 function setZoom(value) {
-  zoom.value = Math.max(0.25, Math.min(8, Number(value) || 1))
+  zoom.value = clampEditZoom(value)
 }
 
 function cueClipId(cue) {
@@ -510,12 +643,37 @@ function startDrag(event, kind, payload = {}) {
     currentX: event.clientX,
     ...payload,
   }
+  // 触控拖拽/裁剪时捕获指针，避免手指滑出片段后丢失 pointermove
+  captureDragPointer(event)
   if (payload.clipId) emit('select-clip', payload.clipId)
   if (payload.cueId) emit('select-cue', payload.cueId)
   if (payload.overlayId) emit('select-overlay', payload.overlayId)
 }
 
 function onPointerMove(event) {
+  // 双指缩放期间不参与片段拖拽/裁剪，避免与缩放焦点计算串扰
+  if (pinching.value || pinchActive.value) return
+  // 触控挂起态：位移超过 8px 才把挂起指针升级为真正的片段拖拽（等于 8px 仍视为抖动）
+  if (pendingClipDrag && event.pointerId === pendingClipDrag.pointerId) {
+    const pending = pendingClipDrag
+    const movedPx = distanceBetween(pending.startX, pending.startY, event.clientX, event.clientY)
+    if (event.pointerType !== 'touch' || !(movedPx > 8)) return
+    // M7：只读态只允许选中，不升级为挂起拖拽
+    if (props.readonly) {
+      clearPendingClipDrag()
+      return
+    }
+    pendingClipDrag = null
+    drag.value = {
+      kind: 'move',
+      clipId: pending.view.clip_id,
+      startX: pending.startX,
+      startY: pending.startY,
+      currentX: event.clientX,
+    }
+    // 手指可能已滑出片段，捕获到起始元素上继续收 pointermove
+    captureDragPointerOn(pending.sourceEl, pending.pointerId)
+  }
   if (!drag.value) return
   drag.value = { ...drag.value, currentX: event.clientX }
   if (drag.value.kind === 'playhead') {
@@ -526,7 +684,10 @@ function onPointerMove(event) {
   snapLine.value = snapped?.point ? snapped.point.ms : null
 }
 
-function onPointerUp() {
+function onPointerUp(event) {
+  if (pinching.value || pinchActive.value) return
+  clearPendingClipDrag()
+  releaseDragPointer(event?.pointerId)
   const state = drag.value
   drag.value = null
   snapLine.value = null
@@ -587,7 +748,11 @@ function onPointerUp() {
   }
 }
 
-function onPointerCancel() {
+function onPointerCancel(event) {
+  pinch.cancel()
+  clearPendingClipDrag()
+  releaseDragPointer(event?.pointerId)
+  cancelClipLongPress()
   drag.value = null
   snapLine.value = null
 }
@@ -681,10 +846,63 @@ function openOverlayMenu(event, view) {
   ])
 }
 
+// 片段菜单项：右键、长按与工具栏「更多」共用同一套动作与禁用条件
+function clipMenuItems(view) {
+  return frameMenuItems(view)
+}
+
 function openClipMenu(event, view) {
   if (props.readonly) return
   emit('select-clip', view.clip_id)
-  openMenuAt(event, frameMenuItems(view))
+  openMenuAt(event, clipMenuItems(view))
+}
+
+// 工具栏「更多」：用按钮矩形定位选中片段的同一菜单
+function openSelectedClipMenu(event) {
+  if (!props.selectedClipId || props.readonly) return
+  const view = clipViews.value.find((item) => item.clip_id === props.selectedClipId)
+  if (!view) return
+  const rect = event.currentTarget.getBoundingClientRect()
+  menu.value = { items: clipMenuItems(view), x: rect.left, y: rect.bottom + 4 }
+}
+
+const { onPointerDown: onClipLongPressDown, onContextMenu: onClipLongPressContextMenu, cancel: cancelClipLongPress } = useLongPress({
+  onTrigger: (view, event) => {
+    if (props.readonly) return
+    // 长按替代拖拽：清空拖拽态与挂起态并释放捕获，按原始指针坐标打开同一片段菜单
+    clearPendingClipDrag()
+    releaseDragPointer()
+    drag.value = null
+    snapLine.value = null
+    emit('select-clip', view.clip_id)
+    menu.value = { items: clipMenuItems(view), x: event.clientX, y: event.clientY }
+  },
+})
+
+function onClipPointerDown(event, view) {
+  // 双指手势中的第二指落在片段上：不选中、不建挂起拖拽
+  if (pinching.value) return
+  onClipLongPressDown(event, view)
+  // 触控按下不阻断默认行为、不立即建拖拽：先选中并挂起，位移超过 8px 才在 pointermove 里接管
+  if (event.pointerType === 'touch') {
+    emit('select-clip', view.clip_id)
+    // M7：只读态触控只选中，不建立挂起拖拽
+    if (props.readonly) return
+    pendingClipDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      view,
+      sourceEl: event.currentTarget,
+    }
+    return
+  }
+  startDrag(event, 'move', { clipId: view.clip_id })
+}
+
+function onClipContextMenu(event, view) {
+  onClipLongPressContextMenu(event)
+  openClipMenu(event, view)
 }
 
 // 转场库：工具栏按选中片段/播放头找交界，时间线转场块按自身两端点定位（emit 给工作台）
@@ -757,12 +975,23 @@ onMounted(() => {
   window.addEventListener('pointercancel', onPointerCancel)
   // 指针在窗口外松开时收不到 pointerup，窗口失焦同样终止拖拽，避免残留预览
   window.addEventListener('blur', onPointerCancel)
+  // 捕获阶段旁路监听触控指针，供双指缩放识别（不阻断时间线原生滚动）
+  window.addEventListener('pointerdown', onPinchPointerDown, { capture: true })
+  window.addEventListener('pointermove', onPinchPointerMove, { capture: true })
+  window.addEventListener('pointerup', onPinchPointerUp, { capture: true })
 })
 onBeforeUnmount(() => {
+  clearPendingClipDrag()
+  releaseDragPointer()
+  cancelClipLongPress()
+  pinch.cancel()
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
   window.removeEventListener('pointercancel', onPointerCancel)
   window.removeEventListener('blur', onPointerCancel)
+  window.removeEventListener('pointerdown', onPinchPointerDown, true)
+  window.removeEventListener('pointermove', onPinchPointerMove, true)
+  window.removeEventListener('pointerup', onPinchPointerUp, true)
 })
 </script>
 
@@ -780,6 +1009,7 @@ onBeforeUnmount(() => {
   color: var(--text-2); cursor: pointer;
 }
 .ed-tool.is-text { width: auto; padding: 0 8px; font-size: 11px; white-space: nowrap; }
+.ed-tool-more { display: none; }
 .ed-tools-sep { width: 1px; height: 16px; margin: 0 3px; background: var(--border); }
 .ed-tool:hover { color: var(--text-0); border-color: var(--accent); }
 .ed-tool.is-on { color: var(--accent-text); border-color: var(--accent); background: var(--accent-bg); }
@@ -793,11 +1023,15 @@ onBeforeUnmount(() => {
 .ed-head:nth-child(3) { height: 60px; }
 .ed-head:nth-child(4) { height: 34px; }
 .ed-head:nth-child(5) { height: 22px; }
-.ed-tl-scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+.ed-tl-scroll {
+  flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden;
+  touch-action: pan-x; overscroll-behavior-x: contain;
+}
 .ed-tl-stage { position: relative; height: 170px; user-select: none; }
 .ed-tl-ruler {
   position: absolute; inset: 0 0 auto; height: 24px; cursor: ew-resize;
   border-bottom: 1px solid var(--border); background: var(--bg-2);
+  touch-action: none;
 }
 .ed-tick {
   position: absolute; top: 5px; transform: translateX(-50%);
@@ -814,6 +1048,7 @@ onBeforeUnmount(() => {
   border: 1px solid color-mix(in srgb, #a78bfa 55%, transparent);
   background: color-mix(in srgb, #a78bfa 22%, var(--bg-1));
   color: var(--text-0); cursor: grab;
+  touch-action: none;
 }
 .ed-tl-overlay.is-image { border-color: color-mix(in srgb, #38bdf8 55%, transparent); background: color-mix(in srgb, #38bdf8 22%, var(--bg-1)); }
 .ed-tl-overlay.is-text { border-color: color-mix(in srgb, #d7a24a 55%, transparent); background: color-mix(in srgb, #d7a24a 22%, var(--bg-1)); }
@@ -822,7 +1057,7 @@ onBeforeUnmount(() => {
 .ed-tl-overlay.is-image.is-selected { box-shadow: 0 0 0 1px #38bdf8; }
 .ed-tl-overlay.is-text.is-selected { box-shadow: 0 0 0 1px #d7a24a; }
 .ed-tl-overlay.is-dragging { opacity: .82; cursor: grabbing; z-index: 4; }
-.ed-tl-overlay .ed-trim { background: color-mix(in srgb, #a78bfa 55%, transparent); }
+.ed-tl-overlay .ed-trim { background: color-mix(in srgb, #a78bfa 55%, transparent); touch-action: none; }
 .ed-tl-overlay.is-image .ed-trim { background: color-mix(in srgb, #38bdf8 55%, transparent); }
 .ed-tl-overlay.is-text .ed-trim { background: color-mix(in srgb, #d7a24a 55%, transparent); }
 .ed-tl-clip {
@@ -831,6 +1066,7 @@ onBeforeUnmount(() => {
   padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
   border-radius: 6px; background: color-mix(in srgb, var(--accent) 16%, var(--bg-1));
   color: var(--text-0); cursor: grab;
+  touch-action: none;
 }
 .ed-tl-clip:hover { border-color: var(--accent); }
 .ed-tl-clip.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
@@ -840,6 +1076,7 @@ onBeforeUnmount(() => {
 .ed-trim {
   position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize;
   background: color-mix(in srgb, var(--accent) 55%, transparent);
+  touch-action: none;
 }
 .ed-trim.is-start { left: 0; border-radius: 6px 0 0 6px; }
 .ed-trim.is-end { right: 0; border-radius: 0 6px 6px 0; }
@@ -849,6 +1086,7 @@ onBeforeUnmount(() => {
   border: 1px solid color-mix(in srgb, #d7a24a 55%, transparent);
   background: color-mix(in srgb, #d7a24a 20%, var(--bg-1));
   color: var(--text-0); font-size: 9px; white-space: nowrap; cursor: ew-resize;
+  touch-action: none;
 }
 .ed-tl-cue.is-follow { border-style: dashed; }
 .ed-tl-cue.is-selected { box-shadow: 0 0 0 1px #d7a24a; }
@@ -906,5 +1144,46 @@ onBeforeUnmount(() => {
 .ed-tl-empty {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   margin: 0; font-size: 9px; color: var(--text-3); pointer-events: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .ed-tool { min-width: 44px; min-height: 44px; }
+  .ed-tool-more { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+  .ed-trim::after {
+    content: ''; position: absolute; top: 0; bottom: 0; left: 50%;
+    width: 44px; transform: translateX(-50%);
+  }
+  /* 标尺下沿的 44px 命中区必须盖住下方轨道背景才可点；overlay 片段优先于标尺接收 */
+  .ed-tl-ruler { z-index: 1; }
+  .ed-tl-ruler::after {
+    content: ''; position: absolute; left: 0; right: 0; top: 0; height: 44px;
+  }
+  .ed-tl-overlay { z-index: 2; }
+  /* 字幕块用透明 ::after 上下外扩 5px 命中区，不改变可见尺寸（基础 top/bottom 保持 3px） */
+  .ed-tl-cue { overflow: visible; }
+  .ed-tl-cue > span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .ed-tl-cue::after {
+    content: ''; position: absolute; left: 0; right: 0; top: -5px; bottom: -5px;
+  }
+}
+
+@media (max-width: 900px) {
+  /* 片段轨道加高到 62px：上下各留 3px 后仍保证 56px 可点高度；下方轨道整体顺延，避免重叠 */
+  .ed-tl-track.is-video { height: 62px; }
+  .ed-tl-track.is-subtitle { top: 114px; }
+  .ed-tl-track.is-audio { top: 148px; }
+  .ed-tl-stage { height: 172px; }
+  .ed-tl-transition { top: 74px; }
+  .ed-head:nth-child(3) { height: 62px; }
+}
+
+@media (max-width: 1180px) and (hover: none) and (pointer: coarse) {
+  /* 双指缩放期间禁止滚动容器原生手势，避免与 pinch 计算抢滚动 */
+  .ed-tl-scroll.is-pinching { touch-action: none; }
+  /* 播放头桌面仍不接收指针；触控下开放 44px 命中区便于拖动定位 */
+  .ed-tl-playhead { pointer-events: auto; touch-action: none; }
+  .ed-tl-playhead::after {
+    content: ''; position: absolute; top: 0; bottom: 0; left: -21px; width: 44px;
+  }
 }
 </style>

@@ -1,11 +1,12 @@
 import { Hono } from 'hono'
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { success, notFound, badRequest, now } from '../utils/response.js'
 import { toSnakeCaseArray, toSnakeCase, slimTaskParams } from '../utils/transform.js'
 import { getActiveConfigId } from '../services/ai.js'
 import { EXTRACT_TARGETS, getExtractionStatus, startExtraction, type ExtractTarget } from '../services/extraction.js'
 import { getVideoPromptBatchStatus, startVideoPromptBatch } from '../services/video-prompts.js'
+import { getVideoBatch, startVideoBatch, stopVideoBatch } from '../services/video-batch.js'
 import { getAutomationState, isAutomationRunning, startAutomation, stopAutomation } from '../services/automation.js'
 import { ReworkError, reworkEpisode } from '../services/rework.js'
 import { getDubbingDefaults, VIDEO_AUDIO_MODES } from '../services/app-settings.js'
@@ -395,6 +396,42 @@ app.get('/:id/video-prompts-status', async (c) => {
   return success(c, getVideoPromptBatchStatus(id))
 })
 
+// POST /episodes/:id/video-batch — 后端持久批量生成视频（同集运行中复用，并发 1-5）
+app.post('/:id/video-batch', async (c) => {
+  const id = Number(c.req.param('id'))
+  const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, id))
+  if (!ep) return notFound(c, '剧集不存在')
+  const body = await c.req.json().catch(() => ({}))
+  const items = Array.isArray(body.items) ? body.items : []
+  if (!items.length) return badRequest(c, '请选择要生成的分镜')
+  try {
+    await startVideoBatch({
+      episodeId: ep.id,
+      dramaId: ep.dramaId,
+      concurrency: body.concurrency,
+      items,
+    })
+  } catch (err: any) {
+    return badRequest(c, err?.message || '批量生成失败')
+  }
+  return success(c, await getVideoBatch(ep.id))
+})
+
+// GET /episodes/:id/video-batch — 最新批次进度（含排队/处理/完成/失败项）
+app.get('/:id/video-batch', async (c) => {
+  const id = Number(c.req.param('id'))
+  return success(c, await getVideoBatch(id))
+})
+
+// POST /episodes/:id/video-batch/stop — 停止后续派发，已在生成的任务继续
+app.post('/:id/video-batch/stop', async (c) => {
+  const id = Number(c.req.param('id'))
+  const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, id))
+  if (!ep) return notFound(c, '剧集不存在')
+  await stopVideoBatch(ep.id)
+  return success(c, await getVideoBatch(ep.id))
+})
+
 // GET /episodes/:episode_id/storyboards
 app.get('/:episode_id/storyboards', async (c) => {
   const episodeId = Number(c.req.param('episode_id'))
@@ -492,7 +529,7 @@ app.post('/:id/comfyui/run', async (c) => {
   }
 })
 
-// sys_task 无 episode_id,通过 storyboard/scene/character/prop 关联键归属到当前集
+// sys_task.episode_id 为直接归属；历史任务通过 storyboard/scene/character/prop 关联键归属到当前集
 async function getEpisodeTaskScope(episodeId: number) {
   const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
   if (!ep) return null
@@ -530,6 +567,7 @@ async function getEpisodeTaskScope(episodeId: number) {
   }
   const tasks = allTasks
     .filter(t =>
+      (t.episodeId && t.episodeId === episodeId) ||
       (t.storyboardId && storyboardIds.has(t.storyboardId)) ||
       (t.sceneId && sceneIds.has(t.sceneId)) ||
       (t.characterId && characterIds.has(t.characterId)) ||
@@ -556,6 +594,144 @@ app.get('/:id/generation-tasks', async (c) => {
   return success(c, {
     tasks: toSnakeCaseArray(scope.tasks.map(slimTaskParams)),
     merges: toSnakeCaseArray(merges),
+  })
+})
+
+// GET /episodes/:id/task-center — 任务中心：生成任务 + 语音 Take + 混音作业 + 流水线 + 导出
+app.get('/:id/task-center', async (c) => {
+  const episodeId = Number(c.req.param('id'))
+  const scope = await getEpisodeTaskScope(episodeId)
+  if (!scope) return notFound(c, '剧集不存在')
+  const { ep } = scope
+
+  const merges = (await db.select().from(schema.videoMerges)
+    .where(and(eq(schema.videoMerges.episodeId, episodeId), isNull(schema.videoMerges.deletedAt)))
+    .orderBy(desc(schema.videoMerges.createdAt))
+    .limit(20))
+
+  const takes = await db.select().from(schema.lineTakes)
+    .where(and(eq(schema.lineTakes.episodeId, episodeId), isNull(schema.lineTakes.deletedAt)))
+    .orderBy(desc(schema.lineTakes.createdAt), desc(schema.lineTakes.id))
+    .limit(100)
+  const lineIds = [...new Set(takes.map(t => t.lineId))]
+  const lines = lineIds.length
+    ? await db.select().from(schema.storyboardLines).where(inArray(schema.storyboardLines.id, lineIds))
+    : []
+  const lineMap = new Map(lines.map(line => [line.id, line]))
+  const voiceItems = takes.map(take => {
+    const line = lineMap.get(take.lineId)
+    return {
+      id: take.id,
+      line_id: take.lineId,
+      line_no: line?.lineNo ?? null,
+      speaker_name: line?.speakerName ?? null,
+      text: line?.text ?? take.text,
+      take_no: take.takeNo,
+      provider: take.provider,
+      model: take.model,
+      status: take.status,
+      error: take.error,
+      audio_url: take.audioUrl,
+      duration_ms: take.durationMs,
+      created_at: take.createdAt,
+    }
+  })
+  // 计数走独立聚合，不能从 limit 后的列表推导：否则跌出窗口的进行中任务会被漏计
+  const voiceStatusRows = await db.select({
+    status: schema.lineTakes.status,
+    total: count(),
+  }).from(schema.lineTakes)
+    .where(and(eq(schema.lineTakes.episodeId, episodeId), isNull(schema.lineTakes.deletedAt)))
+    .groupBy(schema.lineTakes.status)
+  const voiceCounts = { generating: 0, ready: 0, failed: 0, total: 0 }
+  for (const row of voiceStatusRows) {
+    const n = Number(row.total || 0)
+    voiceCounts.total += n
+    if (row.status === 'generating') voiceCounts.generating += n
+    else if (row.status === 'ready') voiceCounts.ready += n
+    else if (row.status === 'failed') voiceCounts.failed += n
+  }
+
+  const audioJobs = await db.select().from(schema.dubbingJobs)
+    .where(eq(schema.dubbingJobs.episodeId, episodeId))
+    .orderBy(desc(schema.dubbingJobs.createdAt), desc(schema.dubbingJobs.id))
+    .limit(50)
+
+  const automationJobs = await db.select().from(schema.pipelineJobs)
+    .where(eq(schema.pipelineJobs.episodeId, episodeId))
+    .orderBy(desc(schema.pipelineJobs.createdAt), desc(schema.pipelineJobs.id))
+    .limit(50)
+
+  const exports = await db.select().from(schema.episodeExports)
+    .where(and(eq(schema.episodeExports.episodeId, episodeId), isNull(schema.episodeExports.deletedAt)))
+    .orderBy(desc(schema.episodeExports.createdAt), desc(schema.episodeExports.id))
+    .limit(20)
+
+  const [mergeActiveRow] = await db.select({ total: count() }).from(schema.videoMerges)
+    .where(and(
+      eq(schema.videoMerges.episodeId, episodeId),
+      isNull(schema.videoMerges.deletedAt),
+      inArray(schema.videoMerges.status, ['pending', 'processing']),
+    ))
+  const [exportActiveRow] = await db.select({ total: count() }).from(schema.episodeExports)
+    .where(and(
+      eq(schema.episodeExports.episodeId, episodeId),
+      isNull(schema.episodeExports.deletedAt),
+      inArray(schema.episodeExports.status, ['pending', 'running']),
+    ))
+  const [audioActiveRow] = await db.select({ total: count() }).from(schema.dubbingJobs)
+    .where(and(
+      eq(schema.dubbingJobs.episodeId, episodeId),
+      inArray(schema.dubbingJobs.status, ['pending', 'running']),
+    ))
+  const [pipelineActiveRow] = await db.select({ total: count() }).from(schema.pipelineJobs)
+    .where(and(
+      eq(schema.pipelineJobs.episodeId, episodeId),
+      inArray(schema.pipelineJobs.status, ['running', 'queued']),
+    ))
+
+  const tasksActive = scope.tasks.filter(t => t.status === 'processing').length
+  const mergesActive = Number(mergeActiveRow?.total || 0)
+  const voicesActive = voiceCounts.generating
+  const audioActive = Math.max(
+    Number(audioActiveRow?.total || 0),
+    ep.dubStatus === 'running' ? 1 : 0,
+  )
+  const pipelineActive = Math.max(
+    Number(pipelineActiveRow?.total || 0),
+    ep.automationStatus === 'running' ? 1 : 0,
+  )
+  const exportsActive = Number(exportActiveRow?.total || 0)
+
+  return success(c, {
+    counts: {
+      tasks_active: tasksActive,
+      merges_active: mergesActive,
+      voices_active: voicesActive,
+      audio_active: audioActive,
+      pipeline_active: pipelineActive,
+      exports_active: exportsActive,
+      total_active: tasksActive + mergesActive + voicesActive + audioActive + pipelineActive + exportsActive,
+    },
+    tasks: toSnakeCaseArray(scope.tasks.map(slimTaskParams)),
+    merges: toSnakeCaseArray(merges),
+    voices: { counts: voiceCounts, items: voiceItems },
+    audio: {
+      dubbing_status: ep.dubStatus ?? null,
+      dub_progress: ep.dubProgress ?? 0,
+      dub_note: ep.dubNote ?? null,
+      jobs: toSnakeCaseArray(audioJobs),
+    },
+    pipeline: {
+      enabled: ep.autoPipeline === true,
+      automation_status: ep.automationStatus ?? null,
+      automation_stage: ep.automationStage ?? null,
+      automation_progress: ep.automationProgress ?? 0,
+      automation_note: ep.automationNote ?? null,
+      automation_error: ep.automationError ?? null,
+      jobs: toSnakeCaseArray(automationJobs),
+    },
+    exports: toSnakeCaseArray(exports),
   })
 })
 

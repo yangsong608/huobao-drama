@@ -328,7 +328,13 @@ async function confirmDelete() {
 .empty-title { font-size: 14px; font-weight: 600; color: var(--text-1); }
 .empty-desc { font-size: 12px; color: var(--text-3); max-width: 240px; line-height: 1.6; }
 
-@media (max-width: 760px) {
+@media (max-width: 1180px) {
+  .project-grid { grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 12px; }
+}
+@media (max-width: 900px) {
+  .project-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+}
+@media (max-width: 743px) {
   .page { padding: 16px 16px 40px; }
   .launcher-head { flex-wrap: wrap; }
   .head-actions { width: 100%; }

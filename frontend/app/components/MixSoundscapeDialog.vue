@@ -544,4 +544,8 @@ watch(() => props.error, async (value) => {
   font-size: 11px; font-family: inherit;
 }
 .ss-duration-input i { font-style: normal; font-size: 10px; color: var(--text-3); }
+@media (max-width: 1180px) {
+  .ss-dialog { width: min(640px, calc(100vw - 24px)); }
+  .ss-body { max-height: calc(var(--app-vvh, 100vh) - 200px); }
+}
 </style>

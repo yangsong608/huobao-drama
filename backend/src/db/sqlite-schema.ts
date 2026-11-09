@@ -288,6 +288,7 @@ export const sqliteSchemaStatements = [
   `CREATE TABLE IF NOT EXISTS sys_task (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     type TEXT NOT NULL,
+    episode_id INTEGER,
     storyboard_id INTEGER,
     drama_id INTEGER,
     scene_id INTEGER,
@@ -309,6 +310,32 @@ export const sqliteSchemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_sys_task_type ON sys_task (type)`,
   `CREATE INDEX IF NOT EXISTS idx_sys_task_drama_id ON sys_task (drama_id)`,
   `CREATE INDEX IF NOT EXISTS idx_sys_task_storyboard_id ON sys_task (storyboard_id)`,
+
+  `CREATE TABLE IF NOT EXISTS video_batch_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER,
+    status TEXT DEFAULT 'running',
+    concurrency INTEGER DEFAULT 1,
+    stop_requested INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_video_batch_jobs_episode ON video_batch_jobs (episode_id)`,
+  `CREATE TABLE IF NOT EXISTS video_batch_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER NOT NULL,
+    storyboard_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    status TEXT DEFAULT 'queued',
+    task_id INTEGER,
+    request_json TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_video_batch_items_batch ON video_batch_items (batch_id)`,
 
   `CREATE TABLE IF NOT EXISTS video_merges (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1259,10 +1286,11 @@ export function initSqliteSchema(sqlite: Database.Database) {
   }
   // 兼容已安装的桌面版；仅增加任务恢复元数据，不改写历史生成结果。
   const taskColumns = new Set((sqlite.prepare('PRAGMA table_info(sys_task)').all() as { name: string }[]).map(c => c.name))
-  for (const [name, type] of Object.entries({ config_id: 'INTEGER', config_base_url: 'TEXT', stage: 'TEXT', error_code: 'TEXT', transition_id: 'INTEGER' })) {
+  for (const [name, type] of Object.entries({ config_id: 'INTEGER', config_base_url: 'TEXT', stage: 'TEXT', error_code: 'TEXT', transition_id: 'INTEGER', episode_id: 'INTEGER' })) {
     if (!taskColumns.has(name)) sqlite.exec(`ALTER TABLE sys_task ADD COLUMN ${name} ${type}`)
   }
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_sys_task_transition_id ON sys_task (transition_id)')
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_sys_task_episode_id ON sys_task (episode_id)')
   // 角色音色由用户上传；旧库补充可空字段，不修改已有角色和图片。
   const characterColumns = new Set((sqlite.prepare('PRAGMA table_info(characters)').all() as { name: string }[]).map(c => c.name))
   for (const name of ['voice_audio_url', 'voice_audio_name']) {

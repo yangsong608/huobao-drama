@@ -5,7 +5,7 @@ import fs from 'fs'
 import path from 'path'
 import { v4 as uuid } from 'uuid'
 import { db, getInsertId, schema } from '../db/index.js'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { now } from '../utils/response.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 import { extractVideoPoster } from '../utils/video-poster.js'
@@ -32,6 +32,18 @@ export interface MergeOptions {
 
 function toAbsPath(relativePath: string): string {
   return path.isAbsolute(relativePath) ? relativePath : getAbsolutePath(relativePath)
+}
+
+/**
+ * 合并是进程内任务，重启后 pending/processing 行不会再有结果，
+ * 启动时统一置 failed，任务中心才能如实统计。
+ */
+export function markInterruptedMerges(): number {
+  const result = db.update(schema.videoMerges)
+    .set({ status: 'failed', errorMsg: '服务重启，合并任务中断，请重新合成', completedAt: now() })
+    .where(inArray(schema.videoMerges.status, ['pending', 'processing']))
+    .run()
+  return Number(result.changes || 0)
 }
 
 /**

@@ -9,7 +9,7 @@ test('episodes route exposes soft delete', () => {
   const route = read('src/routes/episodes.ts')
 
   assert.match(route, /app\.delete\('\/:id'/)
-  assert.match(route, /set\(\{ deletedAt: now\(\)/)
+  assert.match(route, /set\(\{ deletedAt: (?:now\(\)|ts)/)
   assert.match(route, /剧集不存在/)
   // 无硬删
   assert.doesNotMatch(route, /db\.delete\(schema\.episodes\)/)

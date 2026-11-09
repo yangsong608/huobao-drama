@@ -144,7 +144,7 @@
     </div>
 
     <div v-if="showCreate" class="overlay" @click.self="closeCreate">
-      <div class="dialog create-dialog">
+      <div class="dialog create-dialog" role="dialog" aria-modal="true" :aria-label="t('index.createDialog.title')">
         <div class="dialog-head">
           <div class="modal-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
@@ -307,12 +307,19 @@ import { dramaAPI, stylePresetAPI, aiConfigAPI, uploadAPI, settingsAPI } from '~
 import { textModelSupportsVision } from '~/utils/model-capabilities'
 import BaseSelect from '~/components/BaseSelect.vue'
 import { startTour, autoTour } from '~/composables/useTour'
+import { useOverlayHistory } from '~/composables/useOverlayHistory'
 
 const { t, locale } = useI18n()
 
 const dramas = ref([])
 const loading = ref(false)
 const showCreate = ref(false)
+// 创建项目弹窗：返回键 / 返回手势先关弹窗，关闭后焦点回到触发按钮
+const createOverlay = useOverlayHistory(() => { showCreate.value = false })
+watch(showCreate, (open) => {
+  if (open) createOverlay.open()
+  else createOverlay.close()
+})
 const searchKeyword = ref('')
 const statusFilter = ref('all')
 const sortMode = ref('updated')
@@ -967,10 +974,14 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
 .field-hint-warn { color: var(--error); }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 
-@media (max-width: 900px) {
-  .project-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+/* 平板 / 窄屏栅格：列宽随可用宽度收缩，而不是把卡片挤成 200/160px 窄条 */
+@media (max-width: 1180px) {
+  .project-grid { grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 12px; }
 }
-@media (max-width: 760px) {
+@media (max-width: 900px) {
+  .project-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+}
+@media (max-width: 743px) {
   .page { padding: 16px 16px 40px; }
   .launcher-head { flex-wrap: wrap; }
   .launcher-sub { display: none; }
@@ -978,9 +989,13 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
   .toolbar { flex-wrap: wrap; }
   .search-box { width: 100%; flex: 1 1 100%; }
   .sort-select-wrap { margin-left: 0; flex: 1; }
-  .project-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .project-grid { grid-template-columns: 1fr; }
   .field-row { grid-template-columns: 1fr; }
   .dialog-foot { flex-direction: column-reverse; }
   .dialog-foot .btn { width: 100%; }
+}
+/* 触控设备无 hover：卡片「更多」操作常驻可见 */
+@media (hover: none) and (pointer: coarse) {
+  .cover-more, .project-card .cover-more { opacity: 1; }
 }
 </style>

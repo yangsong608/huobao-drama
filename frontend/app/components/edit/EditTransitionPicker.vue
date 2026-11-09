@@ -225,4 +225,16 @@ const demoFlash = computed(() => {
 .ed-tr-preset.is-on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg-2)); }
 .ed-tr-picker footer input[type="range"] { flex: 1; }
 .ed-tr-picker footer b { font-size: 11px; color: var(--text-1); min-width: 52px; text-align: right; }
+@media (max-width: 1180px) {
+  /* 平板宽度：两列卡片 + 受 --app-vvh 约束的弹层高度（扣掉安全区与边距），网格内部滚动 */
+  .ed-tr-picker {
+    max-height: min(82vh, calc(var(--app-vvh, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px));
+  }
+  .ed-tr-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 1180px) and (hover: none) and (pointer: coarse) {
+  .ed-close { min-width: 44px; min-height: 44px; }
+  .ed-tr-cats button { min-height: 44px; }
+  .ed-tr-preset { min-height: 44px; }
+}
 </style>
