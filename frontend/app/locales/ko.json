@@ -361,6 +361,7 @@
         "assetImages": "소재 이미지",
         "storyboards": "스토리보드 분할",
         "videoPrompts": "영상 프롬프트",
+        "storyboardAudit": "액션 검사",
         "voices": "음색 설정",
         "videos": "영상 생성",
         "dub": "더빙"
@@ -389,7 +390,8 @@
       "rules": "흐름 규칙",
       "breakdown": "스토리보드 분할",
       "queue": "작업 큐",
-      "novel": "소설"
+      "novel": "소설",
+      "audit": "스토리보드 검사"
     },
     "novel": {
       "title": "소설 생성",
@@ -650,7 +652,8 @@
       "storyboardBreaker": "스토리보드 분해",
       "promptGenerator": "프롬프트 생성",
       "langFallback": "중국어로 폴백",
-      "followContentLang": "편집 언어: {lang} (일반 → AI 콘텐츠 언어에서 전환)"
+      "followContentLang": "편집 언어: {lang} (일반 → AI 콘텐츠 언어에서 전환)",
+      "storyboardAuditor": "스토리보드 동작 검사"
     },
     "skills": {
       "agentList": "Agent 목록",
@@ -898,6 +901,54 @@
       "analyzing": "분석 중…",
       "done": "스타일 {name} 생성 완료",
       "failed": "스타일 분석 실패"
+    },
+    "audit": {
+      "title": "스토리보드 검사",
+      "subtitle": "동작 검사의 5개 항목, 임계값, 의미론적 윈도우, 자동 수정 정책을 설정합니다. 저장 후 새 검사 작업에 적용되며 완료된 결과는 변경되지 않습니다.",
+      "checks": "검사 항목",
+      "checksHint": "비활성화한 항목은 규칙/의미론적 문제를 생성하지 않습니다. 자산 검사는 항상 수동 처리이며 자동 수정되지 않습니다.",
+      "thresholds": "판정 임계값",
+      "thresholdHint": "대사 용량은 「글자/초 + 줄별 호흡」으로 추정합니다. 무음 임계값은 초 단위입니다.",
+      "semantic": "의미론적 검사",
+      "semanticHint": "검사 에이전트를 윈도우 단위로 호출합니다. 윈도우가 클수록 문맥은 풍부하지만 호출이 느려집니다.",
+      "autoRepair": "자동 수정",
+      "autoRepairHint": "서버 화이트리스트 작업만 실행합니다. 재검사에서 오류가 증가하면 수정 배치 전체를 롤백합니다.",
+      "enable": "사용",
+      "check": {
+        "shot": "카메라 / 대사 / 동작 / 표정 / 내레이션",
+        "continuity": "앞뒤 샷 연결과 부자연스러운 동작",
+        "silent": "긴 무대사·빈 샷",
+        "lineDuration": "대사 길이와 분할 제안",
+        "assets": "자산 정확성과 완전성"
+      },
+      "threshold": {
+        "charsPerSecond": "대사 속도(글자/초)",
+        "lineBreathSeconds": "줄당 호흡(초)",
+        "lineRequiredMaxSeconds": "한 줄 최대(초)",
+        "silentCharacterWarnSeconds": "캐릭터 무음 경고(초)",
+        "silentCharacterErrorSeconds": "캐릭터 무음 오류(초)",
+        "emptyShotWarnSeconds": "빈 샷 경고(초)",
+        "promptSegmentMaxChars": "3초 구간 최대 글자 수"
+      },
+      "semanticLabel": {
+        "windowSize": "윈도우 샷 수",
+        "windowStep": "윈도우 간격",
+        "maxWindows": "최대 윈도우 수"
+      },
+      "repairLabel": {
+        "semanticFix": "의미론적 문제 수정 허용",
+        "autoInsertTransition": "단절 지점에 전환 샷 자동 삽입",
+        "maxInsertedTransitions": "삽입 전환 샷 최대 수",
+        "maxActions": "작업당 최대 액션 수",
+        "maxActionsPerShot": "샷당 최대 액션 수"
+      },
+      "promptTitle": "검사 프롬프트와 Skill",
+      "promptDesc": "동작 검사는 storyboard_auditor 에이전트를 사용합니다. 검사 범위는 여기서 설정하고 시스템 프롬프트와 검사 Skill은 Agent 설정에서 편집합니다.",
+      "promptOpen": "프롬프트 관리 열기",
+      "save": "정책 저장",
+      "saving": "저장 중…",
+      "saved": "검사 정책이 저장되었습니다",
+      "loadFailed": "검사 정책을 불러오지 못했습니다. 다른 탭으로 이동한 후 다시 시도하세요."
     }
   },
   "episode": {
@@ -1160,14 +1211,14 @@
       "continuity": "연속성",
       "continuityPlaceholder": "이전 샷의 끝 동작, 시선, 위치, 환경음이 어떻게 이어지는지",
       "breakingElapsed": "스토리보드 분해 중… {s}초 경과, 생성된 샷은 자동으로 새로고침됩니다",
-    "splitProgress": "분할 분해 중: {done}/{total} 구간 · 샷 {shots}개 저장됨",
-    "splitFailed": "{chunk}/{total} 구간 분해 실패: {error}",
-    "splitDone": "분할 분해 완료: 총 샷 {n}개",
-    "splitResumed": "남은 구간 분해를 다시 시작했습니다",
-    "splitAlreadyRunning": "이미 분해 작업이 실행 중입니다. 진행 상황을 계속 표시합니다",
-    "resumeSplit": "남은 구간 분해 계속",
-    "splitStartFailed": "분할 분해를 시작하지 못했습니다. 다시 시도하세요",
-    "splitActionFailed": "분해를 계속하지 못했습니다. 잠시 후 다시 시도하세요",
+      "splitProgress": "분할 분해 중: {done}/{total} 구간 · 샷 {shots}개 저장됨",
+      "splitFailed": "{chunk}/{total} 구간 분해 실패: {error}",
+      "splitDone": "분할 분해 완료: 총 샷 {n}개",
+      "splitResumed": "남은 구간 분해를 다시 시작했습니다",
+      "splitAlreadyRunning": "이미 분해 작업이 실행 중입니다. 진행 상황을 계속 표시합니다",
+      "resumeSplit": "남은 구간 분해 계속",
+      "splitStartFailed": "분할 분해를 시작하지 못했습니다. 다시 시도하세요",
+      "splitActionFailed": "분해를 계속하지 못했습니다. 잠시 후 다시 시도하세요",
       "videoPromptSection": "영상 프롬프트",
       "regenPrompt": "다시 생성",
       "aiGenerate": "AI로 생성",
@@ -1367,10 +1418,119 @@
       "boundRefs": "바인딩 참조 이미지",
       "noBoundRefs": "바인딩된 에셋 없음（중앙 \"참조 에셋\"에서 바인딩）"
     },
+    "audit": {
+      "button": "액션 검사",
+      "rerun": "다시 검사",
+      "runningBlocked": "액션 검사 중에는 스토리보드를 변경할 수 없습니다",
+      "loadFailed": "액션 검사 상태를 불러오지 못했습니다",
+      "cleanTitle": "5개 검사 모두 문제가 없습니다",
+      "issuesTitle": "문제 {n}개",
+      "undo": "이번 수정 취소",
+      "undoDone": "스토리보드 {n}개를 복원했습니다",
+      "runDone": "액션 검사 완료, 자동 수정 {n}건",
+      "statusLabel": "검사 상태",
+      "trigger": {
+        "manual": "수동 검사",
+        "auto": "분할 후 자동 검사",
+        "pipeline": "전자동 흐름"
+      },
+      "shotStatus": {
+        "pending": "검사 대기",
+        "running": "검사 중",
+        "done": "완료",
+        "failed": "검사 실패",
+        "ruleOnly": "완료(규칙만)",
+        "stale": "검사 후 변경됨"
+      },
+      "check": {
+        "1": "숏 묘사",
+        "2": "전후 연결성",
+        "3": "대사 없는 빈 숏",
+        "4": "대사 길이",
+        "5": "에셋"
+      },
+      "filter": {
+        "all": "전체",
+        "error": "오류",
+        "warning": "경고",
+        "info": "정보",
+        "manual": "수동 필요",
+        "fixed": "수정됨"
+      },
+      "severity": {
+        "error": "오류",
+        "warning": "경고",
+        "info": "정보"
+      },
+      "panel": {
+        "title": "액션 검사",
+        "running": "검사 중입니다. 잠시만 기다려 주세요",
+        "progress": "시맨틱 {done}/{total}",
+        "model": "모델",
+        "trigger": "트리거",
+        "time": "시간",
+        "showAllShots": "전체 숏 보기",
+        "locateShot": "숏으로 이동",
+        "repairLog": "수정 기록",
+        "repairEmpty": "수정 기록이 없습니다",
+        "undoTitle": "이번 수정 취소",
+        "undoConfirm": "이번 자동 수정 전의 스토리보드 필드와 길이로 복원합니다. 이후 수동 편집은 덮어쓰지 않습니다. 계속할까요?",
+        "close": "닫기",
+        "jobError": "검사 실패: {message}",
+        "stale": "검사 후 스토리보드가 변경되었습니다. 다시 검사를 권장합니다",
+        "shotOnly": "숏 {n}만 보기",
+        "noIssuesForShot": "이 숏에 미처리 문제가 없습니다"
+      },
+      "empty": {
+        "none": "검사 기록이 없습니다",
+        "clean": "5개 검사 모두 문제가 없습니다",
+        "ruleOnly": "텍스트 모델이 없어 규칙 검사만 완료했습니다",
+        "stale": "검사 후 스토리보드가 변경되었습니다. 다시 검사를 권장합니다",
+        "semanticDisabled": "시맨틱 검사가 설정에서 꺼져 있어 규칙 검사만 실행했습니다",
+        "semanticPartial": "일부 시맨틱 윈도우 검사가 실패해 결과가 불완전할 수 있습니다",
+        "semanticFailed": "모든 시맨틱 윈도우가 실패해 규칙 검사만 완료되었습니다",
+        "semanticTruncated": "시맨틱 윈도우가 상한을 초과해 일부 샷만 검사했습니다"
+      },
+      "transition": {
+        "title": "트랜지션 숏 만들기",
+        "kindName": "종류",
+        "kindLabel": "종류",
+        "duration": "길이",
+        "prompt": "프롬프트",
+        "promptPlaceholder": "트랜지션 숏의 화면, 카메라 움직임, 조명 연결을 설명…",
+        "scene": "장면",
+        "scenePlaceholder": "장면 선택(빈 숏 배경으로 사용)",
+        "sceneRequired": "장면을 선택하세요",
+        "textContent": "메인 제목",
+        "textSubtitle": "부제",
+        "textHint": "텍스트 영상은 로컬에서 렌더링하며 영상 모델을 사용하지 않습니다. 제목 최대 20자, 부제 최대 40자.",
+        "needPrompt": "프롬프트를 입력하세요",
+        "needText": "제목을 입력하세요",
+        "needTitle": "제목을 입력하세요",
+        "submitted": "트랜지션 숏을 제출했습니다",
+        "failed": "트랜지션 숏 생성에 실패했습니다",
+        "kind": {
+          "ai": "AI 트랜지션",
+          "empty": "빈 숏",
+          "scene": "장면",
+          "text": "텍스트 영상"
+        },
+        "submit": "생성 및 만들기",
+        "submitting": "제출 중…",
+        "cancel": "취소",
+        "boundary": "경계 {pair}",
+        "noBoundary": "사용할 수 있는 인접 경계가 없습니다",
+        "degraded": "장면 이미지가 없어 빈 숏으로 생성합니다",
+        "editCustom": "종류 변경",
+        "badge": "전환"
+      },
+      "insertedDone": "전환 샷 {n}개를 자동 삽입하고 번호를 다시 정렬했습니다"
+    },
     "tasks": {
       "title": "생성 작업 목록",
       "meta": "생성 시간 역순 · 작업 {n}개",
       "centerTitle": "작업 센터",
+      "runStoryboardAudit": "에피소드 전체 액션 검사",
       "metaCenter": "총 {n}건 · 진행 중 {active}",
       "tabAll": "전체",
       "tabTasks": "생성",
@@ -1514,6 +1674,9 @@
         "loadFailed": "전환 상태를 불러오지 못했습니다",
         "actionFailed": "전환 작업에 실패했습니다",
         "partialFailed": "{n}개 트랜지션 제출 실패: {message}",
+        "addCustom": "트랜지션 숏 만들기",
+        "degraded": "장면 이미지가 없어 빈 숏으로 생성합니다",
+        "editCustom": "종류 변경",
         "prompt": {
           "toggle": "프롬프트",
           "label": "전환 영상 프롬프트",

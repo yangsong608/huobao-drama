@@ -22,7 +22,8 @@ process.env.MYSQL_AUTO_IMPORT = 'false'
 const { db, schema } = await import('../src/db/index.ts')
 const { default: episodesRoute } = await import('../src/routes/episodes.ts')
 const { default: dramasRoute } = await import('../src/routes/dramas.ts')
-const { buildVideoRequest, getAutomationState, markInterruptedAutomations, startAutomation, waitForAutomationIdle } = await import('../src/services/automation.ts')
+const { buildVideoRequest, getAutomationState, markInterruptedAutomations, startAutomation, stepStoryboardAudit, waitForAutomationIdle } = await import('../src/services/automation.ts')
+const auditSvc = await import('../src/services/storyboard-audit-jobs.ts')
 const { getPipelineRule, listPipelineRules, renderPipelineRule, resetPipelineRule, setPipelineRule, DEFAULT_PIPELINE_RULES } = await import('../src/services/pipeline-rules.ts')
 
 const ts = new Date().toISOString()
@@ -174,6 +175,39 @@ test('分镜拆分素材列表取全剧资产（跨集可绑定）', async () =>
   const ids = assets.scenes.map((s) => s.id)
   assert.ok(ids.includes(sceneA.id), '本集关联的场景在列表中')
   assert.ok(ids.includes(sceneB.id), '其他集/未关联的全剧场景也必须在列表中')
+})
+
+async function waitAuditJob(episodeId: number, timeoutMs = 10000): Promise<any> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const view = auditSvc.getLatestStoryboardAuditJob(episodeId)
+    if (view && ['done', 'failed', 'interrupted'].includes(view.status)) return view
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return auditSvc.getLatestStoryboardAuditJob(episodeId)
+}
+
+test('自动化检验步骤创建 automation 任务并等待完成，无模型时只做规则检验', async () => {
+  const [shot] = db.select().from(schema.storyboards).all()
+  assert.ok(shot, '前序用例应已写入分镜')
+  const episodeId = shot.episodeId
+
+  await stepStoryboardAudit(episodeId, 1, {})
+
+  const job = await waitAuditJob(episodeId)
+  assert.ok(job, '应创建动作检验任务')
+  assert.equal(job.trigger, 'automation')
+  assert.equal(job.status, 'done')
+  assert.equal(job.semantic_status, 'skipped_no_model')
+
+  const state = await getAutomationState(episodeId)
+  assert.equal(state?.stage, 'storyboard_audit')
+  // 视频提示词之后、视频之前，权重 6：67 + 6 = 73
+  assert.equal(state?.progress, 73)
+})
+
+test('自动化检验任务无法创建时只记录错误，不抛出中断流水线', async () => {
+  await stepStoryboardAudit(999999, 1, {})
 })
 
 after(async () => {

@@ -33,7 +33,7 @@ const {
   getDramaVisualBackground,
   MAX_BACKGROUND_PROMPT_CHARS,
 } = await import('../src/services/drama-background.ts')
-const { translateH3Text } = await import('../src/services/h3-prompt.ts')
+const { translateH3Text, clearH3TranslationCache } = await import('../src/services/h3-prompt.ts')
 const { getDramaStylePrompt } = await import('../src/services/style-preset.ts')
 
 const PNG = Buffer.from(
@@ -45,6 +45,7 @@ let server: http.Server
 let base = ''
 let cloudBase = ''
 let imagePromptSeen = ''
+let textPrompts: string[] = []
 
 await new Promise<void>((resolve) => {
   server = http.createServer((req, res) => {
@@ -65,13 +66,27 @@ await new Promise<void>((resolve) => {
         return
       }
       if (req.method === 'GET' && req.url?.startsWith('/v2/query/video_generation/')) {
+        // 立返回终态，避免测试结束后轮询重试拖住进程
         res.setHeader('Content-Type', 'application/json')
-        res.end(JSON.stringify({ task: { status: 'processing' } }))
+        res.end(JSON.stringify({ task: { status: 'failed', error: 'stub terminal' } }))
         return
       }
       if (req.url === '/content.png') {
         res.setHeader('Content-Type', 'image/png')
         res.end(PNG)
+        return
+      }
+      if (req.method === 'POST' && req.url === '/v1/chat/completions') {
+        let parsed: any = {}
+        try { parsed = JSON.parse(body.toString('utf8') || '{}') } catch {}
+        const text = (parsed.messages || []).map((m: any) => String(m.content || '')).join('\n')
+        textPrompts.push(text)
+        let content = 'Shen Yan pushes the door open, rain begins.'
+        if (text.includes('宋韵暖金')) content = 'Song dynasty warm gold 3D animation, cinematic lighting.'
+        else if (text.includes('深靛色')) content = 'Deep indigo sky, pale cyan sea, pale light band across the horizon.'
+        else if (text.includes('眉头')) content = 'Shen Yan turns his head, frowning.'
+        res.setHeader('Content-Type', 'application/json')
+        res.end(JSON.stringify({ choices: [{ message: { content } }] }))
         return
       }
       res.writeHead(404).end()
@@ -100,7 +115,21 @@ await db.insert(schema.aiServiceConfigs).values([
     serviceType: 'video', provider: 'minimax', name: 'stub-cloud-video', baseUrl: cloudBase, apiKey: 'test',
     model: JSON.stringify(['MiniMax-H3']), priority: 20, isActive: true, createdAt: ts, updatedAt: ts,
   },
+  {
+    serviceType: 'text', provider: 'openai', name: 'stub-text', baseUrl: base, apiKey: 'test',
+    model: JSON.stringify(['stub-text-model']), priority: 10, isActive: true, createdAt: ts, updatedAt: ts,
+  },
 ])
+await db.insert(schema.stylePresets).values({
+  name: '宋韵暖金 3D 国漫（测试）',
+  value: 'test-song-gold',
+  prompt: '宋韵暖金 3D 国漫，暖金侧逆光，低饱和暖色系，电影级景深',
+  description: '测试用中文风格预设',
+  sortOrder: 99,
+  isActive: true,
+  createdAt: ts,
+  updatedAt: ts,
+})
 await fs.mkdir(path.join(root, 'static', 'uploads'), { recursive: true })
 await fs.writeFile(path.join(root, 'static', 'uploads', 'ref.png'), PNG)
 
@@ -257,32 +286,81 @@ test('视频生成：视觉背景进入视频提示词，项目背景不再进�
   }
 })
 
-test('本地 H3：视觉背景翻译失败时跳过，项目背景也不进入视频提示词', async () => {
+test('本地 H3：中文提示词翻译失败时取消提交并返回明确错误', async () => {
+  const drama = (await db.select().from(schema.dramas)).find(row => row.title === '背景测试项目')!
+  const [episode] = await db.select().from(schema.episodes)
+  const videoConfig = (await db.select().from(schema.aiServiceConfigs)).find(row => row.name === 'stub-h3')!
+  const textConfig = (await db.select().from(schema.aiServiceConfigs)).find(row => row.name === 'stub-text')!
+  await db.update(schema.episodes).set({ videoConfigId: videoConfig.id }).where(eq(schema.episodes.id, episode.id))
+
+  await db.update(schema.aiServiceConfigs).set({ isActive: false }).where(eq(schema.aiServiceConfigs.id, textConfig.id))
+  try {
+    const res = await tasksRoute.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'video',
+        drama_id: drama.id,
+        config_id: videoConfig.id,
+        prompt: '沈砚推门而入，雨声渐起',
+        duration: 5,
+        aspect_ratio: '16:9',
+        reference_image_urls: [],
+      }),
+    })
+    const json = await res.json() as any
+    assert.equal(res.status, 400, JSON.stringify(json))
+    assert.match(String(json.message || ''), /本地 H3 提示词英文化失败/)
+    assert.match(String(json.message || ''), /取消提交/)
+  } finally {
+    await db.update(schema.aiServiceConfigs).set({ isActive: true }).where(eq(schema.aiServiceConfigs.id, textConfig.id))
+  }
+})
+
+test('本地 H3：风格/视觉背景单独翻译并缓存，提交前标签外无中文', async () => {
   const drama = (await db.select().from(schema.dramas)).find(row => row.title === '背景测试项目')!
   const [episode] = await db.select().from(schema.episodes)
   const videoConfig = (await db.select().from(schema.aiServiceConfigs)).find(row => row.name === 'stub-h3')!
   await db.update(schema.episodes).set({ videoConfigId: videoConfig.id }).where(eq(schema.episodes.id, episode.id))
+  await db.update(schema.dramas).set({ style: 'test-song-gold' }).where(eq(schema.dramas.id, drama.id))
+  clearH3TranslationCache()
 
-  const res = await tasksRoute.request('/', {
+  const post = (prompt: string) => tasksRoute.request('/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       type: 'video',
       drama_id: drama.id,
       config_id: videoConfig.id,
-      prompt: '沈砚推门而入，雨声渐起',
+      prompt,
       duration: 5,
       aspect_ratio: '16:9',
       reference_image_urls: [],
     }),
   })
-  const json = await res.json() as any
-  assert.equal(res.status, 201, JSON.stringify(json))
 
-  const prompt = String(json.data.prompt || '')
-  assert.ok(!prompt.includes(VISUAL_BACKGROUND), prompt.slice(0, 160))
-  assert.ok(!prompt.includes(BACKGROUND), prompt.slice(0, 160))
-  assert.ok(prompt.includes('沈砚推门而入'), prompt.slice(0, 160))
+  textPrompts = []
+  const first = await post('沈砚推门而入，雨声渐起')
+  const firstJson = await first.json() as any
+  assert.equal(first.status, 201, JSON.stringify(firstJson))
+  const firstPrompt = String(firstJson.data.prompt || '')
+  assert.doesNotMatch(firstPrompt, /[\u3400-\u9fff]/, firstPrompt)
+  assert.match(firstPrompt, /Song dynasty warm gold 3D animation/)
+  assert.match(firstPrompt, /Shen Yan pushes the door open, rain begins/)
+  assert.match(firstPrompt, /no spoken dialogue/i)
+  assert.ok(firstPrompt.indexOf('Deep indigo sky') < firstPrompt.indexOf('Song dynasty warm gold'))
+  assert.ok(firstPrompt.indexOf('Song dynasty warm gold') < firstPrompt.indexOf('Shen Yan pushes'))
+  assert.equal(textPrompts.length, 3, textPrompts.join('\n---\n'))
+
+  textPrompts = []
+  const second = await post('沈砚回头，眉头紧锁')
+  const secondJson = await second.json() as any
+  assert.equal(second.status, 201, JSON.stringify(secondJson))
+  const secondPrompt = String(secondJson.data.prompt || '')
+  assert.doesNotMatch(secondPrompt, /[\u3400-\u9fff]/, secondPrompt)
+  assert.match(secondPrompt, /Shen Yan turns his head, frowning/)
+  // 风格与视觉背景命中缓存，只为新正文调用一次文本模型
+  assert.equal(textPrompts.length, 1, textPrompts.join('\n---\n'))
 })
 
 test('translateH3Text：成功返回英文，失败返回 null，英文原样返回', async () => {
@@ -305,5 +383,13 @@ test('translateH3Text：成功返回英文，失败返回 null，英文原样返
 })
 
 after(async () => {
+  // 视频任务在创建后约 10s 才发起首轮轮询；等它们拿到桩服务的终态再关服务，
+  // 否则轮询重试定时器会拖住测试进程直到超时
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    const rows = await db.select().from(schema.sysTask)
+    if (rows.every(row => row.status === 'completed' || row.status === 'failed')) break
+    await new Promise(resolve => setTimeout(resolve, 250))
+  }
   await new Promise<void>(resolve => server?.close(() => resolve()))
 })

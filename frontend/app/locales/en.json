@@ -361,6 +361,7 @@
         "assetImages": "Asset images",
         "storyboards": "Storyboards",
         "videoPrompts": "Video prompts",
+        "storyboardAudit": "Action audit",
         "voices": "Voice design",
         "videos": "Video generation",
         "dub": "Dubbing"
@@ -389,7 +390,8 @@
       "rules": "Pipeline rules",
       "breakdown": "Breakdown methods",
       "queue": "Job queue",
-      "novel": "Novel"
+      "novel": "Novel",
+      "audit": "Storyboard Audit"
     },
     "novel": {
       "title": "Novel generation",
@@ -650,7 +652,8 @@
       "storyboardBreaker": "Storyboard Breaker",
       "promptGenerator": "Prompt Generator",
       "langFallback": "Falls back to Chinese",
-      "followContentLang": "Editing language: {lang} (switch in General → AI Content Language)"
+      "followContentLang": "Editing language: {lang} (switch in General → AI Content Language)",
+      "storyboardAuditor": "Storyboard Auditor"
     },
     "skills": {
       "agentList": "Agents",
@@ -898,6 +901,54 @@
       "analyzing": "Analyzing…",
       "done": "Style \"{name}\" created",
       "failed": "Style analysis failed"
+    },
+    "audit": {
+      "title": "Storyboard Audit",
+      "subtitle": "Configure the five audit checks, thresholds, semantic windows and auto-repair policy. Changes apply to new audit jobs and leave completed results untouched.",
+      "checks": "Checks",
+      "checksHint": "Disabled checks produce no rule or semantic issues. Asset checks stay manual and are never repaired automatically.",
+      "thresholds": "Thresholds",
+      "thresholdHint": "Line capacity is estimated as characters per second plus a per-line breath. Silence thresholds are measured in seconds.",
+      "semantic": "Semantic audit",
+      "semanticHint": "The auditor runs window by window. Larger windows carry more context but take longer per call.",
+      "autoRepair": "Auto repair",
+      "autoRepairHint": "Only server-side whitelisted actions run. Any increase in open errors rolls back the whole repair batch.",
+      "enable": "Enable",
+      "check": {
+        "shot": "Camera / dialogue / action / expression / narration",
+        "continuity": "Adjacent-shot continuity and unreasonable actions",
+        "silent": "Long silent or empty shots",
+        "lineDuration": "Line duration and split suggestions",
+        "assets": "Asset correctness and completeness"
+      },
+      "threshold": {
+        "charsPerSecond": "Speech rate (chars/sec)",
+        "lineBreathSeconds": "Breath per line (sec)",
+        "lineRequiredMaxSeconds": "Longest single line (sec)",
+        "silentCharacterWarnSeconds": "Character silence warning (sec)",
+        "silentCharacterErrorSeconds": "Character silence error (sec)",
+        "emptyShotWarnSeconds": "Empty shot warning (sec)",
+        "promptSegmentMaxChars": "Max chars per 3-second segment"
+      },
+      "semanticLabel": {
+        "windowSize": "Shots per window",
+        "windowStep": "Window step",
+        "maxWindows": "Max windows"
+      },
+      "repairLabel": {
+        "semanticFix": "Repair semantic issues",
+        "autoInsertTransition": "Auto-insert transition shot at breaks",
+        "maxInsertedTransitions": "Max inserted transitions",
+        "maxActions": "Max actions per job",
+        "maxActionsPerShot": "Max actions per shot"
+      },
+      "promptTitle": "Audit prompt and Skill",
+      "promptDesc": "The audit uses the storyboard_auditor agent. Configure the check scope here and edit the system prompt and audit Skill under Agent settings.",
+      "promptOpen": "Open prompt settings",
+      "save": "Save policy",
+      "saving": "Saving…",
+      "saved": "Audit policy saved",
+      "loadFailed": "Failed to load the audit policy. Switch to another tab and retry."
     }
   },
   "episode": {
@@ -1160,14 +1211,14 @@
       "continuity": "Continuity",
       "continuityPlaceholder": "How the previous shot's tail action, gaze, blocking and ambience continue",
       "breakingElapsed": "Breaking down the storyboard… {s}s elapsed; generated shots refresh automatically",
-    "splitProgress": "Chunked split: chunk {done}/{total} · {shots} shots saved",
-    "splitFailed": "Chunk {chunk}/{total} failed: {error}",
-    "splitDone": "Chunked split complete: {n} shots",
-    "splitResumed": "Resuming the remaining chunks",
-    "splitAlreadyRunning": "A split job is already running; progress continues here",
-    "resumeSplit": "Resume remaining chunks",
-    "splitStartFailed": "Failed to start the chunked split; please retry",
-    "splitActionFailed": "Failed to resume the split; please retry later",
+      "splitProgress": "Chunked split: chunk {done}/{total} · {shots} shots saved",
+      "splitFailed": "Chunk {chunk}/{total} failed: {error}",
+      "splitDone": "Chunked split complete: {n} shots",
+      "splitResumed": "Resuming the remaining chunks",
+      "splitAlreadyRunning": "A split job is already running; progress continues here",
+      "resumeSplit": "Resume remaining chunks",
+      "splitStartFailed": "Failed to start the chunked split; please retry",
+      "splitActionFailed": "Failed to resume the split; please retry later",
       "videoPromptSection": "Video Prompt",
       "regenPrompt": "Regenerate",
       "aiGenerate": "AI Generate",
@@ -1367,10 +1418,119 @@
       "boundRefs": "Bound References",
       "noBoundRefs": "No bound assets (bind in the center \"References\" panel)"
     },
+    "audit": {
+      "button": "Action audit",
+      "rerun": "Re-audit",
+      "runningBlocked": "Action audit is running; shots cannot be changed now",
+      "loadFailed": "Failed to load action audit status",
+      "cleanTitle": "All five checks passed",
+      "issuesTitle": "{n} issues",
+      "undo": "Undo repairs",
+      "undoDone": "Restored {n} shots",
+      "runDone": "Action audit finished; repaired {n} items",
+      "statusLabel": "Audit status",
+      "trigger": {
+        "manual": "Manual audit",
+        "auto": "Auto after breakdown",
+        "pipeline": "Full pipeline"
+      },
+      "shotStatus": {
+        "pending": "Pending",
+        "running": "Checking",
+        "done": "Checked",
+        "failed": "Failed",
+        "ruleOnly": "Checked (rules only)",
+        "stale": "Modified after audit"
+      },
+      "check": {
+        "1": "Shot descriptions",
+        "2": "Continuity",
+        "3": "Silent shots",
+        "4": "Line duration",
+        "5": "Assets"
+      },
+      "filter": {
+        "all": "All",
+        "error": "Errors",
+        "warning": "Warnings",
+        "info": "Info",
+        "manual": "Manual",
+        "fixed": "Fixed"
+      },
+      "severity": {
+        "error": "Error",
+        "warning": "Warning",
+        "info": "Info"
+      },
+      "panel": {
+        "title": "Action audit",
+        "running": "Auditing, please wait",
+        "progress": "Semantic {done}/{total}",
+        "model": "Model",
+        "trigger": "Trigger",
+        "time": "Time",
+        "showAllShots": "Show all shots",
+        "locateShot": "Locate shot",
+        "repairLog": "Repair log",
+        "repairEmpty": "No repairs yet",
+        "undoTitle": "Undo repairs",
+        "undoConfirm": "Restore shot fields and durations to their pre-repair values. Manual edits made afterwards are kept. Continue?",
+        "close": "Close",
+        "jobError": "Audit failed: {message}",
+        "stale": "Shots changed after the audit; re-audit recommended",
+        "shotOnly": "Only shot {n}",
+        "noIssuesForShot": "No open issues for this shot"
+      },
+      "empty": {
+        "none": "No audit yet",
+        "clean": "All five checks passed",
+        "ruleOnly": "No text model configured; rule checks completed",
+        "stale": "Shots changed after the audit; re-audit recommended",
+        "semanticDisabled": "Semantic check is disabled in Settings; only rule checks ran",
+        "semanticPartial": "Some semantic windows failed; results may be incomplete",
+        "semanticFailed": "All semantic windows failed; only rule checks completed",
+        "semanticTruncated": "Semantic windows exceeded the limit and were truncated; results cover only part of the episode"
+      },
+      "transition": {
+        "title": "New transition shot",
+        "kindName": "Type",
+        "kindLabel": "Type",
+        "duration": "Duration",
+        "prompt": "Prompt",
+        "promptPlaceholder": "Describe the transition shot's visuals, camera movement and lighting…",
+        "scene": "Scene",
+        "scenePlaceholder": "Choose a scene (used as the empty-shot background)",
+        "sceneRequired": "Choose a scene",
+        "textContent": "Title",
+        "textSubtitle": "Subtitle",
+        "textHint": "Text videos render locally without using a video model; title up to 20 characters, subtitle up to 40.",
+        "needPrompt": "Enter a prompt",
+        "needText": "Enter a title",
+        "needTitle": "Enter a title",
+        "submitted": "Transition shot submitted",
+        "failed": "Failed to create transition shot",
+        "kind": {
+          "ai": "AI transition",
+          "empty": "Empty shot",
+          "scene": "Scene",
+          "text": "Text video"
+        },
+        "submit": "Create & generate",
+        "submitting": "Submitting…",
+        "cancel": "Cancel",
+        "boundary": "Boundary {pair}",
+        "noBoundary": "No adjacent boundary available",
+        "degraded": "Scene image missing; generated as an empty shot",
+        "editCustom": "Change type",
+        "badge": "Transition"
+      },
+      "insertedDone": "Inserted {n} transition shot(s); shot numbers re-sequenced"
+    },
     "tasks": {
       "title": "Generation Tasks",
       "meta": "Newest first · {n} tasks",
       "centerTitle": "Task Center",
+      "runStoryboardAudit": "Episode action audit",
       "metaCenter": "{n} records · {active} running",
       "tabAll": "All",
       "tabTasks": "Generation",
@@ -1514,6 +1674,9 @@
         "loadFailed": "Failed to load transition status",
         "actionFailed": "Transition action failed",
         "partialFailed": "{n} transition(s) failed to submit: {message}",
+        "addCustom": "New transition shot",
+        "degraded": "Scene image missing; generated as an empty shot",
+        "editCustom": "Change type",
         "prompt": {
           "toggle": "Prompt",
           "label": "Transition video prompt",

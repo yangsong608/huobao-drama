@@ -85,14 +85,15 @@ test('custom and missing prompt templates retain the runtime voice rules', async
 
 test('a generated voice binding saves editable tokens and resolves to the corresponding video audio', async () => {
   const prompt = '0-3秒：@林小雨抬头，#林小雨轻声说：「早上好。」\n3-6秒：@陈默点头。'
+  const savedPrompt = `出场人物：@林小雨、@陈默、@小白｜场景：未指定\n${prompt}`
   await call('updateStoryboard', { storyboard_id: sb.id, video_prompt: prompt })
-  assert.equal(row().videoPrompt, prompt)
+  assert.equal(row().videoPrompt, savedPrompt)
   assert.equal(row().description, sb.description)
   assert.equal(row().atmosphere, sb.atmosphere)
   assert.equal(row().duration, sb.duration)
   const resolved = await resolveStoryboardVoiceReferences(row().videoPrompt!, sb.id, [])
   assert.deepEqual(resolved.audioUrls, [speaker.voiceAudioUrl])
-  assert.equal(resolved.prompt, '0-3秒：@林小雨抬头，林小雨（音色参考音频1）轻声说：「早上好。」\n3-6秒：@陈默点头。')
+  assert.equal(resolved.prompt, `出场人物：@林小雨、@陈默、@小白｜场景：未指定\n0-3秒：@林小雨抬头，林小雨（音色参考音频1）轻声说：「早上好。」\n3-6秒：@陈默点头。`)
   assert.doesNotMatch(resolved.prompt, /#林小雨/)
 })
 
@@ -124,7 +125,10 @@ test('initial breakdown validates voices before replacement and persists valid b
   const shots = db.select().from(schema.storyboards).where(eq(schema.storyboards.episodeId, ep.id)).all()
   const second = shots.find(s => s.storyboardNumber === 2)!
   assert.deepEqual((await resolveStoryboardVoiceReferences(second.videoPrompt!, second.id, [])).audioUrls, [speaker.voiceAudioUrl])
-  assert.equal(shots.find(s => s.storyboardNumber === 3)!.videoPrompt, '@小白走路。')
+  assert.equal(
+    shots.find(s => s.storyboardNumber === 3)!.videoPrompt,
+    '出场人物：@小白｜场景：未指定\n@小白走路。',
+  )
 })
 
 test.after(async () => { db.$client.close(); await fs.rm(root, { recursive: true, force: true }) })

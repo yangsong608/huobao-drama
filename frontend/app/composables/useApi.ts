@@ -1436,12 +1436,18 @@ export const transitionAPI = {
     storyboardIds?.length ? `?storyboard_ids=${storyboardIds.join(',')}` : ''
   }`),
   prepare: (epId: number, payload: Record<string, any>) => api.post<any>(`/merge/episodes/${epId}/transitions/prepare`, payload),
+  createCustom: (epId: number, payload: Record<string, any>) => api.post<any>(`/merge/episodes/${epId}/transitions/custom`, payload),
   retry: (id: number, payload: Record<string, any> = {}) => api.post<any>(`/merge/transitions/${id}/retry`, payload),
   analyze: (id: number, payload: Record<string, any> = {}) => api.post<any>(`/merge/transitions/${id}/analyze`, payload),
   savePrompt: (id: number, prompt: string) => api.put<any>(`/merge/transitions/${id}/prompt`, { prompt }),
   saveReferenceImages: (id: number, payload: Record<string, any>) => api.put<any>(`/merge/transitions/${id}/reference-images`, payload),
   skip: (id: number) => api.post<any>(`/merge/transitions/${id}/skip`, {}),
   del: (id: number) => api.del(`/merge/transitions/${id}`),
+}
+export const storyboardAuditAPI = {
+  latest: (episodeId: number) => api.get<any>(`/agent/storyboard_auditor/audit-jobs/latest/${episodeId}`),
+  create: (payload: Record<string, any>) => api.post<any>('/agent/storyboard_auditor/audit-jobs', payload),
+  undo: (id: number) => api.post<any>(`/agent/storyboard_auditor/audit-jobs/${id}/undo`, {}),
 }
 export const aiConfigAPI = {
   list: (t?: string) => api.get(`/ai-configs${t ? `?service_type=${t}` : ''}`),
@@ -1485,6 +1491,39 @@ export const storageAPI = {
   info: () => api.get('/storage'),
 }
 
+export interface StoryboardAuditPolicy {
+  checks: {
+    shot: boolean
+    continuity: boolean
+    silent: boolean
+    lineDuration: boolean
+    assets: boolean
+  }
+  thresholds: {
+    charsPerSecond: number
+    lineBreathSeconds: number
+    lineRequiredMaxSeconds: number
+    silentCharacterWarnSeconds: number
+    silentCharacterErrorSeconds: number
+    emptyShotWarnSeconds: number
+    promptSegmentMaxChars: number
+  }
+  semantic: {
+    enabled: boolean
+    windowSize: number
+    windowStep: number
+    maxWindows: number
+  }
+  autoRepair: {
+    enabled: boolean
+    semanticFix: boolean
+    maxActions: number
+    maxActionsPerShot: number
+    autoInsertTransition: boolean
+    maxInsertedTransitions: number
+  }
+}
+
 export const settingsAPI = {
   contentLanguage: () => api.get<{ language: string }>('/settings/content-language'),
   setContentLanguage: (language: string) => api.put('/settings/content-language', { language }),
@@ -1494,6 +1533,8 @@ export const settingsAPI = {
   saveNovel: (patch: Partial<NovelSettings>) => api.put<{ settings: NovelSettings }>('/settings/novel', patch),
   media: () => api.get<MediaSettingsPayload>('/settings/media'),
   saveMedia: (ffmpegDir: string) => api.put<MediaSettingsPayload>('/settings/media', { ffmpegDir }),
+  storyboardAudit: () => api.get<{ policy: StoryboardAuditPolicy }>('/settings/storyboard-audit'),
+  saveStoryboardAudit: (policy: StoryboardAuditPolicy) => api.put<{ policy: StoryboardAuditPolicy }>('/settings/storyboard-audit', policy),
 }
 
 // MCP 服务：开关、端口、访问 token

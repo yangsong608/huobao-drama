@@ -449,6 +449,45 @@ test('方案块：未编辑 standard 为空，自定义块含标题、优先声�
   svc.deleteBreakdownMethod(custom.key)
 })
 
+test('方案块尾部固定追加平台硬约束，任何方案不得覆盖 video_prompt 基础规范', async () => {
+  await svc.ensureBreakdownMethodsSeeded()
+  const custom = svc.createBreakdownMethod({
+    name: '平台硬约束测试方案',
+    prompt: '方案提示词：按钩子节拍拆分',
+    skill: '方案 Skill：自检只看钩子',
+  })
+  try {
+    const ep = newEpisode(custom.key)
+    const block = svc.getEpisodeBreakdownBlock(ep)!
+    for (const word of [
+      '### 平台硬约束',
+      '任何方案不得覆盖',
+      '出场人物：@角色A、@角色B｜场景：@场景名',
+      '出场人物：无',
+      '场景：未指定',
+      '0-3秒：',
+      '最后一段的结束时间等于本镜 duration',
+      '@角色名说：「台词」',
+      '旁白（画外音）：「台词」',
+      '不得写成台词或旁白',
+      'description 固定按',
+      'atmosphere',
+      '不要写「音频：」',
+    ]) {
+      assert.ok(block.includes(word), `硬约束块缺少 ${word}`)
+    }
+    assert.ok(
+      block.indexOf('### 平台硬约束') > block.indexOf('方案 Skill：自检只看钩子'),
+      '硬约束必须排在方案正文之后',
+    )
+
+    const extendedEp = newEpisode('hook-beat-extended')
+    assert.ok(svc.getEpisodeBreakdownBlock(extendedEp)!.includes('### 平台硬约束'))
+  } finally {
+    svc.deleteBreakdownMethod(custom.key)
+  }
+})
+
 test('按集读取：编辑后的 standard 会注入，未知 key 回退为空', () => {
   const standard = svc.getBreakdownMethod('standard')!
   db.update(breakdownMethods).set({ prompt: '标准补充规则' }).where(eq(breakdownMethods.key, 'standard')).run()
@@ -660,6 +699,36 @@ test('Agent 路由注入覆盖下限并在生成结束后返回覆盖结果', ()
   const afterGenerate = source.indexOf('coverageResult')
   const generateCall = source.indexOf('agent.generate(')
   assert.ok(afterGenerate > generateCall, '覆盖结果必须在生成结束后再计算')
+})
+
+test('基础分镜提示词与技能写明统一的 description / video_prompt 格式', () => {
+  const prompt = fs.readFileSync(
+    new URL('../workspace/prompts/storyboard_breaker.md', import.meta.url),
+    'utf8',
+  )
+  const skill = fs.readFileSync(
+    new URL('../workspace/skills/storyboard-breaker/SKILL.md', import.meta.url),
+    'utf8',
+  )
+  for (const marker of [
+    '出场人物：@角色A、@角色B｜场景：@场景名',
+    '出场人物：无',
+    '场景：未指定',
+    '0-3秒：',
+    '最后一段的结束时间等于本镜 duration',
+    '@角色名说：「台词」',
+    '旁白（画外音）：「台词」',
+    '不得写成台词',
+  ]) {
+    assert.ok(prompt.includes(marker), `基础提示词缺少 ${marker}`)
+  }
+  for (const marker of [
+    '【镜头1】',
+    '@角色名说：「台词」',
+    '旁白（画外音）：「台词」',
+  ]) {
+    assert.ok(skill.includes(marker), `基础 Skill 缺少 ${marker}`)
+  }
 })
 
 test('名称、prompt、skill 长度边界', () => {

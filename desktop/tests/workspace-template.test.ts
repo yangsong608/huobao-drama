@@ -1,9 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { migrateLegacyAudioInstructions, rewriteLegacyAudioText } from '../src/workspace-template.ts'
+import {
+  LEGACY_BUILTIN_FILES,
+  migrateLegacyAudioInstructions,
+  migrateLegacyBuiltinFiles,
+  rewriteLegacyAudioText,
+} from '../src/workspace-template.ts'
 
 const LEGACY_ZH = '音频：人声清晰靠前，环境音压低，无背景音乐；旁白/心声为画外音，不张口。'
 const LEGACY_EN = 'Audio: dialogue/narration clear and forward, ambience low, no background music; narration/inner voice is off-screen, mouth not moving.'
@@ -61,6 +67,68 @@ test('migration is idempotent and leaves clean or user-edited files alone', () =
     assert.match(fs.readFileSync(path.join(root, 'prompts/custom.md'), 'utf8'), /用户自己的分镜习惯/)
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+function sha256(content: string): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
+test('legacy builtin skill files are replaced only when content matches the shipped hash', () => {
+  const legacy = '旧版分镜技能\n'
+  const current = '新版分镜技能：剧本全覆盖\n'
+  const root = workspace({ 'skills/storyboard-breaker/SKILL.md': legacy })
+  const template = workspace({ 'skills/storyboard-breaker/SKILL.md': current })
+  try {
+    const rules = [{
+      path: 'skills/storyboard-breaker/SKILL.md',
+      sha256: [sha256(legacy)],
+    }]
+    const target = path.join(root, 'skills/storyboard-breaker/SKILL.md')
+
+    assert.deepEqual(migrateLegacyBuiltinFiles(root, template, rules), [target])
+    assert.equal(fs.readFileSync(target, 'utf8'), current)
+    assert.deepEqual(migrateLegacyBuiltinFiles(root, template, rules), [])
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+    fs.rmSync(template, { recursive: true, force: true })
+  }
+})
+
+test('user-edited builtin skill and missing template are preserved', () => {
+  const legacy = '旧版分镜技能\n'
+  const edited = `${legacy}我自己的调整\n`
+  const rules = [{
+    path: 'skills/storyboard-breaker/SKILL.md',
+    sha256: [sha256(legacy)],
+  }]
+  const root = workspace({ 'skills/storyboard-breaker/SKILL.md': edited })
+  const template = workspace({ 'skills/storyboard-breaker/SKILL.md': '新版\n' })
+  const emptyTemplate = workspace({})
+  try {
+    assert.deepEqual(migrateLegacyBuiltinFiles(root, template, rules), [])
+    assert.equal(fs.readFileSync(path.join(root, 'skills/storyboard-breaker/SKILL.md'), 'utf8'), edited)
+    assert.deepEqual(migrateLegacyBuiltinFiles(root, emptyTemplate, rules), [])
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+    fs.rmSync(template, { recursive: true, force: true })
+    fs.rmSync(emptyTemplate, { recursive: true, force: true })
+  }
+})
+
+test('builtin storyboard-breaker skill migration covers all language variants', () => {
+  const paths = LEGACY_BUILTIN_FILES.map(rule => rule.path)
+  for (const file of ['SKILL.md', 'SKILL.en.md', 'SKILL.ja.md', 'SKILL.ko.md']) {
+    assert.ok(paths.includes(`skills/storyboard-breaker/${file}`), `迁移清单缺少 ${file}`)
+  }
+})
+
+test('builtin storyboard-auditor skill migration covers all language variants', () => {
+  const rules = new Map(LEGACY_BUILTIN_FILES.map(rule => [rule.path, rule]))
+  for (const file of ['SKILL.md', 'SKILL.en.md', 'SKILL.ja.md', 'SKILL.ko.md']) {
+    const rule = rules.get(`skills/storyboard-auditor/${file}`)
+    assert.ok(rule, `迁移清单缺少 storyboard-auditor/${file}`)
+    assert.equal(rule.sha256.length, 1, `storyboard-auditor/${file} 应只匹配 4.0.30 版哈希`)
   }
 })
 

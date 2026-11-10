@@ -1,0 +1,24 @@
+%% 火宝短剧现状容器视图（2026-11-10 下午复核）
+%% 证据：desktop/src/main.ts、backend/src/index.ts、services/adapters/、services/h3-prompt.ts、services/mcp.ts
+%% local-h3 网关实际运行位置为远程主机，属历史运行记录，非本次代码验证
+flowchart TB
+  creator[创作者]
+  subgraph desktop[桌面壳 desktop/]
+    electron[Electron 主进程<br/>端口编排/模板同步/更新]
+  end
+  subgraph app[应用本体]
+    fe[frontend<br/>Nuxt 3 SPA]
+    be[backend<br/>Hono API + Mastra Agents]
+    db[(data/<br/>SQLite + static 媒体)]
+  end
+  ai[外部 AI 服务<br/>文本/图片/视频/TTS 中转]
+  h3[local-h3 网关<br/>ComfyUI H3 视频]
+  mcpclient[外部 MCP 客户端]
+
+  creator -->|操作| fe
+  electron -->|utilityProcess.fork| be
+  fe -->|/api/v1 同源| be
+  be -->|读写| db
+  be -->|适配器调用| ai
+  be -->|时间轴/提示词编译| h3
+  mcpclient -->|127.0.0.1:5780 Bearer| be

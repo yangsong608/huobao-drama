@@ -5,7 +5,8 @@
  * 已完成且来源指纹一致的断点直接复用，避免重复计费。
  */
 import fs from 'node:fs'
-import { and, desc, eq, ne } from 'drizzle-orm'
+import { randomUUID } from 'node:crypto'
+import { and, desc, eq, inArray, ne } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import { now } from '../utils/response.js'
@@ -13,13 +14,24 @@ import { logTaskError, logTaskProgress, logTaskWarn } from '../utils/task-logger
 import { videoModelCapabilities } from './model-capabilities.js'
 import { extractVideoFrame, type ExtractedFrame, type ExtractFrameOptions, type FramePosition } from './video-frames.js'
 import {
+  assertCustomTransitionDuration,
   buildCloudTransitionPrompt,
   buildLocalTransitionPrompt,
   buildTransitionBoundaries,
+  customTransitionSourceHash,
   effectiveTransitionDuration,
+  normalizeTransitionKind,
+  normalizeTransitionText,
+  parseTransitionKind,
+  transitionEdgeMode,
   transitionSourceHash,
+  type NormalizedTransitionText,
   type TransitionBoundary,
+  type TransitionEdgeMode,
+  type TransitionKind,
 } from './transition-plan.js'
+import { renderTransitionTextVideo, transitionTextDimensions } from './transition-text-render.js'
+import { hasActiveStoryboardAudit } from './storyboard-audit-jobs.js'
 import { generateVideo, type GenerateVideoParams } from './generation.js'
 import { isLocalShim, isLocalShimConfig } from './adapters/minimax-video.js'
 import { assertComfyFirstLastFrameWorkflow, parseComfyWorkflow } from './adapters/comfyui.js'
@@ -61,6 +73,28 @@ export interface TransitionDeps {
   extractFrame?: (videoPath: string, position: FramePosition, options: ExtractFrameOptions) => Promise<ExtractedFrame>
   translate?: (text: string) => Promise<string | null>
   analyze?: (input: TransitionPromptAnalysisInput) => Promise<TransitionPromptAnalysis>
+  renderText?: (input: {
+    absolutePath: string
+    title: string
+    subtitle: string | null
+    durationMs: number
+    width: number
+    height: number
+    fps: number
+    backgroundImagePath: string | null
+  }) => Promise<void>
+}
+
+export interface CreateCustomTransitionParams {
+  episodeId: number
+  fromStoryboardId: number
+  toStoryboardId: number
+  kind: 'empty' | 'scene' | 'text'
+  prompt?: string
+  sceneId?: number | null
+  textContent?: string
+  textSubtitle?: string | null
+  duration?: number
 }
 
 export type TransitionPromptSource = 'ai' | 'fallback' | 'manual'
@@ -77,6 +111,13 @@ export interface TransitionBoundaryView {
   enabled: boolean
   stale: boolean
   supported: boolean
+  kind: TransitionKind
+  sceneId: number | null
+  textContent: string | null
+  textSubtitle: string | null
+  edgeMode: TransitionEdgeMode
+  /** 场景图缺失时场景镜头降级为文生视频 */
+  degraded: boolean
   prompt: string | null
   promptSource: TransitionPromptSource | null
   videoUrl: string | null
@@ -143,6 +184,7 @@ export interface PrepareTransitionsResult extends TransitionListView {
 
 type StoryboardRow = typeof schema.storyboards.$inferSelect
 type TransitionRow = typeof schema.videoTransitions.$inferSelect
+type SceneRow = typeof schema.scenes.$inferSelect
 
 interface EpisodeContext {
   episode: typeof schema.episodes.$inferSelect
@@ -295,6 +337,51 @@ function parseReferenceImageUrls(raw: string | null | undefined): string[] {
   }
 }
 
+/** 自定义过渡指纹不依赖相邻镜头视频，只随自身内容/场景图/时长变化 */
+function customHashFor(row: Pick<TransitionRow,
+  'kind' | 'prompt' | 'textContent' | 'textSubtitle' | 'sceneId' | 'durationRequested' | 'audioMode'>,
+  sceneImageUrl: string | null,
+): string {
+  const kind = normalizeTransitionKind(row.kind)
+  if (kind === 'ai') throw new Error('过渡类型不合法')
+  return customTransitionSourceHash({
+    kind,
+    prompt: row.prompt,
+    textContent: row.textContent,
+    textSubtitle: row.textSubtitle,
+    sceneId: row.sceneId,
+    sceneImageUrl,
+    duration: Number(row.durationRequested) || 0,
+    audioMode: row.audioMode,
+  })
+}
+
+async function sceneImageById(sceneIds: (number | null | undefined)[]): Promise<Map<number, string>> {
+  const ids = [...new Set(sceneIds.filter((id): id is number => Number(id) > 0))]
+  if (!ids.length) return new Map()
+  const rows = await db.select().from(schema.scenes).where(inArray(schema.scenes.id, ids))
+  return new Map(rows.map(row => [row.id, String(row.imageUrl || '').trim()]))
+}
+
+/** 行当前指纹：AI 过渡比对相邻视频，自定义过渡只比对自身内容 */
+function rowHashFor(
+  row: TransitionRow,
+  from: StoryboardRow,
+  to: StoryboardRow,
+  sceneImages: Map<number, string>,
+): string {
+  if (normalizeTransitionKind(row.kind) === 'ai') return hashFor(from, to, row)
+  return customHashFor(row, row.sceneId ? sceneImages.get(row.sceneId) || '' : '')
+}
+
+async function loadTransitionScene(dramaId: number, sceneId: number): Promise<SceneRow> {
+  if (!Number.isInteger(sceneId) || sceneId <= 0) throw new Error('请选择场景资产')
+  const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, sceneId))
+  if (!scene || scene.dramaId !== dramaId) throw new Error('场景不存在或不属于当前项目')
+  if (scene.deletedAt) throw new Error('场景已删除，请重新选择场景')
+  return scene
+}
+
 function videoFileExists(relativePath: string | null | undefined): boolean {
   if (!relativePath) return false
   try {
@@ -331,6 +418,7 @@ function toView(
     : row.enabled === false
       ? 'skipped'
       : (row.status as TransitionViewStatus) || 'pending'
+  const kind = normalizeTransitionKind(row?.kind)
   return {
     id: row?.id ?? null,
     index: boundary.index,
@@ -341,7 +429,16 @@ function toView(
     status,
     enabled: row ? row.enabled !== false : true,
     stale,
-    supported,
+    // 空镜/场景/文字由各自链路生成，不受首尾帧模型能力限制
+    supported: kind === 'ai' ? supported : true,
+    kind,
+    sceneId: row?.sceneId ?? null,
+    textContent: row?.textContent ?? null,
+    textSubtitle: row?.textSubtitle ?? null,
+    edgeMode: kind === 'ai'
+      ? transitionEdgeMode('ai')
+      : (row?.edgeMode === 'cut' || row?.edgeMode === 'fade' ? row.edgeMode : transitionEdgeMode(kind)),
+    degraded: kind === 'scene' && !row?.firstFrameUrl,
     prompt: row?.prompt ?? null,
     promptSource: row?.promptSource === 'ai' || row?.promptSource === 'fallback' || row?.promptSource === 'manual'
       ? row.promptSource
@@ -750,12 +847,378 @@ async function submitBoundary(input: SubmitRowInput): Promise<{ rowId: number; r
   }
 }
 
+interface CustomVideoPlan {
+  config: AIConfig
+  model: string
+  localShim: boolean
+  prompt: string
+  durationEffective: number
+}
+
+/** 空镜/场景的提交计划：先解析配置与翻译，失败时不领取断点 */
+async function planCustomVideo(
+  context: EpisodeContext,
+  prompt: string | null | undefined,
+  duration: number,
+  deps: TransitionDeps,
+): Promise<CustomVideoPlan> {
+  const raw = String(prompt || '').trim()
+  if (!raw) throw new Error('请填写过渡提示词')
+  if (raw.length > MAX_MANUAL_PROMPT_CHARS) {
+    throw new Error(`过渡提示词过长，请控制在 ${MAX_MANUAL_PROMPT_CHARS} 字以内`)
+  }
+  const config = await resolveVideoConfig(undefined, context.episode.videoConfigId)
+  if (!config) throw new Error('未配置视频模型，请先到「设置」页添加并启用 AI 服务')
+  const model = config.model
+  const localShim = localShimFor(config)
+  let finalPrompt = raw
+  if (localShim && CJK_RE.test(raw)) {
+    const translate = deps.translate ?? ((text: string) => translateH3Text(text))
+    let translated: string | null = null
+    try {
+      translated = await translate(raw)
+    } catch {
+      translated = null
+    }
+    if (!translated || !translated.trim() || CJK_RE.test(translated)) {
+      throw new Error('本地 H3 过渡提示词仅支持英文，自动翻译失败，请改用英文提示词')
+    }
+    finalPrompt = translated.trim()
+  }
+  return {
+    config,
+    model,
+    localShim,
+    prompt: finalPrompt,
+    durationEffective: effectiveTransitionDuration(config.provider, model, duration, { localShim }),
+  }
+}
+
+async function executeCustomVideo(input: {
+  context: EpisodeContext
+  boundary: TransitionBoundary
+  rowId: number
+  previous: TransitionOutputSnapshot | null
+  kind: Exclude<TransitionKind, 'ai'>
+  sceneImageUrl: string | null
+  duration: number
+  audioMode: 'ambient' | 'silent'
+  plan: CustomVideoPlan
+  deps: TransitionDeps
+}): Promise<void> {
+  const { context, boundary, rowId, previous, kind, duration, audioMode, plan } = input
+  try {
+    const submit = input.deps.submit ?? ((params: GenerateVideoParams) => generateVideo(params))
+    const taskId = await submit({
+      transitionId: rowId,
+      episodeId: context.episode.id,
+      dramaId: context.episode.dramaId,
+      fromStoryboardId: boundary.fromStoryboardId,
+      toStoryboardId: boundary.toStoryboardId,
+      prompt: plan.prompt,
+      model: plan.model,
+      ...(kind === 'scene' && input.sceneImageUrl ? { firstFrameUrl: input.sceneImageUrl } : {}),
+      duration: plan.durationEffective,
+      durationRequested: duration,
+      durationEffective: plan.durationEffective,
+      allowShortDuration: plan.localShim,
+      promptExtend: false,
+      watermark: false,
+      audioMode,
+      aspectRatio: context.drama?.aspectRatio || undefined,
+      resolution: context.episode.resolution || undefined,
+      configId: plan.config.id,
+      forceNew: true,
+    })
+    await db.update(schema.videoTransitions).set({
+      prompt: plan.prompt,
+      promptSource: 'manual',
+      provider: plan.config.provider,
+      model: plan.model,
+      configId: plan.config.id ?? null,
+      configBaseUrl: plan.config.baseUrl,
+      durationEffective: plan.durationEffective,
+      status: 'processing',
+      sysTaskId: taskId,
+      errorMsg: null,
+      updatedAt: now(),
+    }).where(eq(schema.videoTransitions.id, rowId))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await restoreAfterFailure(rowId, previous, message)
+    throw error
+  }
+}
+
+/** 文字视频纯本地渲染：不建 sys_task、不占视频模型额度 */
+async function executeCustomText(input: {
+  context: EpisodeContext
+  rowId: number
+  previous: TransitionOutputSnapshot | null
+  text: NormalizedTransitionText
+  sceneImageUrl: string | null
+  duration: number
+  deps: TransitionDeps
+}): Promise<void> {
+  const dims = transitionTextDimensions(input.context.drama?.aspectRatio, input.context.episode.resolution)
+  const relative = `static/projects/${input.context.episode.dramaId}/transitions/text-${randomUUID()}.mp4`
+  try {
+    const renderText = input.deps.renderText ?? ((params: {
+      absolutePath: string
+      title: string
+      subtitle: string | null
+      durationMs: number
+      width: number
+      height: number
+      fps: number
+      backgroundImagePath: string | null
+    }) => renderTransitionTextVideo({
+      outputPath: params.absolutePath,
+      title: params.title,
+      subtitle: params.subtitle,
+      durationMs: params.durationMs,
+      width: params.width,
+      height: params.height,
+      fps: params.fps,
+      backgroundImagePath: params.backgroundImagePath,
+    }))
+    await renderText({
+      absolutePath: getAbsolutePath(relative),
+      title: input.text.title,
+      subtitle: input.text.subtitle,
+      durationMs: Math.round(input.duration * 1000),
+      width: dims.width,
+      height: dims.height,
+      fps: 30,
+      backgroundImagePath: input.sceneImageUrl ? getAbsolutePath(input.sceneImageUrl) : null,
+    })
+    await db.update(schema.videoTransitions).set({
+      status: 'completed',
+      videoUrl: relative,
+      provider: 'local',
+      model: 'ffmpeg-text',
+      configId: null,
+      configBaseUrl: null,
+      sysTaskId: null,
+      durationEffective: input.duration,
+      durationActual: input.duration,
+      errorMsg: null,
+      completedAt: now(),
+      updatedAt: now(),
+    }).where(eq(schema.videoTransitions.id, input.rowId))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await restoreAfterFailure(input.rowId, input.previous, message)
+    throw error
+  }
+}
+
+/**
+ * 新建或重生成空镜/场景/文字过渡：断点记录唯一，切换类型时先清空旧输出，
+ * 同类型重生成失败时保留上一次完成结果。
+ */
+export async function createCustomTransition(
+  params: CreateCustomTransitionParams,
+  deps: TransitionDeps = {},
+): Promise<TransitionBoundaryView> {
+  const kind = parseTransitionKind(params.kind)
+  if (kind === 'ai') throw new Error('过渡类型不合法，请选择空镜、场景或文字视频')
+  const duration = assertCustomTransitionDuration(params.duration ?? 3)
+  const context = await loadEpisodeContext(params.episodeId)
+  const boundary = context.boundaries.find(item =>
+    item.fromStoryboardId === params.fromStoryboardId && item.toStoryboardId === params.toStoryboardId)
+  if (!boundary) throw new Error('过渡断点已变化，请刷新后重试')
+  if (await hasActiveStoryboardAudit(params.episodeId)) {
+    throw new Error('分镜动作检验进行中，暂不能新建或重新生成过渡镜头')
+  }
+
+  const dramaId = context.episode.dramaId
+  let scene: SceneRow | null = null
+  if (kind === 'scene') {
+    scene = await loadTransitionScene(dramaId, Number(params.sceneId))
+  } else if (kind === 'text' && Number(params.sceneId) > 0) {
+    scene = await loadTransitionScene(dramaId, Number(params.sceneId))
+  }
+  const sceneImageUrl = String(scene?.imageUrl || '').trim() || null
+  const text = kind === 'text'
+    ? normalizeTransitionText({ title: params.textContent, subtitle: params.textSubtitle })
+    : null
+  const audioMode: 'ambient' | 'silent' = kind === 'scene' ? 'ambient' : 'silent'
+  const plan = kind === 'text' ? null : await planCustomVideo(context, params.prompt, duration, deps)
+  const sourceHash = customTransitionSourceHash({
+    kind,
+    prompt: plan?.prompt ?? null,
+    textContent: text?.title ?? null,
+    textSubtitle: text?.subtitle ?? null,
+    sceneId: scene?.id ?? null,
+    sceneImageUrl,
+    duration,
+    audioMode,
+  })
+
+  const existingRows = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.episodeId, params.episodeId))
+  const existing = existingRows.find(item =>
+    item.fromStoryboardId === boundary.fromStoryboardId && item.toStoryboardId === boundary.toStoryboardId)
+  const kindSwitched = !!existing && normalizeTransitionKind(existing.kind) !== kind
+  if (existing && kindSwitched) {
+    removeLocalFile(existing.videoUrl)
+    removeLocalFile(existing.firstFrameUrl)
+    removeLocalFile(existing.lastFrameUrl)
+  }
+
+  const claim = await claimBoundary({ existing, context, boundary })
+  if (!claim) throw new Error('过渡片段正在运行中，请等待结果')
+  const previous = kindSwitched ? null : claim.previous
+  const rowId = claim.rowId
+
+  await db.update(schema.videoTransitions).set({
+    kind,
+    edgeMode: transitionEdgeMode(kind),
+    sceneId: scene?.id ?? null,
+    textContent: text?.title ?? null,
+    textSubtitle: text?.subtitle ?? null,
+    sourceHash,
+    prompt: plan?.prompt ?? null,
+    promptSource: plan ? 'manual' : null,
+    firstFrameUrl: kind === 'scene' ? sceneImageUrl : null,
+    lastFrameUrl: null,
+    firstFrameUploadUrl: null,
+    lastFrameUploadUrl: null,
+    referenceImageUrls: null,
+    durationRequested: duration,
+    durationEffective: kind === 'text' ? duration : plan!.durationEffective,
+    audioMode,
+    ...(kindSwitched ? { videoUrl: null, durationActual: null, completedAt: null, sysTaskId: null } : {}),
+    updatedAt: now(),
+  }).where(eq(schema.videoTransitions.id, rowId))
+
+  if (kind === 'text') {
+    await executeCustomText({
+      context,
+      rowId,
+      previous,
+      text: text!,
+      sceneImageUrl,
+      duration,
+      deps,
+    })
+  } else {
+    await executeCustomVideo({
+      context,
+      boundary,
+      rowId,
+      previous,
+      kind,
+      sceneImageUrl,
+      duration,
+      audioMode,
+      plan: plan!,
+      deps,
+    })
+  }
+
+  const [row] = await db.select().from(schema.videoTransitions)
+    .where(eq(schema.videoTransitions.id, rowId))
+  return toView(boundary, row, true, sourceHash)
+}
+
+async function retryCustomTransition(input: {
+  row: TransitionRow
+  episode: typeof schema.episodes.$inferSelect
+  context: EpisodeContext
+  boundary: TransitionBoundary
+  options: RetryTransitionOptions
+  deps: TransitionDeps
+}): Promise<void> {
+  const { row, context, boundary, options, deps } = input
+  const kind = normalizeTransitionKind(row.kind) as Exclude<TransitionKind, 'ai'>
+  const duration = assertCustomTransitionDuration(Number(row.durationRequested) || 3)
+  const scene = row.sceneId ? await loadTransitionScene(input.episode.dramaId, row.sceneId) : null
+  const sceneImageUrl = String(scene?.imageUrl || '').trim() || null
+
+  if (kind === 'text') {
+    const text = normalizeTransitionText({ title: row.textContent, subtitle: row.textSubtitle })
+    const audioMode: 'ambient' | 'silent' = 'silent'
+    const sourceHash = customTransitionSourceHash({
+      kind,
+      textContent: text.title,
+      textSubtitle: text.subtitle,
+      sceneId: scene?.id ?? null,
+      sceneImageUrl,
+      duration,
+      audioMode,
+    })
+    const claim = await claimBoundary({ existing: row, context, boundary })
+    if (!claim) throw new Error('过渡片段正在运行中，请等待结果')
+    await db.update(schema.videoTransitions).set({
+      textContent: text.title,
+      textSubtitle: text.subtitle,
+      sceneId: scene?.id ?? null,
+      sourceHash,
+      durationRequested: duration,
+      durationEffective: duration,
+      audioMode,
+      updatedAt: now(),
+    }).where(eq(schema.videoTransitions.id, claim.rowId))
+    await executeCustomText({
+      context,
+      rowId: claim.rowId,
+      previous: claim.previous,
+      text,
+      sceneImageUrl,
+      duration,
+      deps,
+    })
+    return
+  }
+
+  const prompt = String(options.prompt ?? row.prompt ?? '').trim()
+  const plan = await planCustomVideo(context, prompt, duration, deps)
+  const audioMode: 'ambient' | 'silent' = row.audioMode === 'ambient' ? 'ambient' : 'silent'
+  const sourceHash = customTransitionSourceHash({
+    kind,
+    prompt: plan.prompt,
+    sceneId: scene?.id ?? null,
+    sceneImageUrl,
+    duration,
+    audioMode,
+  })
+  const claim = await claimBoundary({ existing: row, context, boundary })
+  if (!claim) throw new Error('过渡片段正在运行中，请等待结果')
+  await db.update(schema.videoTransitions).set({
+    sceneId: scene?.id ?? null,
+    sourceHash,
+    firstFrameUrl: kind === 'scene' ? sceneImageUrl : null,
+    lastFrameUrl: null,
+    durationRequested: duration,
+    durationEffective: plan.durationEffective,
+    audioMode,
+    updatedAt: now(),
+  }).where(eq(schema.videoTransitions.id, claim.rowId))
+  await executeCustomVideo({
+    context,
+    boundary,
+    rowId: claim.rowId,
+    previous: claim.previous,
+    kind,
+    sceneImageUrl,
+    duration,
+    audioMode,
+    plan,
+    deps,
+  })
+}
+
 export async function prepareTransitions(
   params: PrepareTransitionsParams,
   deps: TransitionDeps = {},
 ): Promise<PrepareTransitionsResult> {
   const context = await loadEpisodeContext(params.episodeId, params.storyboardIds)
   if (context.boundaries.length === 0) throw new Error('至少需要两个已生成视频的镜头才能创建 AI 过渡片段')
+  if (await hasActiveStoryboardAudit(params.episodeId)) {
+    throw new Error('分镜动作检验进行中，暂不能创建或重新生成过渡镜头')
+  }
 
   const config = await resolveVideoConfig(params.configId, context.episode.videoConfigId)
   if (!config) throw new Error('未配置视频模型，请先到「设置」页添加并启用 AI 服务')
@@ -788,6 +1251,11 @@ export async function prepareTransitions(
     const to = storyboardById(context, boundary.toStoryboardId)
     if (!from || !to) continue
     const existing = existingByKey.get(`${boundary.fromStoryboardId}:${boundary.toStoryboardId}`)
+    // 自定义过渡（空镜/场景/文字）由专有链路维护，AI 批量准备不得覆盖
+    if (existing && normalizeTransitionKind(existing.kind) !== 'ai') {
+      skipped++
+      continue
+    }
     const hash = hashFor(from, to, existing)
 
     if (existing) {
@@ -866,12 +1334,13 @@ export async function listTransitions(params: {
   const rows = await db.select().from(schema.videoTransitions)
     .where(eq(schema.videoTransitions.episodeId, params.episodeId))
   const byKey = orderedBoundaryRows(context, rows)
+  const sceneImages = await sceneImageById(rows.map(row => row.sceneId))
 
   const boundaries = context.boundaries.map((boundary) => {
     const from = storyboardById(context, boundary.fromStoryboardId)
     const to = storyboardById(context, boundary.toStoryboardId)
     const row = byKey.get(`${boundary.fromStoryboardId}:${boundary.toStoryboardId}`)
-    const hash = from && to ? hashFor(from, to, row) : ''
+    const hash = row && from && to ? rowHashFor(row, from, to, sceneImages) : ''
     return toView(boundary, row, supported, hash)
   })
   // 全集模式补上非相邻断点的历史片段（例如曾只勾选 S1/S3 生成的 S1→S3），
@@ -895,7 +1364,7 @@ export async function listTransitions(params: {
         toStoryboardId: row.toStoryboardId,
         fromNumber: from.storyboardNumber,
         toNumber: to.storyboardNumber,
-      }, row, supported, hashFor(from, to, row)))
+      }, row, supported, rowHashFor(row, from, to, sceneImages)))
     }
   }
 
@@ -926,19 +1395,28 @@ export async function retryTransition(
   const [row] = await db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, id))
   if (!row) throw new Error('过渡片段不存在')
   if (row.status === 'processing') throw new Error('过渡片段正在运行中，请等待结果')
+  if (await hasActiveStoryboardAudit(row.episodeId)) {
+    throw new Error('分镜动作检验进行中，暂不能重新生成过渡镜头')
+  }
 
   const [episode] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, row.episodeId))
   if (!episode) throw new Error('剧集不存在')
+  const context = await loadEpisodeContext(row.episodeId)
+  const boundary = context.boundaries.find(item =>
+    item.fromStoryboardId === row.fromStoryboardId && item.toStoryboardId === row.toStoryboardId)
+  if (!boundary) throw new Error('过渡断点的镜头已不完整，请重新生成镜头后再试')
+
+  const kind = normalizeTransitionKind(row.kind)
+  if (kind !== 'ai') {
+    await retryCustomTransition({ row, episode, context, boundary, options, deps })
+    return
+  }
+
   const config = await resolveVideoConfig(row.configId ?? undefined, episode.videoConfigId)
   if (!config) throw new Error('原视频服务配置已删除或停用，请重新选择模型后再生成')
   // 配置被替换后旧模型可能不属于新服务商；此时按新配置重新取模型，避免把旧模型发错渠道。
   const model = config.id && config.id === row.configId && row.model ? row.model : config.model
   assertTransitionCapability(config, model)
-
-  const context = await loadEpisodeContext(row.episodeId)
-  const boundary = context.boundaries.find(item =>
-    item.fromStoryboardId === row.fromStoryboardId && item.toStoryboardId === row.toStoryboardId)
-  if (!boundary) throw new Error('过渡断点的镜头已不完整，请重新生成镜头后再试')
 
   const audioMode = row.audioMode === 'silent' ? 'silent' : 'ambient'
   const submitted = await submitBoundary({
@@ -1180,12 +1658,13 @@ export async function readyTransitions(params: {
   const context = await loadEpisodeContext(params.episodeId, params.storyboardIds)
   const rows = await db.select().from(schema.videoTransitions)
     .where(eq(schema.videoTransitions.episodeId, params.episodeId))
+  const sceneImages = await sceneImageById(rows.map(row => row.sceneId))
   const result = new Map<string, TransitionRow>()
   for (const row of rows) {
     if (row.enabled === false || row.status !== 'completed' || !videoFileExists(row.videoUrl)) continue
     const from = storyboardById(context, row.fromStoryboardId)
     const to = storyboardById(context, row.toStoryboardId)
-    if (!from || !to || row.sourceHash !== hashFor(from, to, row)) continue
+    if (!from || !to || row.sourceHash !== rowHashFor(row, from, to, sceneImages)) continue
     result.set(`${row.fromStoryboardId}:${row.toStoryboardId}`, row)
   }
   return result

@@ -19,6 +19,7 @@ const { db, schema } = await import('../src/db/index.ts')
 const { eq } = await import('drizzle-orm')
 const { default: mergeRoute } = await import('../src/routes/merge.ts')
 const { transitionSourceHash } = await import('../src/services/transition-plan.ts')
+const auditSvc = await import('../src/services/storyboard-audit-jobs.ts')
 
 const app = new Hono()
 app.route('/api/v1/merge', mergeRoute)
@@ -491,6 +492,46 @@ test('merge 按 use_ai_transitions 写入过渡快照，关闭时保持旧行为
   const disabledRow = await waitMergeRow(Number(disabledBody.data.merge_id))
   assert.equal(disabledRow.transitions, null)
   assert.equal(JSON.parse(disabledRow.mixOptions).aiTransitions, undefined)
+})
+
+test('检验进行中拒绝新建与重新生成过渡镜头，结束后恢复', async () => {
+  const dramaId = insertDrama()
+  const episodeId = insertEpisode(dramaId)
+  const urls = [1, 2].map(n => `static/projects/${dramaId}/videos/s${n}.mp4`)
+  urls.forEach(url => writeStatic(url))
+  const [s1, s2] = urls.map((url, index) => insertStoryboard(episodeId, index + 1, url))
+  const failedId = insertTransitionRow(episodeId, dramaId, s1, s2, { status: 'failed' })
+
+  await auditSvc.createStoryboardAuditJob({ episodeId, dramaId }, { autorun: false })
+
+  const prepare = await app.fetch(new Request(
+    `http://localhost/api/v1/merge/episodes/${episodeId}/transitions/prepare`,
+    { method: 'POST', body: JSON.stringify({ storyboard_ids: [s1, s2] }) },
+  ))
+  assert.equal(prepare.status, 400)
+  assert.match((await prepare.json() as any).message, /检验进行中，暂不能生成过渡镜头/)
+
+  const custom = await app.fetch(new Request(
+    `http://localhost/api/v1/merge/episodes/${episodeId}/transitions/custom`,
+    { method: 'POST', body: JSON.stringify({ from_storyboard_id: s1, to_storyboard_id: s2, kind: 'empty', duration: 3 }) },
+  ))
+  assert.equal(custom.status, 400)
+  assert.match((await custom.json() as any).message, /检验进行中，暂不能生成过渡镜头/)
+
+  const retry = await app.fetch(new Request(
+    `http://localhost/api/v1/merge/transitions/${failedId}/retry`,
+    { method: 'POST' },
+  ))
+  assert.equal(retry.status, 400)
+  assert.match((await retry.json() as any).message, /检验进行中，暂不能生成过渡镜头/)
+
+  await auditSvc.interruptStoryboardAuditForEpisode(episodeId, '测试结束')
+  const released = await app.fetch(new Request(
+    `http://localhost/api/v1/merge/episodes/${episodeId}/transitions/custom`,
+    { method: 'POST', body: JSON.stringify({ from_storyboard_id: s1, to_storyboard_id: s2 }) },
+  ))
+  assert.equal(released.status, 400)
+  assert.match((await released.json() as any).message, /请选择过渡类型/)
 })
 
 test('DELETE 过渡片段删除记录与本地文件，运行中与缺失拒绝', async () => {

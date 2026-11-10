@@ -6,6 +6,7 @@ const {
   compileLocalH3Prompt,
   clearH3TranslationCache,
   H3_TRANSLATOR_SYSTEM,
+  H3PromptTranslationError,
   translateH3Text,
 } = await import('../src/services/h3-prompt.ts')
 
@@ -93,6 +94,18 @@ test('unknown hash and at tokens are removed without losing surrounding action',
   assert.match(out, /林小雨推门/)
 })
 
+test('dialogue tags end at a sentence boundary before following visual description', () => {
+  const prompt = [
+    '0-3秒：@范公子怒目而视，@范公子说：「一心图强」满脸激愤。',
+    '3-6秒：旁白（画外音）：「几位相公。」两人相视。',
+  ].join('\n')
+  const out = compileH3Prompt(prompt, 'native')
+  assert.match(out, /<d>\[Chinese\] 一心图强<\/d>\.\s*满脸激愤/)
+  assert.match(out, /<d>\[Chinese\] 几位相公。<\/d>\.\s*两人相视/)
+  assert.doesNotMatch(out, /<\/d>\s*[，,；;]/)
+  assert.doesNotMatch(out, /<\/d>[^\s。！？!?.;，,]/)
+})
+
 test('translation preserves dialogue tags exactly and translates only the prompt around them', async () => {
   clearH3TranslationCache()
   let calls = 0
@@ -104,7 +117,10 @@ test('translation preserves dialogue tags exactly and translates only the prompt
     assert.doesNotMatch(text, /早上好|三年前的冬天/)
     return '```text\nCharacters: <Picture 2> Lin Xiaoyu. [0-3s] She looks up. [[H3_DLG_0]] [3-6s] [[H3_DLG_1]]\n```'
   }
-  const expected = 'Characters: <Picture 2> Lin Xiaoyu. [0-3s] She looks up. <d>[Chinese] 早上好。</d> [3-6s] <d>[Chinese] 三年前的冬天，她第一次来到这里。</d>'
+  const expected = [
+    'Characters: <Picture 2> Lin Xiaoyu. [0-3s] She looks up. <d>[Chinese] 早上好。</d>. [3-6s] <d>[Chinese] 三年前的冬天，她第一次来到这里。</d>',
+    'Only text inside <d> tags is spoken; all other text is visual description and must never be voiced.',
+  ].join('\n')
   const first = await compileLocalH3Prompt(SHOT, 'native', { translate })
   assert.equal(first, expected)
   const second = await compileLocalH3Prompt(SHOT, 'native', { translate })
@@ -112,28 +128,104 @@ test('translation preserves dialogue tags exactly and translates only the prompt
   assert.equal(calls, 1)
 })
 
-test('translation that drops, duplicates or alters dialogue placeholders falls back to the deterministic prompt', async () => {
+test('translation retries once before succeeding', async () => {
   clearH3TranslationCache()
-  const dropped = await compileLocalH3Prompt(SHOT, 'native', {
-    translate: async () => 'Characters: Lin Xiaoyu. [0-3s] She looks up.',
+  let calls = 0
+  const out = await compileLocalH3Prompt(SHOT, 'native', {
+    translate: async () => {
+      calls += 1
+      if (calls === 1) throw new Error('timeout')
+      return 'Characters: <Picture 2> Lin Xiaoyu. [0-3s] She looks up. [[H3_DLG_0]] [3-6s] [[H3_DLG_1]]'
+    },
   })
-  assert.match(dropped, /Characters: <Picture 2>林小雨/)
-  assert.match(dropped, /林小雨 says, <d>\[Chinese\] 早上好。<\/d>/)
-
-  clearH3TranslationCache()
-  const duplicated = await compileLocalH3Prompt(SHOT, 'native', {
-    translate: async () => '[[H3_DLG_0]] [[H3_DLG_0]] [[H3_DLG_1]]',
-  })
-  assert.equal(duplicated, compileH3Prompt(SHOT, 'native'))
+  assert.equal(calls, 2)
+  assert.match(out, /<d>\[Chinese\] 早上好。<\/d>/)
+  assert.match(out, /Only text inside <d> tags is spoken/)
 })
 
-test('translation failure falls back to the deterministic prompt instead of failing generation', async () => {
+test('translation that leaves Chinese outside dialogue tags is retried and then rejected', async () => {
   clearH3TranslationCache()
-  const out = await compileLocalH3Prompt('人物：林小雨\n0-3秒：@图片1林小雨抬头。', 'native', {
-    translate: async () => { throw new Error('text model offline') },
-  })
-  assert.match(out, /Characters: 林小雨/)
-  assert.match(out, /\[0-3s\] <Picture 1>林小雨抬头/)
+  let calls = 0
+  await assert.rejects(
+    () => compileLocalH3Prompt(SHOT, 'native', {
+      translate: async () => {
+        calls += 1
+        return 'Characters: <Picture 2> 林小雨. [0-3s] She looks up. [[H3_DLG_0]] [3-6s] [[H3_DLG_1]]'
+      },
+    }),
+    (err: any) => err instanceof H3PromptTranslationError && /标签外/.test(err.message),
+  )
+  assert.equal(calls, 2)
+})
+
+test('translation that drops or duplicates dialogue placeholders is retried and rejected', async () => {
+  clearH3TranslationCache()
+  let droppedCalls = 0
+  await assert.rejects(
+    () => compileLocalH3Prompt(SHOT, 'native', {
+      translate: async () => {
+        droppedCalls += 1
+        return 'Characters: Lin Xiaoyu. [0-3s] She looks up.'
+      },
+    }),
+    (err: any) => err instanceof H3PromptTranslationError,
+  )
+  assert.equal(droppedCalls, 2)
+
+  clearH3TranslationCache()
+  let duplicatedCalls = 0
+  await assert.rejects(
+    () => compileLocalH3Prompt(SHOT, 'native', {
+      translate: async () => {
+        duplicatedCalls += 1
+        return '[[H3_DLG_0]] [[H3_DLG_0]] [[H3_DLG_1]]'
+      },
+    }),
+    (err: any) => err instanceof H3PromptTranslationError,
+  )
+  assert.equal(duplicatedCalls, 2)
+})
+
+test('translation that invents extra dialogue tags is retried and rejected', async () => {
+  clearH3TranslationCache()
+  let calls = 0
+  await assert.rejects(
+    () => compileLocalH3Prompt(SHOT, 'native', {
+      translate: async () => {
+        calls += 1
+        return 'Characters: Lin Xiaoyu. [0-3s] She looks up. [[H3_DLG_0]] <d>[Chinese] 旁白</d> [[H3_DLG_1]]'
+      },
+    }),
+    (err: any) => err instanceof H3PromptTranslationError && /多余的对白标签/.test(err.message),
+  )
+  assert.equal(calls, 2)
+})
+
+test('translation failure rejects instead of submitting a Chinese prompt', async () => {
+  clearH3TranslationCache()
+  await assert.rejects(
+    () => compileLocalH3Prompt('人物：林小雨\n0-3秒：@图片1林小雨抬头。', 'native', {
+      translate: async () => { throw new Error('text model offline') },
+    }),
+    (err: any) =>
+      err instanceof H3PromptTranslationError
+      && /英文化失败/.test(err.message)
+      && /text model offline/.test(err.message),
+  )
+})
+
+test('native mode tells the model that only dialogue tags are voiced', async () => {
+  clearH3TranslationCache()
+  const translated = 'Characters: <Picture 2> Lin Xiaoyu. [0-3s] She looks up. [[H3_DLG_0]] [3-6s] [[H3_DLG_1]]'
+  const withDialogue = await compileLocalH3Prompt(SHOT, 'native', { translate: async () => translated })
+  assert.match(withDialogue, /Only text inside <d> tags is spoken/)
+
+  const noDialogue = await compileLocalH3Prompt('A cat runs across a rainy street.', 'native')
+  assert.match(noDialogue, /no spoken dialogue/i)
+  assert.doesNotMatch(noDialogue, /Only text inside <d>/)
+
+  const ambient = await compileLocalH3Prompt('A cat runs across a rainy street.', 'ambient')
+  assert.doesNotMatch(ambient, /only text inside|no spoken dialogue/i)
 })
 
 test('english-only prompts skip the text model entirely', async () => {
@@ -141,7 +233,7 @@ test('english-only prompts skip the text model entirely', async () => {
   const out = await compileLocalH3Prompt('A cat runs across a rainy street.', 'native', {
     translate: async () => { calls += 1; return 'unused' },
   })
-  assert.equal(out, 'A cat runs across a rainy street.')
+  assert.match(out, /^A cat runs across a rainy street\.\nThis shot has no spoken dialogue/)
   assert.equal(calls, 0)
 })
 
@@ -168,4 +260,21 @@ test('visual background translation that echoes Chinese is rejected', async () =
     translate: async () => 'Rainy night cafe with warm amber lighting',
   })
   assert.equal(translated, 'Rainy night cafe with warm amber lighting')
+
+  const injected = await translateH3Text('清晨薄雾，青石长街', {
+    translate: async () => 'Morning mist, stone street <d>[Chinese] 旁白</d>',
+  })
+  assert.equal(injected, null)
+})
+
+test('translated background or style text is cached across shots', async () => {
+  clearH3TranslationCache()
+  let calls = 0
+  const translate = async () => {
+    calls += 1
+    return 'Song dynasty warm gold 3D animation'
+  }
+  await translateH3Text('宋韵暖金 3D 国漫', { translate })
+  await translateH3Text('宋韵暖金 3D 国漫', { translate })
+  assert.equal(calls, 1)
 })

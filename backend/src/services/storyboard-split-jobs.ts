@@ -17,6 +17,7 @@ import {
   getMaxSegmentSeconds,
   type EpisodeCoverage,
 } from './breakdown-methods.js'
+import { createStoryboardAuditJob, interruptStoryboardAuditForEpisode } from './storyboard-audit-jobs.js'
 import { logTaskError, logTaskProgress, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
 import { buildAgentRequestContext, type AgentRequestContextValues } from '../agents/context.js'
 
@@ -482,6 +483,8 @@ export async function createStoryboardSplitJob(
     return { job: toView(active), alreadyRunning: true }
   }
 
+  await interruptStoryboardAuditForEpisode(episodeId, '重新拆分，检验作废')
+
   const parts = splitScriptIntoChunks(script, input.budgetChars)
   if (!parts.length) throw new Error('剧本为空，无法拆分分镜')
 
@@ -537,6 +540,7 @@ export async function resumeStoryboardSplitJob(
 
   const chunks = parseChunks(row)
   if (!chunks.length) throw new Error('拆分任务没有可继续的分段')
+  await interruptStoryboardAuditForEpisode(row.episodeId, '重新拆分，检验作废')
   for (const chunk of chunks) {
     if (chunk.status === 'running' || chunk.status === 'failed') {
       chunk.status = 'pending'
@@ -726,6 +730,29 @@ export async function runStoryboardSplitJob(
         actual: coverage.actual,
         floor: coverage.floor,
       })
+    }
+    if (liveCount > 0) {
+      try {
+        const audit = await createStoryboardAuditJob({
+          episodeId: row.episodeId,
+          dramaId: row.dramaId,
+          trigger: 'split',
+          model: row.model,
+          configId: row.configId,
+        })
+        logTaskProgress('StoryboardSplit', 'audit-triggered', {
+          jobId,
+          episodeId: row.episodeId,
+          auditJobId: audit.job.id,
+          alreadyRunning: audit.alreadyRunning,
+        })
+      } catch (error) {
+        logTaskWarn('StoryboardSplit', 'audit-trigger-failed', {
+          jobId,
+          episodeId: row.episodeId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
     }
   } catch (error) {
     // 非分段内的意外错误（DB/恢复逻辑）也要落库失败，不能让任务永远停在 running

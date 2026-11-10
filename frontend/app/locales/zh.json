@@ -361,6 +361,7 @@
         "assetImages": "资产生图",
         "storyboards": "分镜拆分",
         "videoPrompts": "视频提示词",
+        "storyboardAudit": "动作检验",
         "voices": "声音设定",
         "videos": "视频生成",
         "dub": "配音"
@@ -389,7 +390,8 @@
       "rules": "流程规则",
       "breakdown": "分镜拆分",
       "queue": "任务队列",
-      "novel": "小说"
+      "novel": "小说",
+      "audit": "分镜检验"
     },
     "novel": {
       "title": "小说生成",
@@ -650,7 +652,8 @@
       "storyboardBreaker": "分镜拆解",
       "promptGenerator": "提示词",
       "langFallback": "跟随中文",
-      "followContentLang": "编辑语言跟随：{lang}（在「通用 → AI 内容语言」切换）"
+      "followContentLang": "编辑语言跟随：{lang}（在「通用 → AI 内容语言」切换）",
+      "storyboardAuditor": "分镜动作检验"
     },
     "skills": {
       "agentList": "Agent 列表",
@@ -898,6 +901,54 @@
       "analyzing": "分析中…",
       "done": "已生成风格「{name}」",
       "failed": "风格分析失败"
+    },
+    "audit": {
+      "title": "分镜检验",
+      "subtitle": "配置动作检验的五项检查、判定阈值、语义窗口与自动修复策略；保存后对新检验任务生效，不影响已完成结果。",
+      "checks": "检验项",
+      "checksHint": "关闭的检查项不会产生规则或语义问题；资产检查始终只给人工建议，不自动修改。",
+      "thresholds": "判定阈值",
+      "thresholdHint": "台词容量按「字/秒 + 每句呼吸」估算；空镜阈值按秒计算，超过会报对应级别问题。",
+      "semantic": "语义检验",
+      "semanticHint": "按窗口调用检验智能体；窗口越大上下文越完整，但单次调用更慢。",
+      "autoRepair": "自动修复",
+      "autoRepairHint": "只执行服务端白名单动作；复查错误数增加时整轮回滚。",
+      "enable": "启用",
+      "check": {
+        "shot": "运镜 / 对话 / 动作 / 表情 / 旁白",
+        "continuity": "前后镜连贯与不合理动作",
+        "silent": "长时间无对白空镜",
+        "lineDuration": "台词时长与拆句",
+        "assets": "资产正确与完整"
+      },
+      "threshold": {
+        "charsPerSecond": "台词语速（字/秒）",
+        "lineBreathSeconds": "每句呼吸（秒）",
+        "lineRequiredMaxSeconds": "单句最长（秒）",
+        "silentCharacterWarnSeconds": "角色空镜警告（秒）",
+        "silentCharacterErrorSeconds": "角色空镜错误（秒）",
+        "emptyShotWarnSeconds": "空镜警告（秒）",
+        "promptSegmentMaxChars": "3 秒段最多字数"
+      },
+      "semanticLabel": {
+        "windowSize": "窗口分镜数",
+        "windowStep": "窗口步长",
+        "maxWindows": "最多窗口数"
+      },
+      "repairLabel": {
+        "semanticFix": "允许修复语义问题",
+        "autoInsertTransition": "断点自动插入过渡分镜",
+        "maxInsertedTransitions": "最多插入过渡分镜",
+        "maxActions": "单任务最多动作",
+        "maxActionsPerShot": "单分镜最多动作"
+      },
+      "promptTitle": "检验提示词与 Skill",
+      "promptDesc": "动作检验使用 storyboard_auditor 智能体；在这里配置检查口径，在 Agent 配置中编辑系统提示词与检验 Skill。",
+      "promptOpen": "打开提示词管理",
+      "save": "保存策略",
+      "saving": "保存中…",
+      "saved": "检验策略已保存",
+      "loadFailed": "检验策略加载失败，请切换到其他页签后重试"
     }
   },
   "episode": {
@@ -1160,14 +1211,14 @@
       "continuity": "连续性",
       "continuityPlaceholder": "承接上一镜的尾动作、视线、站位、环境声如何延续",
       "breakingElapsed": "正在拆分分镜…已等待 {s} 秒，期间会自动刷新已生成的镜头",
-    "splitProgress": "分块拆分中：第 {done}/{total} 段 · 已保存 {shots} 个镜头",
-    "splitFailed": "第 {chunk}/{total} 段拆分失败：{error}",
-    "splitDone": "分块拆分完成：共 {n} 个镜头",
-    "splitResumed": "已继续拆分剩余场次",
-    "splitAlreadyRunning": "已有拆分任务在运行，继续显示进度",
-    "resumeSplit": "继续拆分剩余场次",
-    "splitStartFailed": "启动分块拆分失败，请重试",
-    "splitActionFailed": "继续拆分失败，请稍后重试",
+      "splitProgress": "分块拆分中：第 {done}/{total} 段 · 已保存 {shots} 个镜头",
+      "splitFailed": "第 {chunk}/{total} 段拆分失败：{error}",
+      "splitDone": "分块拆分完成：共 {n} 个镜头",
+      "splitResumed": "已继续拆分剩余场次",
+      "splitAlreadyRunning": "已有拆分任务在运行，继续显示进度",
+      "resumeSplit": "继续拆分剩余场次",
+      "splitStartFailed": "启动分块拆分失败，请重试",
+      "splitActionFailed": "继续拆分失败，请稍后重试",
       "videoPromptSection": "视频提示词",
       "regenPrompt": "重新生成",
       "aiGenerate": "AI 生成",
@@ -1367,10 +1418,119 @@
       "boundRefs": "绑定参考图",
       "noBoundRefs": "暂无绑定素材（在中间「参考素材」区点击绑定）"
     },
+    "audit": {
+      "button": "动作检验",
+      "rerun": "重新检验",
+      "runningBlocked": "动作检验进行中，暂不能改动分镜",
+      "loadFailed": "动作检验状态加载失败",
+      "cleanTitle": "五项检验均未发现问题",
+      "issuesTitle": "{n} 个问题",
+      "undo": "撤销本次修复",
+      "undoDone": "已恢复 {n} 个分镜",
+      "runDone": "动作检验完成，自动修复 {n} 项",
+      "statusLabel": "检验状态",
+      "trigger": {
+        "manual": "手动检验",
+        "auto": "拆分后自动检验",
+        "pipeline": "全自动流程"
+      },
+      "shotStatus": {
+        "pending": "待检查",
+        "running": "检查中",
+        "done": "已完成",
+        "failed": "检查失败",
+        "ruleOnly": "已完成（仅规则）",
+        "stale": "检验后已修改"
+      },
+      "check": {
+        "1": "镜头描述",
+        "2": "前后连贯",
+        "3": "无对话空镜",
+        "4": "台词时长",
+        "5": "资产完整"
+      },
+      "filter": {
+        "all": "全部",
+        "error": "错误",
+        "warning": "警告",
+        "info": "提示",
+        "manual": "需人工",
+        "fixed": "已修复"
+      },
+      "severity": {
+        "error": "错误",
+        "warning": "警告",
+        "info": "提示"
+      },
+      "panel": {
+        "title": "动作检验",
+        "running": "检验中，请稍候",
+        "progress": "语义 {done}/{total}",
+        "model": "模型",
+        "trigger": "触发方式",
+        "time": "时间",
+        "showAllShots": "查看整集",
+        "locateShot": "定位分镜",
+        "repairLog": "修复记录",
+        "repairEmpty": "暂无修复记录",
+        "undoTitle": "撤销本次修复",
+        "undoConfirm": "将恢复本次自动修复前的分镜字段和时长，用户之后的手工修改不会被覆盖。继续？",
+        "close": "关闭",
+        "jobError": "检验失败：{message}",
+        "stale": "检验后分镜有修改，建议重新检验",
+        "shotOnly": "只看镜头 {n}",
+        "noIssuesForShot": "该镜头没有待处理问题"
+      },
+      "empty": {
+        "none": "暂无检验记录",
+        "clean": "五项检验均未发现问题",
+        "ruleOnly": "未配置文本模型，已完成规则检验",
+        "stale": "检验后分镜有修改，建议重新检验",
+        "semanticDisabled": "语义检验已在设置中关闭，本次仅执行规则检验",
+        "semanticPartial": "部分语义窗口检验失败，结果可能不完整",
+        "semanticFailed": "语义窗口全部失败，本次仅完成规则检验",
+        "semanticTruncated": "语义窗口超过上限被截断，结果仅覆盖部分分镜"
+      },
+      "transition": {
+        "title": "新建过渡镜头",
+        "kindName": "过渡类型",
+        "kindLabel": "类型",
+        "duration": "时长",
+        "prompt": "提示词",
+        "promptPlaceholder": "描述过渡镜头的画面、镜头运动与光线…",
+        "scene": "场景",
+        "scenePlaceholder": "选择场景（用于生成空镜背景）",
+        "sceneRequired": "请选择场景",
+        "textContent": "主标题",
+        "textSubtitle": "副标题",
+        "textHint": "文字视频在本地渲染，不消耗视频模型；主标题最多 20 字，副标题最多 40 字。",
+        "needPrompt": "请填写提示词",
+        "needText": "请填写主标题",
+        "needTitle": "请填写标题",
+        "submitted": "过渡镜头已提交生成",
+        "failed": "创建过渡镜头失败",
+        "kind": {
+          "ai": "AI 过渡",
+          "empty": "空镜",
+          "scene": "场景",
+          "text": "文字视频"
+        },
+        "submit": "创建并生成",
+        "submitting": "提交中…",
+        "cancel": "取消",
+        "boundary": "断点 {pair}",
+        "noBoundary": "没有可用的相邻断点",
+        "degraded": "场景图缺失，已按空镜生成",
+        "editCustom": "修改类型",
+        "badge": "过渡"
+      },
+      "insertedDone": "已自动插入 {n} 个过渡镜头，排序编号已重排"
+    },
     "tasks": {
       "title": "生成任务列表",
       "meta": "按创建时间倒序 · {n} 个任务",
       "centerTitle": "任务中心",
+      "runStoryboardAudit": "整集动作检验",
       "metaCenter": "共 {n} 条 · 进行中 {active}",
       "tabAll": "全部",
       "tabTasks": "生成",
@@ -1514,6 +1674,9 @@
         "loadFailed": "过渡状态加载失败",
         "actionFailed": "过渡操作失败",
         "partialFailed": "有 {n} 个断点提交失败：{message}",
+        "addCustom": "新建过渡镜头",
+        "degraded": "场景图缺失，已按空镜生成",
+        "editCustom": "修改类型",
         "prompt": {
           "toggle": "提示词",
           "label": "过渡视频提示词",

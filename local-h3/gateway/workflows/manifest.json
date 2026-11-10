@@ -46,12 +46,12 @@
     "negative": "bad video, distorted face, extra fingers, text, watermark, subtitles, muffled speech, distorted audio, loud background music",
     "audio": {
       "directives": {
-        "native": "Audio: clear, intelligible Mandarin dialogue with accurate lip sync, natural ambience, no voice-over narration unless the prompt explicitly describes an off-screen narrator, no background music, no subtitles, no captions, no on-screen text.",
+        "native": "Audio: only text inside <d> tags is spoken dialogue and must be voiced exactly; all other text is visual description and must never be voiced. Clear, intelligible Mandarin dialogue with accurate lip sync, natural ambience, no voice-over narration unless the prompt explicitly describes an off-screen narrator, no background music, no subtitles, no captions, no on-screen text.",
         "ambient": "Audio: ambient sound only, no intelligible speech, no dialogue, no voice-over, no background music; characters may move their mouths and gesture as if speaking, but their speech must stay unintelligible. No subtitles, no captions, no on-screen text.",
         "silent": "Audio: silent video, no audio track at all; no speech, no dialogue, no voice-over, no ambience, no sound effects, no background music; characters do not speak and keep their mouths closed. No subtitles, no captions, no on-screen text."
       },
       "global_prompts": {
-        "native": "Natural synchronized audio: clear, intelligible Mandarin dialogue with accurate lip sync, natural ambience, no voice-over narration unless the prompt explicitly describes an off-screen narrator, no background music, no subtitles, no on-screen text.",
+        "native": "Natural synchronized audio: only text inside <d> tags is spoken dialogue and must be voiced exactly; all other text is visual description and must never be voiced. Clear, intelligible Mandarin dialogue with accurate lip sync, natural ambience, no voice-over narration unless the prompt explicitly describes an off-screen narrator, no background music, no subtitles, no on-screen text.",
         "ambient": "Audio: ambient sound only, no intelligible speech, no dialogue, no voice-over, no background music; characters may move their mouths and gesture as if speaking, but their speech must stay unintelligible. No subtitles, no captions, no on-screen text.",
         "silent": "Audio: silent video, no audio track at all; no speech, no dialogue, no voice-over, no ambience, no sound effects, no background music; characters do not speak and keep their mouths closed. No subtitles, no captions, no on-screen text."
       }

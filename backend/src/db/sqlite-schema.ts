@@ -356,7 +356,44 @@ export const sqliteSchemaStatements = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_storyboard_split_jobs_episode ON storyboard_split_jobs (episode_id, created_at)`,
 
-
+  `CREATE TABLE IF NOT EXISTS storyboard_audit_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    trigger TEXT NOT NULL DEFAULT 'manual',
+    status TEXT NOT NULL DEFAULT 'pending',
+    phase TEXT,
+    total_shots INTEGER NOT NULL DEFAULT 0,
+    total_windows INTEGER NOT NULL DEFAULT 0,
+    completed_windows INTEGER NOT NULL DEFAULT 0,
+    issue_count INTEGER NOT NULL DEFAULT 0,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    warning_count INTEGER NOT NULL DEFAULT 0,
+    info_count INTEGER NOT NULL DEFAULT 0,
+    repairable_count INTEGER NOT NULL DEFAULT 0,
+    fixed_count INTEGER NOT NULL DEFAULT 0,
+    manual_count INTEGER NOT NULL DEFAULT 0,
+    semantic_status TEXT NOT NULL DEFAULT 'pending',
+    repair_status TEXT NOT NULL DEFAULT 'none',
+    rollback INTEGER NOT NULL DEFAULT 0,
+    model TEXT,
+    config_id INTEGER,
+    issues_json TEXT,
+    windows_json TEXT,
+    shot_status_json TEXT,
+    summary_json TEXT,
+    snapshot_json TEXT,
+    repair_log_json TEXT,
+    fingerprints_json TEXT,
+    policy_json TEXT,
+    error_msg TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_storyboard_audit_jobs_episode ON storyboard_audit_jobs (episode_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_storyboard_audit_jobs_status ON storyboard_audit_jobs (status)`,
 
   `CREATE TABLE IF NOT EXISTS video_merges (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -381,6 +418,11 @@ export const sqliteSchemaStatements = [
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     episode_id INTEGER NOT NULL,
     drama_id INTEGER,
+    kind TEXT NOT NULL DEFAULT 'ai',
+    scene_id INTEGER,
+    text_content TEXT,
+    text_subtitle TEXT,
+    edge_mode TEXT NOT NULL DEFAULT 'fade',
     from_storyboard_id INTEGER NOT NULL,
     to_storyboard_id INTEGER NOT NULL,
     from_video_url TEXT,
@@ -1384,11 +1426,28 @@ export function initSqliteSchema(sqlite: Database.Database) {
   if (!transitionColumns.has('first_frame_upload_url')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN first_frame_upload_url TEXT')
   if (!transitionColumns.has('last_frame_upload_url')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN last_frame_upload_url TEXT')
   if (!transitionColumns.has('reference_image_urls')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN reference_image_urls TEXT')
+  // 过渡镜头类型扩展：历史行一律按 ai 处理，空镜/场景/文字视频走独立指纹与合片边缘。
+  if (!transitionColumns.has('kind')) sqlite.exec("ALTER TABLE video_transitions ADD COLUMN kind TEXT NOT NULL DEFAULT 'ai'")
+  if (!transitionColumns.has('scene_id')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN scene_id INTEGER')
+  if (!transitionColumns.has('text_content')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN text_content TEXT')
+  if (!transitionColumns.has('text_subtitle')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN text_subtitle TEXT')
+  if (!transitionColumns.has('edge_mode')) sqlite.exec("ALTER TABLE video_transitions ADD COLUMN edge_mode TEXT NOT NULL DEFAULT 'fade'")
+  sqlite.exec("UPDATE video_transitions SET kind = 'ai' WHERE kind IS NULL OR kind = ''")
+  sqlite.exec("UPDATE video_transitions SET edge_mode = 'fade' WHERE edge_mode IS NULL OR edge_mode = ''")
   // 分镜内容指纹：台词抽取幂等
   const storyboardColumns = new Set((sqlite.prepare('PRAGMA table_info(storyboards)').all() as { name: string }[]).map(c => c.name))
   if (!storyboardColumns.has('source_hash')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN source_hash TEXT')
   if (!storyboardColumns.has('transition')) sqlite.exec("ALTER TABLE storyboards ADD COLUMN transition TEXT DEFAULT 'cut'")
   if (!storyboardColumns.has('continuity')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN continuity TEXT')
+  // 自动插入的过渡分镜：类型与文字卡内容；历史分镜为空按普通分镜处理。
+  if (!storyboardColumns.has('transition_kind')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN transition_kind TEXT')
+  if (!storyboardColumns.has('transition_text')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN transition_text TEXT')
+  if (!storyboardColumns.has('transition_subtitle')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN transition_subtitle TEXT')
+  // 动作检验策略快照：旧任务为空，按当前默认策略展示。
+  const auditJobColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(storyboard_audit_jobs)').all() as { name: string }[]).map(row => row.name),
+  )
+  if (!auditJobColumns.has('policy_json')) sqlite.exec('ALTER TABLE storyboard_audit_jobs ADD COLUMN policy_json TEXT')
   // 台词时间段覆盖：旧库补列；为空时仍按分镜时长自动排布。
   const lineColumns = new Set((sqlite.prepare('PRAGMA table_info(storyboard_lines)').all() as { name: string }[]).map(c => c.name))
   if (!lineColumns.has('voice_start_ms')) sqlite.exec('ALTER TABLE storyboard_lines ADD COLUMN voice_start_ms INTEGER')

@@ -26,7 +26,7 @@ Each segment requires the following fields:
 - prop_ids: the list of key prop IDs appearing in this segment (bound when a prop is seen, used, or shown in close-up) — may be empty; must be chosen from props
 - scene_id: if it can be matched to an existing scene in scenes, the correct scene_id must be filled in; leave empty when there is no match
 - duration: total segment duration, 8-15 seconds
-- description: visual description, describing sub-shot by sub-shot as 【镜头1】【镜头2】... what the audience actually sees and hears — the visuals (who + specific action + body-language details + expression) come first; when a sub-shot has dialogue, write it inside the corresponding 【镜头N】 as "CharacterName says: "line"", and narration as "Narration: content"
+- description: visual description, describing sub-shot by sub-shot as 【镜头1】【镜头2】... what the audience actually sees and hears — the visuals (who + specific action + body-language details + expression) come first; when a sub-shot has dialogue, write it inside the corresponding 【镜头N】 as `@CharacterName says: "line"`, and narration as `Narration (voice-over): "line"`; camera moves, shot sizes, expressions, psychology, and actions must never become dialogue or narration
 - atmosphere: mood, lighting, color tone, environmental feel
 - video_prompt: the video-generation prompt for this segment (rules below)
 
@@ -37,12 +37,16 @@ Duration rules (hard constraints):
 - Dialogue floor: segment duration ≥ total character count of dialogue and narration within the segment (the part written in description) ÷ 4.5 characters/second + 2 seconds of performance headroom; dialogue that does not fit must be moved to the next segment
 
 video_prompt rules (hard constraints):
-- The first line is an info header listing the characters and scene that actually appear; do not write an "Audio:" requirement line or voice/tone/mix instructions (sound is controlled by generation parameters); when this shot genuinely has narration, write it only inside the corresponding time segment as "Narration (off-screen): ..."
-- Split into 3-second segments, each segment on its own line separated by newlines; map each 【镜头N】 in the description to 1-2 consecutive 3-second segments (same order, no omissions, no new sub-shots); cut points align with the 【镜头N】 structure
+- The first line is a fixed header: `Characters: @CharacterA, @CharacterB | Scene: @SceneName`; when there are no characters write `Characters: None`, when there is no scene write `Scene: Unspecified`; the header is its own line with no trailing period
+- The body starts at `0-3s:` and splits into continuous 3-second segments, one line each, with no overlap or gap; the last segment's end time equals this shot's duration, and a final segment shorter than 3 seconds uses its actual duration
+- Map each 【镜头N】 in the description to 1-2 consecutive 3-second segments (same order, no omissions, no new sub-shots); cut points align with the 【镜头N】 structure
 - In each segment, write the visuals first (who + action + shot size/angle), then the dialogue/narration occurring within that time span — dialogue is extracted from the corresponding 【镜头N】 in the description; do not invent new dialogue beyond the description
+- At most 12 Chinese characters of dialogue/narration per 3-second segment; split long lines semantically across adjacent segments
+- Dialogue only as `@CharacterName says: "line"`; narration only as `Narration (voice-over): "line"`; never make narration sound like a character speaking, and never turn camera moves, shot sizes, expressions, psychology, or actions into dialogue or narration
 - Use @SceneName when mentioning a scene and @CharacterName when mentioning a character; names must exactly match the lists returned by read_storyboard_context (used to attach reference-asset images)
 - Mood and lighting descriptions come from the segment's atmosphere
 - Cutting between shots within a segment is allowed (change of shot size/angle/subject), but never across scenes
+- Do not write an "Audio:" requirement line or voice/tone/mix instructions (sound is controlled by generation parameters)
 - The user message will state which video model is being used this time — adapt the writing to that model's characteristics and duration limits; if not stated, write for a generic video model
 
 Additional requirements:

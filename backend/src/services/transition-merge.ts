@@ -5,11 +5,18 @@
  * 其余断点保留原转场并把原因写入快照，任何回退都不阻断合片。
  */
 import fs from 'node:fs'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import { ffmpeg } from '../utils/ffmpeg.js'
-import { transitionSourceHash } from './transition-plan.js'
+import {
+  customTransitionSourceHash,
+  normalizeTransitionKind,
+  transitionEdgeMode,
+  transitionSourceHash,
+  type TransitionEdgeMode,
+  type TransitionKind,
+} from './transition-plan.js'
 
 export interface MergeStoryboard {
   id: number
@@ -26,6 +33,8 @@ export interface TransitionCandidate {
   enabled: boolean | null
   status: string
   stale: boolean
+  kind?: TransitionKind
+  edgeMode?: TransitionEdgeMode
   /** 文件存在但 ffprobe 无法解析（损坏），合片时剔除 */
   corrupt?: boolean
 }
@@ -100,13 +109,20 @@ export function buildTransitionInsertion(
       const previous = storyboards[i - 1]
       const candidate = byKey.get(`${previous.id}:${storyboard.id}`)
       if (isUsable(candidate)) {
-        clips.push({
-          url: candidate.videoUrl,
-          transition: 'fade',
-          transitionMs: edgeMs,
-          transitionId: candidate.id,
-        })
-        clips.push({ url: storyboard.url, transition: 'fade', transitionMs: edgeMs })
+        const kind = normalizeTransitionKind(candidate.kind)
+        const edgeMode = candidate.edgeMode ?? transitionEdgeMode(kind)
+        if (edgeMode === 'cut') {
+          clips.push({ url: candidate.videoUrl, transition: 'cut', transitionId: candidate.id })
+          clips.push({ url: storyboard.url, transition: 'cut' })
+        } else {
+          clips.push({
+            url: candidate.videoUrl,
+            transition: 'fade',
+            transitionMs: edgeMs,
+            transitionId: candidate.id,
+          })
+          clips.push({ url: storyboard.url, transition: 'fade', transitionMs: edgeMs })
+        }
         snapshot.push({
           from_storyboard_id: previous.id,
           to_storyboard_id: storyboard.id,
@@ -187,6 +203,12 @@ export async function loadTransitionCandidates(
     const current = byKey.get(key)
     if (!current || row.id > current.id) byKey.set(key, row)
   }
+  const sceneIds = [...new Set(rows.map(row => row.sceneId).filter((id): id is number => Number(id) > 0))]
+  const sceneImages = new Map<number, string>()
+  if (sceneIds.length) {
+    const scenes = await db.select().from(schema.scenes).where(inArray(schema.scenes.id, sceneIds))
+    for (const scene of scenes) sceneImages.set(scene.id, String(scene.imageUrl || '').trim())
+  }
 
   const candidates: TransitionCandidate[] = []
   for (let i = 1; i < storyboards.length; i++) {
@@ -198,6 +220,20 @@ export async function loadTransitionCandidates(
     // 设计 9.4：文件必须存在且能 ffprobe；解析失败时不能用库里的旧时长兜底，
     // 否则损坏文件会被当成可用片段插进合片序列，导致整次合片失败。
     const probed = exists && row.videoUrl ? await probeDurationSeconds(row.videoUrl) : null
+    const kind = normalizeTransitionKind(row.kind)
+    // 空镜/场景/文字只看自身内容；相邻镜头重生成不应让它们过期
+    const stale = kind === 'ai'
+      ? row.sourceHash !== boundaryHash(previous, current)
+      : row.sourceHash !== customTransitionSourceHash({
+          kind,
+          prompt: row.prompt,
+          textContent: row.textContent,
+          textSubtitle: row.textSubtitle,
+          sceneId: row.sceneId,
+          sceneImageUrl: row.sceneId ? sceneImages.get(row.sceneId) || '' : '',
+          duration: Number(row.durationRequested) || 0,
+          audioMode: row.audioMode,
+        })
     candidates.push({
       id: row.id,
       fromStoryboardId: row.fromStoryboardId,
@@ -206,7 +242,11 @@ export async function loadTransitionCandidates(
       durationActual: probed,
       enabled: row.enabled,
       status: row.status || 'missing',
-      stale: row.sourceHash !== boundaryHash(previous, current),
+      stale,
+      kind,
+      edgeMode: row.edgeMode === 'cut' || row.edgeMode === 'fade'
+        ? row.edgeMode
+        : transitionEdgeMode(kind),
       corrupt: exists && probed === null,
     })
   }

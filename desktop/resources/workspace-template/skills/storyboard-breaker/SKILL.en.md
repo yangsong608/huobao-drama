@@ -43,7 +43,7 @@ Determine duration by the segment's function — do not use one size for all:
 
 **Segment duration × 4 characters/second = the maximum total character count of dialogue and narration in the segment (leaving one extra second of breathing room). Example: a 12-second segment holds at most ~44 Chinese characters.**
 
-Dialogue that does not fit must be split into another segment; cramming unperformable dialogue into one segment or rushing the delivery is not allowed. Narration, memories, and inner monologue are always written as "Narration (voice-over): content", never as a character speaking.
+Dialogue that does not fit must be split into another segment; cramming unperformable dialogue into one segment or rushing the delivery is not allowed. Narration, memories, and inner monologue are always written as `Narration (voice-over): "line"`, never as a character speaking.
 
 ## Shot Elements
 
@@ -53,13 +53,31 @@ Dialogue that does not fit must be split into another segment; cramming unperfor
 4. **Shot size**: the dominant shot size of the segment; for multi-size segments write a combination, e.g. "medium shot + close-up"
 5. **Angle**: eye-level / low angle / high angle / side / back
 6. **Camera move**: static / push-in / pull-back / pan / tracking / dolly (different sub-shots within a segment may differ)
-7. **Visual description** `description`: describe sub-shot by sub-shot as `【镜头1】…【镜头2】…` what the audience actually sees and hears — the visuals (who + specific action + body-language details + expression) come first; when a sub-shot has dialogue, write it inside the corresponding `【镜头N】` as "CharacterName says: "line"", and narration as "Narration: content"
+7. **Visual description** `description`: describe sub-shot by sub-shot as `【镜头1】…【镜头2】…` what the audience actually sees and hears — the visuals (who + specific action + body-language details + expression) come first; when a sub-shot has dialogue, write it inside the corresponding `【镜头N】` as `@CharacterName says: "line"`, and narration as `Narration (voice-over): "line"`; camera moves, shot sizes, expressions, psychology, and actions must never become dialogue or narration
 8. **Visual result** `result`: the immediate consequence at the end of the segment + visual details
 9. **Atmosphere** `atmosphere`: lighting + color tone + sound + overall mood
 10. **Duration** `duration`: total segment duration 8-15 seconds, and it must satisfy the dialogue duration floor
 11. **Scene binding**: if it can be matched to an existing scene, `scene_id` must be filled in
 12. **Character binding**: fill in `character_ids`, binding 0 to multiple characters involved in this segment
 13. **Prop binding**: fill in `prop_ids`, binding 0 to multiple key props appearing in this segment
+
+## Unified video_prompt Format (Hard Rule)
+
+The first line is a fixed header; then split into 3-second segments, one line each:
+
+```text
+Characters: @CharacterA, @CharacterB | Scene: @SceneName
+0-3s: visual description, @CharacterA says: "line"
+3-6s: visual description, Narration (voice-over): "line"
+6-10s: visual description, @CharacterB says: "line"
+```
+
+- No characters: `Characters: None`; no scene: `Scene: Unspecified`; the header has no trailing period and the body never contains an "Audio:" or voice/mix instruction
+- Time starts at 0 and stays continuous; the last segment's end time equals this shot's duration, and a final segment shorter than 3 seconds uses its actual duration
+- Visuals come before dialogue/narration in every segment; at most 12 Chinese characters of dialogue/narration per 3-second segment; split long lines across adjacent segments
+- Dialogue only as `@CharacterName says: "line"`; narration only as `Narration (voice-over): "line"`; camera moves, shot sizes, expressions, psychology, and actions must never become dialogue or narration
+- Dialogue must come from the corresponding `【镜头N】` in the description — never invent new lines; @character/@scene names must exactly match the lists returned by `read_storyboard_context`
+- Mood and lighting come from this shot's `atmosphere`; cuts within a segment are allowed, but never across scenes
 
 ## Scene Binding Rules
 

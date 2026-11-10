@@ -18,7 +18,18 @@ import type { VideoAudioMode } from './video-audio.js'
 const CJK_RE = /[\u3400-\u9fff]/
 const H3_PROMPT_MAX_CHARS = 6800
 const CACHE_LIMIT = 200
+const TRANSLATE_TIMEOUT_MS = 120_000
+const TRANSLATE_ATTEMPTS = 2
+const DIALOGUE_ONLY_RULE = 'Only text inside <d> tags is spoken; all other text is visual description and must never be voiced.'
+const NO_DIALOGUE_RULE = 'This shot has no spoken dialogue: do not voice any line; characters stay silent except for ambient sound.'
 const translationCache = new Map<string, string>()
+
+export class H3PromptTranslationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'H3PromptTranslationError'
+  }
+}
 
 export const H3_TRANSLATOR_SYSTEM = `You translate Chinese video-generation prompts into English for the MiniMax H3 model.
 Rules:
@@ -142,10 +153,21 @@ export function compileH3Prompt(prompt: string, audioMode: VideoAudioMode = 'nat
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
-  return dialogueTags.reduce(
+  return delimitDialogueTags(dialogueTags.reduce(
     (value, tag, index) => value.split(`[[H3_DLG_${index}]]`).join(tag),
     compiled,
-  )
+  ))
+}
+
+/** `</d>` 后没有句读时 H3 会把后续画面描述并进台词，补一个句号把边界钉死 */
+function delimitDialogueTags(text: string): string {
+  return text
+    .replace(/<\/d>\s*[，,；;]\s*/g, '</d>. ')
+    .replace(/<\/d>(\s*)(?=[^\s。！？!?.;，,])/g, '</d>.$1')
+}
+
+function stripDialogueTags(text: string): string {
+  return text.replace(/<d>\[Chinese\][\s\S]*?<\/d>/g, '')
 }
 
 function normalizeTranslation(text: string): string {
@@ -181,22 +203,59 @@ function restoreDialogueTags(text: string, tags: string[]): string {
   return restored
 }
 
-function defaultTranslate(text: string): Promise<string> {
+type H3Translate = (text: string, attempt: number) => Promise<string>
+
+function defaultTranslate(text: string, attempt = 0): Promise<string> {
+  const system = attempt > 0
+    ? `${H3_TRANSLATOR_SYSTEM}\nStrict retry: the previous output was rejected. The output must contain no Chinese characters outside the [[H3_DLG_N]] tokens.`
+    : H3_TRANSLATOR_SYSTEM
   return callText({
-    system: H3_TRANSLATOR_SYSTEM,
+    system,
     prompt: text,
     temperature: 0.2,
-    maxTokens: 2048,
-    timeoutMs: 30_000,
+    maxTokens: 4096,
+    timeoutMs: TRANSLATE_TIMEOUT_MS,
     responseFormat: 'text',
   }).then(result => result.text)
 }
 
-export interface TranslateH3TextOptions {
-  translate?: (text: string) => Promise<string>
+function cacheTranslation(key: string, value: string): void {
+  if (translationCache.size >= CACHE_LIMIT) {
+    translationCache.delete(translationCache.keys().next().value as string)
+  }
+  translationCache.set(key, value)
 }
 
-/** 单独翻译视觉背景；失败返回 null，由调用方决定是否跳过 */
+async function requestTranslation(
+  text: string,
+  translate: H3Translate,
+  validate?: (translated: string) => void,
+): Promise<string> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < TRANSLATE_ATTEMPTS; attempt += 1) {
+    try {
+      const translated = normalizeTranslation(await translate(text, attempt))
+      if (!translated) throw new Error('翻译结果为空')
+      validate?.(translated)
+      return translated
+    } catch (err) {
+      lastError = err
+      if (attempt < TRANSLATE_ATTEMPTS - 1) {
+        logTaskWarn('H3Prompt', 'translate-retry', {
+          attempt: attempt + 1,
+          error: (err as Error)?.message || String(err),
+        })
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
+
+export interface TranslateH3TextOptions {
+  translate?: H3Translate
+}
+
+/** 单独翻译视觉背景/风格；失败返回 null，由调用方决定是否跳过 */
 export async function translateH3Text(
   text: string,
   options: TranslateH3TextOptions = {},
@@ -210,14 +269,16 @@ export async function translateH3Text(
   if (cached) return cached
 
   try {
-    const translated = normalizeTranslation(await (options.translate ?? defaultTranslate)(source))
-    if (!translated) throw new Error('翻译结果为空')
-    // 翻译模型可能原样回显或只译了一部分；中文送进本地 H3 会被烧进画面。
-    if (CJK_RE.test(translated)) throw new Error('翻译结果仍包含中文')
-    if (translationCache.size >= CACHE_LIMIT) {
-      translationCache.delete(translationCache.keys().next().value as string)
-    }
-    translationCache.set(key, translated)
+    const translated = await requestTranslation(
+      source,
+      options.translate ?? defaultTranslate,
+      value => {
+        // 翻译模型可能原样回显或只译了一部分；中文送进本地 H3 会被烧进画面，重试一次再放弃
+        if (CJK_RE.test(value)) throw new Error('翻译结果仍包含中文')
+        if (/<\/?d>/i.test(value)) throw new Error('翻译结果包含意外的对白标签')
+      },
+    )
+    cacheTranslation(key, translated)
     return translated
   } catch (err: any) {
     logTaskWarn('H3Prompt', 'visual-background-translate-failed', { error: err?.message || String(err) })
@@ -226,39 +287,63 @@ export async function translateH3Text(
 }
 
 export interface CompileLocalH3Options {
-  translate?: (text: string) => Promise<string>
+  translate?: H3Translate
 }
 
-/** 本地 H3 编译：确定性结构转换 + 可选英文化；翻译失败保留确定性结果 */
+/**
+ * 本地 H3 编译：确定性结构转换 + 英文化。
+ * `<d>` 标签外不允许残留中文；翻译失败会抛错取消提交，绝不把中文正文交给 H3。
+ */
 export async function compileLocalH3Prompt(
   prompt: string,
   audioMode: VideoAudioMode = 'native',
   options: CompileLocalH3Options = {},
 ): Promise<string> {
   const deterministic = compileH3Prompt(prompt, audioMode)
-  if (!deterministic || !CJK_RE.test(deterministic)) return deterministic
+  if (!deterministic) return deterministic
+
+  const dialogueCount = (deterministic.match(/<d>\[Chinese\][\s\S]*?<\/d>/g) || []).length
+  const nativeRule = audioMode === 'native'
+    ? (dialogueCount > 0 ? DIALOGUE_ONLY_RULE : NO_DIALOGUE_RULE)
+    : ''
+  const finish = (text: string) => (nativeRule ? `${text}\n${nativeRule}` : text)
+
+  // 标签外没有中文时无需翻译，直接保留原文台词
+  if (!CJK_RE.test(stripDialogueTags(deterministic))) return finish(deterministic)
 
   const key = `${audioMode}\n${deterministic}`
   const cached = translationCache.get(key)
   if (cached) return cached
 
   const { text: translatable, tags } = extractDialogueTags(deterministic)
-  // 标签外没有中文时无需翻译，直接保留原文台词
-  if (!CJK_RE.test(translatable)) return deterministic
-
-  try {
-    const translated = normalizeTranslation(await (options.translate ?? defaultTranslate)(translatable))
-    if (!translated) throw new Error('翻译结果为空')
-    const restored = tags.length ? restoreDialogueTags(translated, tags) : translated
-    if (translationCache.size >= CACHE_LIMIT) {
-      translationCache.delete(translationCache.keys().next().value as string)
+  let lastError: unknown
+  for (let attempt = 0; attempt < TRANSLATE_ATTEMPTS; attempt += 1) {
+    try {
+      const translated = normalizeTranslation(await (options.translate ?? defaultTranslate)(translatable, attempt))
+      if (!translated) throw new Error('翻译结果为空')
+      const restored = tags.length ? restoreDialogueTags(translated, tags) : translated
+      if (CJK_RE.test(stripDialogueTags(restored))) throw new Error('翻译结果在 <d> 标签外仍包含中文')
+      if ((restored.match(/<d>/g) || []).length !== tags.length) throw new Error('翻译结果包含多余的对白标签')
+      const final = finish(delimitDialogueTags(restored))
+      cacheTranslation(key, final)
+      return final
+    } catch (err) {
+      lastError = err
+      if (attempt < TRANSLATE_ATTEMPTS - 1) {
+        logTaskWarn('H3Prompt', 'translate-retry', {
+          audioMode,
+          attempt: attempt + 1,
+          error: (err as Error)?.message || String(err),
+        })
+      }
     }
-    translationCache.set(key, restored)
-    return restored
-  } catch (err: any) {
-    logTaskWarn('H3Prompt', 'translate-fallback', { error: err?.message || String(err) })
-    return deterministic
   }
+
+  const reason = lastError instanceof Error ? lastError.message : String(lastError)
+  logTaskWarn('H3Prompt', 'translate-failed', { audioMode, error: reason })
+  throw new H3PromptTranslationError(
+    `本地 H3 提示词英文化失败（${audioMode}）：${reason}。已取消提交，避免中文被烧成字幕或被念成台词；请检查文本模型配置与网络后重试。`,
+  )
 }
 
 /** 测试与配置切换时清空翻译缓存 */

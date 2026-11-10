@@ -6,10 +6,10 @@ import { createTool } from '@mastra/core/tools'
 import type { ToolExecutionContext } from '@mastra/core/tools'
 import { z } from 'zod'
 import { db, getInsertId, schema } from '../../db/index.js'
-import { and, eq, isNotNull, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { now } from '../../utils/response.js'
-import { logTaskProgress, logTaskSuccess } from '../../utils/task-logger.js'
-import { getDramaId, getEpisodeId } from '../context.js'
+import { logTaskProgress, logTaskSuccess, logTaskWarn } from '../../utils/task-logger.js'
+import { getContentLanguageFromRC, getDramaId, getEpisodeId } from '../context.js'
 import { resolveVoiceMentions } from '../../services/character-voice-references.js'
 import { getDramaBackground } from '../../services/drama-background.js'
 import { cleanupFrameAssetsForEpisode } from '../../services/storyboard-frame-assets.js'
@@ -327,6 +327,122 @@ const storyboardFields = z.object({
   prop_ids: z.array(z.number()).optional(),
 })
 
+const HEADER_CHARACTER_RE = /人物|登场人物|登場人物|characters?|인물|등장인물/i
+const HEADER_SCENE_RE = /场景|scene|シーン|장면/i
+const HEADER_LINE_START_RE = /^(?:出场人物|登场人物|登場人物|人物|characters?|인물|등장인물|场景|scene|シーン|장면)\s*[：:@]/i
+const TIME_SEGMENT_RE = /^(\s*)(\d+(?:\.\d+)?)\s*[-–—~～至]\s*(\d+(?:\.\d+)?)\s*(秒|s|초)/i
+const AUDIO_DIRECTIVE_RE = /^\s*(?:音频|audio)\s*[：:]/i
+const NARRATION_RE = /旁白(?:\s*[（(][^）)]*[）)])?\s*[：:]\s*/
+const EMPTY_CHARACTER_NAMES = new Set(['无', '没有', '沒有', 'なし', '없음', 'none'])
+const EMPTY_SCENE_NAMES = new Set(['未指定', '不明', 'unspecified', 'なし', '미지정'])
+
+function mentionName(value: string) {
+  return value.trim().replace(/^@+/, '').replace(/[。．.；;，,、｜|／/]+$/, '').trim()
+}
+
+function buildVideoPromptHeader(
+  names: string[],
+  sceneName: string | null | undefined,
+  language: string | null | undefined,
+) {
+  const people = [...new Set(names.map(mentionName).filter(Boolean))]
+  const scene = sceneName ? mentionName(sceneName) : ''
+  const mentions = (separator: string) => people.map(name => `@${name}`).join(separator)
+  switch (language) {
+    case 'en':
+      return `Characters: ${people.length ? mentions(', ') : 'None'} | Scene: ${scene ? `@${scene}` : 'Unspecified'}`
+    case 'ja':
+      return `登場人物：${people.length ? mentions('、') : 'なし'}／シーン：${scene ? `@${scene}` : '未指定'}`
+    case 'ko':
+      return `등장인물: ${people.length ? mentions(', ') : '없음'} | 장면: ${scene ? `@${scene}` : '미지정'}`
+    default:
+      return `出场人物：${people.length ? mentions('、') : '无'}｜场景：${scene ? `@${scene}` : '未指定'}`
+  }
+}
+
+function parseVideoPromptHeader(line: string): { names: string[], scene: string | null } | null {
+  if (TIME_SEGMENT_RE.test(line) || !HEADER_LINE_START_RE.test(line.trim())) return null
+  const characterMatch = HEADER_CHARACTER_RE.exec(line)
+  const sceneMatch = HEADER_SCENE_RE.exec(line)
+  if (!characterMatch || !sceneMatch) return null
+  const characterStart = characterMatch.index + characterMatch[0].length
+  const sceneStart = sceneMatch.index
+  const characterSection = sceneStart > characterStart
+    ? line.slice(characterStart, sceneStart)
+    : line.slice(characterStart)
+  const sceneSection = line.slice(sceneMatch.index + sceneMatch[0].length)
+  const names = characterSection
+    .replace(/^[：:\s]+/, '')
+    .split(/[、，,；;｜|／/]+/)
+    .map(mentionName)
+    .filter(Boolean)
+    .filter(name => !EMPTY_CHARACTER_NAMES.has(name.toLowerCase()))
+  const scene = mentionName(sceneSection.replace(/^[：:\s｜|／/]+/, ''))
+  return {
+    names,
+    scene: scene && !EMPTY_SCENE_NAMES.has(scene.toLowerCase()) ? scene : null,
+  }
+}
+
+function normalizeNarration(line: string) {
+  let result = ''
+  let rest = line
+  while (rest) {
+    const match = NARRATION_RE.exec(rest)
+    if (!match) {
+      result += rest
+      break
+    }
+    result += rest.slice(0, match.index) + '旁白（画外音）：'
+    rest = rest.slice(match.index + match[0].length)
+    if (rest.startsWith('「')) {
+      const close = rest.indexOf('」')
+      if (close >= 0) {
+        result += rest.slice(0, close + 1)
+        rest = rest.slice(close + 1)
+        continue
+      }
+    }
+    const next = NARRATION_RE.exec(rest)
+    const end = next ? next.index : rest.length
+    const spoken = rest.slice(0, end).trim().replace(/^「+/, '').replace(/」+$/, '').trim()
+    result += spoken ? `「${spoken}」` : ''
+    rest = next ? rest.slice(end) : ''
+  }
+  return result
+}
+
+function normalizeVideoPromptBody(lines: string[]) {
+  return lines
+    .filter(line => !AUDIO_DIRECTIVE_RE.test(line))
+    .map(line => normalizeNarration(line.replace(TIME_SEGMENT_RE, '$1$2-$3$4')))
+}
+
+function normalizeVideoPrompt(
+  prompt: string | undefined,
+  names: string[],
+  sceneName: string | null | undefined,
+  language: string | null | undefined,
+) {
+  if (!prompt || !prompt.trim()) return prompt
+  const lines = prompt.split(/\r?\n/)
+  const headerIndex = lines.findIndex(line => line.trim())
+  const parsed = headerIndex >= 0 ? parseVideoPromptHeader(lines[headerIndex]) : null
+  const useBindings = names.length > 0 || Boolean(sceneName)
+  const header = buildVideoPromptHeader(
+    useBindings ? names : parsed?.names ?? [],
+    useBindings ? sceneName : parsed?.scene ?? null,
+    language,
+  )
+  const bodyLines = parsed
+    ? lines.filter((_, index) => index !== headerIndex)
+    : [...lines]
+  while (bodyLines.length && !bodyLines[0].trim()) bodyLines.shift()
+  while (bodyLines.length && !bodyLines[bodyLines.length - 1].trim()) bodyLines.pop()
+  const body = normalizeVideoPromptBody(bodyLines).join('\n')
+  return body.trim() ? `${header}\n${body}` : header
+}
+
 const saveStoryboards = createTool({
   id: 'save_storyboards',
   description: 'Save storyboards for this episode. Call in batches of at most 8 storyboards: the first batch must set replace_existing: true (clears all old storyboards for the episode, then writes), every following batch omits replace_existing (appends). Rows are upserted by shot_number, so overlapping batches and retries never create duplicates.',
@@ -374,9 +490,44 @@ const saveStoryboards = createTool({
       ? [...storyboards].sort((a, b) => a.shot_number - b.shot_number)
       : storyboards
 
+    const characterIds = [...new Set(batch.flatMap(sb => sb.character_ids || []).filter(Boolean))]
+    const sceneIds = [...new Set(batch
+      .map(sb => sb.scene_id)
+      .filter((id): id is number => typeof id === 'number'))]
+    const characterNameMap = new Map<number, string>()
+    const sceneNameMap = new Map<number, string>()
+    if (characterIds.length) {
+      const rows = await db.select({ id: schema.characters.id, name: schema.characters.name })
+        .from(schema.characters)
+        .where(and(
+          eq(schema.characters.dramaId, dramaId),
+          inArray(schema.characters.id, characterIds),
+          isNull(schema.characters.deletedAt),
+        ))
+      for (const row of rows) characterNameMap.set(row.id, row.name)
+    }
+    if (sceneIds.length) {
+      const rows = await db.select({ id: schema.scenes.id, location: schema.scenes.location })
+        .from(schema.scenes)
+        .where(and(
+          eq(schema.scenes.dramaId, dramaId),
+          inArray(schema.scenes.id, sceneIds),
+          isNull(schema.scenes.deletedAt),
+        ))
+      for (const row of rows) sceneNameMap.set(row.id, row.location)
+    }
+    const patchedShots: number[] = []
+    const promptLanguage = getContentLanguageFromRC(context?.requestContext)
+
     for (const sb of batch) {
       await validateStoryboardBindings(episodeId, dramaId, sb.scene_id, sb.character_ids, sb.prop_ids)
       const shotNumber = chunkMode ? chunk.state!.nextShot : sb.shot_number
+      const characterNames = (sb.character_ids || [])
+        .map(id => characterNameMap.get(id))
+        .filter((name): name is string => Boolean(name))
+      const sceneName = sb.scene_id != null ? sceneNameMap.get(sb.scene_id) ?? null : null
+      const videoPrompt = normalizeVideoPrompt(sb.video_prompt, characterNames, sceneName, promptLanguage)
+      if (videoPrompt !== sb.video_prompt) patchedShots.push(shotNumber)
       const existingId = chunkMode ? undefined : shotToId.get(shotNumber)
       if (existingId !== undefined) {
         await db.update(schema.storyboards).set({
@@ -385,7 +536,7 @@ const saveStoryboards = createTool({
           location: sb.location, time: sb.time,
           description: sb.description, result: sb.result,
           atmosphere: sb.atmosphere, imagePrompt: sb.image_prompt,
-          videoPrompt: sb.video_prompt, bgmPrompt: sb.bgm_prompt,
+          videoPrompt, bgmPrompt: sb.bgm_prompt,
           soundEffect: sb.sound_effect,
           transition: sb.transition || 'cut', continuity: sb.continuity,
           sceneId: sb.scene_id, duration: sb.duration || 10,
@@ -403,7 +554,7 @@ const saveStoryboards = createTool({
           location: sb.location, time: sb.time,
           description: sb.description, result: sb.result,
           atmosphere: sb.atmosphere, imagePrompt: sb.image_prompt,
-          videoPrompt: sb.video_prompt, bgmPrompt: sb.bgm_prompt,
+          videoPrompt, bgmPrompt: sb.bgm_prompt,
           soundEffect: sb.sound_effect,
           transition: sb.transition || 'cut', continuity: sb.continuity,
           sceneId: sb.scene_id, duration: sb.duration || 10,
@@ -415,6 +566,14 @@ const saveStoryboards = createTool({
         await syncStoryboardCharacters(newId, sb.character_ids || [])
         await syncStoryboardProps(newId, sb.prop_ids || [])
       }
+    }
+
+    if (patchedShots.length) {
+      logTaskWarn('StoryboardTool', 'video-prompt-header-patched', {
+        episodeId,
+        count: patchedShots.length,
+        shotNumbers: patchedShots.join(','),
+      })
     }
 
     // 整集时长 = 当前全部存活分镜时长之和（分批保存时不能再按单批累加）
@@ -484,11 +643,11 @@ const updateStoryboard = createTool({
       fields: Object.keys(fields),
     })
 
-    const currentCharacterIds = 'character_ids' in fields
+    const currentCharacterIds = ('character_ids' in fields
       ? fields.character_ids
       : (await db.select().from(schema.storyboardCharacters)
           .where(eq(schema.storyboardCharacters.storyboardId, storyboard_id)))
-          .map(link => link.characterId)
+          .map(link => link.characterId)) ?? []
 
     const currentPropIds = 'prop_ids' in fields
       ? fields.prop_ids
@@ -504,6 +663,41 @@ const updateStoryboard = createTool({
       currentCharacterIds,
       currentPropIds,
     )
+
+    if ('video_prompt' in fields) {
+      const uniqueCharacterIds = [...new Set(currentCharacterIds.filter(Boolean))]
+      const characterNameMap = new Map<number, string>()
+      if (uniqueCharacterIds.length) {
+        const rows = await db.select({ id: schema.characters.id, name: schema.characters.name })
+          .from(schema.characters)
+          .where(and(
+            eq(schema.characters.dramaId, dramaId),
+            inArray(schema.characters.id, uniqueCharacterIds),
+            isNull(schema.characters.deletedAt),
+          ))
+        for (const row of rows) characterNameMap.set(row.id, row.name)
+      }
+      const sceneId = 'scene_id' in fields ? fields.scene_id : storyboard.sceneId
+      let sceneName: string | null = null
+      if (sceneId != null) {
+        const [scene] = await db.select({ location: schema.scenes.location })
+          .from(schema.scenes)
+          .where(and(
+            eq(schema.scenes.id, sceneId),
+            eq(schema.scenes.dramaId, dramaId),
+            isNull(schema.scenes.deletedAt),
+          ))
+        sceneName = scene?.location ?? null
+      }
+      fields.video_prompt = normalizeVideoPrompt(
+        fields.video_prompt,
+        uniqueCharacterIds
+          .map(id => characterNameMap.get(id))
+          .filter((name): name is string => Boolean(name)),
+        sceneName,
+        getContentLanguageFromRC(context?.requestContext),
+      )
+    }
 
     const updates: Record<string, any> = { updatedAt: now() }
     if ('title' in fields) updates.title = fields.title

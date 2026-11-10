@@ -5,6 +5,7 @@ import { success, badRequest, now } from '../utils/response.js'
 import { mergeEpisodeVideos } from '../services/ffmpeg-merge.js'
 import {
   analyzeTransitionPrompt,
+  createCustomTransition,
   deleteTransition,
   getTransition,
   listTransitions,
@@ -15,6 +16,7 @@ import {
   skipTransition,
 } from '../services/transition-service.js'
 import { toSnakeCase } from '../utils/transform.js'
+import { hasActiveStoryboardAudit } from '../services/storyboard-audit-jobs.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 
 const app = new Hono()
@@ -112,6 +114,9 @@ app.get('/episodes/:id/transitions', async (c) => {
 // POST /episodes/:id/transitions/prepare — 为缺失/过期断点创建生成任务（不等待完成）
 app.post('/episodes/:id/transitions/prepare', async (c) => {
   const episodeId = Number(c.req.param('id'))
+  if (Number.isInteger(episodeId) && episodeId > 0 && await hasActiveStoryboardAudit(episodeId)) {
+    return badRequest(c, '检验进行中，暂不能生成过渡镜头')
+  }
   let body: any = {}
   try { body = await c.req.json() } catch { body = {} }
 
@@ -204,6 +209,52 @@ app.post('/episodes/:id/transitions/prepare', async (c) => {
   }
 })
 
+// POST /episodes/:id/transitions/custom — 新建/切换自定义过渡（空镜/场景/文字）
+app.post('/episodes/:id/transitions/custom', async (c) => {
+  const episodeId = Number(c.req.param('id'))
+  if (!Number.isInteger(episodeId) || episodeId <= 0) return badRequest(c, '剧集不存在')
+  if (await hasActiveStoryboardAudit(episodeId)) {
+    return badRequest(c, '检验进行中，暂不能生成过渡镜头')
+  }
+  const body = await readJsonBody(c)
+  const fromStoryboardId = Number(body?.from_storyboard_id)
+  const toStoryboardId = Number(body?.to_storyboard_id)
+  if (!Number.isInteger(fromStoryboardId) || fromStoryboardId <= 0
+    || !Number.isInteger(toStoryboardId) || toStoryboardId <= 0) {
+    return badRequest(c, '过渡断点无效')
+  }
+  const kind = typeof body?.kind === 'string' ? body.kind.trim() : ''
+  if (!kind) return badRequest(c, '请选择过渡类型')
+
+  let sceneId: number | null = null
+  if (body?.scene_id !== undefined && body?.scene_id !== null && body?.scene_id !== '') {
+    const parsed = Number(body.scene_id)
+    if (!Number.isInteger(parsed) || parsed <= 0) return badRequest(c, 'scene_id 无效')
+    sceneId = parsed
+  }
+  const duration = body?.duration === undefined || body?.duration === null || body?.duration === ''
+    ? undefined
+    : Number(body.duration)
+  if (duration !== undefined && !Number.isFinite(duration)) return badRequest(c, 'duration 无效')
+
+  try {
+    const view = await createCustomTransition({
+      episodeId,
+      fromStoryboardId,
+      toStoryboardId,
+      kind: kind as 'empty' | 'scene' | 'text',
+      prompt: typeof body?.prompt === 'string' ? body.prompt : undefined,
+      sceneId,
+      textContent: typeof body?.text_content === 'string' ? body.text_content : undefined,
+      textSubtitle: typeof body?.text_subtitle === 'string' ? body.text_subtitle : undefined,
+      duration,
+    })
+    return success(c, toSnakeCase(view))
+  } catch (error: any) {
+    return badRequest(c, error?.message || '创建过渡镜头失败')
+  }
+})
+
 // POST /transitions/:id/retry — 按原配置重试单个断点；可带用户改写后的提示词与文本模型
 app.post('/transitions/:id/retry', async (c) => {
   const id = Number(c.req.param('id'))
@@ -216,6 +267,10 @@ app.post('/transitions/:id/retry', async (c) => {
     return badRequest(c, error.message)
   }
   const prompt = typeof body?.prompt === 'string' && body.prompt.trim() ? body.prompt : undefined
+  const row = await getTransition(id)
+  if (row && await hasActiveStoryboardAudit(row.episodeId)) {
+    return badRequest(c, '检验进行中，暂不能生成过渡镜头')
+  }
   try {
     await retryTransition(id, {
       prompt,

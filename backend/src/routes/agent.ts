@@ -11,6 +11,12 @@ import {
   getStoryboardSplitJob,
   resumeStoryboardSplitJob,
 } from '../services/storyboard-split-jobs.js'
+import {
+  createStoryboardAuditJob,
+  getLatestStoryboardAuditJob,
+  getStoryboardAuditJob,
+} from '../services/storyboard-audit-jobs.js'
+import { undoAuditRepair } from '../services/storyboard-audit-repair.js'
 import { mastra } from '../mastra/index.js'
 import { success, badRequest, notFound } from '../utils/response.js'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
@@ -94,6 +100,75 @@ app.post('/:type/split-jobs/:id/resume', async (c) => {
     return success(c, { job })
   } catch (err: any) {
     return badRequest(c, err.message || '继续拆分失败')
+  }
+})
+
+// ===== 分镜动作检验任务 =====
+const AUDIT_TRIGGERS = ['manual', 'split', 'automation'] as const
+
+function auditJobTypeGuard(c: any) {
+  const agentType = c.req.param('type')
+  if (agentType !== 'storyboard_auditor') {
+    return badRequest(c, `该 Agent 不支持动作检验：${agentType}`)
+  }
+  return null
+}
+
+// POST /agent/:type/audit-jobs — 创建并启动动作检验
+app.post('/:type/audit-jobs', async (c) => {
+  const guard = auditJobTypeGuard(c)
+  if (guard) return guard
+  let body: any
+  try {
+    body = await c.req.json()
+  } catch {
+    return badRequest(c, '请求体不是合法 JSON')
+  }
+  const trigger = typeof body.trigger === 'string' ? body.trigger.trim() : ''
+  if (trigger && !AUDIT_TRIGGERS.includes(trigger as typeof AUDIT_TRIGGERS[number])) {
+    return badRequest(c, 'trigger 无效')
+  }
+  try {
+    const result = await createStoryboardAuditJob({
+      episodeId: Number(body.episode_id),
+      dramaId: Number(body.drama_id),
+      trigger: trigger ? trigger as typeof AUDIT_TRIGGERS[number] : undefined,
+      model: body.model || undefined,
+      configId: body.config_id || undefined,
+    })
+    return success(c, { job: result.job, already_running: result.alreadyRunning })
+  } catch (err: any) {
+    return badRequest(c, err.message || '创建动作检验任务失败')
+  }
+})
+
+// GET /agent/:type/audit-jobs/latest/:episodeId — 某集最近一次动作检验（必须注册在 /:id 之前）
+app.get('/:type/audit-jobs/latest/:episodeId', async (c) => {
+  const guard = auditJobTypeGuard(c)
+  if (guard) return guard
+  const job = getLatestStoryboardAuditJob(Number(c.req.param('episodeId')))
+  return success(c, { job })
+})
+
+// GET /agent/:type/audit-jobs/:id — 按 ID 查询检验进度
+app.get('/:type/audit-jobs/:id', async (c) => {
+  const guard = auditJobTypeGuard(c)
+  if (guard) return guard
+  const job = getStoryboardAuditJob(Number(c.req.param('id')))
+  if (!job) return notFound(c, '检验任务不存在')
+  return success(c, { job })
+})
+
+// POST /agent/:type/audit-jobs/:id/undo — 撤销本次自动修复
+app.post('/:type/audit-jobs/:id/undo', async (c) => {
+  const guard = auditJobTypeGuard(c)
+  if (guard) return guard
+  const id = Number(c.req.param('id'))
+  try {
+    const result = undoAuditRepair(id)
+    return success(c, { ...result, job: getStoryboardAuditJob(id) })
+  } catch (err: any) {
+    return badRequest(c, err.message || '撤销修复失败')
   }
 })
 

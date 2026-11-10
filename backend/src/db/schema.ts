@@ -216,6 +216,12 @@ export const storyboards = sqliteTable('storyboards', {
   status: text('status').default('pending'),
   /** 内容指纹：台词抽取幂等（V2） */
   sourceHash: text('source_hash'),
+  /** 自动插入的过渡分镜类型：empty / scene / text；空 = 普通分镜 */
+  transitionKind: text('transition_kind'),
+  /** 文字过渡主标题 */
+  transitionText: text('transition_text'),
+  /** 文字过渡副标题 */
+  transitionSubtitle: text('transition_subtitle'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   deletedAt: text('deleted_at'),
@@ -378,6 +384,50 @@ export const storyboardSplitJobs = sqliteTable('storyboard_split_jobs', {
   finishedAt: text('finished_at'),
 })
 
+// 分镜动作检验任务：拆分完成/全自动/手动触发，一次任务保存问题、窗口、逐镜状态与修复快照
+export const storyboardAuditJobs = sqliteTable('storyboard_audit_jobs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  /** manual / split / automation */
+  trigger: text('trigger').notNull().default('manual'),
+  /** pending / preparing / auditing / repairing / rechecking / done / failed / interrupted */
+  status: text('status').notNull().default('pending'),
+  /** wait_prompts / rule / semantic / repair / recheck */
+  phase: text('phase'),
+  totalShots: integer('total_shots').notNull().default(0),
+  totalWindows: integer('total_windows').notNull().default(0),
+  completedWindows: integer('completed_windows').notNull().default(0),
+  issueCount: integer('issue_count').notNull().default(0),
+  errorCount: integer('error_count').notNull().default(0),
+  warningCount: integer('warning_count').notNull().default(0),
+  infoCount: integer('info_count').notNull().default(0),
+  repairableCount: integer('repairable_count').notNull().default(0),
+  fixedCount: integer('fixed_count').notNull().default(0),
+  manualCount: integer('manual_count').notNull().default(0),
+  /** pending / running / done / partial / skipped_no_model / failed / truncated */
+  semanticStatus: text('semantic_status').notNull().default('pending'),
+  /** none / running / done / skipped / rolled_back / failed */
+  repairStatus: text('repair_status').notNull().default('none'),
+  rollback: integer('rollback', { mode: 'boolean' }).notNull().default(false),
+  model: text('model'),
+  configId: integer('config_id'),
+  issuesJson: text('issues_json'),
+  windowsJson: text('windows_json'),
+  shotStatusJson: text('shot_status_json'),
+  summaryJson: text('summary_json'),
+  snapshotJson: text('snapshot_json'),
+  repairLogJson: text('repair_log_json'),
+  fingerprintsJson: text('fingerprints_json'),
+  /** 创建任务时的检验策略快照 */
+  policyJson: text('policy_json'),
+  errorMsg: text('error_msg'),
+  startedAt: text('started_at'),
+  finishedAt: text('finished_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
 export const videoMerges = sqliteTable('video_merges', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   episodeId: integer('episode_id'),
@@ -427,6 +477,15 @@ export const videoTransitions = sqliteTable('video_transitions', {
   dramaId: integer('drama_id'),
   fromStoryboardId: integer('from_storyboard_id').notNull(),
   toStoryboardId: integer('to_storyboard_id').notNull(),
+  /** ai / empty / scene / text；历史行按 ai 处理 */
+  kind: text('kind').notNull().default('ai'),
+  /** scene 类型使用的场景资产 */
+  sceneId: integer('scene_id'),
+  /** text 类型主标题/副标题 */
+  textContent: text('text_content'),
+  textSubtitle: text('text_subtitle'),
+  /** 合片两端处理：fade / cut */
+  edgeMode: text('edge_mode').notNull().default('fade'),
   fromVideoUrl: text('from_video_url'),
   toVideoUrl: text('to_video_url'),
   firstFrameUrl: text('first_frame_url'),

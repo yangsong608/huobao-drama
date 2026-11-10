@@ -315,6 +315,19 @@ export function duplicateBreakdownMethod(key: string): BreakdownMethodRow {
   }).returning().get()
 }
 
+/** 平台硬约束：方案只能追加风格，不能覆盖 description / video_prompt 的统一格式 */
+const PLATFORM_VIDEO_PROMPT_RULES = [
+  '### 平台硬约束（任何方案不得覆盖）',
+  '以下规则优先于本方案中的任何相反描述：',
+  '- description 固定按「【镜头1】…【镜头2】…」逐行写子镜头；对白写成「@角色名说：「台词」」，旁白写成「旁白（画外音）：「台词」」；运镜、景别、表情、心理和动作不得写成台词或旁白。',
+  '- video_prompt 首行信息头固定为「出场人物：@角色A、@角色B｜场景：@场景名」（中文会话；英文会话写「Characters: @CharacterA, @CharacterB | Scene: @SceneName」，日文会话写「登場人物：@キャラクターA、@キャラクターB／シーン：@シーン名」，韩文会话写「등장인물: @캐릭터A, @캐릭터B | 장면: @장면명」）；没有角色写「出场人物：无」，没有场景写「场景：未指定」；信息头独立一行，不加句号。',
+  '- video_prompt 正文从「0-3秒：」开始，按 3 秒连续分段、每段一行、时间不重叠不留空；最后一段的结束时间等于本镜 duration，不足 3 秒的尾段按实际时长收尾。',
+  '- 每段先写画面再写该段台词/旁白；台词只写「@角色名说：「台词」」，旁白只写「旁白（画外音）：「台词」」；每个 3 秒段的台词或旁白不超过 12 个汉字。',
+  '- 提到角色必须写 @角色名，提到场景必须写 @场景名；名称必须与 read_storyboard_context 返回的列表完全一致。',
+  '- 氛围、光线描述取自本镜 atmosphere。',
+  '- 不要写「音频：」要求行或音色/混音指令（声音由生成参数控制）。',
+].join('\n')
+
 export function buildBreakdownMethodBlock(
   method: Pick<BreakdownMethodRow, 'name' | 'prompt' | 'skill'> | null,
 ): string | null {
@@ -329,6 +342,7 @@ export function buildBreakdownMethodBlock(
   ]
   if (prompt) sections.push(`### 方案提示词\n${prompt}`)
   if (skill) sections.push(`### 方案 Skill\n${skill}`)
+  sections.push(PLATFORM_VIDEO_PROMPT_RULES)
   return sections.join('\n\n')
 }
 

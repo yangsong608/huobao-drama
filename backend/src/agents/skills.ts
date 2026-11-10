@@ -47,6 +47,7 @@ const AGENT_SKILL_MAP: Record<string, string[]> = {
     'prompt-generator/video-prompt',
   ],
   voice_designer: ['voice-designer'],
+  storyboard_auditor: ['storyboard-auditor'],
 }
 
 /** 每个 Agent 的 Workspace（filesystem 工作目录 + 原生技能注册）

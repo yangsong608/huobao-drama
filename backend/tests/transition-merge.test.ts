@@ -68,3 +68,22 @@ test('可自定义两端转场时长', () => {
   assert.equal(result.clips[1].transitionMs, 150)
   assert.equal(result.clips[2].transitionMs, 150)
 })
+
+test('文字过渡两端硬切，不叠加淡入淡出', () => {
+  const result = buildTransitionInsertion(storyboards, [
+    candidate({ kind: 'text', edgeMode: 'cut' }),
+  ])
+  assert.deepEqual(result.clips.map(clip => clip.url), ['a.mp4', 't1.mp4', 'b.mp4', 'c.mp4'])
+  assert.equal(result.clips[1].transition, 'cut')
+  assert.equal(result.clips[2].transition, 'cut')
+  assert.equal(result.clips[1].transitionMs, undefined)
+  assert.equal(result.clips[2].transitionMs, undefined)
+  assert.equal(result.used, 1)
+})
+
+test('历史候选没有类型时按 AI 过渡淡入淡出', () => {
+  const result = buildTransitionInsertion(storyboards, [candidate({ kind: undefined })])
+  assert.equal(result.clips[1].transition, 'fade')
+  assert.equal(result.clips[1].transitionMs, 200)
+  assert.equal(result.clips[2].transition, 'fade')
+})

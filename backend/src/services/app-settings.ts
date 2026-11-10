@@ -565,6 +565,223 @@ export function setNovelSettings(patch: unknown): NovelSettings {
 }
 
 // ---------------------------------------------------------------------------
+// 分镜动作检验策略（设置「分镜检验」）
+// ---------------------------------------------------------------------------
+
+export interface StoryboardAuditPolicyChecks {
+  /** 检查 1：运镜/对话/动作/表情/旁白 */
+  shot: boolean
+  /** 检查 2：前后镜连贯与不合理动作 */
+  continuity: boolean
+  /** 检查 3：长时间无对白空镜 */
+  silent: boolean
+  /** 检查 4：台词时长与拆句 */
+  lineDuration: boolean
+  /** 检查 5：资产正确完整 */
+  assets: boolean
+}
+
+export interface StoryboardAuditPolicyThresholds {
+  charsPerSecond: number
+  lineBreathSeconds: number
+  lineRequiredMaxSeconds: number
+  silentCharacterWarnSeconds: number
+  silentCharacterErrorSeconds: number
+  emptyShotWarnSeconds: number
+  promptSegmentMaxChars: number
+}
+
+export interface StoryboardAuditPolicySemantic {
+  enabled: boolean
+  windowSize: number
+  windowStep: number
+  maxWindows: number
+}
+
+export interface StoryboardAuditPolicyAutoRepair {
+  enabled: boolean
+  /** 语义检查 1/2 在证据充分时允许自动修复 */
+  semanticFix: boolean
+  maxActions: number
+  maxActionsPerShot: number
+  /** 连贯断点自动插入空镜/场景/文字过渡分镜 */
+  autoInsertTransition: boolean
+  maxInsertedTransitions: number
+}
+
+export interface StoryboardAuditPolicy {
+  checks: StoryboardAuditPolicyChecks
+  thresholds: StoryboardAuditPolicyThresholds
+  semantic: StoryboardAuditPolicySemantic
+  autoRepair: StoryboardAuditPolicyAutoRepair
+}
+
+const STORYBOARD_AUDIT_POLICY_KEY = 'storyboard_audit.policy'
+
+export const STORYBOARD_AUDIT_POLICY_DEFAULTS: StoryboardAuditPolicy = {
+  checks: {
+    shot: true,
+    continuity: true,
+    silent: true,
+    lineDuration: true,
+    assets: true,
+  },
+  thresholds: {
+    charsPerSecond: 4,
+    lineBreathSeconds: 1,
+    lineRequiredMaxSeconds: 6,
+    silentCharacterWarnSeconds: 8,
+    silentCharacterErrorSeconds: 12,
+    emptyShotWarnSeconds: 6,
+    promptSegmentMaxChars: 12,
+  },
+  semantic: {
+    enabled: true,
+    windowSize: 16,
+    windowStep: 15,
+    maxWindows: 20,
+  },
+  autoRepair: {
+    enabled: true,
+    semanticFix: true,
+    maxActions: 40,
+    maxActionsPerShot: 3,
+    autoInsertTransition: true,
+    maxInsertedTransitions: 3,
+  },
+}
+
+function policySection(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function policyFlag(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+function policyNumber(value: unknown, min: number, max: number, fallback: number, integer = true): number {
+  if (value === null || value === undefined || value === '') return fallback
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  const bounded = Math.max(min, Math.min(max, n))
+  return integer ? Math.round(bounded) : Math.round(bounded * 100) / 100
+}
+
+/** 非法字段逐项回退默认值；窗口步长不允许大于窗口大小 */
+export function sanitizeStoryboardAuditPolicy(raw: unknown): StoryboardAuditPolicy {
+  const input = policySection(raw)
+  const checks = policySection(input.checks)
+  const thresholds = policySection(input.thresholds)
+  const semantic = policySection(input.semantic)
+  const autoRepair = policySection(input.autoRepair)
+  const defaults = STORYBOARD_AUDIT_POLICY_DEFAULTS
+
+  const warnSeconds = policyNumber(
+    thresholds.silentCharacterWarnSeconds, 2, 120, defaults.thresholds.silentCharacterWarnSeconds,
+  )
+  const errorSeconds = Math.max(
+    warnSeconds,
+    policyNumber(thresholds.silentCharacterErrorSeconds, 2, 120, defaults.thresholds.silentCharacterErrorSeconds),
+  )
+  const windowSize = policyNumber(semantic.windowSize, 4, 40, defaults.semantic.windowSize)
+  const windowStep = Math.min(
+    windowSize,
+    policyNumber(semantic.windowStep, 1, 40, Math.min(defaults.semantic.windowStep, windowSize)),
+  )
+
+  return {
+    checks: {
+      shot: policyFlag(checks.shot, defaults.checks.shot),
+      continuity: policyFlag(checks.continuity, defaults.checks.continuity),
+      silent: policyFlag(checks.silent, defaults.checks.silent),
+      lineDuration: policyFlag(checks.lineDuration, defaults.checks.lineDuration),
+      assets: policyFlag(checks.assets, defaults.checks.assets),
+    },
+    thresholds: {
+      charsPerSecond: policyNumber(thresholds.charsPerSecond, 1, 12, defaults.thresholds.charsPerSecond),
+      lineBreathSeconds: policyNumber(thresholds.lineBreathSeconds, 0, 3, defaults.thresholds.lineBreathSeconds),
+      lineRequiredMaxSeconds: policyNumber(
+        thresholds.lineRequiredMaxSeconds, 3, 30, defaults.thresholds.lineRequiredMaxSeconds,
+      ),
+      silentCharacterWarnSeconds: warnSeconds,
+      silentCharacterErrorSeconds: errorSeconds,
+      emptyShotWarnSeconds: policyNumber(
+        thresholds.emptyShotWarnSeconds, 1, 120, defaults.thresholds.emptyShotWarnSeconds,
+      ),
+      promptSegmentMaxChars: policyNumber(
+        thresholds.promptSegmentMaxChars, 4, 40, defaults.thresholds.promptSegmentMaxChars,
+      ),
+    },
+    semantic: {
+      enabled: policyFlag(semantic.enabled, defaults.semantic.enabled),
+      windowSize,
+      windowStep,
+      maxWindows: policyNumber(semantic.maxWindows, 1, 60, defaults.semantic.maxWindows),
+    },
+    autoRepair: {
+      enabled: policyFlag(autoRepair.enabled, defaults.autoRepair.enabled),
+      semanticFix: policyFlag(autoRepair.semanticFix, defaults.autoRepair.semanticFix),
+      maxActions: policyNumber(autoRepair.maxActions, 1, 100, defaults.autoRepair.maxActions),
+      maxActionsPerShot: policyNumber(autoRepair.maxActionsPerShot, 1, 10, defaults.autoRepair.maxActionsPerShot),
+      autoInsertTransition: policyFlag(autoRepair.autoInsertTransition, defaults.autoRepair.autoInsertTransition),
+      maxInsertedTransitions: policyNumber(
+        autoRepair.maxInsertedTransitions, 1, 10, defaults.autoRepair.maxInsertedTransitions,
+      ),
+    },
+  }
+}
+
+export function getStoryboardAuditPolicy(): StoryboardAuditPolicy {
+  const row = db.select().from(schema.appSettings)
+    .where(eq(schema.appSettings.key, STORYBOARD_AUDIT_POLICY_KEY))
+    .get()
+  try {
+    return sanitizeStoryboardAuditPolicy(JSON.parse(row?.value || '{}'))
+  } catch {
+    return sanitizeStoryboardAuditPolicy({})
+  }
+}
+
+/** 部分更新：只覆盖传入字段，嵌套对象按字段合并 */
+export function setStoryboardAuditPolicy(patch: unknown): StoryboardAuditPolicy {
+  const current = getStoryboardAuditPolicy()
+  const input = policySection(patch)
+  const next = sanitizeStoryboardAuditPolicy({
+    checks: { ...current.checks, ...policySection(input.checks) },
+    thresholds: { ...current.thresholds, ...policySection(input.thresholds) },
+    semantic: { ...current.semantic, ...policySection(input.semantic) },
+    autoRepair: { ...current.autoRepair, ...policySection(input.autoRepair) },
+  })
+  const value = JSON.stringify(next)
+  db.insert(schema.appSettings)
+    .values({ key: STORYBOARD_AUDIT_POLICY_KEY, value, updatedAt: now() })
+    .onConflictDoUpdate({ target: schema.appSettings.key, set: { value, updatedAt: now() } })
+    .run()
+  return next
+}
+
+/** 策略 → 规则层/窗口规划选项（毫秒阈值在这里换算，规则层只认毫秒） */
+export function storyboardAuditRuleOptions(policy: StoryboardAuditPolicy) {
+  return {
+    checks: { ...policy.checks },
+    thresholds: {
+      charsPerSecond: policy.thresholds.charsPerSecond,
+      lineBreathSeconds: policy.thresholds.lineBreathSeconds,
+      lineRequiredMaxSeconds: policy.thresholds.lineRequiredMaxSeconds,
+      silentCharacterWarnMs: policy.thresholds.silentCharacterWarnSeconds * 1000,
+      silentCharacterErrorMs: policy.thresholds.silentCharacterErrorSeconds * 1000,
+      emptyShotWarnMs: policy.thresholds.emptyShotWarnSeconds * 1000,
+      promptSegmentMaxChars: policy.thresholds.promptSegmentMaxChars,
+    },
+    windows: {
+      size: policy.semantic.windowSize,
+      step: policy.semantic.windowStep,
+      maxWindows: policy.semantic.maxWindows,
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 媒体工具（设置「通用 → 媒体工具」）
 // ---------------------------------------------------------------------------
 

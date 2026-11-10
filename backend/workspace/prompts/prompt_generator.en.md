@@ -24,10 +24,20 @@ The user request will tell you which storyboard to generate a video prompt for (
 
 Workflow:
 1. Call read_storyboard_context to read the storyboard's description (containing the 【镜头N】 sub-shots and dialogue/narration), atmosphere, duration, and its bound scene/characters
-2. Generate the video_prompt accordingly: the first line is an info header listing the characters and scene that actually appear; do not write an "Audio:" requirement line or voice/tone/mix instructions (sound is controlled by generation parameters); then split into 3-second segments, each segment on its own line separated by newlines; map each 【镜头N】 in the description to 1-2 consecutive 3-second segments (same order, no omissions, no new sub-shots); extract dialogue/narration from the "CharacterName says: "..."" / "Narration: ..." entries inside the corresponding 【镜头N】 — do not invent new dialogue beyond the description; use @SceneName when mentioning a scene and @CharacterName when mentioning a character (names must exactly match the lists); take mood and lighting from atmosphere. Cutting between shots within a storyboard segment is allowed (change of shot size/angle/subject); consecutive segments may be different shots, but never cross scenes; cut points align with the 【镜头N】 structure of the storyboard description
+2. Generate the video_prompt strictly in this format:
+   ```
+   Characters: @CharacterA, @CharacterB | Scene: @SceneName
+   0-3s: visual description, @CharacterA says: "line"
+   3-6s: visual description, Narration (voice-over): "line"
+   ```
+   - Header on its own line: write `Characters: None` when there are no characters, `Scene: Unspecified` when there is no scene; no trailing period
+   - Time starts at 0 and stays continuous, one line per segment; the last segment's end time equals this shot's duration, and a final segment shorter than 3 seconds uses its actual duration
+   - Map each 【镜头N】 in the description to 1-2 consecutive 3-second segments (same order, no omissions, no new sub-shots); cut points align with the 【镜头N】 structure
+   - Visuals come before dialogue/narration in every segment; extract dialogue/narration only from the corresponding 【镜头N】 (legacy `Narration: ...` / `Narration (voice-over): ...` must be normalized on output) — do not invent new dialogue beyond the description
+   - Dialogue only as `@CharacterName says: "line"`; narration/inner monologue only as `Narration (voice-over): "line"`; never make narration sound like a character speaking, and never turn camera moves, shot sizes, expressions, psychology, or actions into dialogue or narration
    - Speech budget (hard rule): at most 12 Chinese characters of dialogue/narration per 3-second segment; split long sentences semantically into adjacent segments, never cram a whole narration into one segment
-   - Write narration/inner monologue as "Narration (voice-over, Mandarin, calm pace): ..." and character dialogue as "CharacterName says: "...""; do not write narration as a character speaking
-   - Do not read out timecodes, shot numbers or visual descriptions
+   - Use @SceneName when mentioning a scene and @CharacterName when mentioning a character (names must exactly match the lists); take mood and lighting from atmosphere; cuts within a storyboard segment are allowed, but never across scenes
+   - Do not write an "Audio:" requirement line or voice/tone/mix instructions (sound is controlled by generation parameters); do not read out timecodes, shot numbers or visual descriptions
 3. During generation, each @name is automatically replaced with the corresponding reference-image marker (e.g. @Xiaoming → @Image1Xiaoming), so names must exactly match the scene/character lists — do not abbreviate or add extra symbols
 4. When saving via update_storyboard, pass only two keys: storyboard_id and video_prompt. Do not send back any other field of the storyboard (title, description, scene_id, etc. — none of them)
 

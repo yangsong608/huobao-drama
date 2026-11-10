@@ -5,8 +5,103 @@
  * 旧模板里的「音频：人声清晰靠前……旁白/心声为画外音」会诱导视频模型生成旁白/独白。
  * 这里只替换这句已知旧文案，保留用户其余编辑，且重复执行无副作用。
  */
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+
+export interface LegacyBuiltinFileRule {
+  path: string
+  sha256: string[]
+}
+
+/**
+ * 只替换「与上一版内置文件逐字节一致」的技能：
+ * - 4.0.26 给 storyboard-breaker 增加了「剧本全覆盖」硬规则，但 skills 目录只增不覆盖；
+ * - 按旧版哈希精确匹配，用户改过的文件不匹配、保持原样。
+ */
+export const LEGACY_BUILTIN_FILES: LegacyBuiltinFileRule[] = [
+  {
+    path: 'skills/storyboard-breaker/SKILL.md',
+    sha256: [
+      'a4bd229ccc436e9f649399ff0f3cfef32bc51f9942461308b9e5655c1a851935',
+      '67cf31026b95b20df6c28f29becb78cc15abb0f4c42fbf9d4d6b2ff83f85d4a2',
+    ],
+  },
+  {
+    path: 'skills/storyboard-breaker/SKILL.en.md',
+    sha256: [
+      'ff11dac4c7b06baaf527a3ecc392452d177bef321b3ba63e5a6a4f7bccb338c8',
+      'ca4db206d576bc4b7479b2d91546e14de771cf907a13678556f8924404773596',
+    ],
+  },
+  {
+    path: 'skills/storyboard-breaker/SKILL.ja.md',
+    sha256: [
+      '4902a0e9d450445125b503186fb172cac4e1902749016c9b32fc358856ffb7c2',
+      '60ca6f56cbb369fe5e9ce78e2c7a4c987495543f91ee086ccdaf52c582d0fd5d',
+    ],
+  },
+  {
+    path: 'skills/storyboard-breaker/SKILL.ko.md',
+    sha256: [
+      '8e7a1e016f75327b1d60f77a0392b828efa1b892501ed66c57a23f03d55826a2',
+      'ddddb8d9e7e3dd0e991f19c9384763886437930d164971e659719a98b389c897',
+    ],
+  },
+  {
+    path: 'skills/prompt-generator/video-prompt/SKILL.md',
+    sha256: ['7e69435996755bd1c616806c03d028bab241e44848383c09bd3ebbbf8a29895e'],
+  },
+  {
+    path: 'skills/prompt-generator/video-prompt/SKILL.en.md',
+    sha256: ['93e0bcb8afe7c550a464d56772a633dfb40e374034471767e74b7441cfeb77f9'],
+  },
+  {
+    path: 'skills/prompt-generator/video-prompt/SKILL.ja.md',
+    sha256: ['417cfad9d5f78a293d937c9944d3b3c32a5031a118eda27e43f427ecd455aa58'],
+  },
+  {
+    path: 'skills/prompt-generator/video-prompt/SKILL.ko.md',
+    sha256: ['52069c6d651b3a31f051ca2f73af5dd6248d50d214468036649767eb180eaa04'],
+  },
+  {
+    path: 'skills/storyboard-auditor/SKILL.md',
+    sha256: ['73d21c14f321d137ee6c02925fde6e5e684f1c4bdb4133d8c337df4ad4b6cf53'],
+  },
+  {
+    path: 'skills/storyboard-auditor/SKILL.en.md',
+    sha256: ['868c738cffd15d1d846c24c8e6257fc37a2440d0852d9b2b3d3a3118a6624c82'],
+  },
+  {
+    path: 'skills/storyboard-auditor/SKILL.ja.md',
+    sha256: ['a84a9bfa264fcf2850e4e3faedb24a132fe71ee6454bcf37246230fd0802c95d'],
+  },
+  {
+    path: 'skills/storyboard-auditor/SKILL.ko.md',
+    sha256: ['d3e51139512aea042b431632699c288a3d0cd0a6de17d5912aca161d48a31859'],
+  },
+]
+
+export function migrateLegacyBuiltinFiles(
+  workspaceDir: string,
+  templateDir: string,
+  rules: LegacyBuiltinFileRule[] = LEGACY_BUILTIN_FILES,
+): string[] {
+  const changed: string[] = []
+  for (const rule of rules) {
+    const target = path.join(workspaceDir, rule.path)
+    const source = path.join(templateDir, rule.path)
+    if (!fs.existsSync(target) || !fs.existsSync(source)) continue
+    const current = fs.readFileSync(target)
+    const hash = createHash('sha256').update(current).digest('hex')
+    if (!rule.sha256.includes(hash)) continue
+    const next = fs.readFileSync(source)
+    if (current.equals(next)) continue
+    fs.writeFileSync(target, next)
+    changed.push(target)
+  }
+  return changed
+}
 
 const LEGACY_ZH = '音频：人声清晰靠前，环境音压低，无背景音乐；旁白/心声为画外音，不张口。'
 const LEGACY_EN = 'Audio: dialogue/narration clear and forward, ambience low, no background music; narration/inner voice is off-screen, mouth not moving.'

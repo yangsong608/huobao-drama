@@ -34,6 +34,110 @@ export function buildTransitionBoundaries(
   return boundaries
 }
 
+export type TransitionKind = 'ai' | 'empty' | 'scene' | 'text'
+export type TransitionEdgeMode = 'fade' | 'cut'
+
+export const TRANSITION_KINDS: readonly TransitionKind[] = ['ai', 'empty', 'scene', 'text']
+export const CUSTOM_TRANSITION_DURATION_MIN = 2
+export const CUSTOM_TRANSITION_DURATION_MAX = 5
+export const TRANSITION_TEXT_TITLE_MAX = 20
+export const TRANSITION_TEXT_SUBTITLE_MAX = 40
+
+/** 历史行没有类型或类型非法时按 AI 过渡处理，避免旧数据不可读 */
+export function normalizeTransitionKind(value: unknown): TransitionKind {
+  const key = String(value ?? '').trim().toLowerCase()
+  return (TRANSITION_KINDS as readonly string[]).includes(key) ? key as TransitionKind : 'ai'
+}
+
+/** 写入/生成入口使用：非法类型直接拒绝，不再静默按 ai 处理 */
+export function parseTransitionKind(value: unknown): TransitionKind {
+  const key = String(value ?? '').trim().toLowerCase()
+  if (!(TRANSITION_KINDS as readonly string[]).includes(key)) {
+    throw new Error('过渡类型不合法，只能是 AI 过渡、空镜、场景或文字视频')
+  }
+  return key as TransitionKind
+}
+
+/** 文字视频两端硬切，避免文字被叠化 */
+export function transitionEdgeMode(kind: TransitionKind): TransitionEdgeMode {
+  return kind === 'text' ? 'cut' : 'fade'
+}
+
+/** 可发音字符：字母与数字计入，空白、标点、符号不计 */
+export function audibleCharCount(text: string): number {
+  return (String(text || '').match(/[\p{L}\p{N}]/gu) || []).length
+}
+
+export interface NormalizedTransitionText {
+  title: string
+  subtitle: string | null
+}
+
+export function normalizeTransitionText(input: {
+  title?: string | null
+  subtitle?: string | null
+}): NormalizedTransitionText {
+  const title = String(input.title ?? '').trim()
+  if (!title) throw new Error('文字视频需要填写主标题')
+  const titleCount = audibleCharCount(title)
+  if (titleCount > TRANSITION_TEXT_TITLE_MAX) {
+    throw new Error(`文字视频主标题最多 ${TRANSITION_TEXT_TITLE_MAX} 个字符（当前 ${titleCount} 个）`)
+  }
+  const subtitle = String(input.subtitle ?? '').trim() || null
+  if (subtitle) {
+    const subtitleCount = audibleCharCount(subtitle)
+    if (subtitleCount > TRANSITION_TEXT_SUBTITLE_MAX) {
+      throw new Error(`文字视频副标题最多 ${TRANSITION_TEXT_SUBTITLE_MAX} 个字符（当前 ${subtitleCount} 个）`)
+    }
+  }
+  return { title, subtitle }
+}
+
+/** 自定义过渡（空镜/场景/文字）时长 2–5 秒 */
+export function assertCustomTransitionDuration(value: unknown): number {
+  const duration = Number(value)
+  if (!Number.isFinite(duration)
+    || duration < CUSTOM_TRANSITION_DURATION_MIN
+    || duration > CUSTOM_TRANSITION_DURATION_MAX) {
+    throw new Error(`过渡时长必须在 ${CUSTOM_TRANSITION_DURATION_MIN}-${CUSTOM_TRANSITION_DURATION_MAX} 秒之间`)
+  }
+  return duration
+}
+
+export interface CustomTransitionSourceParts {
+  kind: Exclude<TransitionKind, 'ai'>
+  prompt?: string | null
+  textContent?: string | null
+  textSubtitle?: string | null
+  sceneId?: number | null
+  sceneImageUrl?: string | null
+  duration: number
+  audioMode?: string | null
+}
+
+const CUSTOM_SOURCE_HASH_VERSION = 'transition-custom-v1'
+
+/**
+ * 空镜/场景/文字使用独立指纹：只取决于类型、内容、时长、音频与场景图，
+ * 相邻镜头视频变化不会让它们过期。
+ */
+export function customTransitionSourceHash(parts: CustomTransitionSourceParts): string {
+  const kind = parseTransitionKind(parts.kind)
+  if (kind === 'ai') throw new Error('过渡类型不合法，只能是 AI 过渡、空镜、场景或文字视频')
+  const fields = [
+    CUSTOM_SOURCE_HASH_VERSION,
+    kind,
+    String(parts.prompt ?? '').trim(),
+    String(parts.textContent ?? '').trim(),
+    String(parts.textSubtitle ?? '').trim(),
+    Number(parts.sceneId) > 0 ? String(Number(parts.sceneId)) : '',
+    String(parts.sceneImageUrl ?? '').trim(),
+    (Number(parts.duration) || 0).toFixed(3),
+    String(parts.audioMode ?? '').trim().toLowerCase(),
+  ]
+  return crypto.createHash('sha256').update(fields.join('|')).digest('hex')
+}
+
 const H3_FPS = 24
 const H3_MIN_FRAMES = 56 // 2.333s：shim 可用网格中不低于 2s 的最小档
 

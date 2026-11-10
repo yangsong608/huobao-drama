@@ -139,6 +139,34 @@ test('legacy generic audio line never reaches timeline segments', async () => {
   assert.match(plan.segments[0].prompt, /0-3秒：空镜/)
 })
 
+test('native audio directive only voices text inside <d> tags', async () => {
+  const mapping = readComfyTimelineMapping(configWith({ mode: 'timeline' }))
+  assert.ok(mapping)
+  const plan = await buildComfyTimelinePlan([
+    { id: 1, duration: 2, videoPrompt: '空镜', refs: [] },
+  ], { mapping, audioMode: 'native', compilePrompt: compileStub })
+
+  const timeline = materializeComfyTimelineData(plan, {})
+  const prompt = String((timeline.global as any).prompt)
+  assert.match(prompt, /inside <d> tags is spoken/)
+  assert.match(prompt, /must never be voiced/)
+})
+
+test('segment compile failure names the shot', async () => {
+  const mapping = readComfyTimelineMapping(configWith({ mode: 'timeline' }))
+  assert.ok(mapping)
+  await assert.rejects(
+    buildComfyTimelinePlan([
+      { id: 7, title: '雨夜对峙', duration: 2, videoPrompt: '空镜', refs: [] },
+    ], {
+      mapping,
+      audioMode: 'native',
+      compilePrompt: () => { throw new Error('本地 H3 提示词英文化失败（native）') },
+    }),
+    /分镜「雨夜对峙」：本地 H3 提示词英文化失败/,
+  )
+})
+
 test('silent audio mode instructs the timeline to skip sound', async () => {
   const mapping = readComfyTimelineMapping(configWith({ mode: 'timeline' }))
   assert.ok(mapping)

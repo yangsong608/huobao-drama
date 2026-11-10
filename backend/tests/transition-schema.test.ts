@@ -14,7 +14,8 @@ const root = await fs.mkdtemp(path.join(os.tmpdir(), 'huobao-transition-schema-'
 after(async () => { await fs.rm(root, { recursive: true, force: true }) })
 
 const TRANSITION_COLUMNS = [
-  'id', 'episode_id', 'drama_id', 'from_storyboard_id', 'to_storyboard_id',
+  'id', 'episode_id', 'drama_id', 'kind', 'scene_id', 'text_content', 'text_subtitle', 'edge_mode',
+  'from_storyboard_id', 'to_storyboard_id',
   'from_video_url', 'to_video_url', 'first_frame_url', 'last_frame_url',
   'first_frame_upload_url', 'last_frame_upload_url', 'reference_image_urls', 'source_hash',
   'prompt', 'prompt_source', 'provider', 'model', 'config_id', 'config_base_url',

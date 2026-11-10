@@ -240,12 +240,27 @@ app.post('/', async (c) => {
     const promptDramaId = body.drama_id ?? storyboardDramaId ?? null
     let videoPrompt = videoBody?.prompt
     let visualBackgroundPrompt = ''
+    let stylePromptText = ''
     if (type === 'video' && String(videoPrompt || '').trim()) {
       const [stylePrompt, visualBackground] = await Promise.all([
         getDramaStylePrompt(promptDramaId),
         getDramaVisualBackground(promptDramaId),
       ])
-      if (stylePrompt) videoPrompt = `${stylePrompt}，\n${videoPrompt}`
+      if (stylePrompt) {
+        if (localVideoShim) {
+          const translated = await translateH3Text(stylePrompt)
+          if (translated) {
+            stylePromptText = translated
+          } else {
+            logTaskWarn('TaskAPI', 'style-skipped', {
+              dramaId: promptDramaId,
+              reason: 'translate-failed',
+            })
+          }
+        } else {
+          videoPrompt = `${stylePrompt}，\n${videoPrompt}`
+        }
+      }
       if (visualBackground) {
         if (localVideoShim) {
           const translated = await translateH3Text(visualBackground)
@@ -288,7 +303,10 @@ app.post('/', async (c) => {
       })
     }
 
-    // 本地 H3 的视觉背景在编译后再前置，避免重复翻译；云端则在拼装阶段已就绪
+    // 本地 H3 的风格与视觉背景在编译后再前置，避免重复翻译；云端则在拼装阶段已就绪
+    if (type === 'video' && stylePromptText) {
+      videoPrompt = `${stylePromptText}，\n${videoPrompt}`
+    }
     if (type === 'video' && visualBackgroundPrompt) {
       videoPrompt = withVisualBackground(String(videoPrompt || ''), visualBackgroundPrompt)
     }

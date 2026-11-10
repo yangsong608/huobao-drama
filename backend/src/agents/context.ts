@@ -22,6 +22,10 @@ export interface AgentRequestContextValues {
   storyboardChunkShotStart?: number
   /** 分块拆分：块内共享状态（是否已替换旧分镜、下一镜头号） */
   storyboardChunkState?: { replaced: boolean; nextShot: number }
+  /** 动作检验：当前任务、阶段与语义窗口；只在任务内部注入，聊天入口不设置 */
+  auditJobId?: number
+  auditPhase?: 'audit' | 'repair'
+  auditWindowIndex?: number
 }
 
 export function buildAgentRequestContext(values: AgentRequestContextValues): RequestContext<AgentRequestContextValues> {
@@ -36,6 +40,9 @@ export function buildAgentRequestContext(values: AgentRequestContextValues): Req
   if (values.storyboardChunkLabel) rc.set('storyboardChunkLabel', values.storyboardChunkLabel)
   if (typeof values.storyboardChunkShotStart === 'number') rc.set('storyboardChunkShotStart', values.storyboardChunkShotStart)
   if (values.storyboardChunkState) rc.set('storyboardChunkState', values.storyboardChunkState)
+  if (typeof values.auditJobId === 'number') rc.set('auditJobId', values.auditJobId)
+  if (values.auditPhase) rc.set('auditPhase', values.auditPhase)
+  if (typeof values.auditWindowIndex === 'number') rc.set('auditWindowIndex', values.auditWindowIndex)
   // 语言在构建处统一解析：4 条链路（chat/提取/图片提示词/视频提示词）都经过这里，
   // 全局设置一处生效；显式传入 values.language 可按请求覆盖
   rc.set('language', values.language ?? getContentLanguage())
@@ -56,4 +63,19 @@ export function getDramaId(requestContext: RequestContext | undefined): number |
 export function getContentLanguageFromRC(requestContext: RequestContext | undefined): ContentLanguage | null {
   const v = requestContext?.get('language' as never)
   return typeof v === 'string' && v ? (v as ContentLanguage) : null
+}
+
+export function getAuditJobId(requestContext: RequestContext | undefined): number | null {
+  const v = requestContext?.get('auditJobId' as never)
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
+}
+
+export function getAuditPhase(requestContext: RequestContext | undefined): 'audit' | 'repair' | null {
+  const v = requestContext?.get('auditPhase' as never)
+  return v === 'audit' || v === 'repair' ? v : null
+}
+
+export function getAuditWindowIndex(requestContext: RequestContext | undefined): number | null {
+  const v = requestContext?.get('auditWindowIndex' as never)
+  return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null
 }

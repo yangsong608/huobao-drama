@@ -15,6 +15,7 @@ import { extractTools } from './tools/extract-tools.js'
 import { storyboardTools } from './tools/storyboard-tools.js'
 import { imagePromptTools } from './tools/image-prompt-tools.js'
 import { createVoiceProfileTools } from './tools/voice-profile-tools.js'
+import { storyboardAuditTools } from './tools/storyboard-audit-tools.js'
 import { loadAgentSkills, skillWorkspaces } from './skills.js'
 import { loadAgentPromptFile, loadBasePromptFile } from './prompts.js'
 import { buildLanguageDirective } from './language.js'
@@ -100,7 +101,7 @@ export const DEFAULT_PROMPTS: Record<string, { name: string; instructions: strin
 - prop_ids：当前段落出现的关键道具 ID 列表（道具在画面中被看到、使用或特写时绑定），可以为空；必须从 props 中选择
 - scene_id：若可匹配到 scenes 中已有场景，必须填写正确 scene_id；无匹配时置空
 - duration：段落总时长 8-15 秒
-- description：画面描述，按【镜头1】【镜头2】…逐子镜头描述观众实际看到和听到的内容——画面（谁+具体动作+肢体细节+表情）写在前；该子镜头有台词时以「角色名说：「台词」」写在对应【镜头N】内，旁白写「旁白：内容」
+- description：画面描述，按【镜头1】【镜头2】…逐行描述观众实际看到和听到的内容——画面（谁+具体动作+肢体细节+表情）写在前；该子镜头有台词时以「@角色名说：「台词」」写在对应【镜头N】内，旁白写「旁白（画外音）：「台词」」；运镜、景别、表情、心理和动作不得写成台词或旁白
 - atmosphere：氛围、光线、色调、环境感受
 - transition：与上一镜的转场方式，只能填 cut / fade / dissolve / wipe；同场景连续动作优先 cut，跨场景或时间跳跃用 fade/dissolve，强调节奏冲击可用 wipe
 - continuity：承接上一镜的连续性说明（上一镜尾动作、视线方向、人物站位、道具位置、环境声如何延续），第一镜写「开场」或空字符串
@@ -114,11 +115,16 @@ export const DEFAULT_PROMPTS: Record<string, { name: string; instructions: strin
 - 台词下限：段落时长 ≥ 段内台词与旁白总字数（写在 description 中的部分）÷ 4.5字/秒 + 2秒表演余量，装不下的台词拆到下一个段落
 
 video_prompt 规则（硬约束）：
-- 按 3 秒为一段、每段单独一行换行分隔；description 的每个【镜头N】映射为 1-2 个连续 3 秒段（顺序一致、不遗漏、不新增子镜头），切镜点对齐【镜头N】结构
+- 第一行信息头固定为「出场人物：@角色A、@角色B｜场景：@场景名」；没有角色写「出场人物：无」，没有场景写「场景：未指定」；信息头单独一行，不加句号
+- 正文从「0-3秒：」开始，按 3 秒连续分段、每段单独一行、时间不重叠不留空；最后一段的结束时间等于本镜 duration，不足 3 秒的尾段按实际时长收尾
+- description 的每个【镜头N】映射为 1-2 个连续 3 秒段（顺序一致、不遗漏、不新增子镜头），切镜点对齐【镜头N】结构
 - 每段先写画面（谁+动作+景别/角度），再写该段时间内的台词/旁白——台词从 description 对应【镜头N】内提取，不要创作 description 之外的新台词
+- 每个 3 秒段最多 12 个汉字的台词/旁白；长句按语义拆到相邻段，不得把整段旁白塞进一句
+- 台词只写「@角色名说：「台词」」，旁白/心里活动只写「旁白（画外音）：「台词」」；不要把旁白写成角色开口，也不要把运镜、景别、表情、心理和动作写成台词或旁白
 - 提到场景用 @场景名、提到角色用 @角色名，名字必须与 read_storyboard_context 返回的列表完全一致（用于挂接参考素材图片）
 - 氛围、光线描述取自该段 atmosphere
 - 一个段落内允许切镜（换景别/角度/对象），但不跨场景
+- 不要写「音频：」要求行或音色/混音指令（声音由生成参数控制）
 - 用户消息中会告知本次视频模型，按该模型的特性与时长限制调整写法；未告知时按通用视频模型写法
 
 额外要求：
@@ -127,7 +133,7 @@ video_prompt 规则（硬约束）：
 - 段落道具绑定必须来自 read_storyboard_context 返回的道具列表；道具被使用、特写、交接或在画面中明显可见时绑定，与剧情无关的背景物品不要绑定；没有道具出现可传空数组
 - 段落描述必须能支撑后续视频生成和导出流程
 - 每段结尾必须留 2-3 秒可剪辑的尾部动作、空镜或情绪停顿，并在 continuity 中说明下一段如何从该动作继续；对白密集处主动插入 1-2 秒空镜或过渡镜头
-- 同一场景的所有段落使用同一段环境声描述，不要让每个镜头各自发挥；视频提示词不要写「音频：」要求行或音色/混音指令（声音由生成参数控制），本镜确有旁白时只在对应时间段内写「旁白（画外音）：…」
+- 同一场景的所有段落使用同一段环境声描述，不要让每个镜头各自发挥；视频提示词不要写「音频：」要求行或音色/混音指令（声音由生成参数控制），本镜确有旁白时只在对应时间段内写「旁白（画外音）：「台词」」
 - 若一个段落没有台词，description 中不写台词即可，但画面描述与 atmosphere 仍必须完整
 - 如果已有 existing_storyboards，仅在用户明确要求增量修改时参考；默认按当前剧本重新完整生成并保存整集分镜。`,
   },
@@ -152,7 +158,18 @@ video_prompt 规则（硬约束）：
 
 工作流程：
 1. 调用 read_storyboard_context 读取该分镜的 description（含【镜头N】子镜头与台词/旁白）、atmosphere、duration、continuity（承接上一镜的尾动作/视线/站位）、sound_effect（本镜环境声）及绑定的场景/角色
-2. 据此生成 video_prompt：按 3 秒为一段、每段单独一行换行分隔；description 的每个【镜头N】映射为 1-2 个连续 3 秒段（顺序一致、不遗漏、不新增子镜头），台词/旁白从对应【镜头N】内的「角色名说：「…」」「旁白：…」提取，不要创作 description 之外的新台词；提到场景用 @场景名、提到角色用 @角色名（名字必须与列表完全一致）；氛围光线取自 atmosphere；开头 0-1 秒承接 continuity 的尾部动作，结尾留 2-3 秒可剪辑的尾部动作或空镜；环境声取自 sound_effect 并保持与同场景其他镜头一致。一个分镜段落内允许切镜（换景别/角度/对象），段与段之间可以是不同镜头，但不跨场景；切镜点对齐分镜 description 的【镜头N】结构
+2. 据此生成 video_prompt，严格按下面格式（示例三行依次为信息头、第一段、第二段）：
+   出场人物：@角色A、@角色B｜场景：@场景名
+   0-3秒：画面描述，@角色A说：「台词」
+   3-6秒：画面描述，旁白（画外音）：「台词」
+   - 信息头单独一行：没有角色写「出场人物：无」，没有场景写「场景：未指定」，不加句号
+   - 时间轴从 0 开始连续分段、每段一行；最后一段的结束时间等于本镜 duration，不足 3 秒的尾段按实际时长收尾
+   - description 的每个【镜头N】映射为 1-2 个连续 3 秒段（顺序一致、不遗漏、不新增子镜头），切镜点对齐【镜头N】结构
+   - 每段先写画面再写该段台词/旁白；台词/旁白只从对应【镜头N】内提取（旧稿的「旁白：…」「旁白（画外音）：…」也要统一改写成规范格式），不得创作 description 之外的新台词
+   - 台词只写「@角色名说：「台词」」，旁白/心里活动只写「旁白（画外音）：「台词」」；不要把旁白写成角色开口，也不要把运镜、景别、表情、心理和动作写成台词或旁白
+   - 每个 3 秒段最多 12 个汉字的台词/旁白；长句按语义拆到相邻段，不得把整段旁白塞进一句
+   - 提到场景用 @场景名、提到角色用 @角色名，名字必须与列表完全一致；氛围光线取自 atmosphere；开头 0-1 秒承接 continuity 的尾部动作，结尾留 2-3 秒可剪辑的尾部动作或空镜；环境声取自 sound_effect 并保持与同场景其他镜头一致；一个分镜段落内允许切镜（换景别/角度/对象），段与段之间可以是不同镜头，但不跨场景
+   - 不要写「音频：」要求行或音色/混音指令（声音由生成参数控制）；不要念出时间码、镜号或画面描述
 3. 生成时会自动把 @名字 替换为对应参考图片标记（如 @小明 → @图片1小明），因此名字必须精确匹配场景/角色列表，不要缩写或加额外符号
 4. 调用 update_storyboard 保存时参数只传两个键：storyboard_id 和 video_prompt。不要回传该分镜的其他任何字段（title、description、scene_id 等一律不传）
 
@@ -177,6 +194,34 @@ video_prompt 规则（硬约束）：
 - 旁白风格统一、克制、少情绪
 - design_instruct 固定顺序：age & gender -> timbre -> pitch -> pace -> accent -> temperament -> emotional baseline
 - 必须实际调用 save_voice_profiles，不要只在回复中给出结果`,
+  },
+  storyboard_auditor: {
+    name: '动作检验',
+    instructions: `你是短剧分镜动作检验员，负责五项检验并在受控范围内自动修复。
+
+阶段与工具：
+- 检验阶段（audit）只读，只能调用 report_storyboard_issues。
+- 修复阶段（repair）只能调用 apply_storyboard_repair，且只能处理问题清单中的可修问题。
+- 阶段不符时工具会拒绝；不要尝试绕过。
+
+输出纪律：
+- 只输出工具调用，不输出规划、分析、解释文字。
+- 每个问题带分镜号、原文证据和可操作建议；没有把握不要报，禁止编造。
+- 重叠窗口同一问题只报一次；逐镜状态和计数由服务端维护，不要输出。
+
+五项检验：
+1. 运镜/对话/动作/表情/旁白：描述是否可拍，运镜是否匹配，是否出现镜头语言写成台词、旁白写成角色开口、动作写成旁白。问题码 semantic_shot_description。
+2. 前后连贯：尾动作、视线、站位、道具、时间空间是否承接；跨场景硬切是否缺说明。问题码 semantic_continuity_break。需要过渡时 suggestedTransition 只能是 empty/scene/text；不要自己新增分镜，服务端按策略决定是否插入过渡分镜。
+3. 长空镜：只确认是否真的无人物动作或台词支撑，不误报有表演的镜头；不自动修复。
+4. 台词时长：只判断是否该拆句或拆到相邻分镜；不要提交规则层问题码。
+5. 资产正确完整：@引用、绑定、资产图与描述是否一致。问题码 semantic_asset_mismatch；只报问题，不改绑定、不生成资产图。
+
+修复阶段：
+- 每条动作引用问题清单中的 issueId；允许 fill_camera_fields、normalize_video_prompt、rewrite_description、fix_continuity、extend_duration、insert_transition_shot。
+- insert_transition_shot 只接收 issueId，不接受字段；服务端按问题给出的断点插入 1 个过渡分镜并重排镜头号。
+- 除 insert_transition_shot 外，不新增角色/场景/道具/台词，不改分镜号、绑定和分镜数量；保留台词/旁白原文与说话人。
+- 视频提示词保留信息头，从 0-3 秒开始，时间连续，最后结束时间等于 duration；时长只增不减且不超过单段上限。
+- 拿不准就跳过，留给人工处理。`,
   },
 }
 
@@ -374,6 +419,7 @@ const AGENT_TOOLS: Record<string, Record<string, any>> = {
     updateStoryboard: storyboardTools.updateStoryboard,
   },
   voice_designer: createVoiceProfileTools,
+  storyboard_auditor: storyboardAuditTools,
 }
 
 export interface AgentInstructionParts {

@@ -22,7 +22,16 @@ const received: any[] = []
 const server = http.createServer(async (req, res) => {
   const chunks = []
   for await (const chunk of req) chunks.push(chunk)
-  received.push(JSON.parse(Buffer.concat(chunks).toString()))
+  const body = JSON.parse(Buffer.concat(chunks).toString())
+  if (req.url === '/v1/chat/completions') {
+    // 本地 H3 提交前必须英文化：保留对白占位符，其余转英文
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify({
+      choices: [{ message: { content: '[0-3s] <Picture 1>Lin Xiaoyu looks up, Lin Xiaoyu says, [[H3_DLG_0]]' } }],
+    }))
+    return
+  }
+  received.push(body)
   // Stop after capturing the submission. No paid generation, polling or remote download.
   res.writeHead(400, { 'Content-Type': 'application/json' }).end('{"error":{"message":"test capture complete"}}')
 })
@@ -47,6 +56,9 @@ const configs = Object.fromEntries(['volcengine', 'minimax', 'aliyun'].map(provi
 ]))
 const localMinimaxConfig = db.insert(schema.aiServiceConfigs).values({ serviceType: 'video', provider: 'minimax',
   name: 'local-shim', baseUrl, apiKey: 'local', model: JSON.stringify(['MiniMax-H3']), ...timestamps }).returning().get().id
+// 本地 H3 英文化需要文本模型；桩服务只做结构翻译，不产生真实费用
+db.insert(schema.aiServiceConfigs).values({ serviceType: 'text', provider: 'openai',
+  name: 'test-text', baseUrl, apiKey: 'mock-key', model: JSON.stringify(['stub-text-model']), ...timestamps }).run()
 function wav(seconds: number) {
   const buffer = Buffer.alloc(44 + 16000 * seconds)
   buffer.write('RIFF'); buffer.writeUInt32LE(buffer.length - 8, 4); buffer.write('WAVEfmt ', 8)
@@ -146,7 +158,7 @@ test('local H3 shim never receives voice references; tags are compiled away', as
   const task = await waitForSubmission(data.id)
   const request = received.at(-1)
   const text = request.content.find((c: any) => c.type === 'text').text
-  assert.match(text, /林小雨 says, <d>\[Chinese\] 早上好。<\/d>/)
+  assert.match(text, /Lin Xiaoyu says, <d>\[Chinese\] 早上好。<\/d>/)
   assert.doesNotMatch(text, /音频1|音色参考音频/)
   assert.equal(request.content.some((c: any) => c.type === 'audio_url'), false)
   assert.deepEqual(JSON.parse(task.params!).referenceAudioUrls, [])

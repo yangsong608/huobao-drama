@@ -567,21 +567,27 @@
               <span class="tag mono">{{ t('episode.sb.segmentStat', { n: sbs.length, dur: totalDuration }) }}</span>
               <span class="tag mono" :title="t('episode.vid.aspectRatio')">{{ dramaAspectRatio }}</span>
               <div class="ml-auto flex gap-1">
-                <button class="btn btn-sm" :disabled="rn || methodSaving || splitRunning || splitStarting" :title="currentBreakdownMethodName" @click="doBreakdown">
+                <button class="btn btn-sm" :disabled="rn || methodSaving || splitRunning || splitStarting || auditRunning" :title="currentBreakdownMethodName" @click="doBreakdown">
                   <Loader2 v-if="splitRunning || splitStarting" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                   {{ splitRunning ? splitProgressText : (sbs.length ? t('episode.sb.rebreak') : t('episode.sb.startBreak')) }}
                 </button>
-                <button v-if="canResumeSplit" class="btn btn-sm video-split-resume" :disabled="splitStarting" :title="splitJob?.error || t('episode.sb.resumeSplit')" @click="resumeSplit">
+                <button v-if="canResumeSplit" class="btn btn-sm video-split-resume" :disabled="splitStarting || auditRunning" :title="splitJob?.error || t('episode.sb.resumeSplit')" @click="resumeSplit">
                   <Loader2 v-if="splitStarting" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   {{ t('episode.sb.resumeSplit') }}
                 </button>
-                <button class="btn btn-sm" :disabled="videoPromptBatch.running || !sbs.length" @click="batchVideoPrompts">
+                <button class="btn btn-sm" :disabled="videoPromptBatch.running || !sbs.length || auditRunning" @click="batchVideoPrompts">
                   <Loader2 v-if="videoPromptBatch.running" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                   {{ videoPromptBatch.running ? t('episode.sb.promptProgress', { done: videoPromptBatch.completed, total: videoPromptBatch.total }) : (videoSelectMode && selectedVideoSbIds.length ? t('episode.sb.promptSelected', { n: selectedVideoSbIds.length }) : t('episode.sb.batchPrompts')) }}
                 </button>
+                <button class="btn btn-sm episode-audit-btn" :disabled="!sbs.length || splitRunning || splitStarting || auditBusy || auditRunning" :title="auditStatusText" @click="runStoryboardAudit()">
+                  <Loader2 v-if="auditBusy || auditRunning" :size="11" class="animate-spin" />
+                  <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+                  {{ auditButtonLabel }}
+                </button>
+                <button v-if="auditJob" type="button" class="episode-audit-status" :title="auditStatusText" @click="openAuditPanel()">{{ auditStatusText }}</button>
                 <button v-if="recoverableVideoCount && !isComfyVideoMode" class="btn btn-sm video-retry-failed" @click="retryFailedVideos">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   {{ t('episode.recovery.restoreFailed', { n: recoverableVideoCount }) }}
@@ -605,12 +611,12 @@
               <div v-if="canResumeSplit && splitJob" class="empty-desc video-split-failed">{{ t('episode.sb.splitFailed', { chunk: (splitJob.completed_chunks || 0) + 1, total: splitJob.total_chunks || 0, error: splitJob.error || '' }) }}</div>
               <div class="empty-desc">{{ t('episode.sb.methodCurrent', { method: currentBreakdownMethodName }) }}</div>
               <div class="locked-config-banner">{{ t('episode.vid.lockedModel') }}{{ effectiveVideoModelLabel }}</div>
-              <button v-if="canResumeSplit" class="btn btn-primary video-split-resume" :disabled="splitStarting" @click="resumeSplit">
+              <button v-if="canResumeSplit" class="btn btn-primary video-split-resume" :disabled="splitStarting || auditRunning" @click="resumeSplit">
                 <Loader2 v-if="splitStarting" :size="13" class="animate-spin" />
                 <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 {{ t('episode.sb.resumeSplit') }}
               </button>
-              <button class="btn btn-primary" :disabled="rn || methodSaving || splitRunning || splitStarting" :title="currentBreakdownMethodName" @click="doBreakdown">
+              <button class="btn btn-primary" :disabled="rn || methodSaving || splitRunning || splitStarting || auditRunning" :title="currentBreakdownMethodName" @click="doBreakdown">
                 <Loader2 v-if="splitRunning || splitStarting" :size="13" class="animate-spin" />
                 <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 {{ splitRunning ? splitProgressText : t('episode.sb.startBreak') }}
@@ -625,7 +631,7 @@
               <div v-if="splitRunning || (canResumeSplit && splitJob)" class="video-split-banner">
                 <Loader2 v-if="splitRunning" :size="12" class="animate-spin" />
                 <span class="video-split-banner-text">{{ splitRunning ? splitProgressText : t('episode.sb.splitFailed', { chunk: (splitJob.completed_chunks || 0) + 1, total: splitJob.total_chunks || 0, error: splitJob.error || '' }) }}</span>
-                <button v-if="canResumeSplit" class="btn btn-sm video-split-resume" :disabled="splitStarting" @click="resumeSplit">{{ t('episode.sb.resumeSplit') }}</button>
+                <button v-if="canResumeSplit" class="btn btn-sm video-split-resume" :disabled="splitStarting || auditRunning" @click="resumeSplit">{{ t('episode.sb.resumeSplit') }}</button>
               </div>
               <div v-if="isCompact && !isComfyVideoMode" class="video-tablet-bar">
                 <div class="video-tablet-tabs" role="tablist">
@@ -725,6 +731,7 @@
                 <div
                   v-for="task in videoTaskRows"
                   :key="task.id"
+                  :data-sb-id="task.storyboard.id"
                   :class="['video-task-row', 'is-' + videoTaskState(task.storyboard), { active: !videoSelectMode && selectedSb?.id === task.storyboard.id, 'is-selected': videoSelectMode && isVideoSbSelected(task.id) }]"
                   role="button"
                   tabindex="0"
@@ -761,6 +768,7 @@
                   <div class="video-task-main">
                     <div class="video-task-line">
                       <strong class="video-task-name">{{ task.title }}</strong>
+                      <span v-if="task.transitionKind" class="video-task-transition-tag">{{ task.transitionLabel }}</span>
                     </div>
                     <div class="video-task-meta-line">
                       <span :class="['video-task-state', 'is-' + videoTaskState(task.storyboard)]">
@@ -790,6 +798,21 @@
                     @click.stop="genVid(task.storyboard)"
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-icon btn-sm video-task-audit"
+                    :class="auditShotClass(task.storyboard)"
+                    :title="auditShotTitle(task.storyboard)"
+                    :aria-label="auditShotTitle(task.storyboard)"
+                    @click.stop="openAuditPanel(task.storyboard.id)"
+                  >
+                    <Loader2 v-if="auditShotState(task.storyboard).status === 'running'" :size="12" class="animate-spin" />
+                    <svg v-else-if="auditShotState(task.storyboard).status === 'done' || auditShotState(task.storyboard).status === 'ruleOnly'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    <svg v-else-if="auditShotState(task.storyboard).status === 'failed'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="7" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12" y2="16.6"/></svg>
+                    <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    <span v-if="auditShotBadge(task.storyboard)" class="video-task-audit-badge">{{ auditShotBadge(task.storyboard) }}</span>
+                    <span v-if="auditShotState(task.storyboard).stale" class="video-task-audit-stale" aria-hidden="true" />
                   </button>
                   <button
                     v-if="!videoSelectMode"
@@ -1479,6 +1502,7 @@
                     </span>
                   </div>
                   <div class="exp-row-line">
+                    <span v-if="storyboardTransitionKind(sb)" class="exp-transition-tag">{{ t(`episode.audit.transition.kind.${storyboardTransitionKind(sb)}`) }}</span>
                     <span class="truncate" style="flex:1;font-size:11px">{{ sb.description || sb.title || '—' }}</span>
                     <span :class="['dot', hasVid(sb) && 'ok']" />
                   </div>
@@ -1491,7 +1515,11 @@
               <div class="export-section-head">
                 <span class="export-section-title">{{ t('episode.export.aiTransition.cardsTitle') }}</span>
                 <span class="dim" style="font-size:11px">{{ t('episode.export.aiTransition.cardsStat', { n: transitionCards.length }) }}</span>
-                <span v-if="transitionCards.length" class="dim ml-auto" style="font-size:11px">{{ t('episode.export.aiTransition.cardHint') }}</span>
+                <button class="btn btn-sm ml-auto" @click="openTransitionCreate()">
+                  <Plus :size="11" />
+                  {{ t('episode.export.aiTransition.addCustom') }}
+                </button>
+                <span v-if="transitionCards.length" class="dim" style="font-size:11px">{{ t('episode.export.aiTransition.cardHint') }}</span>
               </div>
               <div v-if="transitionCards.length" class="ai-transition-cards">
                 <button
@@ -1512,6 +1540,8 @@
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
                     </div>
                     <span :class="['ai-transition-status', transitionStatusClass(b)]">{{ transitionStatusLabel(b) }}</span>
+                    <span class="ai-transition-kind">{{ transitionKindLabel(b) }}</span>
+                    <span v-if="b.degraded" class="ai-transition-degraded">{{ t('episode.export.aiTransition.degraded') }}</span>
                     <span v-if="b.status === 'completed' && !b.stale && b.video_url" class="ai-transition-card-play">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 3 20 12 6 21 6 3"/></svg>
                     </span>
@@ -1662,6 +1692,118 @@
           </div>
         </aside>
       </div>
+
+      <!-- ===== STORYBOARD AUDIT DRAWER ===== -->
+      <div v-if="auditPanel.open" class="task-drawer-overlay" @click.self="closeAuditPanel" />
+      <aside v-if="auditPanel.open" class="task-drawer audit-drawer" role="dialog" aria-modal="true" :aria-label="t('episode.audit.panel.title')">
+        <header class="task-drawer-head">
+          <div>
+            <div class="video-task-title">{{ t('episode.audit.panel.title') }}</div>
+            <div class="video-task-meta">
+              {{ auditStatusText }}
+              <template v-if="auditJob"> · {{ t('episode.audit.panel.trigger') }}: {{ t(`episode.audit.trigger.${auditJob.trigger || 'manual'}`) }}</template>
+            </div>
+          </div>
+          <div class="task-drawer-head-actions">
+            <button class="btn btn-sm" :disabled="auditBusy || auditRunning || !sbs.length" @click="runStoryboardAudit()">
+              <Loader2 v-if="auditBusy || auditRunning" :size="11" class="animate-spin" />
+              {{ auditRunning ? t('episode.audit.shotStatus.running') : (auditJob ? t('episode.audit.rerun') : t('episode.audit.button')) }}
+            </button>
+            <button class="btn btn-ghost btn-icon" :aria-label="t('episode.audit.panel.close')" @click="closeAuditPanel"><X :size="14" /></button>
+          </div>
+        </header>
+        <div v-if="auditRunning" class="audit-progress">
+          <div class="audit-progress-bar"><span :style="{ width: auditProgressPercent + '%' }" /></div>
+          <span class="video-task-meta">{{ t('episode.audit.panel.progress', { done: auditJob?.completed_windows || 0, total: auditJob?.total_windows || 0 }) }}</span>
+        </div>
+        <div class="video-task-metrics task-drawer-metrics">
+          <span class="video-task-metric is-failed">{{ t('episode.audit.filter.error') }} {{ auditJob?.error_count || 0 }}</span>
+          <span class="video-task-metric is-pending">{{ t('episode.audit.filter.warning') }} {{ auditJob?.warning_count || 0 }}</span>
+          <span class="video-task-metric is-done">{{ t('episode.audit.filter.info') }} {{ auditJob?.info_count || 0 }}</span>
+        </div>
+        <div v-if="auditSemanticNote" class="audit-semantic-note">{{ auditSemanticNote }}</div>
+        <div v-if="auditJob?.stale" class="audit-stale-note">{{ t('episode.audit.empty.stale') }}</div>
+        <div v-if="auditJob?.status === 'failed'" class="audit-error-note">
+          {{ t('episode.audit.panel.jobError', { message: auditJob.error_msg || '' }) }}
+        </div>
+        <div v-if="auditPanel.shotId" class="audit-shot-scope">
+          <span>{{ t('episode.audit.panel.shotOnly', { n: storyboardNumberOf(auditPanelShot) || auditPanel.shotId }) }}</span>
+          <button class="btn btn-sm" @click="auditPanel = { ...auditPanel, shotId: null }">{{ t('episode.audit.panel.showAllShots') }}</button>
+        </div>
+        <div class="audit-filter-row">
+          <button
+            v-for="option in auditFilterOptions"
+            :key="option.key"
+            type="button"
+            :class="['audit-filter-chip', { on: auditPanelFilter === option.key }]"
+            @click="auditPanelFilter = option.key"
+          >{{ t(`episode.audit.filter.${option.key}`) }}</button>
+          <span class="audit-filter-count">{{ auditPanelIssues.length }}</span>
+        </div>
+        <div v-if="!auditPanelIssues.length" class="step-empty task-drawer-empty">
+          <div class="empty-visual">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+          </div>
+          <div class="empty-title">
+            {{ auditPanel.shotId ? t('episode.audit.panel.noIssuesForShot') : (auditJob ? t('episode.audit.empty.clean') : t('episode.audit.cleanTitle')) }}
+          </div>
+          <div class="empty-desc">
+            <template v-if="auditJob?.semantic_status === 'skipped_no_model'">{{ t('episode.audit.empty.ruleOnly') }}</template>
+            <template v-else-if="auditJob?.semantic_status === 'disabled'">{{ t('episode.audit.empty.semanticDisabled') }}</template>
+            <template v-else-if="!auditJob">{{ t('episode.audit.empty.none') }}</template>
+            <template v-else>{{ auditStatusText }}</template>
+          </div>
+        </div>
+        <div v-else class="task-drawer-body audit-issue-list">
+          <section v-for="group in auditCheckGroups" :key="group.check" class="audit-group">
+            <div class="audit-group-head">
+              <span class="audit-group-title">{{ t(`episode.audit.check.${group.check}`) }}</span>
+              <span class="audit-group-count">{{ group.issues.length }}</span>
+            </div>
+            <article v-for="issue in group.issues" :key="issue.id" :class="['audit-issue', `is-${issue.severity}`]">
+              <div class="audit-issue-head">
+                <span class="audit-issue-severity">{{ t(`episode.audit.severity.${issue.severity}`) }}</span>
+                <span v-if="issue.storyboardNumber" class="audit-issue-shot">S{{ issue.storyboardNumber }}</span>
+                <span v-if="issue.fixed" class="audit-issue-fixed">{{ t('episode.audit.filter.fixed') }}</span>
+                <span v-else-if="issue.manual" class="audit-issue-manual">{{ t('episode.audit.filter.manual') }}</span>
+              </div>
+              <p class="audit-issue-text">{{ auditIssueText(issue) }}</p>
+              <p v-if="issue.evidence" class="audit-issue-evidence">{{ issue.evidence }}</p>
+              <p v-if="issue.suggestion" class="audit-issue-suggestion">{{ issue.suggestion }}</p>
+              <div class="audit-issue-actions">
+                <button v-if="issue.storyboardId" class="btn btn-sm" :title="t('episode.audit.panel.locateShot')" @click="locateAuditShot(issue)">
+                  {{ t('episode.audit.panel.locateShot') }}
+                </button>
+                <button v-if="issue.check === 2 && issue.suggestedTransition" class="btn btn-sm btn-primary" @click="openTransitionCreateFromIssue(issue)">
+                  {{ t('episode.audit.transition.title') }}
+                </button>
+                <button v-if="issue.check === 5" class="btn btn-sm" @click="gotoAssetPage()">
+                  {{ t('episode.prod.assets') }}
+                </button>
+              </div>
+            </article>
+          </section>
+        </div>
+        <div class="audit-repair-log">
+          <div class="audit-group-head">
+            <span class="audit-group-title">{{ t('episode.audit.panel.repairLog') }}</span>
+            <span v-if="auditJob?.fixed_count" class="audit-group-count">{{ auditJob.fixed_count }}</span>
+          </div>
+          <div v-if="auditJob?.repair_log?.length" class="audit-repair-list">
+            <div v-for="(entry, i) in auditJob.repair_log" :key="i" class="audit-repair-item">
+              <span v-if="entry?.storyboardNumber" class="audit-issue-shot">S{{ entry.storyboardNumber }}</span>
+              <span>{{ entry?.message || entry?.summary || entry?.action || entry?.code || entry }}</span>
+            </div>
+          </div>
+          <p v-else class="dim audit-repair-empty">{{ t('episode.audit.panel.repairEmpty') }}</p>
+        </div>
+        <footer class="audit-drawer-foot">
+          <button v-if="auditJob?.can_undo" class="btn" :disabled="auditBusy || auditRunning" :title="t('episode.audit.panel.undoTitle')" @click="undoAuditRepair()">
+            {{ auditBusy ? t('episode.audit.panel.running') : t('episode.audit.undo') }}
+          </button>
+          <button class="btn" style="margin-left:auto" @click="closeAuditPanel">{{ t('episode.audit.panel.close') }}</button>
+        </footer>
+      </aside>
 
       <div v-if="assetDetail.open && assetDetailItem" class="overlay asset-detail-overlay" @click.self="closeAssetDetail">
         <section
@@ -1986,10 +2128,77 @@
         </div>
       </div>
 
+      <div v-if="transitionCreate.open" class="overlay" @click.self="closeTransitionCreate">
+        <div class="dialog transition-create-dialog">
+          <header class="dialog-head">
+            <div class="image-viewer-title">{{ t('episode.audit.transition.title') }}</div>
+            <span class="audit-kind-hint">{{ t('episode.audit.transition.kindLabel') }}: {{ t(`episode.audit.transition.kind.${transitionCreate.kind}`) }}</span>
+            <button class="btn btn-ghost btn-icon" style="margin-left:auto" @click="closeTransitionCreate"><X :size="14" /></button>
+          </header>
+          <div class="dialog-body transition-create-body">
+            <label class="transition-create-field">
+              <span>{{ t('episode.audit.transition.boundary', { pair: transitionCreatePairLabel() || '—' }) }}</span>
+              <select v-if="!transitionCreate.fromId" v-model="transitionCreate.pairKey" class="input" :disabled="transitionCreate.submitting">
+                <option v-for="pair in transitionCreatePairs" :key="pair.key" :value="pair.key">{{ pair.label }}</option>
+              </select>
+              <span v-else class="transition-create-fixed">{{ transitionCreatePairLabel() }}</span>
+            </label>
+            <label class="transition-create-field">
+              <span>{{ t('episode.audit.transition.kindName') }}</span>
+              <select v-model="transitionCreate.kind" class="input" :disabled="transitionCreate.submitting">
+                <option v-for="option in transitionCreateKindOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+            <label class="transition-create-field">
+              <span>{{ t('episode.audit.transition.duration') }}</span>
+              <select v-model.number="transitionCreate.duration" class="input" :disabled="transitionCreate.submitting">
+                <option v-for="value in TRANSITION_CUSTOM_DURATIONS" :key="value" :value="value">{{ value }}s</option>
+              </select>
+            </label>
+            <label v-if="transitionCreate.kind === 'scene'" class="transition-create-field">
+              <span>{{ t('episode.audit.transition.scene') }}</span>
+              <select v-model.number="transitionCreate.sceneId" class="input" :disabled="transitionCreate.submitting">
+                <option :value="null">{{ t('episode.audit.transition.scenePlaceholder') }}</option>
+                <option v-for="scene in transitionCreateScenes" :key="scene.id" :value="scene.id">{{ scene.label }}</option>
+              </select>
+            </label>
+            <template v-if="transitionCreate.kind === 'text'">
+              <label class="transition-create-field">
+                <span>{{ t('episode.audit.transition.textContent') }}</span>
+                <input v-model="transitionCreate.title" class="input" maxlength="20" :disabled="transitionCreate.submitting" :placeholder="t('episode.audit.transition.textHint')" />
+              </label>
+              <label class="transition-create-field">
+                <span>{{ t('episode.audit.transition.textSubtitle') }}</span>
+                <input v-model="transitionCreate.subtitle" class="input" maxlength="40" :disabled="transitionCreate.submitting" />
+              </label>
+              <label class="transition-create-field">
+                <span>{{ t('episode.audit.transition.scene') }}</span>
+                <select v-model.number="transitionCreate.sceneId" class="input" :disabled="transitionCreate.submitting">
+                  <option :value="null">{{ t('episode.audit.transition.scenePlaceholder') }}</option>
+                  <option v-for="scene in transitionCreateScenes" :key="scene.id" :value="scene.id">{{ scene.label }}</option>
+                </select>
+              </label>
+            </template>
+            <label v-else class="transition-create-field">
+              <span>{{ t('episode.audit.transition.prompt') }}</span>
+              <textarea v-model="transitionCreate.prompt" class="input" rows="4" maxlength="1200" :disabled="transitionCreate.submitting" :placeholder="t('episode.audit.transition.promptPlaceholder')" />
+            </label>
+          </div>
+          <footer class="dialog-foot">
+            <button class="btn" style="margin-left:auto" :disabled="transitionCreate.submitting" @click="closeTransitionCreate">{{ t('episode.audit.transition.cancel') }}</button>
+            <button class="btn btn-primary" :disabled="transitionCreate.submitting" @click="transitionCreateSubmit()">
+              <Loader2 v-if="transitionCreate.submitting" :size="11" class="animate-spin" />
+              {{ transitionCreate.submitting ? t('episode.audit.transition.submitting') : t('episode.audit.transition.submit') }}
+            </button>
+          </footer>
+        </div>
+      </div>
+
       <div v-if="transitionDetailBoundary" class="overlay" @click.self="closeTransitionDetail">
         <div class="dialog transition-detail-dialog">
           <header class="dialog-head">
             <div class="image-viewer-title">{{ t('episode.export.aiTransition.detailTitle') }}</div>
+            <span class="ai-transition-kind">{{ transitionKindLabel(transitionDetailBoundary) }}</span>
             <span :class="['ai-transition-status', transitionStatusClass(transitionDetailBoundary)]">
               {{ transitionStatusLabel(transitionDetailBoundary) }}
             </span>
@@ -2016,6 +2225,7 @@
             <div v-else-if="transitionDetailBoundary.error_msg" class="transition-detail-error">
               {{ mapError(transitionDetailBoundary.error_msg) }}
             </div>
+            <template v-if="transitionKindOf(transitionDetailBoundary) === 'ai'">
             <div v-if="transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'first') || transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'last')" class="transition-detail-frames">
               <button
                 v-if="transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'first')"
@@ -2175,6 +2385,27 @@
               </p>
               <p class="ai-transition-prompt-note">{{ t('episode.export.aiTransition.prompt.hint') }}</p>
             </div>
+            </template>
+            <template v-else>
+              <div class="transition-detail-custom">
+                <p v-if="transitionDetailBoundary.degraded" class="ai-transition-prompt-note transition-detail-degraded">
+                  {{ t('episode.export.aiTransition.degraded') }}
+                </p>
+                <div v-if="transitionDetailBoundary.text_content" class="transition-detail-custom-text">
+                  <strong>{{ transitionDetailBoundary.text_content }}</strong>
+                  <span v-if="transitionDetailBoundary.text_subtitle" class="dim">{{ transitionDetailBoundary.text_subtitle }}</span>
+                </div>
+                <p v-if="transitionDetailBoundary.prompt" class="transition-detail-custom-text">{{ transitionDetailBoundary.prompt }}</p>
+                <p v-if="transitionDetailBoundary.scene_id" class="dim transition-detail-custom-note">
+                  {{ getSceneName({ scene_id: transitionDetailBoundary.scene_id }) }}
+                </p>
+                <button
+                  class="btn btn-sm"
+                  :disabled="transitionDetailBoundary.status === 'processing' || transitionDetailBoundary.status === 'pending'"
+                  @click="editTransitionCustom(transitionDetailBoundary)"
+                >{{ t('episode.export.aiTransition.editCustom') }}</button>
+              </div>
+            </template>
           </div>
           <footer class="dialog-foot">
             <button
@@ -2548,7 +2779,7 @@ import {
   Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors, Ellipsis,
   Share2, AlertCircle,
 } from 'lucide-vue-next'
-import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, storyboardSplitAPI } from '~/composables/useApi'
+import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, storyboardSplitAPI, storyboardAuditAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
 import { useAgent, coverageShortfall } from '~/composables/useAgent'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
@@ -2569,7 +2800,7 @@ import ContextMenu from '~/components/ContextMenu.vue'
 
 definePageMeta({ layout: 'studio' })
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { width: viewportWidth, isCompact, isNarrow, isTablet, orientation } = useViewport()
 // 平板页签与步骤抽屉：模板引用集中在这里，供暂停、滚动与焦点循环使用
 const tabletPane = ref('shots')
@@ -3046,6 +3277,443 @@ function openTaskDrawer() {
 function closeTaskDrawer() {
   taskDrawer.value = false
 }
+// ===== 整集动作检验：最新任务轮询 + 逐镜状态 + 问题面板 =====
+const ACTIVE_AUDIT_STATUSES = ['pending', 'preparing', 'auditing', 'repairing', 'rechecking']
+const AUDIT_CHECKS = [1, 2, 3, 4, 5]
+const auditState = ref({ loading: false, job: null, loaded: false })
+const auditPanel = ref({ open: false, shotId: null, filter: 'all' })
+const auditBusy = ref(false)
+let auditRequestSeq = 0
+let auditToastJob = ''
+const auditJob = computed(() => auditState.value.job || null)
+const auditRunning = computed(() =>
+  ACTIVE_AUDIT_STATUSES.includes(String(auditJob.value?.status || '')))
+const auditIssueTotal = computed(() => {
+  const job = auditJob.value
+  return Number(job?.issue_count ?? job?.issueCount ?? 0) || 0
+})
+const auditStatusText = computed(() => {
+  if (auditRunning.value) return t('episode.audit.shotStatus.running')
+  if (!auditJob.value) return t('episode.audit.shotStatus.pending')
+  if (auditJob.value.status === 'failed') return t('episode.audit.shotStatus.failed')
+  return t('episode.audit.issuesTitle', { n: auditIssueTotal.value })
+})
+const auditButtonLabel = computed(() =>
+  auditJob.value ? t('episode.audit.rerun') : t('episode.audit.button'))
+const auditProgressPercent = computed(() => {
+  const total = Number(auditJob.value?.total_windows ?? auditJob.value?.totalWindows ?? 0) || 0
+  const done = Number(auditJob.value?.completed_windows ?? auditJob.value?.completedWindows ?? 0) || 0
+  if (!total) return 0
+  return Math.min(100, Math.round(done / total * 100))
+})
+const auditSemanticNote = computed(() => {
+  const status = String(auditJob.value?.semantic_status || '')
+  if (status === 'disabled') return t('episode.audit.empty.semanticDisabled')
+  if (status === 'skipped_no_model') return t('episode.audit.empty.ruleOnly')
+  if (status === 'partial') return t('episode.audit.empty.semanticPartial')
+  if (status === 'failed') return t('episode.audit.empty.semanticFailed')
+  if (status === 'truncated') return t('episode.audit.empty.semanticTruncated')
+  return ''
+})
+function auditInsertedTransitionCount(job) {
+  const log = job?.repair_log || job?.repairLog || []
+  if (!Array.isArray(log)) return 0
+  return log.filter(entry => (
+    entry?.action === 'insert_transition_shot'
+    && entry?.result === 'applied'
+    && entry?.insertedStoryboardId
+  )).length
+}
+const auditPoll = useVisibilityPolling(async () => {
+  await loadStoryboardAudit({ silent: true })
+}, 3000)
+function applyAuditData(data, { notify = false } = {}) {
+  const job = data?.job || data || null
+  auditState.value = { loading: false, job, loaded: true }
+  if (!job?.id) return
+  const totalShots = Number(job.total_shots ?? job.totalShots ?? 0) || 0
+  if (job.status === 'done' && totalShots > 0 && totalShots !== sbs.value.length) {
+    void resyncStoryboards()
+  }
+  if (!notify) return
+  const id = String(job.id)
+  if (auditToastJob === id) return
+  if (job.status === 'done') {
+    auditToastJob = id
+    toast.success(t('episode.audit.runDone', { n: Number(job.fixed_count ?? job.fixedCount ?? 0) || 0 }))
+    const inserted = auditInsertedTransitionCount(job)
+    if (inserted > 0) toast.info(t('episode.audit.insertedDone', { n: inserted }))
+    const repaired = job.repair_status === 'done' || Number(job.fixed_count ?? job.fixedCount ?? 0) > 0
+    if (repaired || inserted > 0 || job.rollback) void resyncStoryboards()
+  } else if (job.status === 'failed') {
+    auditToastJob = id
+    toast.error(t('episode.audit.panel.jobError', { message: job.error_msg || job.errorMsg || '' }))
+    if (job.rollback) void resyncStoryboards()
+  }
+}
+async function loadStoryboardAudit({ silent = false } = {}) {
+  if (!epId.value) return
+  const seq = ++auditRequestSeq
+  const previousStatus = String(auditState.value.job?.status || '')
+  if (!silent) auditState.value = { ...auditState.value, loading: true }
+  try {
+    const data = await storyboardAuditAPI.latest(epId.value)
+    if (seq !== auditRequestSeq) return
+    applyAuditData(data, { notify: ACTIVE_AUDIT_STATUSES.includes(previousStatus) })
+    scheduleAuditPoll()
+  } catch (e) {
+    if (seq !== auditRequestSeq) return
+    auditState.value = { ...auditState.value, loading: false }
+    if (!silent) toastError(e, { fallback: 'episode.audit.loadFailed' })
+  }
+}
+function scheduleAuditPoll() {
+  if (!auditRunning.value) {
+    auditPoll.stop()
+    return
+  }
+  auditPoll.start()
+}
+async function loadStoryboardAuditAfterSplit() {
+  const previousId = auditState.value.job?.id ?? null
+  for (let i = 0; i < 3; i++) {
+    if (i) await sleep(800)
+    if (!epId.value) return
+    try {
+      const data = await storyboardAuditAPI.latest(epId.value)
+      const job = data?.job || data || null
+      applyAuditData(data, { notify: !!job?.id && job.id !== previousId })
+      if (job?.id && job.id !== previousId) break
+    } catch { /* 下一轮继续 */ }
+  }
+  scheduleAuditPoll()
+}
+async function runStoryboardAudit() {
+  if (auditBusy.value || auditRunning.value || !epId.value) return
+  auditBusy.value = true
+  try {
+    const data = await storyboardAuditAPI.create({
+      episode_id: epId.value,
+      drama_id: dramaId,
+      trigger: 'manual',
+      model: chatModelOverride() || undefined,
+      config_id: chatConfigId() || undefined,
+    })
+    applyAuditData(data)
+    scheduleAuditPoll()
+  } catch (e) {
+    toastError(e, { fallback: 'episode.audit.loadFailed' })
+  } finally {
+    auditBusy.value = false
+  }
+}
+async function undoAuditRepair() {
+  const id = Number(auditJob.value?.id)
+  if (!id || auditBusy.value) return
+  auditBusy.value = true
+  try {
+    const data = await storyboardAuditAPI.undo(id)
+    applyAuditData(data)
+    await refresh()
+    const restored = Number(data?.restored ?? data?.job?.fixed_count ?? 0) || 0
+    toast.success(t('episode.audit.undoDone', { n: restored }))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.audit.loadFailed' })
+  } finally {
+    auditBusy.value = false
+  }
+}
+function openAuditPanel(shotId = null) {
+  auditPanel.value = { open: true, shotId, filter: 'all' }
+  if (!auditState.value.loaded) loadStoryboardAudit({ silent: true })
+  scheduleAuditPoll()
+}
+function closeAuditPanel() {
+  auditPanel.value = { open: false, shotId: null, filter: 'all' }
+}
+function normalizeAuditIssue(issue, index) {
+  const storyboardId = issue?.storyboardId ?? issue?.storyboard_id ?? null
+  const status = String(issue?.status || 'open')
+  const repairable = !!(issue?.repairable ?? issue?.canRepair)
+  return {
+    ...issue,
+    id: issue?.id ?? `${storyboardId || 'x'}-${issue?.code || 'issue'}-${index}`,
+    check: Number(issue?.check) || 1,
+    storyboardId,
+    storyboardNumber: issue?.storyboardNumber ?? issue?.storyboard_number ?? null,
+    lineId: issue?.lineId ?? issue?.line_id ?? null,
+    severity: String(issue?.severity || 'warning'),
+    code: String(issue?.code || ''),
+    message: issue?.message || '',
+    evidence: issue?.evidence || '',
+    suggestion: issue?.suggestion || '',
+    repairable,
+    repairAction: issue?.repairAction ?? issue?.repair_action ?? null,
+    suggestedTransition: issue?.suggestedTransition ?? issue?.suggested_transition ?? null,
+    relatedStoryboardIds: issue?.relatedStoryboardIds ?? issue?.related_storyboard_ids ?? [],
+    status,
+    windowIndex: issue?.windowIndex ?? issue?.window_index ?? null,
+    manual: status === 'manual' || (status === 'open' && !repairable),
+    fixed: status === 'fixed' || status === 'repaired' || status === 'resolved',
+  }
+}
+function auditIssueVisible(issue) {
+  const filter = auditPanel.value.filter
+  if (filter === 'manual' && !issue.manual) return false
+  if (filter === 'fixed' && !issue.fixed) return false
+  if (!['all', 'manual', 'fixed'].includes(filter) && issue.severity !== filter) return false
+  if (auditPanel.value.shotId) return issue.storyboardId === auditPanel.value.shotId
+  return true
+}
+const auditPanelIssues = computed(() => {
+  const raw = auditJob.value?.issues || []
+  return raw.map((issue, index) => normalizeAuditIssue(issue, index)).filter(auditIssueVisible)
+})
+const auditFilterOptions = [
+  { key: 'all' }, { key: 'error' }, { key: 'warning' }, { key: 'info' }, { key: 'manual' }, { key: 'fixed' },
+]
+const auditPanelFilter = computed({
+  get: () => auditPanel.value.filter,
+  set: value => { auditPanel.value = { ...auditPanel.value, filter: value } },
+})
+const auditCheckGroups = computed(() => AUDIT_CHECKS.map(check => ({
+  check,
+  issues: auditPanelIssues.value.filter(issue => issue.check === check),
+})).filter(group => group.issues.length))
+function auditIssueText(issue) {
+  const key = `episode.audit.code.${issue?.code}`
+  if (issue?.code && te(key)) return t(key)
+  return issue?.message || issue?.suggestion || issue?.code || ''
+}
+function auditShotState(sb) {
+  const empty = {
+    status: 'pending', stale: false, ruleOnly: false, errorCount: 0, warningCount: 0, infoCount: 0,
+  }
+  const job = auditJob.value
+  if (!job) return empty
+  const map = job.shot_status || job.shotStatus || {}
+  const entry = map?.[sb?.id] ?? map?.[String(sb?.id)] ?? null
+  if (!entry) return empty
+  const raw = String(entry.status || '')
+  const status = ['pending', 'running', 'done', 'failed', 'ruleOnly'].includes(raw) ? raw : 'pending'
+  return {
+    status,
+    stale: !!(entry.stale ?? entry.isStale),
+    ruleOnly: status === 'ruleOnly' || !!(entry.ruleOnly ?? entry.rule_only),
+    errorCount: Number(entry.errorCount ?? entry.error_count ?? 0) || 0,
+    warningCount: Number(entry.warningCount ?? entry.warning_count ?? 0) || 0,
+    infoCount: Number(entry.infoCount ?? entry.info_count ?? 0) || 0,
+  }
+}
+function auditShotClass(sb) {
+  const shot = auditShotState(sb)
+  if (shot.stale) return 'audit-shot-stale'
+  return `audit-shot-${shot.status === 'ruleOnly' ? 'done' : shot.status}`
+}
+function auditShotTitle(sb) {
+  const shot = auditShotState(sb)
+  const statusKey = shot.ruleOnly ? 'ruleOnly' : shot.status
+  const label = t(`episode.audit.shotStatus.${statusKey}`)
+  const issues = shot.errorCount + shot.warningCount + shot.infoCount
+  return issues ? `${label} · ${t('episode.audit.issuesTitle', { n: issues })}` : label
+}
+function auditShotBadge(sb) {
+  const shot = auditShotState(sb)
+  const count = shot.errorCount + shot.warningCount
+  return count > 0 ? String(count) : ''
+}
+function storyboardTransitionKind(sb) {
+  const kind = String(sb?.transition_kind || sb?.transitionKind || '')
+  return ['empty', 'scene', 'text'].includes(kind) ? kind : ''
+}
+function storyboardTransitionLabel(sb) {
+  const kind = storyboardTransitionKind(sb)
+  if (!kind) return ''
+  return `${t('episode.audit.transition.badge')} · ${t(`episode.audit.transition.kind.${kind}`)}`
+}
+const auditPanelShot = computed(() =>
+  sbs.value.find(sb => sb.id === auditPanel.value.shotId) || null)
+function locateAuditShot(issue) {
+  const storyboardId = issue?.storyboardId
+  if (!storyboardId) return
+  videoListFilter.value = ''
+  const sb = sbs.value.find(item => item.id === storyboardId)
+  if (!sb) return
+  selectedSb.value = sb
+  auditPanel.value = { open: false, shotId: null, filter: 'all' }
+  void nextTick(() => {
+    document.querySelector(`[data-sb-id="${storyboardId}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  })
+}
+function gotoAssetPage() {
+  panel.value = 'production'
+  prodTab.value = 'assets'
+  closeAuditPanel()
+}
+
+// ===== 自定义过渡镜头：空镜 / 场景 / 文字视频 =====
+const TRANSITION_CUSTOM_DURATIONS = [2, 2.5, 3, 3.5, 4, 4.5, 5]
+const transitionCreate = ref({
+  open: false,
+  kind: 'empty',
+  duration: 3,
+  prompt: '',
+  sceneId: null,
+  title: '',
+  subtitle: '',
+  fromId: 0,
+  toId: 0,
+  pairKey: '',
+  submitting: false,
+})
+const transitionCreateKindOptions = computed(() => [
+  { value: 'empty', label: t('episode.audit.transition.kind.empty') },
+  { value: 'scene', label: t('episode.audit.transition.kind.scene') },
+  { value: 'text', label: t('episode.audit.transition.kind.text') },
+])
+const transitionCreateScenes = computed(() => bindableScenes.value.map(scene => ({
+  id: scene.id,
+  label: `${scene.location || scene.name || ''}${scene.time ? ` · ${scene.time}` : ''}`,
+})))
+const transitionCreatePairs = computed(() => {
+  const ordered = [...sbs.value].sort((a, b) =>
+    storyboardNumberOf(a) - storyboardNumberOf(b) || a.id - b.id)
+  const pairs = []
+  for (let i = 1; i < ordered.length; i++) {
+    const from = ordered[i - 1]
+    const to = ordered[i]
+    pairs.push({
+      key: `${from.id}-${to.id}`,
+      fromId: from.id,
+      toId: to.id,
+      label: `S${storyboardNumberOf(from) || '?'} → S${storyboardNumberOf(to) || '?'}`,
+    })
+  }
+  return pairs
+})
+function transitionKindOf(boundary) {
+  const kind = String(boundary?.kind || 'ai')
+  return ['empty', 'scene', 'text'].includes(kind) ? kind : 'ai'
+}
+function transitionKindLabel(boundary) {
+  return t(`episode.audit.transition.kind.${transitionKindOf(boundary)}`)
+}
+function openTransitionCreate(boundary = null) {
+  const fromId = Number(boundary?.from_storyboard_id ?? boundary?.fromStoryboardId ?? 0) || 0
+  const toId = Number(boundary?.to_storyboard_id ?? boundary?.toStoryboardId ?? 0) || 0
+  const hasBoundary = fromId > 0 && toId > 0
+  const pair = transitionCreatePairs.value.find(item => item.fromId === fromId && item.toId === toId)
+  transitionCreate.value = {
+    open: true,
+    kind: 'empty',
+    duration: 3,
+    prompt: '',
+    sceneId: null,
+    title: '',
+    subtitle: '',
+    fromId: hasBoundary ? fromId : 0,
+    toId: hasBoundary ? toId : 0,
+    pairKey: hasBoundary ? (pair?.key || `${fromId}-${toId}`) : (transitionCreatePairs.value[0]?.key || ''),
+    submitting: false,
+  }
+}
+function openTransitionCreateForBoundary(boundary) {
+  openTransitionCreate(boundary)
+}
+function openTransitionCreateFromIssue(issue) {
+  const primaryId = Number(issue?.storyboardId ?? issue?.storyboard_id ?? 0) || 0
+  const relatedIds = issue?.relatedStoryboardIds ?? issue?.related_storyboard_ids ?? []
+  const ids = new Set()
+  if (primaryId) ids.add(primaryId)
+  for (const id of (Array.isArray(relatedIds) ? relatedIds : [])) {
+    const value = Number(id)
+    if (value) ids.add(value)
+  }
+  const pair = transitionCreatePairs.value.find(item => ids.has(item.fromId) && ids.has(item.toId))
+    || (primaryId
+      ? transitionCreatePairs.value.find(item => item.fromId === primaryId || item.toId === primaryId)
+      : null)
+  openTransitionCreate(pair ? { from_storyboard_id: pair.fromId, to_storyboard_id: pair.toId } : null)
+  const kind = String(issue?.suggestedTransition ?? issue?.suggested_transition ?? '')
+  if (['empty', 'scene', 'text'].includes(kind)) {
+    transitionCreate.value.kind = kind
+  }
+}
+function transitionCreatePairLabel() {
+  const from = sbs.value.find(sb => sb.id === transitionCreate.value.fromId)
+  const to = sbs.value.find(sb => sb.id === transitionCreate.value.toId)
+  if (!from || !to) return ''
+  return `S${storyboardNumberOf(from) || '?'} → S${storyboardNumberOf(to) || '?'}`
+}
+function closeTransitionCreate() {
+  transitionCreate.value = { ...transitionCreate.value, open: false, submitting: false }
+}
+async function transitionCreateSubmit() {
+  if (transitionCreate.value.submitting) return
+  if (auditRunning.value) {
+    toast.warning(t('episode.audit.runningBlocked'))
+    return
+  }
+  let fromId = Number(transitionCreate.value.fromId)
+  let toId = Number(transitionCreate.value.toId)
+  if (!fromId || !toId) {
+    const pair = transitionCreatePairs.value.find(item => item.key === transitionCreate.value.pairKey)
+    fromId = Number(pair?.fromId) || 0
+    toId = Number(pair?.toId) || 0
+  }
+  if (!fromId || !toId) {
+    toast.error(t('episode.audit.transition.noBoundary'))
+    return
+  }
+  const kind = transitionCreate.value.kind
+  const sceneId = Number(transitionCreate.value.sceneId) || 0
+  if (kind === 'scene' && !sceneId) {
+    toast.error(t('episode.audit.transition.sceneRequired'))
+    return
+  }
+  if (kind === 'text' && !transitionCreate.value.title.trim()) {
+    toast.error(t('episode.audit.transition.needText'))
+    return
+  }
+  if (kind !== 'text' && !transitionCreate.value.prompt.trim()) {
+    toast.error(t('episode.audit.transition.needPrompt'))
+    return
+  }
+  transitionCreate.value.submitting = true
+  const payload = {
+    from_storyboard_id: fromId,
+    to_storyboard_id: toId,
+    kind,
+    duration: transitionCreate.value.duration,
+  }
+  if (kind !== 'text') payload.prompt = transitionCreate.value.prompt.trim()
+  if (sceneId) payload.scene_id = sceneId
+  if (kind === 'text') {
+    payload.text_content = transitionCreate.value.title.trim()
+    payload.text_subtitle = transitionCreate.value.subtitle.trim()
+  }
+  try {
+    await transitionAPI.createCustom(epId.value, payload)
+    toast.success(t('episode.audit.transition.submitted'))
+    closeTransitionCreate()
+    await loadTransitions()
+    loadStoryboardAudit({ silent: true })
+  } catch (e) {
+    transitionCreate.value.submitting = false
+    toastError(e, { fallback: 'episode.audit.transition.failed' })
+  }
+}
+function editTransitionCustom(boundary) {
+  openTransitionCreate(boundary)
+  const kind = transitionKindOf(boundary)
+  if (kind !== 'ai') transitionCreate.value.kind = kind
+  transitionCreate.value.duration = Number(boundary?.duration_requested ?? boundary?.durationRequested) || 3
+  transitionCreate.value.prompt = String(boundary?.prompt || '')
+  transitionCreate.value.title = String(boundary?.text_content ?? boundary?.textContent ?? '')
+  transitionCreate.value.subtitle = String(boundary?.text_subtitle ?? boundary?.textSubtitle ?? '')
+  transitionCreate.value.sceneId = Number(boundary?.scene_id ?? boundary?.sceneId) || null
+  closeTransitionDetail()
+}
 const imageViewer = ref({ open: false, src: '', title: '' })
 const activeMerge = ref(null) // 成片大预览弹窗中正在播放的拼接记录
 const mergeDialog = ref({
@@ -3488,6 +4156,7 @@ onBeforeUnmount(() => {
   stopGenTasksPolling()
   stopTransitionPolling()
   stopMergePolling()
+  auditPoll.stop()
   breakdownPoll.stop()
   videoBatchPoll.stop()
   comfyPollSeq++
@@ -3600,6 +4269,8 @@ const allVideoTaskRows = computed(() => sbs.value.map((sb, index) => {
     storyboard: sb,
     title: sb.description || t('episode.vid.shotN', { n: String(index + 1).padStart(2, '0') }),
     meta: sceneName,
+    transitionKind: storyboardTransitionKind(sb),
+    transitionLabel: storyboardTransitionLabel(sb),
     duration: Number.isFinite(duration) ? duration : 5,
     referenceCount,
     state: videoTaskState(sb),
@@ -4834,6 +5505,7 @@ const taskCenterTabs = computed(() => {
 
 function genTaskKindLabel(kind, transitionId = null) {
   if (transitionId) return t('episode.tasks.transitionKind')
+  if (kind === 'storyboard_audit') return t('episode.tasks.runStoryboardAudit')
   if (kind === 'image') return t('common.serviceType.image')
   if (kind === 'video') return t('common.serviceType.video')
   if (kind === 'audio') return t('episode.tasks.kindAudio')
@@ -5375,7 +6047,7 @@ async function refresh() {
   try { mergeData.value = await mergeAPI.status(epId.value) } catch {}
   // 刷新后若合并仍在进行，恢复轮询，保证状态卡最终收敛
   if (mergeData.value?.status === 'pending' || mergeData.value?.status === 'processing') startMergePolling()
-  await Promise.all([loadGenTasks(), loadExportMerges(), loadFrameAssets()])
+  await Promise.all([loadGenTasks(), loadExportMerges(), loadFrameAssets(), loadStoryboardAudit({ silent: true })])
 }
 
 function saveRaw() { episodeAPI.update(epId.value, { content: localRaw.value }); episode.value.content = localRaw.value }
@@ -5507,6 +6179,7 @@ function selectMissingVideos() {
 }
 
 async function batchVideoPrompts() {
+  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   if (videoPromptBatch.value.running || !epId.value) return
   if (!sbs.value.length) { toast.warning(t('episode.sb.breakFirst')); return }
   // 选择模式下有勾选 → 仅补齐所选；否则全量补齐缺失
@@ -5554,6 +6227,7 @@ function pollVideoPromptBatch(attempts = 240) {
   setTimeout(() => tick(attempts), 2500)
 }
 async function doBreakdown() {
+  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   if (rn.value || methodSaving.value || splitStarting.value || splitRunning.value) return
   if (sbs.value.length > 0) {
     const confirmed = window.confirm(t('episode.sb.rebreakConfirm', { n: sbs.value.length, method: currentBreakdownMethodName.value }))
@@ -5601,6 +6275,7 @@ async function doBreakdown() {
 
 /** 从断点继续拆分：后端跳过已完成分段，只重跑未完成分段 */
 async function resumeSplit() {
+  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   const job = splitJob.value
   if (!job?.id || splitStarting.value || splitRunning.value) return
   splitStarting.value = true
@@ -5621,12 +6296,14 @@ async function resumeSplit() {
 /** 拆分完成后刷新并自动补齐缺失的视频提示词（兜住 Agent 漏写/截断） */
 async function onBreakdownDone() {
   await refresh()
+  void loadStoryboardAuditAfterSplit()
   const missing = sbs.value.filter(sb => !(sb.video_prompt || sb.videoPrompt || '').trim())
   if (missing.length) batchVideoPrompts()
 }
 
 // 按需为单个分镜生成视频提示词：由 prompt_generator 读取分镜字段生成并保存到 video_prompt
 async function genVideoPrompt(sb) {
+  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   if (!sb || videoPromptGeneratingIds.value.includes(sb.id)) return
   const idx = sbs.value.indexOf(sb) + 1
   const cfg = selectedVideoConfig.value
@@ -6404,6 +7081,7 @@ function buildVideoGenerationParams(sb) {
 }
 
 async function genVid(sb, opts = {}) {
+  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   if (isComfyVideoMode.value) {
     if (!opts.silent) toast.warning(t('episode.comfy.nativeOnly'))
     return
@@ -6718,6 +7396,7 @@ function transitionTargetCount(ids, boundaries = null) {
     .length
 }
 async function prepareTransitionsFor(ids, options = {}) {
+  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   if (transitionPreparing.value || !epId.value) return
   if (!transitionSupported.value) {
     toast.error(t('episode.export.aiTransition.unsupported'))
@@ -6766,6 +7445,7 @@ async function generateMissingTransitions() {
   })
 }
 async function retryTransitionItem(boundary) {
+  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   if (!boundary?.id || transitionPreparing.value) return
   transitionPreparing.value = true
   try {
@@ -6910,6 +7590,7 @@ async function saveTransitionPromptItem(boundary) {
   }
 }
 async function regenerateTransitionWithPrompt(boundary) {
+  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   const key = transitionPromptKey(boundary)
   if (!boundary?.id || transitionPromptBusy.value[key]) return
   const prompt = transitionPromptDraftOf(boundary)
@@ -9051,6 +9732,16 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.video-task-transition-tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
 .video-task-meta-line {
   display: flex;
   align-items: center;
@@ -9116,6 +9807,58 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .video-task-row:hover .video-task-delete,
 .video-task-delete:focus-visible { opacity: 1; }
 .video-task-delete:hover { color: var(--error); }
+.video-task-audit {
+  justify-self: end;
+  align-self: center;
+  min-width: 28px;
+  min-height: 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  position: relative;
+}
+.audit-shot-pending { color: var(--text-3); }
+.audit-shot-running { color: var(--accent-text); }
+.audit-shot-done { color: var(--success); }
+.audit-shot-failed { color: var(--warning); }
+.audit-shot-ruleOnly { color: var(--accent-text); }
+.audit-shot-stale { color: var(--warning); }
+.video-task-audit-badge {
+  position: absolute;
+  top: -3px;
+  right: -5px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--warning);
+  color: #fff;
+  font-size: 8px;
+  line-height: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+.video-task-audit-stale {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+.episode-audit-btn { white-space: nowrap; }
+.episode-audit-status {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-2);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.episode-audit-status:hover { border-color: var(--border-strong); color: var(--text-1); }
 .video-task-more {
   justify-self: end;
   align-self: center;
@@ -9951,6 +10694,16 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   font-weight: 600;
 }
 .exp-row-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.exp-transition-tag {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
 
 /* ===== 平板页签 / 步骤抽屉 / 底部操作栏 ===== */
 .video-tablet-bar { display: none; }
@@ -9992,6 +10745,10 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 @media (max-width: 1180px) {
   .sidebar { width: 180px; }
   .sidebar.collapsed { width: 46px; }
+
+  /* 平板：检验抽屉全屏、过渡镜头弹窗全屏 */
+  .task-drawer.audit-drawer { width: 100%; }
+  .dialog.transition-create-dialog { width: 100%; max-width: 100%; }
 
   .asset-grid,
   .character-asset-grid,
@@ -10253,6 +11010,206 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   flex: 1;
   justify-content: center;
 }
+.audit-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--surface-outline);
+}
+.audit-progress-bar {
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-outline);
+}
+.audit-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s var(--ease-out);
+}
+.audit-stale-note,
+.audit-error-note {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--surface-outline);
+  font-size: 11px;
+  color: var(--warning);
+}
+.audit-error-note { color: var(--error); }
+.audit-semantic-note {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--surface-outline);
+  font-size: 11px;
+  color: var(--text-2);
+}
+.audit-shot-scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--surface-outline);
+  font-size: 12px;
+  color: var(--text-2);
+}
+.audit-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--surface-outline);
+}
+.audit-filter-chip {
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11px;
+  cursor: pointer;
+}
+.audit-filter-chip:hover { color: var(--text-1); border-color: var(--border-strong); }
+.audit-filter-chip.on { background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent); }
+.audit-filter-count { margin-left: auto; font-size: 11px; color: var(--text-3); }
+.audit-issue-list {
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.audit-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.audit-group-title { font-size: 12px; font-weight: 700; color: var(--text-1); }
+.audit-group-count {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-outline);
+  color: var(--text-2);
+  font-size: 10px;
+  text-align: center;
+}
+.audit-issue {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+.audit-issue.is-error { border-left-color: var(--error); }
+.audit-issue.is-warning { border-left-color: var(--warning); }
+.audit-issue.is-info { border-left-color: var(--accent); }
+.audit-issue-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+}
+.audit-issue-severity { color: var(--warning); font-weight: 700; }
+.audit-issue.is-error .audit-issue-severity { color: var(--error); }
+.audit-issue.is-info .audit-issue-severity { color: var(--accent-text); }
+.audit-issue-shot {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-outline);
+  color: var(--text-2);
+}
+.audit-issue-fixed { color: var(--success); }
+.audit-issue-manual { color: var(--text-3); }
+.audit-issue-text { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-1); }
+.audit-issue-evidence { margin: 0; font-size: 11px; line-height: 1.4; color: var(--text-3); }
+.audit-issue-suggestion { margin: 0; font-size: 11px; line-height: 1.4; color: var(--text-2); }
+.audit-issue-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.audit-repair-log {
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--surface-outline);
+}
+.audit-repair-list { display: flex; flex-direction: column; gap: 4px; }
+.audit-repair-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.audit-repair-empty { margin: 0; font-size: 11px; }
+.audit-drawer-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--surface-outline);
+}
+.audit-kind-hint { font-size: 11px; color: var(--text-3); }
+.transition-create-dialog { width: min(620px, calc(100vw - 48px)); }
+.transition-create-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.transition-create-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.transition-create-fixed {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  color: var(--text-1);
+}
+.ai-transition-kind {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent-text);
+  font-size: 10px;
+}
+.ai-transition-degraded {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--warning);
+  font-size: 9px;
+}
+.transition-detail-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.transition-detail-custom-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-1);
+}
+.transition-detail-degraded { color: var(--warning); }
+.transition-detail-custom-note { margin: 0; font-size: 11px; }
 .task-center-tabs {
   display: flex;
   gap: 4px;

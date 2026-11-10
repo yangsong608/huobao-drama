@@ -7,7 +7,8 @@
  *   3. 资产生图（按 角色 → 场景 → 道具）  → 每个资产轮流生成并等待完成
  *   4. 分镜拆分（storyboard_breaker）     → storyboards + video_prompt
  *   5. 视频提示词补齐（prompt_generator） → 只补缺
- *   6. 视频生成（逐分镜串行）             → 等每个任务出片再下一个
+ *   6. 动作检验（storyboard_auditor）     → 五项检验 + 自动修复
+ *   7. 视频生成（逐分镜串行）             → 等每个任务出片再下一个
  *
  * 设计要点：
  * - 幂等：每一步都先看库里已有的结果，已完成的跳过，所以「停止后重跑」是继续而不是重做。
@@ -23,6 +24,12 @@ import { mastra } from '../mastra/index.js'
 import { buildAgentRequestContext } from '../agents/context.js'
 import { getExtractionStatus, startExtraction, type ExtractTarget } from './extraction.js'
 import { getVideoPromptBatchStatus, startVideoPromptBatch } from './video-prompts.js'
+import {
+  createStoryboardAuditJob,
+  getStoryboardAuditJob,
+  interruptStoryboardAuditJob,
+  type StoryboardAuditJobView,
+} from './storyboard-audit-jobs.js'
 import { renderPipelineRule } from './pipeline-rules.js'
 import { withStoryBible } from './drama-story-bible.js'
 import { getActiveConfig } from './ai.js'
@@ -37,7 +44,7 @@ import { normalizeVideoAudioMode } from './video-audio.js'
 import { logTaskError, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 
 export type AutomationStatus = 'idle' | 'running' | 'done' | 'failed' | 'stopped' | 'interrupted'
-export type AutomationStage = 'rewrite' | 'extract' | 'voices' | 'asset_images' | 'storyboards' | 'video_prompts' | 'videos' | 'dub' | 'done'
+export type AutomationStage = 'rewrite' | 'extract' | 'voices' | 'asset_images' | 'storyboards' | 'video_prompts' | 'storyboard_audit' | 'videos' | 'dub' | 'done'
 
 /** 各阶段占总进度的权重（合计 100） */
 const STAGE_WEIGHT: Record<Exclude<AutomationStage, 'done'>, number> = {
@@ -47,11 +54,12 @@ const STAGE_WEIGHT: Record<Exclude<AutomationStage, 'done'>, number> = {
   asset_images: 22,
   storyboards: 12,
   video_prompts: 7,
-  videos: 25,
+  storyboard_audit: 6,
+  videos: 19,
   dub: 8,
 }
 const STAGE_ORDER: Exclude<AutomationStage, 'done'>[] = [
-  'rewrite', 'extract', 'voices', 'asset_images', 'storyboards', 'video_prompts', 'videos', 'dub',
+  'rewrite', 'extract', 'voices', 'asset_images', 'storyboards', 'video_prompts', 'storyboard_audit', 'videos', 'dub',
 ]
 
 /** 等待单个生成任务的超时与轮询间隔 */
@@ -530,6 +538,91 @@ async function stepVideoPrompts(episodeId: number, dramaId: number, opts: RunOpt
   throw new Error('视频提示词生成超时')
 }
 
+function auditProgressNote(view: StoryboardAuditJobView): string {
+  if (view.status === 'repairing') return '自动修复'
+  if (view.status === 'rechecking') return '复查'
+  if (view.status === 'pending' || view.status === 'preparing' || view.phase === 'wait_prompts') return '等待提示词'
+  if (view.phase === 'rule') return '规则检验'
+  if (view.phase === 'repair') return '自动修复'
+  if (view.total_windows > 0) return `语义检验 ${view.completed_windows}/${view.total_windows}`
+  return '动作检验中'
+}
+
+/** 6. 动作检验：启动或复用该集检验任务并等待完成；问题与回滚不阻断流水线 */
+export async function stepStoryboardAudit(episodeId: number, dramaId: number, opts: RunOptions) {
+  assertRunning(episodeId)
+  let jobId: number
+  try {
+    const started = await createStoryboardAuditJob({
+      episodeId,
+      dramaId,
+      trigger: 'automation',
+      model: opts.model,
+      configId: opts.configId,
+    })
+    jobId = started.job.id
+  } catch (error: any) {
+    logTaskError('Automation', 'storyboard-audit-skip', { episodeId, error: error?.message || String(error) })
+    await updateProgress(episodeId, 'storyboard_audit', 1, 1, '动作检验不可用，已跳过')
+    return
+  }
+
+  const deadline = Date.now() + 60 * 60 * 1000
+  try {
+    while (Date.now() < deadline) {
+      assertRunning(episodeId)
+      const view = getStoryboardAuditJob(jobId)
+      if (!view) break
+      const note = auditProgressNote(view)
+      const ratio = view.status === 'done'
+        ? 1
+        : Math.min(0.95, view.completed_windows / Math.max(1, view.total_windows))
+      await updateProgress(episodeId, 'storyboard_audit', ratio, 1, note)
+
+      if (view.status === 'done') {
+        const fixed = Number(view.fixed_count || 0)
+        const issues = Number(view.issue_count || 0)
+        await updateProgress(
+          episodeId,
+          'storyboard_audit',
+          1,
+          1,
+          issues > 0
+            ? `动作检验完成：${issues} 个问题${fixed > 0 ? `，已修复 ${fixed} 项` : ''}`
+            : '动作检验完成：未发现问题',
+        )
+        logTaskSuccess('Automation', 'storyboard-audit', { episodeId, jobId, issues, fixed })
+        return
+      }
+      if (view.status === 'failed' || view.status === 'interrupted') {
+        logTaskError('Automation', 'storyboard-audit-not-done', {
+          episodeId,
+          jobId,
+          status: view.status,
+          error: view.error_msg || undefined,
+        })
+        await updateProgress(
+          episodeId,
+          'storyboard_audit',
+          1,
+          1,
+          view.status === 'failed' ? '动作检验失败，已跳过' : '动作检验已中断',
+        )
+        return
+      }
+      await sleep(POLL_INTERVAL_MS)
+    }
+  } catch (error) {
+    if (error instanceof StoppedError) {
+      await interruptStoryboardAuditJob(jobId, '自动化已停止，检验中断')
+    }
+    throw error
+  }
+
+  logTaskError('Automation', 'storyboard-audit-timeout', { episodeId, jobId })
+  await updateProgress(episodeId, 'storyboard_audit', 1, 1, '动作检验超时，已跳过')
+}
+
 /** 分镜 → 视频请求参数：绑定素材作参考图，@名字 替换为 @图片N名字（导出便于单测与 MCP 复用） */
 export async function buildVideoRequest(episodeId: number, sb: typeof schema.storyboards.$inferSelect) {
   const ep = await loadEpisode(episodeId)
@@ -748,6 +841,7 @@ export async function startAutomation(episodeId: number, opts: RunOptions = {}):
       await stepAssetImages(episodeId, opts)
       await stepStoryboards(episodeId, ep.dramaId, opts)
       await stepVideoPrompts(episodeId, ep.dramaId, opts)
+      await stepStoryboardAudit(episodeId, ep.dramaId, opts)
       await stepVideos(episodeId, ep.dramaId)
       await stepDub(episodeId, ep.dramaId)
       await updateProgress(episodeId, 'done')

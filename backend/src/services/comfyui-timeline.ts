@@ -215,7 +215,7 @@ function rewritePictureRefs(prompt: string, nameToPicture: Map<string, number>):
 export function timelineAudioInstruction(mode: VideoAudioMode): string {
   if (mode === 'silent') return 'No audio. Silent video.'
   if (mode === 'ambient') return 'Ambient sound only. No dialogue, no music, no text.'
-  return 'Natural synchronized sound, no text.'
+  return 'Natural synchronized sound. Only text inside <d> tags is spoken; all other text is visual description and must never be voiced. No subtitles, no captions, no on-screen text.'
 }
 
 /** 构建纯数据计划：图片只登记 key/source，上传后由 materialize 填入真实文件名 */
@@ -259,7 +259,13 @@ export async function buildComfyTimelinePlan(
 
     const sanitized = stripLegacyAudioInstruction(String(sb.videoPrompt || '').trim())
     const rewritten = rewritePictureRefs(sanitized, nameToPicture)
-    const prompt = String(await compile(rewritten)).trim()
+    let prompt: string
+    try {
+      prompt = String(await compile(rewritten)).trim()
+    } catch (err: any) {
+      const label = sb.title ? `分镜「${sb.title}」` : `分镜 #${i + 1}`
+      throw new Error(`${label}：${err?.message || String(err)}`)
+    }
     const desired = Math.max(1, Math.round((Number(sb.duration) || 5) * mapping.fps))
     const frameCount = alignTimelineFrames(desired, mapping.frameGrid)
     segments.push({

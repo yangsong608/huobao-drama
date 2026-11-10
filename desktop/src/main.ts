@@ -18,7 +18,7 @@ import { registerMigrationIpc } from './migrate'
 import { registerUpdater, markQuitting } from './updater'
 import { createStartupLog, redactStartupLog, waitForBackend } from './startup'
 import { resolveRuntimeResources } from './runtime-resources'
-import { migrateLegacyAudioInstructions } from './workspace-template'
+import { migrateLegacyAudioInstructions, migrateLegacyBuiltinFiles } from './workspace-template'
 
 // 主进程打 CJS 产物，__dirname 天然可用（import.meta.url 在 CJS 下为 undefined）
 declare const __dirname: string
@@ -31,7 +31,7 @@ let backendBundle = BACKEND_BUNDLE
 let runtimeResourcesDir = ''
 
 /** workspace 模板版本：内置模板更新时递增，触发向用户目录补缺失文件 */
-const TEMPLATE_VERSION = '6'
+const TEMPLATE_VERSION = '11'
 const STORAGE_CONFIG_FILE = 'storage-config.json'
 
 let mainWindow: BrowserWindow | null = null
@@ -173,8 +173,10 @@ function syncWorkspaceTemplate(templateDir: string, destDir: string): string[] {
     fs.cpSync(path.join(templateDir, 'prompts'), path.join(destDir, 'prompts'), { recursive: true, force: true })
     fs.writeFileSync(marker, TEMPLATE_VERSION)
   }
-  // 版本号不变时也要清理存量旧音频指令，否则老用户会继续生成旁白/独白
-  return migrateLegacyAudioInstructions(destDir)
+  // 版本号不变时也要清理存量旧音频指令并升级未编辑过的内置技能
+  const changed = migrateLegacyBuiltinFiles(destDir, templateDir)
+  changed.push(...migrateLegacyAudioInstructions(destDir))
+  return changed
 }
 
 function resolveResourceDir(): string {

@@ -15,6 +15,7 @@ process.env.MYSQL_AUTO_IMPORT = 'false'
 const { db } = await import('../src/db/index.ts')
 const schema = await import('../src/db/schema.ts')
 const svc = await import('../src/services/storyboard-split-jobs.ts')
+const auditSvc = await import('../src/services/storyboard-audit-jobs.ts')
 const { Hono } = await import('hono')
 const agentRoutes = await import('../src/routes/agent.ts')
 
@@ -271,4 +272,89 @@ test('拆分任务路由返回最近任务并校验剧集', async () => {
     body: JSON.stringify({ episode_id: 999999, drama_id: 1, message: 'x' }),
   })
   assert.equal(res.status, 400)
+})
+
+function seedShot(episodeId: number) {
+  db.insert(schema.storyboards).values({
+    episodeId,
+    storyboardNumber: 1,
+    title: '旧镜头',
+    duration: 3,
+    createdAt: ts,
+    updatedAt: ts,
+  }).run()
+}
+
+async function activeAudit(episodeId: number) {
+  const { job } = await auditSvc.createStoryboardAuditJob(
+    { episodeId, dramaId: 1 },
+    { autorun: false },
+  )
+  db.update(schema.storyboardAuditJobs)
+    .set({ status: 'auditing', phase: 'semantic' })
+    .where(eq(schema.storyboardAuditJobs.id, job.id))
+    .run()
+  return job
+}
+
+async function waitAudit(episodeId: number, timeoutMs = 10000): Promise<any> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const view = auditSvc.getLatestStoryboardAuditJob(episodeId)
+    if (view && ['done', 'failed', 'interrupted'].includes(view.status)) return view
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  return auditSvc.getLatestStoryboardAuditJob(episodeId)
+}
+
+test('新建拆分任务会中断该集进行中的动作检验', async () => {
+  const episodeId = newEpisode(makeScript())
+  seedShot(episodeId)
+  const audit = await activeAudit(episodeId)
+
+  const created = await svc.createStoryboardSplitJob(
+    { episodeId, dramaId: 1, message: '重新拆分' },
+    { autorun: false },
+  )
+
+  assert.equal(created.job.status, 'pending')
+  const view = auditSvc.getStoryboardAuditJob(audit.id)!
+  assert.equal(view.status, 'interrupted')
+  assert.equal(view.error_msg, '重新拆分，检验作废')
+})
+
+test('断点续拆同样会中断进行中的动作检验', async () => {
+  const episodeId = newEpisode(makeScript())
+  const created = await svc.createStoryboardSplitJob(
+    { episodeId, dramaId: 1, message: '请拆分本集分镜' },
+    { autorun: false },
+  )
+  seedShot(episodeId)
+  const audit = await activeAudit(episodeId)
+
+  await svc.resumeStoryboardSplitJob(created.job.id, { autorun: false })
+
+  const view = auditSvc.getStoryboardAuditJob(audit.id)!
+  assert.equal(view.status, 'interrupted')
+  assert.equal(view.error_msg, '重新拆分，检验作废')
+})
+
+test('拆分完成后自动创建动作检验任务，沿用拆分模型并标记 split 触发', async () => {
+  const episodeId = newEpisode(makeScript())
+  const created = await svc.createStoryboardSplitJob(
+    { episodeId, dramaId: 1, message: '请拆分本集分镜' },
+    { autorun: false },
+  )
+
+  await svc.runStoryboardSplitJob(created.job.id, makeRunner({}))
+
+  const split = await svc.getStoryboardSplitJob(created.job.id)
+  assert.equal(split!.status, 'done')
+
+  const audit = await waitAudit(episodeId)
+  assert.ok(audit, '拆分完成后应自动创建动作检验')
+  assert.equal(audit.trigger, 'split')
+  assert.equal(audit.status, 'done')
+  assert.equal(audit.model, null)
+  assert.equal(audit.total_shots, liveStoryboards(episodeId).length)
 })

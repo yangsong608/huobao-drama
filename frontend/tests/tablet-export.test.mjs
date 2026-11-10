@@ -157,7 +157,7 @@ const MQ_1180 = '@media (max-width: 1180px)'
 const MQ_744 = '@media (max-width: 744px)'
 
 const BASELINE_VIDEO_TAGS = 12
-const BASELINE_USE_API_IMPORT = "import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, storyboardSplitAPI } from '~/composables/useApi'"
+const BASELINE_USE_API_IMPORT = "import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, storyboardSplitAPI, storyboardAuditAPI } from '~/composables/useApi'"
 
 // ---------------------------------------------------------------------------
 // 1. 审片播放器：原生属性、横屏提示

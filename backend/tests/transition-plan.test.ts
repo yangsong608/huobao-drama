@@ -4,10 +4,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  assertCustomTransitionDuration,
+  audibleCharCount,
   buildCloudTransitionPrompt,
   buildLocalTransitionPrompt,
   buildTransitionBoundaries,
+  customTransitionSourceHash,
   effectiveTransitionDuration,
+  normalizeTransitionKind,
+  normalizeTransitionText,
+  parseTransitionKind,
+  transitionEdgeMode,
   transitionSourceHash,
 } from '../src/services/transition-plan.ts'
 
@@ -103,6 +110,90 @@ test('本地 H3 提示词只保留英文骨架，中文片段直接省略', () =
   assert.match(english, /Previous shot: Two people stand/)
   assert.match(english, /Next shot: They turn toward/)
   assert.match(english, /Continuity: Same wardrobe/)
+})
+
+test('过渡类型：历史空值按 ai，未知值在解析时拒绝', () => {
+  assert.equal(normalizeTransitionKind(undefined), 'ai')
+  assert.equal(normalizeTransitionKind(''), 'ai')
+  assert.equal(normalizeTransitionKind('AI'), 'ai')
+  assert.equal(normalizeTransitionKind('empty'), 'empty')
+  assert.equal(normalizeTransitionKind('scene'), 'scene')
+  assert.equal(normalizeTransitionKind('text'), 'text')
+  assert.equal(normalizeTransitionKind('bogus'), 'ai')
+
+  assert.equal(parseTransitionKind('empty'), 'empty')
+  assert.equal(parseTransitionKind('scene'), 'scene')
+  assert.equal(parseTransitionKind('text'), 'text')
+  assert.equal(parseTransitionKind('ai'), 'ai')
+  assert.throws(() => parseTransitionKind('bogus'), /类型不合法/)
+})
+
+test('文字视频两端硬切，其余过渡保持淡入淡出', () => {
+  assert.equal(transitionEdgeMode('text'), 'cut')
+  assert.equal(transitionEdgeMode('ai'), 'fade')
+  assert.equal(transitionEdgeMode('empty'), 'fade')
+  assert.equal(transitionEdgeMode('scene'), 'fade')
+})
+
+test('文字视频按可发音字符计数并校验标题副标题', () => {
+  assert.equal(audibleCharCount('雨夜，街角！'), 4)
+  assert.equal(audibleCharCount('Hello world!'), 10)
+  assert.equal(audibleCharCount('  ！？…  '), 0)
+
+  assert.deepEqual(normalizeTransitionText({ title: '  三年后  ', subtitle: '   ' }), {
+    title: '三年后', subtitle: null,
+  })
+  assert.deepEqual(normalizeTransitionText({ title: '三年后', subtitle: '雨夜重逢' }), {
+    title: '三年后', subtitle: '雨夜重逢',
+  })
+  assert.throws(() => normalizeTransitionText({ title: '   ' }), /主标题/)
+  assert.throws(() => normalizeTransitionText({ title: '字'.repeat(21) }), /20/)
+  assert.throws(() => normalizeTransitionText({ title: '标题', subtitle: '字'.repeat(41) }), /40/)
+})
+
+test('自定义过渡时长只允许 2-5 秒', () => {
+  assert.equal(assertCustomTransitionDuration(2), 2)
+  assert.equal(assertCustomTransitionDuration('3.5'), 3.5)
+  assert.equal(assertCustomTransitionDuration(5), 5)
+  assert.throws(() => assertCustomTransitionDuration(1.9), /2-5/)
+  assert.throws(() => assertCustomTransitionDuration(6), /2-5/)
+  assert.throws(() => assertCustomTransitionDuration('abc'), /2-5/)
+})
+
+test('自定义过渡使用独立指纹，不依赖相邻镜头视频', () => {
+  const base = {
+    kind: 'empty' as const,
+    prompt: '空无一人的雨夜街角，路灯下积水泛着微光。',
+    duration: 3,
+    audioMode: 'silent',
+  }
+  const hash = customTransitionSourceHash(base)
+  assert.match(hash, /^[0-9a-f]{64}$/)
+  assert.equal(customTransitionSourceHash({ ...base }), hash)
+  assert.notEqual(customTransitionSourceHash({ ...base, prompt: '另一段空镜描述' }), hash)
+  assert.notEqual(customTransitionSourceHash({ ...base, duration: 4 }), hash)
+  assert.notEqual(customTransitionSourceHash({ ...base, audioMode: 'ambient' }), hash)
+
+  const text = customTransitionSourceHash({
+    kind: 'text', textContent: '三年后', textSubtitle: '雨夜重逢', duration: 3, audioMode: 'silent',
+  })
+  assert.notEqual(customTransitionSourceHash({
+    kind: 'text', textContent: '三年后', textSubtitle: null, duration: 3, audioMode: 'silent',
+  }), text)
+
+  const scene = customTransitionSourceHash({
+    kind: 'scene', prompt: '镜头缓慢推近', sceneId: 8, sceneImageUrl: 'static/scenes/a.jpg',
+    duration: 3, audioMode: 'ambient',
+  })
+  assert.notEqual(customTransitionSourceHash({
+    kind: 'scene', prompt: '镜头缓慢推近', sceneId: 8, sceneImageUrl: 'static/scenes/b.jpg',
+    duration: 3, audioMode: 'ambient',
+  }), scene)
+  assert.notEqual(customTransitionSourceHash({
+    kind: 'scene', prompt: '镜头缓慢推近', sceneId: 9, sceneImageUrl: 'static/scenes/a.jpg',
+    duration: 3, audioMode: 'ambient',
+  }), scene)
+  assert.throws(() => customTransitionSourceHash({ ...base, kind: 'ai' as never }), /类型不合法/)
 })
 
 test('来源指纹随任一来源信息变化', () => {

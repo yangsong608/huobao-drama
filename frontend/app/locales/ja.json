@@ -361,6 +361,7 @@
         "assetImages": "素材画像",
         "storyboards": "絵コンテ分割",
         "videoPrompts": "動画プロンプト",
+        "storyboardAudit": "アクション検査",
         "voices": "声の設定",
         "videos": "動画生成",
         "dub": "吹き替え"
@@ -389,7 +390,8 @@
       "rules": "フロー規則",
       "breakdown": "絵コンテ分割",
       "queue": "タスクキュー",
-      "novel": "小説"
+      "novel": "小説",
+      "audit": "絵コンテ検査"
     },
     "novel": {
       "title": "小説生成",
@@ -650,7 +652,8 @@
       "storyboardBreaker": "分镜分解",
       "promptGenerator": "プロンプト生成",
       "langFallback": "中国語にフォールバック",
-      "followContentLang": "編集言語：{lang}（「一般 → AI コンテンツ言語」で切替）"
+      "followContentLang": "編集言語：{lang}（「一般 → AI コンテンツ言語」で切替）",
+      "storyboardAuditor": "絵コンテ動作検査"
     },
     "skills": {
       "agentList": "Agent 一覧",
@@ -898,6 +901,54 @@
       "analyzing": "分析中…",
       "done": "スタイル「{name}」を生成しました",
       "failed": "スタイル分析に失敗しました"
+    },
+    "audit": {
+      "title": "絵コンテ検査",
+      "subtitle": "動作検査の5項目、しきい値、セマンティックウィンドウ、自動修正ポリシーを設定します。保存後は新しい検査タスクに適用され、完了済みの結果は変わりません。",
+      "checks": "検査項目",
+      "checksHint": "無効にした項目はルール／セマンティック問題を生成しません。アセット検査は常に手動対応のままで、自動修正されません。",
+      "thresholds": "判定しきい値",
+      "thresholdHint": "セリフ容量は「文字/秒 + 1行ごとの呼吸」で見積もります。無音しきい値は秒単位です。",
+      "semantic": "セマンティック検査",
+      "semanticHint": "検査エージェントをウィンドウ単位で呼び出します。ウィンドウが大きいほど文脈は増えますが、1回の呼び出しは遅くなります。",
+      "autoRepair": "自動修正",
+      "autoRepairHint": "サーバー側ホワイトリストのアクションのみ実行します。再検査でエラーが増えた場合は修正バッチ全体をロールバックします。",
+      "enable": "有効化",
+      "check": {
+        "shot": "カメラ / セリフ / 動作 / 表情 / ナレーション",
+        "continuity": "前後カットの連続性と不自然な動作",
+        "silent": "長時間の無セリフ・空カット",
+        "lineDuration": "セリフ時間と分割提案",
+        "assets": "アセットの正確性と完全性"
+      },
+      "threshold": {
+        "charsPerSecond": "セリフ速度（文字/秒）",
+        "lineBreathSeconds": "1行の呼吸（秒）",
+        "lineRequiredMaxSeconds": "1行の最長（秒）",
+        "silentCharacterWarnSeconds": "キャラ無音の警告（秒）",
+        "silentCharacterErrorSeconds": "キャラ無音のエラー（秒）",
+        "emptyShotWarnSeconds": "空カット警告（秒）",
+        "promptSegmentMaxChars": "3秒区間の最大文字数"
+      },
+      "semanticLabel": {
+        "windowSize": "ウィンドウのカット数",
+        "windowStep": "ウィンドウのステップ",
+        "maxWindows": "最大ウィンドウ数"
+      },
+      "repairLabel": {
+        "semanticFix": "セマンティック問題の修正を許可",
+        "autoInsertTransition": "区切りにトランジションカットを自動挿入",
+        "maxInsertedTransitions": "挿入するトランジションの上限",
+        "maxActions": "タスクあたりの最大アクション数",
+        "maxActionsPerShot": "カットあたりの最大アクション数"
+      },
+      "promptTitle": "検査プロンプトと Skill",
+      "promptDesc": "動作検査は storyboard_auditor エージェントを使用します。検査範囲はここで設定し、システムプロンプトと検査 Skill は Agent 設定で編集します。",
+      "promptOpen": "プロンプト管理を開く",
+      "save": "ポリシーを保存",
+      "saving": "保存中…",
+      "saved": "検査ポリシーを保存しました",
+      "loadFailed": "検査ポリシーの読み込みに失敗しました。別のタブに切り替えて再試行してください。"
     }
   },
   "episode": {
@@ -1160,14 +1211,14 @@
       "continuity": "連続性",
       "continuityPlaceholder": "前カットの終わりの動作・視線・立ち位置・環境音のつながり",
       "breakingElapsed": "分鏡を分解中…{s} 秒経過。生成済みカットは自動更新されます",
-    "splitProgress": "分割分解中：{done}/{total} 段 · {shots} カット保存済み",
-    "splitFailed": "{chunk}/{total} 段目の分解に失敗：{error}",
-    "splitDone": "分割分解が完了：全 {n} カット",
-    "splitResumed": "残りの段の分解を再開しました",
-    "splitAlreadyRunning": "分解タスクが実行中です。進捗を表示します",
-    "resumeSplit": "残りの段の分解を続行",
-    "splitStartFailed": "分割分解を開始できませんでした。再試行してください",
-    "splitActionFailed": "分解の続行に失敗しました。後でもう一度お試しください",
+      "splitProgress": "分割分解中：{done}/{total} 段 · {shots} カット保存済み",
+      "splitFailed": "{chunk}/{total} 段目の分解に失敗：{error}",
+      "splitDone": "分割分解が完了：全 {n} カット",
+      "splitResumed": "残りの段の分解を再開しました",
+      "splitAlreadyRunning": "分解タスクが実行中です。進捗を表示します",
+      "resumeSplit": "残りの段の分解を続行",
+      "splitStartFailed": "分割分解を開始できませんでした。再試行してください",
+      "splitActionFailed": "分解の続行に失敗しました。後でもう一度お試しください",
       "videoPromptSection": "動画プロンプト",
       "regenPrompt": "再生成",
       "aiGenerate": "AI で生成",
@@ -1367,10 +1418,119 @@
       "boundRefs": "绑定参照画像",
       "noBoundRefs": "绑定された素材なし（中央の「参照素材」で绑定）"
     },
+    "audit": {
+      "button": "アクション検査",
+      "rerun": "再検査",
+      "runningBlocked": "アクション検査中は分镜を変更できません",
+      "loadFailed": "アクション検査状態の読み込みに失敗しました",
+      "cleanTitle": "5 項目の検査で問題は見つかりませんでした",
+      "issuesTitle": "{n} 件の問題",
+      "undo": "今回の修正を取り消す",
+      "undoDone": "{n} 個の分镜を復元しました",
+      "runDone": "アクション検査が完了しました。自動修正 {n} 件",
+      "statusLabel": "検査状態",
+      "trigger": {
+        "manual": "手動検査",
+        "auto": "分割後の自動検査",
+        "pipeline": "全自動フロー"
+      },
+      "shotStatus": {
+        "pending": "検査待ち",
+        "running": "検査中",
+        "done": "完了",
+        "failed": "検査失敗",
+        "ruleOnly": "完了（ルールのみ）",
+        "stale": "検査後に変更"
+      },
+      "check": {
+        "1": "ショット記述",
+        "2": "前後連続性",
+        "3": "セリフなし空鏡",
+        "4": "セリフ尺",
+        "5": "素材"
+      },
+      "filter": {
+        "all": "すべて",
+        "error": "エラー",
+        "warning": "警告",
+        "info": "情報",
+        "manual": "手動対応",
+        "fixed": "修正済み"
+      },
+      "severity": {
+        "error": "エラー",
+        "warning": "警告",
+        "info": "情報"
+      },
+      "panel": {
+        "title": "アクション検査",
+        "running": "検査中です。しばらくお待ちください",
+        "progress": "セマンティック {done}/{total}",
+        "model": "モデル",
+        "trigger": "トリガー",
+        "time": "時刻",
+        "showAllShots": "全ショットを表示",
+        "locateShot": "ショットへ移動",
+        "repairLog": "修正履歴",
+        "repairEmpty": "修正履歴はありません",
+        "undoTitle": "今回の修正を取り消す",
+        "undoConfirm": "今回の自動修正前の分镜フィールドと尺に戻します。その後の手動編集は上書きされません。続行しますか？",
+        "close": "閉じる",
+        "jobError": "検査に失敗しました：{message}",
+        "stale": "検査後に分镜が変更されました。再検査を推奨します",
+        "shotOnly": "ショット {n} のみ",
+        "noIssuesForShot": "このショットに未対応の問題はありません"
+      },
+      "empty": {
+        "none": "検査記録はありません",
+        "clean": "5 項目の検査で問題は見つかりませんでした",
+        "ruleOnly": "テキストモデルが未設定のため、ルール検査のみ完了しました",
+        "stale": "検査後に分镜が変更されました。再検査を推奨します",
+        "semanticDisabled": "セマンティック検査は設定で無効のため、ルール検査のみ実行しました",
+        "semanticPartial": "一部のセマンティックウィンドウが失敗したため、結果が不完全な可能性があります",
+        "semanticFailed": "すべてのセマンティックウィンドウが失敗し、ルール検査のみ完了しました",
+        "semanticTruncated": "セマンティックウィンドウが上限を超えて切り捨てられ、一部のショットのみ検査しました"
+      },
+      "transition": {
+        "title": "トランジションショットを作成",
+        "kindName": "種類",
+        "kindLabel": "種類",
+        "duration": "尺",
+        "prompt": "プロンプト",
+        "promptPlaceholder": "トランジションショットの画面、カメラワーク、光のつながりを記述…",
+        "scene": "シーン",
+        "scenePlaceholder": "シーンを選択（空鏡の背景に使用）",
+        "sceneRequired": "シーンを選択してください",
+        "textContent": "メインタイトル",
+        "textSubtitle": "サブタイトル",
+        "textHint": "テキスト動画はローカルでレンダリングし、動画モデルを消費しません。タイトルは最大 20 文字、サブタイトルは最大 40 文字。",
+        "needPrompt": "プロンプトを入力してください",
+        "needText": "タイトルを入力してください",
+        "needTitle": "タイトルを入力してください",
+        "submitted": "トランジションショットを送信しました",
+        "failed": "トランジションショットの作成に失敗しました",
+        "kind": {
+          "ai": "AI トランジション",
+          "empty": "空鏡",
+          "scene": "シーン",
+          "text": "テキスト動画"
+        },
+        "submit": "作成して生成",
+        "submitting": "送信中…",
+        "cancel": "キャンセル",
+        "boundary": "断点 {pair}",
+        "noBoundary": "利用できる隣接断点がありません",
+        "degraded": "シーン画像がないため空鏡として生成します",
+        "editCustom": "種類を変更",
+        "badge": "トランジション"
+      },
+      "insertedDone": "トランジションショットを {n} 件自動挿入し、番号を振り直しました"
+    },
     "tasks": {
       "title": "生成タスク一覧",
       "meta": "作成日時の降順 · {n} 件のタスク",
       "centerTitle": "タスクセンター",
+      "runStoryboardAudit": "エピソード全体のアクション検査",
       "metaCenter": "全 {n} 件 · 実行中 {active}",
       "tabAll": "すべて",
       "tabTasks": "生成",
@@ -1514,6 +1674,9 @@
         "loadFailed": "トランジション状態の読み込みに失敗しました",
         "actionFailed": "トランジション操作に失敗しました",
         "partialFailed": "{n} 件のトランジション送信に失敗しました：{message}",
+        "addCustom": "トランジションショットを作成",
+        "degraded": "シーン画像がないため空鏡として生成します",
+        "editCustom": "種類を変更",
         "prompt": {
           "toggle": "プロンプト",
           "label": "トランジション動画プロンプト",

@@ -1200,6 +1200,7 @@ const AUTO_STAGE_I18N = {
   voices: 'voices',
   asset_images: 'assetImages',
   storyboards: 'storyboards',
+  storyboard_audit: 'storyboardAudit',
   video_prompts: 'videoPrompts',
   videos: 'videos',
   dub: 'dub',

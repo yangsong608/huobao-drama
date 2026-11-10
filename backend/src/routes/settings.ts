@@ -14,6 +14,8 @@ import {
   NovelSettingsValidationError,
   getMediaSettings,
   setMediaSettings,
+  getStoryboardAuditPolicy,
+  setStoryboardAuditPolicy,
   CONTENT_LANGUAGES,
   type ContentLanguage,
 } from '../services/app-settings.js'
@@ -65,6 +67,20 @@ app.put('/dubbing', async (c) => {
     return badRequest(c, '请求体必须是对象')
   }
   return success(c, { defaults: await setDubbingDefaults(body) })
+})
+
+// GET /storyboard-audit — 分镜动作检验策略（检查开关/阈值/语义窗口/自动修复）
+app.get('/storyboard-audit', async (c) => {
+  return success(c, { policy: getStoryboardAuditPolicy() })
+})
+
+// PUT /storyboard-audit — 部分更新策略，非法值自动钳制
+app.put('/storyboard-audit', async (c) => {
+  const body = await c.req.json().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return badRequest(c, '请求体必须是对象')
+  }
+  return success(c, { policy: setStoryboardAuditPolicy(body) })
 })
 
 async function mediaPayload() {
