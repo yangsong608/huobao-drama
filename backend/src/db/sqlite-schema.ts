@@ -422,6 +422,7 @@ export const sqliteSchemaStatements = [
     scene_id INTEGER,
     text_content TEXT,
     text_subtitle TEXT,
+    style TEXT,
     edge_mode TEXT NOT NULL DEFAULT 'fade',
     from_storyboard_id INTEGER NOT NULL,
     to_storyboard_id INTEGER NOT NULL,
@@ -1449,6 +1450,8 @@ export function initSqliteSchema(sqlite: Database.Database) {
   if (!transitionColumns.has('scene_id')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN scene_id INTEGER')
   if (!transitionColumns.has('text_content')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN text_content TEXT')
   if (!transitionColumns.has('text_subtitle')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN text_subtitle TEXT')
+  // 本地转场样式：仅 fade 类型使用；历史行留空，读取时回落交叉淡化。
+  if (!transitionColumns.has('style')) sqlite.exec('ALTER TABLE video_transitions ADD COLUMN style TEXT')
   if (!transitionColumns.has('edge_mode')) sqlite.exec("ALTER TABLE video_transitions ADD COLUMN edge_mode TEXT NOT NULL DEFAULT 'fade'")
   sqlite.exec("UPDATE video_transitions SET kind = 'ai' WHERE kind IS NULL OR kind = ''")
   sqlite.exec("UPDATE video_transitions SET edge_mode = 'fade' WHERE edge_mode IS NULL OR edge_mode = ''")

@@ -11,6 +11,8 @@ import { getAbsolutePath } from '../utils/storage.js'
 import { ffmpeg } from '../utils/ffmpeg.js'
 import {
   customTransitionSourceHash,
+  fadeTransitionSourceHash,
+  normalizeFadeStyle,
   normalizeTransitionKind,
   transitionEdgeMode,
   transitionSourceHash,
@@ -221,19 +223,36 @@ export async function loadTransitionCandidates(
     // 否则损坏文件会被当成可用片段插进合片序列，导致整次合片失败。
     const probed = exists && row.videoUrl ? await probeDurationSeconds(row.videoUrl) : null
     const kind = normalizeTransitionKind(row.kind)
-    // 空镜/场景/文字只看自身内容；相邻镜头重生成不应让它们过期
-    const stale = kind === 'ai'
-      ? row.sourceHash !== boundaryHash(previous, current)
-      : row.sourceHash !== customTransitionSourceHash({
-          kind,
-          prompt: row.prompt,
-          textContent: row.textContent,
-          textSubtitle: row.textSubtitle,
-          sceneId: row.sceneId,
-          sceneImageUrl: row.sceneId ? sceneImages.get(row.sceneId) || '' : '',
-          duration: Number(row.durationRequested) || 0,
-          audioMode: row.audioMode,
-        })
+    // 空镜/场景/文字只看自身内容；相邻镜头重生成不应让它们过期。
+    // 本地转场由相邻镜头片段渲染而成，必须随两端视频变化而过期。
+    let stale: boolean
+    if (kind === 'ai') {
+      stale = row.sourceHash !== boundaryHash(previous, current)
+    } else if (kind === 'fade') {
+      const from = statFor(previous.url)
+      const to = statFor(current.url)
+      stale = row.sourceHash !== fadeTransitionSourceHash({
+        fromVideoUrl: previous.url,
+        toVideoUrl: current.url,
+        fromSize: from.size,
+        fromMtimeMs: from.mtimeMs,
+        toSize: to.size,
+        toMtimeMs: to.mtimeMs,
+        style: normalizeFadeStyle(row.style),
+        duration: Number(row.durationRequested) || 0,
+      })
+    } else {
+      stale = row.sourceHash !== customTransitionSourceHash({
+        kind,
+        prompt: row.prompt,
+        textContent: row.textContent,
+        textSubtitle: row.textSubtitle,
+        sceneId: row.sceneId,
+        sceneImageUrl: row.sceneId ? sceneImages.get(row.sceneId) || '' : '',
+        duration: Number(row.durationRequested) || 0,
+        audioMode: row.audioMode,
+      })
+    }
     candidates.push({
       id: row.id,
       fromStoryboardId: row.fromStoryboardId,

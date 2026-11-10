@@ -209,7 +209,7 @@ app.post('/episodes/:id/transitions/prepare', async (c) => {
   }
 })
 
-// POST /episodes/:id/transitions/custom — 新建/切换自定义过渡（空镜/场景/文字）
+// POST /episodes/:id/transitions/custom — 新建/切换自定义过渡（转场/空镜/场景/文字）
 app.post('/episodes/:id/transitions/custom', async (c) => {
   const episodeId = Number(c.req.param('id'))
   if (!Number.isInteger(episodeId) || episodeId <= 0) return badRequest(c, '剧集不存在')
@@ -242,11 +242,12 @@ app.post('/episodes/:id/transitions/custom', async (c) => {
       episodeId,
       fromStoryboardId,
       toStoryboardId,
-      kind: kind as 'empty' | 'scene' | 'text',
+      kind: kind as 'empty' | 'scene' | 'text' | 'fade',
       prompt: typeof body?.prompt === 'string' ? body.prompt : undefined,
       sceneId,
       textContent: typeof body?.text_content === 'string' ? body.text_content : undefined,
       textSubtitle: typeof body?.text_subtitle === 'string' ? body.text_subtitle : undefined,
+      style: typeof body?.style === 'string' ? body.style : undefined,
       duration,
     })
     return success(c, toSnakeCase(view))

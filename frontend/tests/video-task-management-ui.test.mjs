@@ -26,6 +26,12 @@ test('顶部栏拆分方式下拉随运行/保存禁用并可保存到剧集', (
   assert.match(episode, /episode\.sb\.methodSaveFailed/)
 })
 
+test('拆分方式标签组不换行，下拉不再继承 input 的 100% 宽度', () => {
+  assert.match(episode, /\.video-method-pick \{[^}]*white-space: nowrap;/)
+  assert.match(episode, /\.video-method-pick \.video-method-select \{[^}]*width: auto;[^}]*max-width: 200px;[^}]*flex: 0 0 auto;/)
+  assert.match(episode, /\.video-method-hint \{[^}]*white-space: nowrap;/)
+})
+
 test('重新拆分与空态提示使用当前方案名', () => {
   assert.match(episode, /window\.confirm\(t\('episode\.sb\.rebreakConfirm'/)
   assert.match(episode, /t\('episode\.sb\.methodCurrent'/)

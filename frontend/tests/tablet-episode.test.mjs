@@ -163,6 +163,14 @@ test('断点：1180/1080/900/744 齐备，且无 860/760 与 min-width 媒体查
   }
 })
 
+test('1180 顶栏分行：窄桌面与平板横屏不再把主区挤成 0 宽、按钮裁出屏幕', () => {
+  const wide = mediaText(read(EPISODE), MQ_1180)
+  assert.match(wide, /\.studio-topbar \{[^}]*flex-direction: column;[^}]*align-items: stretch;/, '顶栏应改为纵向分行并撑满宽度')
+  assert.match(wide, /\.studio-topbar-side \{[^}]*flex-wrap: wrap;/, '顶栏右区应允许换行')
+  assert.match(wide, /\.studio-model-picks \{[^}]*flex-wrap: wrap;/, '模型选择器应允许换行，避免整行溢出')
+  assert.match(wide, /\.studio-actions \{[^}]*flex-wrap: wrap;/, '操作按钮应允许换行')
+})
+
 test('1081–1180 侧栏 180px；1080 横向步骤条且隐藏折叠/进度，唯一 pipeline', () => {
   const src = read(EPISODE)
   const wide = mediaText(src, MQ_1180)
@@ -306,7 +314,7 @@ test('触控镜头行：≤1180 粗指针 96×54、44px 操作、隐藏删除', 
   assert.ok(src.includes(COARSE_QUERY), '既有粗指针块必须保留')
 
   const coarse = mediaText(src, COARSE_1180)
-  assert.match(coarse, /\.video-task-row \{[^}]*min-height: 48px;[^}]*grid-template-columns: 96px minmax\(0, 1fr\) auto auto;/)
+  assert.match(coarse, /\.video-task-row \{[^}]*min-height: 48px;[^}]*grid-template-columns: 96px minmax\(0, 1fr\) auto;/)
   assert.match(coarse, /\.video-task-preview \{[^}]*width: 96px;[^}]*height: 54px;[^}]*aspect-ratio: auto;/)
   assert.match(coarse, /\.video-task-action,\s*\.video-task-more \{[^}]*min-width: 44px;[^}]*min-height: 44px;/)
   assert.match(coarse, /\.video-task-delete \{ display: none; \}/)

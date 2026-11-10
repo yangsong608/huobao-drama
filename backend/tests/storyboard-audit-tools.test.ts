@@ -146,6 +146,34 @@ function auditContext(episodeId: number, jobId: number, windowIndex = 1) {
   return rc
 }
 
+function pairContext(episodeId: number, jobId: number, pairKey: string, windowIndex = 1) {
+  const rc = auditContext(episodeId, jobId, windowIndex)
+  rc.set('auditPairKey', pairKey)
+  return rc
+}
+
+function pairRecord(
+  from: { id: number; storyboardNumber: number },
+  to: { id: number; storyboardNumber: number },
+  overrides: Record<string, any> = {},
+) {
+  return {
+    key: `P${from.id}-${to.id}`,
+    fromId: from.id,
+    toId: to.id,
+    fromNumber: from.storyboardNumber,
+    toNumber: to.storyboardNumber,
+    crossCard: false,
+    bridgeNumbers: [],
+    status: 'running',
+    attempts: 1,
+    error: null,
+    startedAt: TS,
+    finishedAt: null,
+    ...overrides,
+  }
+}
+
 function repairContext(episodeId: number, jobId: number) {
   const rc = new RequestContext()
   rc.set('episodeId', episodeId)
@@ -155,7 +183,11 @@ function repairContext(episodeId: number, jobId: number) {
   return rc
 }
 
-function prepareAuditJob(jobId: number, shot: { id: number; storyboardNumber: number }) {
+function prepareAuditJob(
+  jobId: number,
+  shot: { id: number; storyboardNumber: number },
+  pairs: Array<Record<string, any>> = [],
+) {
   const windows = [{
     index: 1,
     fromNumber: shot.storyboardNumber,
@@ -169,6 +201,7 @@ function prepareAuditJob(jobId: number, shot: { id: number; storyboardNumber: nu
     fingerprint: 'fp',
     startedAt: TS,
     finishedAt: null,
+    pairs,
   }]
   db.update(schema.storyboardAuditJobs).set({
     status: 'auditing',
@@ -195,7 +228,7 @@ function shotRow(shotId: number) {
   return db.select().from(schema.storyboards).where(eq(schema.storyboards.id, shotId)).get()!
 }
 
-test('聊天入口直接调用：两个工具都拒绝执行并提示仅可通过检验任务触发', async () => {
+test('聊天入口直接调用：三个工具都拒绝执行并提示仅可通过检验任务触发', async () => {
   seedAssets()
   const episodeId = createEpisode()
   const shot = createShot(episodeId, 1)
@@ -206,14 +239,20 @@ test('聊天入口直接调用：两个工具都拒绝执行并提示仅可通�
 
   const report = await (storyboardAuditTools.reportStoryboardIssues as any).execute({
     issues: [{
-      check: 2,
+      check: 1,
       severity: 'warning',
-      code: 'semantic_continuity_break',
+      code: 'semantic_shot_description',
       storyboardId: shot.id,
       message: '动作不连贯',
     }],
   }, { requestContext: noJob })
   assert.match(report.error, /动作检验仅可通过检验任务触发/)
+
+  const verdict = await (storyboardAuditTools.reportContinuityVerdict as any).execute({
+    pairKey: 'P1-2',
+    verdict: 'connected',
+  }, { requestContext: noJob })
+  assert.match(verdict.error, /动作检验仅可通过检验任务触发/)
 
   const repair = await (storyboardAuditTools.applyStoryboardRepair as any).execute({
     actions: [{ issueId: 'ISSUE-1', storyboardId: shot.id, action: 'fill_camera_fields', shotType: '近景' }],
@@ -223,7 +262,7 @@ test('聊天入口直接调用：两个工具都拒绝执行并提示仅可通�
   assert.ok(jobId > 0)
 })
 
-test('检验阶段：报告窗口内合法问题被接收，越窗与非法问题码被拒绝', async () => {
+test('检验阶段：窗口只接收检查 1/5，检查 2 必须走成对结论工具', async () => {
   seedAssets()
   const episodeId = createEpisode()
   const shot = createShot(episodeId, 1)
@@ -232,18 +271,20 @@ test('检验阶段：报告窗口内合法问题被接收，越窗与非法问�
   prepareAuditJob(jobId, shot)
   const rc = auditContext(episodeId, jobId)
 
+  const withCheck2 = await (storyboardAuditTools.reportStoryboardIssues as any).execute({
+    issues: [{
+      check: 2,
+      severity: 'warning',
+      code: 'semantic_continuity_break',
+      storyboardId: shot.id,
+      message: '上一镜尾动作没有承接',
+    }],
+  }, { requestContext: rc })
+  assert.equal(withCheck2.error, true)
+  assert.match(withCheck2.message, /issues\.0\.check: Invalid input/)
+
   const result = await (storyboardAuditTools.reportStoryboardIssues as any).execute({
     issues: [
-      {
-        check: 2,
-        severity: 'warning',
-        code: 'semantic_continuity_break',
-        storyboardId: shot.id,
-        message: '上一镜尾动作没有承接',
-        evidence: '上一镜结尾 @甲起身，本镜仍坐着',
-        suggestion: '补一句起身动作的承接',
-        suggestedTransition: 'empty',
-      },
       {
         check: 1,
         severity: 'warning',
@@ -258,10 +299,17 @@ test('检验阶段：报告窗口内合法问题被接收，越窗与非法问�
         storyboardId: shot.id,
         message: '非法问题码',
       },
+      {
+        check: 1,
+        severity: 'warning',
+        code: 'semantic_shot_description',
+        storyboardId: shot.id,
+        message: '画面描述缺少动作结果',
+      },
     ],
   }, { requestContext: rc })
 
-  assert.equal(result.accepted, 1)
+  assert.equal(result.accepted, 1, JSON.stringify(result))
   assert.equal(result.rejected.length, 2)
   assert.match(result.rejected[0], /不在窗口/)
   assert.match(result.rejected[1], /未登记的问题码/)
@@ -279,12 +327,12 @@ test('检验阶段：问题可携带相关分镜编号并持久化', async () =>
     runner: async (input) => {
       result = await (storyboardAuditTools.reportStoryboardIssues as any).execute({
         issues: [{
-          check: 2,
+          check: 1,
           severity: 'warning',
-          code: 'semantic_continuity_break',
+          code: 'semantic_shot_description',
           storyboardId: shot.id,
           relatedStoryboardIds: [other.id],
-          message: '上一镜动作没有承接',
+          message: '画面描述缺少动作结果',
         }],
       }, { requestContext: auditContext(episodeId, jobId, input.window.index) })
     },
@@ -292,8 +340,65 @@ test('检验阶段：问题可携带相关分镜编号并持久化', async () =>
 
   assert.equal(result.accepted, 1)
   const view = jobs.getStoryboardAuditJob(jobId)!
-  const stored = view.issues.find((item) => item.code === 'semantic_continuity_break')
+  const stored = view.issues.find((item) => item.code === 'semantic_shot_description')
   assert.deepEqual(stored?.relatedStoryboardIds, [other.id])
+})
+
+test('成对判定：缺少配对键、配对键不一致与阶段不符都被拒绝', async () => {
+  seedAssets()
+  const episodeId = createEpisode()
+  const from = createShot(episodeId, 1)
+  const to = createShot(episodeId, 2)
+  const pair = pairRecord(from, to)
+  const jobId = await createJob(episodeId)
+  prepareAuditJob(jobId, from, [pair], [to.id])
+
+  const noPairKey = await (storyboardAuditTools.reportContinuityVerdict as any).execute({
+    pairKey: pair.key,
+    verdict: 'connected',
+  }, { requestContext: auditContext(episodeId, jobId) })
+  assert.match(noPairKey.error, /缺少配对键/)
+
+  const wrongKey = await (storyboardAuditTools.reportContinuityVerdict as any).execute({
+    pairKey: 'P999-1000',
+    verdict: 'connected',
+  }, { requestContext: pairContext(episodeId, jobId, pair.key) })
+  assert.match(wrongKey.error, /配对键不匹配/)
+
+  const repair = await (storyboardAuditTools.reportContinuityVerdict as any).execute({
+    pairKey: pair.key,
+    verdict: 'connected',
+  }, { requestContext: repairContext(episodeId, jobId) })
+  assert.match(repair.error, /当前不在检验阶段/)
+})
+
+test('成对判定：connected 与 broken 结论被接收，broken 可携带过渡建议', async () => {
+  seedAssets()
+  const episodeId = createEpisode()
+  const from = createShot(episodeId, 1)
+  const to = createShot(episodeId, 2)
+  const pair = pairRecord(from, to)
+  const jobId = await createJob(episodeId)
+  prepareAuditJob(jobId, from, [pair], [to.id])
+  const rc = pairContext(episodeId, jobId, pair.key)
+
+  const connected = await (storyboardAuditTools.reportContinuityVerdict as any).execute({
+    pairKey: pair.key,
+    verdict: 'connected',
+  }, { requestContext: rc })
+  assert.equal(connected.accepted, true)
+  assert.equal(connected.broken, false)
+
+  const broken = await (storyboardAuditTools.reportContinuityVerdict as any).execute({
+    pairKey: pair.key,
+    verdict: 'broken',
+    severity: 'error',
+    evidence: '@甲起身离开，下一镜仍坐在原处',
+    suggestion: '补一个起身离开的过渡镜头',
+    suggestedTransition: 'scene',
+  }, { requestContext: rc })
+  assert.equal(broken.accepted, true)
+  assert.equal(broken.broken, true)
 })
 
 test('修复阶段：合法动作被应用；阶段不符直接拒绝', async () => {
@@ -368,12 +473,12 @@ test('语义上报：数据库 ID 与镜头号不一致时，镜头号或误填�
       result = await (storyboardAuditTools.reportStoryboardIssues as any).execute({
         issues: [
           {
-            check: 2,
+            check: 1,
             severity: 'warning',
-            code: 'semantic_continuity_break',
+            code: 'semantic_shot_description',
             storyboardNumber: first.storyboardNumber,
             relatedStoryboardNumbers: [second.storyboardNumber],
-            message: '上一镜尾动作没有承接',
+            message: '画面描述缺少动作结果',
           },
           {
             check: 1,
@@ -389,11 +494,11 @@ test('语义上报：数据库 ID 与镜头号不一致时，镜头号或误填�
 
   assert.equal(result.accepted, 2)
   const view = jobs.getStoryboardAuditJob(jobId)!
-  const continuity = view.issues.find((item) => item.code === 'semantic_continuity_break')
-  assert.equal(continuity?.storyboardId, first.id)
-  assert.deepEqual(continuity?.relatedStoryboardIds, [second.id])
-  const description = view.issues.find((item) => item.code === 'semantic_shot_description')
-  assert.equal(description?.storyboardId, second.id)
+  const stored = view.issues.filter((item) => item.code === 'semantic_shot_description')
+  const firstIssue = stored.find((item) => item.storyboardId === first.id)
+  assert.deepEqual(firstIssue?.relatedStoryboardIds, [second.id])
+  const secondIssue = stored.find((item) => item.storyboardId === second.id)
+  assert.ok(secondIssue)
 })
 
 test('修复动作：只给 issueId 时按问题所属分镜执行', async () => {

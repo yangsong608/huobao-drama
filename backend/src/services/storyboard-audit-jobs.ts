@@ -29,10 +29,12 @@ import {
   type AuditIssueDraft,
 } from './storyboard-audit-rules.js'
 import {
+  buildAuditContinuityPrompt,
   buildAuditEpisodeContext,
   buildAuditRepairPrompt,
   buildAuditWindowPrompt,
   loadAuditFingerprintSnapshot,
+  type AuditContinuityPair,
   type AuditEpisodeContext,
   type AuditFingerprintSnapshot,
   type AuditWindowContext,
@@ -58,16 +60,18 @@ export type StoryboardAuditSemanticStatus =
   | 'disabled'
   | 'failed'
   | 'truncated'
-export type StoryboardAuditRepairStatus = 'none' | 'running' | 'done' | 'skipped' | 'rolled_back' | 'failed'
+export type StoryboardAuditRepairStatus = 'none' | 'running' | 'done' | 'partial' | 'skipped' | 'rolled_back' | 'failed'
 export type StoryboardAuditShotStatus = 'pending' | 'running' | 'done' | 'failed'
 export type StoryboardAuditTrigger = 'manual' | 'split' | 'automation'
 export type AuditWindowStatus = 'pending' | 'running' | 'done' | 'failed'
+export type AuditPairStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped'
 
 export interface AuditShotStatusEntry {
   status: StoryboardAuditShotStatus
   ruleDone: boolean
   semanticDone: boolean
   ruleOnly: boolean
+  transition: boolean
   errorCount: number
   warningCount: number
   infoCount: number
@@ -76,6 +80,21 @@ export interface AuditShotStatusEntry {
 
 export interface AuditShotStatusView extends AuditShotStatusEntry {
   stale: boolean
+}
+
+export interface AuditPairRecord {
+  key: string
+  fromId: number
+  toId: number
+  fromNumber: number
+  toNumber: number
+  crossCard: boolean
+  bridgeNumbers: number[]
+  status: AuditPairStatus
+  attempts: number
+  error: string | null
+  startedAt: string | null
+  finishedAt: string | null
 }
 
 export interface AuditWindowRecord {
@@ -89,6 +108,7 @@ export interface AuditWindowRecord {
   attempts: number
   error: string | null
   fingerprint: string
+  pairs: AuditPairRecord[]
   startedAt: string | null
   finishedAt: string | null
 }
@@ -99,6 +119,10 @@ export interface StoryboardAuditSummary {
   failedWindows?: number
   completedWindows?: number
   totalWindows?: number
+  pairTotal?: number
+  pairDone?: number
+  pairFailed?: number
+  pairSkipped?: number
   ruleIssueCount?: number
   semanticIssueCount?: number
   issueCount?: number
@@ -175,6 +199,20 @@ export interface AuditWindowRunnerInput {
 
 export type AuditWindowRunner = (input: AuditWindowRunnerInput) => Promise<AuditIssueDraft[] | void>
 
+export interface AuditPairRunnerInput {
+  jobId: number
+  episodeId: number
+  dramaId: number
+  model: string | null
+  configId: number | null
+  window: AuditWindowContext
+  pair: AuditContinuityPair
+  context: AuditEpisodeContext
+  recheck?: boolean
+}
+
+export type AuditPairRunner = (input: AuditPairRunnerInput) => Promise<void>
+
 export interface AuditRepairRunnerInput {
   jobId: number
   episodeId: number
@@ -189,11 +227,26 @@ export type AuditRepairRunner = (input: AuditRepairRunnerInput) => Promise<void>
 
 export interface RunStoryboardAuditOptions {
   runner?: AuditWindowRunner
+  pairRunner?: AuditPairRunner
   repairRunner?: AuditRepairRunner
   promptBatchProbe?: (episodeId: number) => Partial<VideoPromptBatchStatus> | null
   maxPromptWaitMs?: number
   promptWaitIntervalMs?: number
   fileExists?: (relativePath: string) => boolean
+}
+
+export interface AuditContinuityVerdictInput {
+  verdict: 'connected' | 'broken'
+  severity?: 'error' | 'warning' | 'info'
+  evidence?: string
+  suggestion?: string
+  suggestedTransition?: 'empty' | 'scene' | 'text' | null
+}
+
+export interface RecordAuditVerdictResult {
+  accepted: boolean
+  broken: boolean
+  reason?: string
 }
 
 export interface RecordAuditIssuesResult {
@@ -324,6 +377,7 @@ function pendingEntry(updatedAt = now()): AuditShotStatusEntry {
     ruleDone: false,
     semanticDone: false,
     ruleOnly: false,
+    transition: false,
     errorCount: 0,
     warningCount: 0,
     infoCount: 0,
@@ -337,6 +391,7 @@ function normalizeEntry(raw: Partial<AuditShotStatusEntry> | null | undefined): 
     ruleDone: Boolean(raw?.ruleDone),
     semanticDone: Boolean(raw?.semanticDone),
     ruleOnly: Boolean(raw?.ruleOnly),
+    transition: Boolean(raw?.transition),
     errorCount: Number(raw?.errorCount) || 0,
     warningCount: Number(raw?.warningCount) || 0,
     infoCount: Number(raw?.infoCount) || 0,
@@ -593,6 +648,23 @@ function persistJob(jobId: number, patch: Record<string, unknown>) {
   } as never).where(eq(schema.storyboardAuditJobs.id, jobId)).run()
 }
 
+function pairRecordsForWindow(window: AuditWindowContext): AuditPairRecord[] {
+  return window.pairs.map((pair) => ({
+    key: pair.key,
+    fromId: pair.from.id,
+    toId: pair.to.id,
+    fromNumber: pair.from.storyboardNumber,
+    toNumber: pair.to.storyboardNumber,
+    crossCard: pair.crossCard,
+    bridgeNumbers: pair.bridge.map((shot) => shot.storyboardNumber),
+    status: 'pending',
+    attempts: 0,
+    error: null,
+    startedAt: null,
+    finishedAt: null,
+  }))
+}
+
 function windowRecords(context: AuditEpisodeContext): AuditWindowRecord[] {
   return context.windows.map((window) => ({
     index: window.index,
@@ -605,6 +677,7 @@ function windowRecords(context: AuditEpisodeContext): AuditWindowRecord[] {
     attempts: 0,
     error: null,
     fingerprint: window.fingerprint,
+    pairs: pairRecordsForWindow(window),
     startedAt: null,
     finishedAt: null,
   }))
@@ -680,6 +753,74 @@ function consumeStagedIssues(jobId: number, windowIndex: number): AuditIssueDraf
   return drafts
 }
 
+interface StagedVerdict {
+  verdict: 'connected' | 'broken'
+  severity: 'error' | 'warning' | 'info'
+  evidence?: string
+  suggestion?: string
+  suggestedTransition: 'empty' | 'scene' | 'text' | null
+}
+
+const stagedVerdicts = new Map<string, StagedVerdict>()
+
+function verdictKey(jobId: number, windowIndex: number, pairKey: string) {
+  return `${jobId}:${windowIndex}:${pairKey}`
+}
+
+function clearStagedVerdict(jobId: number, windowIndex: number, pairKey: string) {
+  stagedVerdicts.delete(verdictKey(jobId, windowIndex, pairKey))
+}
+
+function consumeStagedVerdict(jobId: number, windowIndex: number, pairKey: string): StagedVerdict | null {
+  const key = verdictKey(jobId, windowIndex, pairKey)
+  const verdict = stagedVerdicts.get(key) ?? null
+  stagedVerdicts.delete(key)
+  return verdict
+}
+
+/** 成对判定结论只接受工具上报，窗口批量上报不得伪造检查 2。 */
+export function recordAuditContinuityVerdict(
+  jobId: number,
+  windowIndex: number,
+  pairKey: string,
+  input: AuditContinuityVerdictInput,
+): RecordAuditVerdictResult {
+  const rejected = (reason: string): RecordAuditVerdictResult => ({ accepted: false, broken: false, reason })
+  const row = getJobRow(jobId)
+  if (!row || !['auditing', 'rechecking'].includes(row.status)) return rejected('检验任务不在检验或复查阶段')
+  if (row.phase !== 'semantic' && row.phase !== 'recheck') return rejected('当前不在语义检验或复查阶段')
+  const key = (pairKey || '').trim()
+  if (!key) return rejected('缺少成对判定配对键')
+  const windows = parseJson<AuditWindowRecord[]>(row.windowsJson, [])
+  const window = windows.find((item) => item.index === windowIndex)
+  if (!window) return rejected(`窗口 ${windowIndex} 不存在或不属于该任务`)
+  const pair = (window.pairs || []).find((item) => item.key === key)
+  if (!pair) return rejected(`配对 ${key} 不属于窗口 ${windowIndex}`)
+  const policy = resolveJobPolicy(row)
+  if (!policy.checks.continuity) return rejected('策略已关闭检查 2')
+  if (input.verdict !== 'connected' && input.verdict !== 'broken') return rejected('结论必须为 connected 或 broken')
+
+  const severity = input.severity === 'error' || input.severity === 'info' ? input.severity : 'warning'
+  const rawTransition = input.suggestedTransition
+  const validTransition = rawTransition === 'empty' || rawTransition === 'scene' || rawTransition === 'text'
+    ? rawTransition
+    : null
+  const autoInsert = policy.autoRepair.enabled
+    && policy.autoRepair.semanticFix
+    && policy.autoRepair.autoInsertTransition
+  const suggestedTransition = input.verdict === 'broken' && !pair.crossCard && autoInsert
+    ? validTransition
+    : null
+  stagedVerdicts.set(verdictKey(jobId, windowIndex, key), {
+    verdict: input.verdict,
+    severity: input.verdict === 'connected' ? 'info' : severity,
+    evidence: clampText(input.evidence, 500),
+    suggestion: clampText(input.suggestion, 300),
+    suggestedTransition,
+  })
+  return { accepted: true, broken: input.verdict === 'broken' }
+}
+
 function clampText(value: unknown, max: number): string | undefined {
   if (typeof value !== 'string') return undefined
   const text = value.trim()
@@ -704,7 +845,11 @@ export function recordAuditWindowIssues(
 ): RecordAuditIssuesResult {
   const rejected: string[] = []
   const row = getJobRow(jobId)
-  if (!row || !['auditing', 'rechecking'].includes(row.status) || row.phase !== 'semantic') {
+  if (!row || !['auditing', 'rechecking'].includes(row.status)) {
+    const reason = '检验任务不在语义检查或复查阶段'
+    return { accepted: 0, rejected: drafts.map(() => reason), truncated: false }
+  }
+  if (row.phase !== 'semantic' && row.phase !== 'recheck') {
     const reason = '检验任务不在语义检查或复查阶段'
     return { accepted: 0, rejected: drafts.map(() => reason), truncated: false }
   }
@@ -734,6 +879,10 @@ export function recordAuditWindowIssues(
     }
     if (raw.source !== 'semantic') {
       rejected.push('工具只接受 semantic 来源的问题')
+      continue
+    }
+    if (Number(raw.check) === 2) {
+      rejected.push('检查 2 只允许通过 report_continuity_verdict 成对判定')
       continue
     }
     // 提示词只暴露镜头号，模型给不出数据库 ID：镜头号优先，storyboardId 再按库 ID/镜头号两路兜底
@@ -811,6 +960,7 @@ function normalizeWindowDrafts(
   for (const raw of drafts) {
     if (!raw || typeof raw !== 'object') continue
     if (raw.source !== 'semantic') continue
+    if (raw.check === 2) continue
     const target = targetById.get(Number(raw.storyboardId))
     if (!target) continue
     const draft: AuditIssueDraft = {
@@ -856,6 +1006,70 @@ async function defaultAuditWindowRunner(input: AuditWindowRunnerInput): Promise<
   )
 }
 
+async function defaultAuditPairRunner(input: AuditPairRunnerInput): Promise<void> {
+  const { mastra } = await import('../mastra/index.js')
+  const agent = (mastra as any).getAgent('storyboard_auditor')
+  if (!agent) throw new Error('动作检验 Agent 不可用')
+  const { buildAgentRequestContext } = await import('../agents/context.js')
+  const requestContext = buildAgentRequestContext({
+    episodeId: input.episodeId,
+    dramaId: input.dramaId,
+    modelOverride: input.model || undefined,
+    textConfigId: input.configId || undefined,
+  })
+  requestContext.set('auditJobId' as never, input.jobId as never)
+  requestContext.set('auditPhase' as never, 'audit' as never)
+  requestContext.set('auditWindowIndex' as never, input.window.index as never)
+  requestContext.set('auditPairKey' as never, input.pair.key as never)
+  await agent.generate(
+    [{
+      role: 'user',
+      content: buildAuditContinuityPrompt(input.context, input.pair, { recheck: Boolean(input.recheck) }),
+    }],
+    { maxSteps: 4, requestContext },
+  )
+}
+
+function buildPairIssue(
+  pair: AuditContinuityPair,
+  verdict: StagedVerdict,
+  policy: StoryboardAuditPolicy,
+  windowIndex: number,
+): AuditIssueDraft {
+  const auto = policy.autoRepair
+  const semanticFix = auto.enabled && auto.semanticFix
+  const canInsert = !pair.crossCard
+    && semanticFix
+    && auto.autoInsertTransition
+    && verdict.suggestedTransition != null
+  const canFixContinuity = !pair.crossCard
+    && semanticFix
+    && Boolean(verdict.evidence)
+    && Boolean(verdict.suggestion)
+  const repairAction = canInsert
+    ? 'insert_transition_shot' as const
+    : canFixContinuity
+      ? 'fix_continuity' as const
+      : null
+  return {
+    check: 2,
+    source: 'semantic',
+    severity: verdict.severity,
+    code: 'semantic_continuity_break',
+    storyboardId: pair.to.id,
+    storyboardNumber: pair.to.storyboardNumber,
+    relatedStoryboardIds: [pair.from.id, ...pair.bridge.map((shot) => shot.id)],
+    message: `第 ${pair.from.storyboardNumber} 镜到第 ${pair.to.storyboardNumber} 镜的动作/场景承接不连续。`,
+    evidence: verdict.evidence,
+    suggestion: verdict.suggestion,
+    repairable: repairAction != null,
+    repairAction,
+    suggestedTransition: canInsert ? verdict.suggestedTransition : null,
+    windowIndex,
+    status: 'open',
+  }
+}
+
 async function defaultRepairRunner(input: AuditRepairRunnerInput): Promise<void> {
   const { mastra } = await import('../mastra/index.js')
   const agent = (mastra as any).getAgent('storyboard_auditor')
@@ -886,6 +1100,7 @@ interface RepairFlowInput {
   statuses: Record<string, AuditShotStatusEntry>
   issues: AuditIssue[]
   runner: AuditWindowRunner
+  pairRunner: AuditPairRunner | null
   repairRunner: AuditRepairRunner
   fileExists?: (relativePath: string) => boolean
 }
@@ -977,20 +1192,71 @@ async function runRepairAndRecheck(input: RepairFlowInput): Promise<RepairFlowRe
     shotStatusJson: JSON.stringify(input.statuses),
   })
 
-  let repairError: string | null = null
-  try {
-    await input.repairRunner({
-      jobId: input.jobId,
-      episodeId: input.episodeId,
-      dramaId: input.dramaId,
-      model: input.model,
-      configId: input.configId,
-      context: input.context,
-      issues: input.issues,
+  let insertionError: string | null = null
+  const insertionActions = policy.autoRepair.autoInsertTransition
+    ? input.issues
+      .filter((issue) => (
+        issue.status === 'open'
+        && issue.repairable
+        && issue.check === 2
+        && issue.repairAction === 'insert_transition_shot'
+        && issue.suggestedTransition != null
+      ))
+      .map((issue) => ({ issueId: issue.id, action: 'insert_transition_shot' as const }))
+    : []
+  if (insertionActions.length) {
+    try {
+      const { applyAuditRepairActions } = await import('./storyboard-audit-repair.js')
+      const result = applyAuditRepairActions(input.jobId, insertionActions, { allowInsertion: true })
+      const rejected = result.rejected.filter((item) => item.action === 'insert_transition_shot')
+      if (rejected.length) {
+        logTaskWarn('StoryboardAudit', 'auto-insert-rejected', {
+          jobId: input.jobId,
+          reasons: rejected.map((item) => item.reason),
+        })
+      }
+    } catch (error) {
+      insertionError = messageOf(error)
+      logTaskWarn('StoryboardAudit', 'auto-insert-failed', { jobId: input.jobId, error: insertionError })
+    }
+  }
+
+  const beforeAgent = getJobRow(input.jobId)
+  if (!beforeAgent || beforeAgent.status !== 'repairing') return null
+  let repairContext = input.context
+  let repairIssues = parseJson<AuditIssue[]>(beforeAgent.issuesJson, input.issues)
+  if (insertionActions.length) {
+    repairContext = buildAuditEpisodeContext(input.episodeId, { fileExists: input.fileExists, policy })
+    const numberById = new Map(repairContext.shots.map((shot) => [shot.id, shot.storyboardNumber]))
+    repairIssues = repairIssues.map((issue) => {
+      const nextNumber = numberById.get(issue.storyboardId)
+      return nextNumber != null && nextNumber !== issue.storyboardNumber
+        ? { ...issue, storyboardNumber: nextNumber }
+        : issue
     })
-  } catch (error) {
-    repairError = messageOf(error)
-    logTaskWarn('StoryboardAudit', 'repair-failed', { jobId: input.jobId, error: repairError })
+  }
+  const remainingRepairable = repairIssues.filter((issue) => (
+    issue.status === 'open'
+    && issue.repairable
+    && issue.check !== 5
+    && issue.repairAction !== 'insert_transition_shot'
+  ))
+  let agentError: string | null = null
+  if (remainingRepairable.length) {
+    try {
+      await input.repairRunner({
+        jobId: input.jobId,
+        episodeId: input.episodeId,
+        dramaId: input.dramaId,
+        model: input.model,
+        configId: input.configId,
+        context: repairContext,
+        issues: repairIssues,
+      })
+    } catch (error) {
+      agentError = messageOf(error)
+      logTaskWarn('StoryboardAudit', 'repair-failed', { jobId: input.jobId, error: agentError })
+    }
   }
 
   const afterRepair = getJobRow(input.jobId)
@@ -1009,27 +1275,49 @@ async function runRepairAndRecheck(input: RepairFlowInput): Promise<RepairFlowRe
   const appliedShots = new Set<number>()
   const insertedShots = new Set<number>()
   let applied = 0
+  let insertionApplied = 0
+  let insertionRejected = 0
+  let promptApplied = 0
+  let promptRejected = 0
   for (const entry of repairLog) {
-    if (entry.type !== 'action' || entry.result !== 'applied') continue
-    applied += 1
-    const shotId = Number(entry.storyboardId)
-    if (Number.isFinite(shotId)) appliedShots.add(shotId)
-    const insertedId = Number(entry.insertedStoryboardId)
-    if (Number.isFinite(insertedId)) insertedShots.add(insertedId)
+    if (entry.type !== 'action') continue
+    const isInsertion = entry.action === 'insert_transition_shot'
+    if (entry.result === 'applied') {
+      applied += 1
+      if (isInsertion) insertionApplied += 1
+      else promptApplied += 1
+      const shotId = Number(entry.storyboardId)
+      if (Number.isFinite(shotId)) appliedShots.add(shotId)
+      const insertedId = Number(entry.insertedStoryboardId)
+      if (Number.isFinite(insertedId)) insertedShots.add(insertedId)
+    } else if (entry.result === 'rejected') {
+      if (isInsertion) insertionRejected += 1
+      else promptRejected += 1
+    }
   }
   let issues = parseJson<AuditIssue[]>(afterRepair.issuesJson, input.issues)
 
   if (!applied) {
     issues = markRepairableManual(issues)
-    const repairStatus: StoryboardAuditRepairStatus = repairError ? 'failed' : 'skipped'
-    const log = parseJson<Array<Record<string, unknown>>>(afterRepair.repairLogJson, [])
+    const failure = agentError || insertionError
+    const manualCount = issues.filter((issue) => issue.status === 'manual').length
+    const repairStatus: StoryboardAuditRepairStatus = failure ? 'failed' : 'skipped'
+    const message = failure
+      ? `修复失败：${failure}；${manualCount} 条问题已转人工`
+      : `没有可安全执行的修复动作；${manualCount} 条问题已转人工`
     persistJob(input.jobId, {
       issuesJson: JSON.stringify(issues),
-      repairLogJson: JSON.stringify([...log, {
+      repairLogJson: JSON.stringify([...repairLog, {
         at: now(),
         type: 'repair',
         result: repairStatus,
-        reason: repairError ? `修复 Agent 失败：${repairError}` : '没有可安全执行的修复动作',
+        message,
+        error: failure,
+        submitted: remainingRepairable.length,
+        applied: 0,
+        rejected: promptRejected + insertionRejected,
+        inserted: 0,
+        manual: manualCount,
       }]),
       repairStatus,
     })
@@ -1045,6 +1333,45 @@ async function runRepairAndRecheck(input: RepairFlowInput): Promise<RepairFlowRe
       recheckFailed: false,
     }
   }
+
+  const leftovers = issues.filter((issue) => (
+    issue.status === 'open' && issue.repairable && issue.check !== 5
+  ))
+  const promptLeftovers = leftovers.filter((issue) => issue.repairAction !== 'insert_transition_shot')
+  if (leftovers.length) {
+    const leftoverIds = new Set(leftovers.map((issue) => issue.id))
+    issues = issues.map((issue) => (
+      leftoverIds.has(issue.id) ? { ...issue, status: 'manual' as const } : issue
+    ))
+  }
+  const repairParts: string[] = []
+  if (promptApplied > 0) repairParts.push(`完成 ${promptApplied} 项提示词/时长修复`)
+  if (promptRejected > 0) repairParts.push(`${promptRejected} 项提示词修复被拒绝`)
+  if (insertionApplied > 0) repairParts.push(`插入 ${insertionApplied} 个过渡分镜`)
+  if (insertionRejected > 0) repairParts.push(`${insertionRejected} 个过渡分镜插入被拒绝`)
+  if (agentError) repairParts.push(`修复 Agent 失败：${agentError}`)
+  else if (remainingRepairable.length > 0 && promptApplied === 0 && promptLeftovers.length > 0) {
+    repairParts.push('修复 Agent 未提交可执行的提示词修复动作')
+  }
+  if (promptLeftovers.length > 0) repairParts.push(`${promptLeftovers.length} 条提示词问题已转人工`)
+  const repairMessage = repairParts.length ? repairParts.join('；') : '修复阶段没有产生动作'
+  const repairStatus: StoryboardAuditRepairStatus = leftovers.length ? 'partial' : 'done'
+  persistJob(input.jobId, {
+    issuesJson: JSON.stringify(issues),
+    repairLogJson: JSON.stringify([...repairLog, {
+      at: now(),
+      type: 'repair',
+      result: repairStatus,
+      message: repairMessage,
+      error: agentError || insertionError,
+      submitted: remainingRepairable.length,
+      applied: promptApplied,
+      rejected: promptRejected,
+      inserted: insertionApplied,
+      manual: leftovers.length,
+    }]),
+    repairStatus,
+  })
 
   persistJob(input.jobId, {
     status: 'rechecking',
@@ -1077,7 +1404,20 @@ async function runRepairAndRecheck(input: RepairFlowInput): Promise<RepairFlowRe
   const ruleDrafts = evaluateStoryboardRules(recheckContext.ruleInput)
   const semanticDrafts: AuditIssueDraft[] = []
   const affectedIds = new Set<number>([...appliedShots, ...insertedShots])
+  const affectedPairKeys = new Set<string>()
+  for (const pair of recheckContext.continuityPairs) {
+    if (
+      affectedIds.has(pair.from.id)
+      || affectedIds.has(pair.to.id)
+      || pair.bridge.some((shot) => affectedIds.has(shot.id))
+    ) {
+      affectedPairKeys.add(pair.key)
+    }
+  }
   const affectedIndexes = new Set<number>()
+  for (const pair of recheckContext.continuityPairs) {
+    if (affectedPairKeys.has(pair.key)) affectedIndexes.add(pair.windowIndex)
+  }
   for (const window of input.windows) {
     if (window.targetIds.some((id) => appliedShots.has(id))) affectedIndexes.add(window.index)
   }
@@ -1085,6 +1425,7 @@ async function runRepairAndRecheck(input: RepairFlowInput): Promise<RepairFlowRe
     if (plan.targets.some((target) => affectedIds.has(target.id))) affectedIndexes.add(plan.index)
   }
   const affected = recheckContext.windows.filter((plan) => affectedIndexes.has(plan.index))
+  const refreshedWindows = windowRecords(recheckContext)
   let recheckFailed = false
   let failedIndex: number | null = null
   let failureReason = ''
@@ -1125,6 +1466,71 @@ async function runRepairAndRecheck(input: RepairFlowInput): Promise<RepairFlowRe
     const staged = consumeStagedIssues(input.jobId, plan.index)
     const returned = Array.isArray(result) ? result : []
     semanticDrafts.push(...normalizeWindowDrafts([...staged, ...returned], plan, policy))
+
+    const refreshedWindow = refreshedWindows.find((window) => window.index === plan.index)
+    if (!input.pairRunner) {
+      for (const pairRecord of refreshedWindow?.pairs ?? []) {
+        pairRecord.status = 'skipped'
+        pairRecord.finishedAt = now()
+      }
+      continue
+    }
+    const pairsToRecheck = plan.pairs.filter((pair) => affectedPairKeys.has(pair.key))
+    for (const pair of pairsToRecheck) {
+      const pairRecord = refreshedWindow?.pairs.find((item) => item.key === pair.key)
+      if (!pairRecord) continue
+      pairRecord.status = 'running'
+      pairRecord.attempts += 1
+      pairRecord.startedAt = now()
+      pairRecord.finishedAt = null
+      pairRecord.error = null
+      persistJob(input.jobId, { windowsJson: JSON.stringify(refreshedWindows) })
+      clearStagedVerdict(input.jobId, plan.index, pair.key)
+      let verdict: StagedVerdict | null = null
+      let pairFailure: Error | null = null
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (attempt > 0) {
+          pairRecord.attempts += 1
+          persistJob(input.jobId, { windowsJson: JSON.stringify(refreshedWindows) })
+        }
+        try {
+          await input.pairRunner({
+            jobId: input.jobId,
+            episodeId: input.episodeId,
+            dramaId: input.dramaId,
+            model: input.model,
+            configId: input.configId,
+            window: plan,
+            pair,
+            context: recheckContext,
+            recheck: true,
+          })
+          verdict = consumeStagedVerdict(input.jobId, plan.index, pair.key)
+          if (!verdict) throw new Error('成对复查未返回结论（必须调用 report_continuity_verdict）')
+          pairFailure = null
+          break
+        } catch (error) {
+          pairFailure = error instanceof Error ? error : new Error(messageOf(error))
+          clearStagedVerdict(input.jobId, plan.index, pair.key)
+        }
+      }
+      const latestPair = getJobRow(input.jobId)
+      if (!latestPair || latestPair.status !== 'rechecking') return null
+      if (pairFailure || !verdict) {
+        pairRecord.status = 'failed'
+        pairRecord.error = (pairFailure ?? new Error('成对复查未返回结论')).message
+        pairRecord.finishedAt = now()
+        recheckFailed = true
+        failureReason = pairRecord.error
+        failedIndex = plan.index
+        break
+      }
+      pairRecord.status = 'done'
+      pairRecord.finishedAt = now()
+      if (verdict.verdict === 'broken') semanticDrafts.push(buildPairIssue(pair, verdict, policy, plan.index))
+      persistJob(input.jobId, { windowsJson: JSON.stringify(refreshedWindows) })
+    }
+    if (recheckFailed) break
   }
 
   const recheckComposed = composeIssues(ruleDrafts, semanticDrafts)
@@ -1141,7 +1547,6 @@ async function runRepairAndRecheck(input: RepairFlowInput): Promise<RepairFlowRe
   }
   persistJob(input.jobId, { shotStatusJson: JSON.stringify(input.statuses) })
 
-  const refreshedWindows = windowRecords(recheckContext)
   for (const window of refreshedWindows) {
     const previous = input.windows.find((item) => item.index === window.index)
     if (affectedIndexes.has(window.index)) {
@@ -1150,12 +1555,27 @@ async function runRepairAndRecheck(input: RepairFlowInput): Promise<RepairFlowRe
       window.finishedAt = now()
       window.attempts = (previous?.attempts ?? 0) + 1
       if (failedIndex === window.index) window.error = failureReason
+      for (const pair of window.pairs) {
+        if (pair.status !== 'pending') continue
+        const previousPair = previous?.pairs?.find((item) => item.key === pair.key)
+        if (previousPair) {
+          pair.status = previousPair.status
+          pair.attempts = previousPair.attempts
+          pair.startedAt = previousPair.startedAt
+          pair.finishedAt = previousPair.finishedAt
+          pair.error = previousPair.error
+        } else {
+          pair.status = 'skipped'
+          pair.finishedAt = now()
+        }
+      }
     } else if (previous) {
       window.status = previous.status
       window.startedAt = previous.startedAt
       window.finishedAt = previous.finishedAt
       window.attempts = previous.attempts
       window.error = previous.error
+      if (previous.pairs?.length) window.pairs = previous.pairs
     }
   }
 
@@ -1219,7 +1639,7 @@ async function runRepairAndRecheck(input: RepairFlowInput): Promise<RepairFlowRe
 
   return {
     issues: mergedRecheck,
-    repairStatus: 'done',
+    repairStatus,
     rollback: false,
     repairedShotIds: [...appliedShots],
     applied,
@@ -1305,7 +1725,19 @@ export async function runStoryboardAuditJob(
     })
     const statuses: Record<string, AuditShotStatusEntry> = {}
     const stampedAt = now()
-    for (const shot of context.shots) statuses[String(shot.id)] = pendingEntry(stampedAt)
+    const transitionIds = new Set(context.transitionIds)
+    for (const shot of context.shots) {
+      // 过渡分镜是已存在的解决方案，只参与成对判定作为桥接证据，不作为检验对象
+      statuses[String(shot.id)] = transitionIds.has(shot.id)
+        ? {
+          ...pendingEntry(stampedAt),
+          status: 'done',
+          ruleDone: true,
+          semanticDone: true,
+          transition: true,
+        }
+        : pendingEntry(stampedAt)
+    }
     const windows = windowRecords(context)
 
     persistJob(jobId, {
@@ -1337,8 +1769,10 @@ export async function runStoryboardAuditJob(
       const semanticStatus: StoryboardAuditSemanticStatus = semanticEnabled ? 'skipped_no_model' : 'disabled'
       const finishedAt = now()
       for (const shot of context.shots) {
+        const entry = statuses[String(shot.id)]
+        if (entry.transition) continue
         statuses[String(shot.id)] = {
-          ...statuses[String(shot.id)],
+          ...entry,
           status: 'done',
           ruleDone: true,
           semanticDone: false,
@@ -1349,15 +1783,24 @@ export async function runStoryboardAuditJob(
       for (const window of windows) {
         window.status = 'done'
         window.finishedAt = finishedAt
+        for (const pair of window.pairs) {
+          pair.status = 'skipped'
+          pair.finishedAt = finishedAt
+        }
       }
       issueCountsFor(statuses, ruleDrafts)
       const composed = composeIssues(ruleDrafts, [])
+      const pairTotal = windows.flatMap((window) => window.pairs).length
       const summary: StoryboardAuditSummary = {
         ruleOnly: true,
         semantic: semanticStatus,
         completedWindows: windows.length,
         totalWindows: windows.length,
         failedWindows: 0,
+        pairTotal,
+        pairDone: 0,
+        pairFailed: 0,
+        pairSkipped: pairTotal,
         ruleIssueCount: ruleDrafts.length,
         semanticIssueCount: 0,
         issueCount: composed.issues.length,
@@ -1402,6 +1845,8 @@ export async function runStoryboardAuditJob(
     }
 
     const runner = options.runner ?? defaultAuditWindowRunner
+    // 自定义窗口 runner 的旧用例没有成对执行器时按跳过处理，成对判定只走默认 Agent 链路
+    const pairRunner = options.pairRunner ?? (options.runner ? null : defaultAuditPairRunner)
     const semanticDrafts: AuditIssueDraft[] = []
     let failedWindows = 0
     let completedWindows = 0
@@ -1486,6 +1931,97 @@ export async function runStoryboardAuditJob(
       const accepted = normalizeWindowDrafts([...staged, ...returned], plan, policy)
       for (const issue of accepted) semanticDrafts.push(issue)
 
+      const runPairs = pairRunner && policy.checks.continuity ? plan.pairs : []
+      if (!runPairs.length) {
+        for (const pair of record.pairs) {
+          if (pair.status !== 'pending') continue
+          pair.status = 'skipped'
+          pair.finishedAt = now()
+        }
+      }
+      let pairFailure: Error | null = null
+      for (const pair of runPairs) {
+        const pairRecord = record.pairs.find((item) => item.key === pair.key)
+        if (!pairRecord) continue
+        pairRecord.status = 'running'
+        pairRecord.attempts += 1
+        pairRecord.startedAt = now()
+        pairRecord.finishedAt = null
+        pairRecord.error = null
+        persistJob(jobId, { windowsJson: JSON.stringify(windows) })
+        clearStagedVerdict(jobId, plan.index, pair.key)
+        let verdict: StagedVerdict | null = null
+        let pairError: Error | null = null
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          if (attempt > 0) {
+            pairRecord.attempts += 1
+            persistJob(jobId, { windowsJson: JSON.stringify(windows) })
+          }
+          try {
+            await pairRunner!({
+              jobId,
+              episodeId: initial.episodeId,
+              dramaId: initial.dramaId,
+              model: initial.model,
+              configId: initial.configId,
+              window: plan,
+              pair,
+              context,
+            })
+            verdict = consumeStagedVerdict(jobId, plan.index, pair.key)
+            if (!verdict) throw new Error('成对检验未返回结论（必须调用 report_continuity_verdict）')
+            pairError = null
+            break
+          } catch (error) {
+            pairError = error instanceof Error ? error : new Error(messageOf(error))
+            clearStagedVerdict(jobId, plan.index, pair.key)
+          }
+        }
+        const latestPair = getJobRow(jobId)
+        if (!latestPair || latestPair.status !== 'auditing') {
+          clearStagedIssues(jobId, plan.index)
+          return
+        }
+        if (pairError || !verdict) {
+          pairRecord.status = 'failed'
+          pairRecord.error = (pairError ?? new Error('成对检验未返回结论')).message
+          pairRecord.finishedAt = now()
+          pairFailure = new Error(pairRecord.error)
+          break
+        }
+        pairRecord.status = 'done'
+        pairRecord.finishedAt = now()
+        if (verdict.verdict === 'broken') semanticDrafts.push(buildPairIssue(pair, verdict, policy, plan.index))
+        persistJob(jobId, { windowsJson: JSON.stringify(windows) })
+      }
+
+      if (pairFailure) {
+        record.status = 'failed'
+        record.error = pairFailure.message
+        record.finishedAt = now()
+        for (const pair of record.pairs) {
+          if (pair.status !== 'pending') continue
+          pair.status = 'skipped'
+          pair.finishedAt = now()
+        }
+        for (const target of plan.targets) {
+          const entry = statuses[String(target.id)]
+          if (entry && (entry.status === 'running' || entry.status === 'pending' || entry.status === 'failed')) {
+            entry.status = 'failed'
+            entry.semanticDone = false
+            entry.updatedAt = now()
+          }
+        }
+        failedWindows += 1
+        persistProgress(jobId, windows, statuses, ruleDrafts, semanticDrafts, completedWindows)
+        logTaskWarn('StoryboardAudit', 'pair-failed', {
+          jobId,
+          window: plan.index,
+          error: pairFailure.message,
+        })
+        continue
+      }
+
       record.status = 'done'
       record.finishedAt = now()
       completedWindows += 1
@@ -1514,7 +2050,7 @@ export async function runStoryboardAuditJob(
     const ruleOnlySet = new Set(context.ruleOnlyIds)
     for (const shot of context.shots) {
       const entry = statuses[String(shot.id)]
-      if (!entry) continue
+      if (!entry || entry.transition) continue
       if (ruleOnlySet.has(shot.id)) {
         entry.status = 'done'
         entry.ruleDone = true
@@ -1553,6 +2089,7 @@ export async function runStoryboardAuditJob(
         statuses,
         issues: composed.issues,
         runner,
+        pairRunner,
         repairRunner: options.repairRunner ?? defaultRepairRunner,
         fileExists: options.fileExists,
       })
@@ -1572,6 +2109,7 @@ export async function runStoryboardAuditJob(
     const finalRuleOnlyShots = flow?.ruleOnlyShots ?? context.ruleOnlyIds.length
     const finalCompletedWindows = finalWindows.filter((window) => window.status === 'done').length
     const finalFailedWindows = finalWindows.filter((window) => window.status === 'failed').length
+    const finalPairs = finalWindows.flatMap((window) => window.pairs || [])
     issueCountsFor(finalStatuses, finalIssues)
     const openIssues = finalIssues.filter((issue) => issue.status === 'open')
     const semanticStatus: StoryboardAuditSemanticStatus = !semanticEnabled
@@ -1589,6 +2127,10 @@ export async function runStoryboardAuditJob(
       failedWindows: finalFailedWindows,
       completedWindows: finalCompletedWindows,
       totalWindows: finalTotalWindows,
+      pairTotal: finalPairs.length,
+      pairDone: finalPairs.filter((pair) => pair.status === 'done').length,
+      pairFailed: finalPairs.filter((pair) => pair.status === 'failed').length,
+      pairSkipped: finalPairs.filter((pair) => pair.status === 'skipped').length,
       ruleIssueCount: ruleDrafts.length,
       semanticIssueCount: semanticDrafts.length,
       issueCount: finalIssues.length,

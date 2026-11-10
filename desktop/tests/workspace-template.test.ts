@@ -128,7 +128,7 @@ test('builtin storyboard-auditor skill migration covers all language variants', 
   for (const file of ['SKILL.md', 'SKILL.en.md', 'SKILL.ja.md', 'SKILL.ko.md']) {
     const rule = rules.get(`skills/storyboard-auditor/${file}`)
     assert.ok(rule, `迁移清单缺少 storyboard-auditor/${file}`)
-    assert.equal(rule.sha256.length, 1, `storyboard-auditor/${file} 应只匹配 4.0.30 版哈希`)
+    assert.equal(rule.sha256.length, 3, `storyboard-auditor/${file} 应覆盖 4.0.30、4.0.32 与 4.0.33 版哈希`)
   }
 })
 

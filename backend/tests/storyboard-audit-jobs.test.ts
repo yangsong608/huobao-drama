@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { desc, eq } from 'drizzle-orm'
+import { asc, desc, eq } from 'drizzle-orm'
 
 const serviceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'huobao-audit-jobs-'))
 process.env.SQLITE_PATH = path.join(serviceRoot, 'test.sqlite3')
@@ -168,6 +168,134 @@ test('没有文本模型时只做规则检验，全部完成并标记仅规则',
   assert.equal(JSON.parse(task?.params || '{}').rule_only, true)
 })
 
+test('AI 成对判定 broken 时插入文字过渡分镜并按 ID 重排镜头号', async () => {
+  const episodeId = createEpisode('剧本')
+  const first = createShot(episodeId, 1, { time: '清晨' })
+  const second = createShot(episodeId, 2, { time: '午间' })
+  const third = createShot(episodeId, 3, { time: '午间' })
+  const { job } = await createJob(episodeId, 'mock-model')
+
+  let repairCalls = 0
+  const verdicts: string[] = []
+  await svc.runStoryboardAuditJob(job.id, {
+    runner: async () => [],
+    pairRunner: async (input) => {
+      const record = (verdict: 'connected' | 'broken') => {
+        verdicts.push(`${input.pair.key}:${verdict}`)
+        svc.recordAuditContinuityVerdict(input.jobId, input.window.index, input.pair.key, {
+          verdict,
+          severity: verdict === 'broken' ? 'warning' : undefined,
+          evidence: verdict === 'broken' ? '@甲转身离开后，下一镜直接坐在桌前' : undefined,
+          suggestion: verdict === 'broken' ? '插入时间过渡文字卡' : undefined,
+          suggestedTransition: verdict === 'broken' ? 'text' : null,
+        })
+      }
+      if (input.recheck) return record('connected')
+      record(input.pair.from.storyboardNumber === 1 ? 'broken' : 'connected')
+    },
+    repairRunner: async () => { repairCalls += 1 },
+  })
+
+  assert.equal(repairCalls, 0)
+  const view = svc.getStoryboardAuditJob(job.id)!
+  assert.equal(view.status, 'done')
+  assert.equal(view.repair_status, 'done')
+  assert.equal(view.summary?.repairApplied, 1)
+  assert.equal(view.summary?.recheck, 'passed')
+  assert.equal(view.summary?.pairDone, 2)
+  assert.equal(view.summary?.pairFailed, 0)
+  assert.ok(verdicts.some((entry) => entry.endsWith(':broken')))
+
+  const jump = view.issues.find((issue) => issue.code === 'adjacent_time_jump')
+  assert.ok(jump)
+  assert.equal(jump!.severity, 'info')
+  assert.equal(jump!.status, 'open')
+  assert.equal(jump!.repairable, false)
+
+  const insertion = view.issues.find((issue) => issue.code === 'semantic_continuity_break')
+  assert.ok(insertion)
+  assert.equal(insertion!.storyboardId, second.id)
+  assert.equal(insertion!.status, 'fixed')
+
+  const rows = db.select().from(schema.storyboards)
+    .where(eq(schema.storyboards.episodeId, episodeId))
+    .orderBy(asc(schema.storyboards.storyboardNumber))
+    .all()
+  assert.deepEqual(rows.map((row) => row.storyboardNumber), [1, 2, 3, 4])
+  assert.equal(rows[0].id, first.id)
+  assert.equal(rows[1].transitionKind, 'text')
+  assert.equal(rows[1].transitionText, '午间')
+  assert.equal(rows[1].time, '午间')
+  assert.equal(rows[2].id, second.id)
+  assert.equal(rows[3].id, third.id)
+})
+
+test('跨过渡分镜的成对判定 broken 时只记问题，不再插入新的过渡分镜', async () => {
+  const episodeId = createEpisode('剧本')
+  const first = createShot(episodeId, 1)
+  const bridge = createShot(episodeId, 2, {
+    transitionKind: 'text',
+    transitionText: '三天后',
+    duration: 1,
+  })
+  const third = createShot(episodeId, 3)
+  const { job } = await createJob(episodeId, 'mock-model')
+
+  let repairCalls = 0
+  await svc.runStoryboardAuditJob(job.id, {
+    runner: async () => [],
+    pairRunner: async (input) => {
+      const broken = input.pair.crossCard
+      svc.recordAuditContinuityVerdict(input.jobId, input.window.index, input.pair.key, {
+        verdict: broken ? 'broken' : 'connected',
+        severity: broken ? 'warning' : undefined,
+        evidence: broken ? '过渡卡没有交代人物从街口到房间的过程' : undefined,
+        suggestion: broken ? '补充过渡描述' : undefined,
+        suggestedTransition: broken ? 'text' : null,
+      })
+    },
+    repairRunner: async () => { repairCalls += 1 },
+  })
+
+  assert.equal(repairCalls, 0)
+  const view = svc.getStoryboardAuditJob(job.id)!
+  assert.equal(view.status, 'done')
+  assert.equal(view.summary?.pairDone, 1)
+  const issue = view.issues.find((item) => item.code === 'semantic_continuity_break')
+  assert.ok(issue)
+  assert.equal(issue!.storyboardId, third.id)
+  assert.deepEqual(issue!.relatedStoryboardIds, [first.id, bridge.id])
+  assert.equal(issue!.repairable, false)
+  assert.equal(issue!.suggestedTransition, null)
+  const rows = db.select().from(schema.storyboards)
+    .where(eq(schema.storyboards.episodeId, episodeId))
+    .orderBy(asc(schema.storyboards.storyboardNumber))
+    .all()
+  assert.deepEqual(rows.map((row) => row.id), [first.id, bridge.id, third.id])
+})
+
+test('成对判定没有提交结论时重试后窗口失败，后续成对判定跳过', async () => {
+  const episodeId = createEpisode('剧本')
+  const shots = [1, 2, 3].map((number) => createShot(episodeId, number))
+  const { job } = await createJob(episodeId, 'mock-model')
+  let calls = 0
+
+  await svc.runStoryboardAuditJob(job.id, {
+    runner: async () => [],
+    pairRunner: async () => { calls += 1 },
+  })
+
+  assert.equal(calls, 2)
+  const view = svc.getStoryboardAuditJob(job.id)!
+  assert.equal(view.status, 'done')
+  assert.equal(view.semantic_status, 'failed')
+  assert.equal(view.windows[0].status, 'failed')
+  assert.match(view.windows[0].error || '', /未返回结论/)
+  assert.equal(view.summary?.pairFailed, 1)
+  assert.equal(view.summary?.pairSkipped, 1)
+  for (const shot of shots) assert.equal(view.shot_status[String(shot.id)].status, 'failed')
+})
+
 test('重复启动返回已有任务，不同剧集可以各自创建', async () => {
   const first = createEpisodeWithShots(1).episodeId
   const second = createEpisodeWithShots(1).episodeId
@@ -301,7 +429,7 @@ test('超过 20 个语义窗口的分镜仅做规则检验并标记截断', asyn
   assert.equal(view.summary?.semanticTruncated, true)
 })
 
-test('规则与语义同位置问题合并，语义重复只保留一条', async () => {
+test('规则与窗口语义同位置问题合并，语义重复只保留一条', async () => {
   const { episodeId, shots } = createEpisodeWithShots(2)
   db.update(schema.storyboards).set({ description: '' }).where(eq(schema.storyboards.id, shots[0].id)).run()
   const { job } = await createJob(episodeId, 'mock-model')
@@ -309,7 +437,6 @@ test('规则与语义同位置问题合并，语义重复只保留一条', async
   await svc.runStoryboardAuditJob(job.id, {
     runner: async (input) => {
       const first = input.window.targets[0]
-      const second = input.window.targets[1]
       return [
         {
           check: 1,
@@ -323,25 +450,14 @@ test('规则与语义同位置问题合并，语义重复只保留一条', async
           repairable: false,
         },
         {
-          check: 2,
+          check: 1,
           source: 'semantic',
           severity: 'warning',
-          code: 'semantic_continuity_break',
-          storyboardId: second.id,
-          storyboardNumber: second.storyboardNumber,
-          message: '前后动作不连贯。',
-          evidence: '上一镜站立，本镜已经出门。',
-          repairable: false,
-        },
-        {
-          check: 2,
-          source: 'semantic',
-          severity: 'warning',
-          code: 'semantic_continuity_break',
-          storyboardId: second.id,
-          storyboardNumber: second.storyboardNumber,
-          message: '前后动作不连贯。',
-          evidence: '上一镜站立，本镜已经出门，且手中多了道具。',
+          code: 'semantic_shot_description',
+          storyboardId: first.id,
+          storyboardNumber: first.storyboardNumber,
+          message: '模型认为描述缺失。',
+          evidence: '描述为空，且没有可拍内容。',
           repairable: false,
         },
       ]
@@ -353,9 +469,6 @@ test('规则与语义同位置问题合并，语义重复只保留一条', async
   assert.equal(merged.length, 1)
   assert.equal(merged[0].code, 'shot_missing_description')
   assert.equal(merged[0].source, 'rule+semantic')
-  const continuity = view.issues.filter((issue) => issue.code === 'semantic_continuity_break')
-  assert.equal(continuity.length, 1)
-  assert.match(continuity[0].evidence || '', /手中多了道具/)
 })
 
 test('工具上报越界或问题码不匹配时拒绝，不写入结果', async () => {
@@ -644,23 +757,23 @@ test('复查只重跑受影响窗口，错误数按合并后全量口径判断�
         recheckPhase = String(svc.getStoryboardAuditJob(job.id)!.phase || '')
         const recheckTarget = input.window.targets.find((item) => item.id === target.id) ?? input.window.targets[0]
         return [{
-          check: 2,
+          check: 1,
           source: 'semantic',
           severity: 'error',
-          code: 'semantic_continuity_break',
+          code: 'semantic_shot_description',
           storyboardId: recheckTarget.id,
           storyboardNumber: recheckTarget.storyboardNumber,
-          message: '修复后与上一镜仍不连贯。',
+          message: '修复后画面描述仍不可拍。',
           repairable: false,
         }]
       }
       if (input.window.index !== 1) return []
       const first = input.window.targets[0]
       return [{
-        check: 2,
+        check: 1,
         source: 'semantic',
         severity: 'error',
-        code: 'semantic_continuity_break',
+        code: 'semantic_shot_description',
         storyboardId: first.id,
         storyboardNumber: first.storyboardNumber,
         message: '未受影响窗口的语义错误。',
@@ -949,4 +1062,70 @@ test('关闭语义检验但配置了文本模型时，规则问题仍执行自�
   } finally {
     settings.setStoryboardAuditPolicy(settings.STORYBOARD_AUDIT_POLICY_DEFAULTS)
   }
+})
+
+test('只插入过渡分镜而修复 Agent 无动作时，未修复的提示词问题转人工并记录修复摘要', async () => {
+  const episodeId = createEpisode('剧本')
+  createShot(episodeId, 1, { time: '清晨' })
+  createShot(episodeId, 2, { time: '午间', shotType: '', angle: '', movement: '' })
+  const { job } = await createJob(episodeId, 'mock-model')
+  let repairCalls = 0
+
+  await svc.runStoryboardAuditJob(job.id, {
+    runner: async () => [],
+    pairRunner: async (input) => {
+      const verdict = input.recheck ? 'connected' : (input.pair.from.storyboardNumber === 1 ? 'broken' : 'connected')
+      svc.recordAuditContinuityVerdict(input.jobId, input.window.index, input.pair.key, {
+        verdict,
+        severity: verdict === 'broken' ? 'warning' : undefined,
+        suggestedTransition: verdict === 'broken' ? 'text' : null,
+      })
+    },
+    repairRunner: async () => { repairCalls += 1 },
+  })
+
+  assert.equal(repairCalls, 1, '存在提示词问题时应调用修复智能体')
+  const view = svc.getStoryboardAuditJob(job.id)!
+  assert.equal(view.status, 'done')
+  assert.equal(view.repair_status, 'partial')
+  const camera = view.issues.find((issue) => issue.code === 'shot_missing_camera_fields')
+  assert.equal(camera?.status, 'manual', '未修复的提示词问题必须显式转人工')
+  const log = view.repair_log as Array<Record<string, unknown>>
+  const summary = log.find((entry) => entry.type === 'repair')
+  assert.ok(summary, '修复阶段必须写入摘要日志')
+  assert.match(String(summary!.message), /未提交可执行的提示词修复动作/)
+  assert.match(String(summary!.message), /转人工/)
+  assert.equal(summary!.inserted, 1)
+  assert.equal(summary!.applied, 0)
+})
+
+test('修复 Agent 抛错但过渡分镜已插入时，任务不假成功且写明失败原因', async () => {
+  const episodeId = createEpisode('剧本')
+  createShot(episodeId, 1, { time: '清晨' })
+  createShot(episodeId, 2, { time: '午间', shotType: '', angle: '', movement: '' })
+  const { job } = await createJob(episodeId, 'mock-model')
+
+  await svc.runStoryboardAuditJob(job.id, {
+    runner: async () => [],
+    pairRunner: async (input) => {
+      const verdict = input.recheck ? 'connected' : (input.pair.from.storyboardNumber === 1 ? 'broken' : 'connected')
+      svc.recordAuditContinuityVerdict(input.jobId, input.window.index, input.pair.key, {
+        verdict,
+        severity: verdict === 'broken' ? 'warning' : undefined,
+        suggestedTransition: verdict === 'broken' ? 'text' : null,
+      })
+    },
+    repairRunner: async () => { throw new Error('模型超时') },
+  })
+
+  const view = svc.getStoryboardAuditJob(job.id)!
+  assert.equal(view.status, 'done')
+  assert.equal(view.repair_status, 'partial')
+  const camera = view.issues.find((issue) => issue.code === 'shot_missing_camera_fields')
+  assert.equal(camera?.status, 'manual')
+  const log = view.repair_log as Array<Record<string, unknown>>
+  const summary = log.find((entry) => entry.type === 'repair')
+  assert.ok(summary)
+  assert.match(String(summary!.message), /修复 Agent 失败：模型超时/)
+  assert.equal(summary!.inserted, 1)
 })

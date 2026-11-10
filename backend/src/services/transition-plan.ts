@@ -34,10 +34,10 @@ export function buildTransitionBoundaries(
   return boundaries
 }
 
-export type TransitionKind = 'ai' | 'empty' | 'scene' | 'text'
+export type TransitionKind = 'ai' | 'empty' | 'scene' | 'text' | 'fade'
 export type TransitionEdgeMode = 'fade' | 'cut'
 
-export const TRANSITION_KINDS: readonly TransitionKind[] = ['ai', 'empty', 'scene', 'text']
+export const TRANSITION_KINDS: readonly TransitionKind[] = ['ai', 'empty', 'scene', 'text', 'fade']
 export const CUSTOM_TRANSITION_DURATION_MIN = 2
 export const CUSTOM_TRANSITION_DURATION_MAX = 5
 export const TRANSITION_TEXT_TITLE_MAX = 20
@@ -53,9 +53,38 @@ export function normalizeTransitionKind(value: unknown): TransitionKind {
 export function parseTransitionKind(value: unknown): TransitionKind {
   const key = String(value ?? '').trim().toLowerCase()
   if (!(TRANSITION_KINDS as readonly string[]).includes(key)) {
-    throw new Error('过渡类型不合法，只能是 AI 过渡、空镜、场景或文字视频')
+    throw new Error('过渡类型不合法，只能是 AI 过渡、转场、空镜、场景或文字视频')
   }
   return key as TransitionKind
+}
+
+/** 本地转场样式：直接映射 ffmpeg xfade 的过渡名，零模型成本 */
+export type FadeStyle =
+  | 'dissolve'
+  | 'dip-black'
+  | 'dip-white'
+  | 'wipe-left'
+  | 'slide-left'
+  | 'circle-open'
+
+export const FADE_STYLES: readonly FadeStyle[] = [
+  'dissolve', 'dip-black', 'dip-white', 'wipe-left', 'slide-left', 'circle-open',
+]
+export const DEFAULT_FADE_STYLE: FadeStyle = 'dissolve'
+
+/** 读库/历史行使用：未知样式回落到交叉淡化 */
+export function normalizeFadeStyle(value: unknown): FadeStyle {
+  const key = String(value ?? '').trim().toLowerCase()
+  return (FADE_STYLES as readonly string[]).includes(key) ? key as FadeStyle : DEFAULT_FADE_STYLE
+}
+
+/** 写入入口使用：非法样式直接拒绝 */
+export function parseFadeStyle(value: unknown): FadeStyle {
+  const key = String(value ?? '').trim().toLowerCase()
+  if (!(FADE_STYLES as readonly string[]).includes(key)) {
+    throw new Error('转场样式不合法，请选择交叉淡化、黑场、白场、划像、滑动或圆形开场')
+  }
+  return key as FadeStyle
 }
 
 /** 文字视频两端硬切，避免文字被叠化 */
@@ -105,7 +134,7 @@ export function assertCustomTransitionDuration(value: unknown): number {
 }
 
 export interface CustomTransitionSourceParts {
-  kind: Exclude<TransitionKind, 'ai'>
+  kind: Exclude<TransitionKind, 'ai' | 'fade'>
   prompt?: string | null
   textContent?: string | null
   textSubtitle?: string | null
@@ -113,6 +142,33 @@ export interface CustomTransitionSourceParts {
   sceneImageUrl?: string | null
   duration: number
   audioMode?: string | null
+}
+
+export interface FadeTransitionSourceParts {
+  fromVideoUrl: string
+  toVideoUrl: string
+  fromSize: number
+  fromMtimeMs: number
+  toSize: number
+  toMtimeMs: number
+  style: FadeStyle
+  duration: number
+}
+
+/** 本地转场的来源指纹：相邻镜头视频 + 样式 + 时长，任一变化都应重新渲染 */
+export function fadeTransitionSourceHash(parts: FadeTransitionSourceParts): string {
+  const fields = [
+    'transition-fade-v1',
+    parts.fromVideoUrl,
+    parts.toVideoUrl,
+    parts.fromSize,
+    parts.fromMtimeMs,
+    parts.toSize,
+    parts.toMtimeMs,
+    normalizeFadeStyle(parts.style),
+    (Number(parts.duration) || 0).toFixed(3),
+  ]
+  return crypto.createHash('sha256').update(fields.join('|')).digest('hex')
 }
 
 const CUSTOM_SOURCE_HASH_VERSION = 'transition-custom-v1'
@@ -124,6 +180,7 @@ const CUSTOM_SOURCE_HASH_VERSION = 'transition-custom-v1'
 export function customTransitionSourceHash(parts: CustomTransitionSourceParts): string {
   const kind = parseTransitionKind(parts.kind)
   if (kind === 'ai') throw new Error('过渡类型不合法，只能是 AI 过渡、空镜、场景或文字视频')
+  if (kind === 'fade') throw new Error('本地转场片段需使用 fadeTransitionSourceHash')
   const fields = [
     CUSTOM_SOURCE_HASH_VERSION,
     kind,

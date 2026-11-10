@@ -413,7 +413,7 @@ function validateDraft(
   shot: AuditContextShot,
   context: AuditEpisodeContext,
   policy: StoryboardAuditPolicy,
-  insertion: { appliedInsertions: number; appliedBoundaries: Set<string> },
+  insertion: { appliedInsertions: number; appliedBoundaries: Set<string>; allowInsertion: boolean },
   usedFields: Map<string, RepairField[]>,
   appliedPerShot: Map<number, number>,
   appliedTotal: number,
@@ -448,6 +448,10 @@ function validateDraft(
   }
 
   if (input.action === 'insert_transition_shot') {
+    // 插卡只能由服务端按成对判定结论触发；Agent 修复阶段不得自行插入分镜
+    if (!insertion.allowInsertion) {
+      return { reason: '过渡分镜插入由服务端按成对判定结论自动完成，修复阶段不能提交插卡动作' }
+    }
     if (presentKeys.length) {
       return { reason: `${input.action} 不接收字段参数，只按问题编号插入过渡分镜` }
     }
@@ -657,6 +661,7 @@ function rejectionEntry(
 export function applyAuditRepairActions(
   jobId: number,
   actions: AuditRepairActionInput[],
+  options: { allowInsertion?: boolean } = {},
 ): AuditRepairActionResult {
   const row = getJobRow(jobId)
   if (!row) throw new Error('检验任务不存在')
@@ -821,7 +826,7 @@ export function applyAuditRepairActions(
       shot,
       context,
       policy,
-      { appliedInsertions, appliedBoundaries },
+      { appliedInsertions, appliedBoundaries, allowInsertion: options.allowInsertion !== false },
       usedFields,
       appliedPerShot,
       effectiveApplied,
@@ -1114,18 +1119,26 @@ function restoreSnapshot(
     insertedIds: number[]
     numberById: Record<string, number>
     transitionBackups: { id: number; enabled: boolean }[]
+    insertionReferences: { insertedNumber: number; originalFromNumber: number }[]
   }>()
   for (const insertion of snapshot.insertions || []) {
     const batch = insertionBatches.get(insertion.batchId) || {
       insertedIds: [],
       numberById: insertion.numberById || {},
       transitionBackups: [],
+      insertionReferences: [],
     }
     batch.insertedIds.push(insertion.insertedId)
     for (const backup of insertion.transitionBackups || []) {
       if (!batch.transitionBackups.some((item) => item.id === backup.id)) {
         batch.transitionBackups.push(backup)
       }
+    }
+    const originalFromNumber = Number(insertion.numberById?.[String(insertion.boundaryFromStoryboardId)])
+    const insertedNumber = Number(insertion.insertedStoryboardNumber)
+    if (Number.isFinite(originalFromNumber) && originalFromNumber > 0
+      && Number.isFinite(insertedNumber) && insertedNumber > 0) {
+      batch.insertionReferences.push({ insertedNumber, originalFromNumber })
     }
     insertionBatches.set(insertion.batchId, batch)
   }

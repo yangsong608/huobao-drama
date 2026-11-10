@@ -20,17 +20,22 @@ import {
   buildTransitionBoundaries,
   customTransitionSourceHash,
   effectiveTransitionDuration,
+  fadeTransitionSourceHash,
+  normalizeFadeStyle,
   normalizeTransitionKind,
   normalizeTransitionText,
+  parseFadeStyle,
   parseTransitionKind,
   transitionEdgeMode,
   transitionSourceHash,
+  type FadeStyle,
   type NormalizedTransitionText,
   type TransitionBoundary,
   type TransitionEdgeMode,
   type TransitionKind,
 } from './transition-plan.js'
 import { renderTransitionTextVideo, transitionTextDimensions } from './transition-text-render.js'
+import { renderFadeTransitionVideo } from './transition-fade-render.js'
 import { hasActiveStoryboardAudit } from './storyboard-audit-jobs.js'
 import { generateVideo, type GenerateVideoParams } from './generation.js'
 import { isLocalShim, isLocalShimConfig } from './adapters/minimax-video.js'
@@ -83,17 +88,29 @@ export interface TransitionDeps {
     fps: number
     backgroundImagePath: string | null
   }) => Promise<void>
+  renderFade?: (input: {
+    absolutePath: string
+    fromAbsolutePath: string
+    toAbsolutePath: string
+    durationMs: number
+    style: FadeStyle
+    aspectRatio: string | null
+    resolution: string | null
+    fps: number
+  }) => Promise<void>
 }
 
 export interface CreateCustomTransitionParams {
   episodeId: number
   fromStoryboardId: number
   toStoryboardId: number
-  kind: 'empty' | 'scene' | 'text'
+  kind: 'empty' | 'scene' | 'text' | 'fade'
   prompt?: string
   sceneId?: number | null
   textContent?: string
   textSubtitle?: string | null
+  /** fade 类型使用的本地转场样式 */
+  style?: string
   duration?: number
 }
 
@@ -115,6 +132,8 @@ export interface TransitionBoundaryView {
   sceneId: number | null
   textContent: string | null
   textSubtitle: string | null
+  /** fade 类型的本地转场样式；其他类型为 null */
+  style: FadeStyle | null
   edgeMode: TransitionEdgeMode
   /** 场景图缺失时场景镜头降级为文生视频 */
   degraded: boolean
@@ -344,6 +363,7 @@ function customHashFor(row: Pick<TransitionRow,
 ): string {
   const kind = normalizeTransitionKind(row.kind)
   if (kind === 'ai') throw new Error('过渡类型不合法')
+  if (kind === 'fade') throw new Error('本地转场需使用 fadeHashFor')
   return customTransitionSourceHash({
     kind,
     prompt: row.prompt,
@@ -356,6 +376,26 @@ function customHashFor(row: Pick<TransitionRow,
   })
 }
 
+/** 本地转场指纹：相邻镜头视频大小/mtime + 样式 + 时长 */
+function fadeHashFor(
+  row: Pick<TransitionRow, 'style' | 'durationRequested'>,
+  from: StoryboardRow,
+  to: StoryboardRow,
+): string {
+  const fromStat = sourceStats(String(from.videoUrl))
+  const toStat = sourceStats(String(to.videoUrl))
+  return fadeTransitionSourceHash({
+    fromVideoUrl: String(from.videoUrl || ''),
+    toVideoUrl: String(to.videoUrl || ''),
+    fromSize: fromStat.size,
+    fromMtimeMs: fromStat.mtimeMs,
+    toSize: toStat.size,
+    toMtimeMs: toStat.mtimeMs,
+    style: normalizeFadeStyle(row.style),
+    duration: Number(row.durationRequested) || 0,
+  })
+}
+
 async function sceneImageById(sceneIds: (number | null | undefined)[]): Promise<Map<number, string>> {
   const ids = [...new Set(sceneIds.filter((id): id is number => Number(id) > 0))]
   if (!ids.length) return new Map()
@@ -363,14 +403,16 @@ async function sceneImageById(sceneIds: (number | null | undefined)[]): Promise<
   return new Map(rows.map(row => [row.id, String(row.imageUrl || '').trim()]))
 }
 
-/** 行当前指纹：AI 过渡比对相邻视频，自定义过渡只比对自身内容 */
+/** 行当前指纹：AI 过渡比对相邻视频，自定义过渡只比对自身内容，本地转场比对相邻视频+样式 */
 function rowHashFor(
   row: TransitionRow,
   from: StoryboardRow,
   to: StoryboardRow,
   sceneImages: Map<number, string>,
 ): string {
-  if (normalizeTransitionKind(row.kind) === 'ai') return hashFor(from, to, row)
+  const kind = normalizeTransitionKind(row.kind)
+  if (kind === 'ai') return hashFor(from, to, row)
+  if (kind === 'fade') return fadeHashFor(row, from, to)
   return customHashFor(row, row.sceneId ? sceneImages.get(row.sceneId) || '' : '')
 }
 
@@ -435,6 +477,7 @@ function toView(
     sceneId: row?.sceneId ?? null,
     textContent: row?.textContent ?? null,
     textSubtitle: row?.textSubtitle ?? null,
+    style: kind === 'fade' ? normalizeFadeStyle(row?.style) : null,
     edgeMode: kind === 'ai'
       ? transitionEdgeMode('ai')
       : (row?.edgeMode === 'cut' || row?.edgeMode === 'fade' ? row.edgeMode : transitionEdgeMode(kind)),
@@ -1013,8 +1056,71 @@ async function executeCustomText(input: {
   }
 }
 
+/** 本地转场纯渲染：相邻镜头首尾片段做 xfade，不建 sys_task、不占视频模型额度 */
+async function executeCustomFade(input: {
+  context: EpisodeContext
+  rowId: number
+  previous: TransitionOutputSnapshot | null
+  from: StoryboardRow
+  to: StoryboardRow
+  style: FadeStyle
+  duration: number
+  deps: TransitionDeps
+}): Promise<void> {
+  const relative = `static/projects/${input.context.episode.dramaId}/transitions/fade-${randomUUID()}.mp4`
+  try {
+    const renderFade = input.deps.renderFade ?? ((params: {
+      absolutePath: string
+      fromAbsolutePath: string
+      toAbsolutePath: string
+      durationMs: number
+      style: FadeStyle
+      aspectRatio: string | null
+      resolution: string | null
+      fps: number
+    }) => renderFadeTransitionVideo({
+      outputPath: params.absolutePath,
+      fromPath: params.fromAbsolutePath,
+      toPath: params.toAbsolutePath,
+      durationMs: params.durationMs,
+      style: params.style,
+      aspectRatio: params.aspectRatio,
+      resolution: params.resolution,
+      fps: params.fps,
+    }))
+    await renderFade({
+      absolutePath: getAbsolutePath(relative),
+      fromAbsolutePath: getAbsolutePath(String(input.from.videoUrl)),
+      toAbsolutePath: getAbsolutePath(String(input.to.videoUrl)),
+      durationMs: Math.round(input.duration * 1000),
+      style: input.style,
+      aspectRatio: input.context.drama?.aspectRatio || null,
+      resolution: input.context.episode.resolution || null,
+      fps: 30,
+    })
+    await db.update(schema.videoTransitions).set({
+      status: 'completed',
+      videoUrl: relative,
+      provider: 'local',
+      model: 'ffmpeg-xfade',
+      configId: null,
+      configBaseUrl: null,
+      sysTaskId: null,
+      durationEffective: input.duration,
+      durationActual: input.duration,
+      errorMsg: null,
+      completedAt: now(),
+      updatedAt: now(),
+    }).where(eq(schema.videoTransitions.id, input.rowId))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await restoreAfterFailure(input.rowId, input.previous, message)
+    throw error
+  }
+}
+
 /**
- * 新建或重生成空镜/场景/文字过渡：断点记录唯一，切换类型时先清空旧输出，
+ * 新建或重生成空镜/场景/文字/转场过渡：断点记录唯一，切换类型时先清空旧输出，
  * 同类型重生成失败时保留上一次完成结果。
  */
 export async function createCustomTransition(
@@ -1022,12 +1128,19 @@ export async function createCustomTransition(
   deps: TransitionDeps = {},
 ): Promise<TransitionBoundaryView> {
   const kind = parseTransitionKind(params.kind)
-  if (kind === 'ai') throw new Error('过渡类型不合法，请选择空镜、场景或文字视频')
+  if (kind === 'ai') throw new Error('过渡类型不合法，请选择转场、空镜、场景或文字视频')
   const duration = assertCustomTransitionDuration(params.duration ?? 3)
   const context = await loadEpisodeContext(params.episodeId)
   const boundary = context.boundaries.find(item =>
     item.fromStoryboardId === params.fromStoryboardId && item.toStoryboardId === params.toStoryboardId)
   if (!boundary) throw new Error('过渡断点已变化，请刷新后重试')
+  const from = storyboardById(context, boundary.fromStoryboardId)
+  const to = storyboardById(context, boundary.toStoryboardId)
+  if (!from || !to) throw new Error('过渡断点的镜头不在本集，请刷新后重试')
+  if (kind === 'fade'
+    && (!videoFileExists(from.videoUrl) || !videoFileExists(to.videoUrl))) {
+    throw new Error('相邻镜头视频缺失，无法生成转场片段')
+  }
   if (await hasActiveStoryboardAudit(params.episodeId)) {
     throw new Error('分镜动作检验进行中，暂不能新建或重新生成过渡镜头')
   }
@@ -1040,21 +1153,26 @@ export async function createCustomTransition(
     scene = await loadTransitionScene(dramaId, Number(params.sceneId))
   }
   const sceneImageUrl = String(scene?.imageUrl || '').trim() || null
+  const style = kind === 'fade' ? parseFadeStyle(params.style) : null
   const text = kind === 'text'
     ? normalizeTransitionText({ title: params.textContent, subtitle: params.textSubtitle })
     : null
   const audioMode: 'ambient' | 'silent' = kind === 'scene' ? 'ambient' : 'silent'
-  const plan = kind === 'text' ? null : await planCustomVideo(context, params.prompt, duration, deps)
-  const sourceHash = customTransitionSourceHash({
-    kind,
-    prompt: plan?.prompt ?? null,
-    textContent: text?.title ?? null,
-    textSubtitle: text?.subtitle ?? null,
-    sceneId: scene?.id ?? null,
-    sceneImageUrl,
-    duration,
-    audioMode,
-  })
+  const plan = kind === 'text' || kind === 'fade'
+    ? null
+    : await planCustomVideo(context, params.prompt, duration, deps)
+  const sourceHash = kind === 'fade'
+    ? fadeHashFor({ style, durationRequested: duration }, from, to)
+    : customTransitionSourceHash({
+        kind,
+        prompt: plan?.prompt ?? null,
+        textContent: text?.title ?? null,
+        textSubtitle: text?.subtitle ?? null,
+        sceneId: scene?.id ?? null,
+        sceneImageUrl,
+        duration,
+        audioMode,
+      })
 
   const existingRows = await db.select().from(schema.videoTransitions)
     .where(eq(schema.videoTransitions.episodeId, params.episodeId))
@@ -1078,6 +1196,7 @@ export async function createCustomTransition(
     sceneId: scene?.id ?? null,
     textContent: text?.title ?? null,
     textSubtitle: text?.subtitle ?? null,
+    style,
     sourceHash,
     prompt: plan?.prompt ?? null,
     promptSource: plan ? 'manual' : null,
@@ -1087,13 +1206,24 @@ export async function createCustomTransition(
     lastFrameUploadUrl: null,
     referenceImageUrls: null,
     durationRequested: duration,
-    durationEffective: kind === 'text' ? duration : plan!.durationEffective,
+    durationEffective: kind === 'text' || kind === 'fade' ? duration : plan!.durationEffective,
     audioMode,
     ...(kindSwitched ? { videoUrl: null, durationActual: null, completedAt: null, sysTaskId: null } : {}),
     updatedAt: now(),
   }).where(eq(schema.videoTransitions.id, rowId))
 
-  if (kind === 'text') {
+  if (kind === 'fade') {
+    await executeCustomFade({
+      context,
+      rowId,
+      previous,
+      from,
+      to,
+      style: style!,
+      duration,
+      deps,
+    })
+  } else if (kind === 'text') {
     await executeCustomText({
       context,
       rowId,
@@ -1136,6 +1266,41 @@ async function retryCustomTransition(input: {
   const duration = assertCustomTransitionDuration(Number(row.durationRequested) || 3)
   const scene = row.sceneId ? await loadTransitionScene(input.episode.dramaId, row.sceneId) : null
   const sceneImageUrl = String(scene?.imageUrl || '').trim() || null
+
+  if (kind === 'fade') {
+    const style = normalizeFadeStyle(row.style)
+    const from = storyboardById(context, boundary.fromStoryboardId)
+    const to = storyboardById(context, boundary.toStoryboardId)
+    if (!from || !to) throw new Error('过渡断点的镜头不在本集，请刷新后重试')
+    if (!videoFileExists(from.videoUrl) || !videoFileExists(to.videoUrl)) {
+      throw new Error('相邻镜头视频缺失，无法生成转场片段')
+    }
+    const sourceHash = fadeHashFor({ style, durationRequested: duration }, from, to)
+    const claim = await claimBoundary({ existing: row, context, boundary })
+    if (!claim) throw new Error('过渡片段正在运行中，请等待结果')
+    await db.update(schema.videoTransitions).set({
+      style,
+      sourceHash,
+      sceneId: null,
+      firstFrameUrl: null,
+      lastFrameUrl: null,
+      durationRequested: duration,
+      durationEffective: duration,
+      audioMode: 'silent',
+      updatedAt: now(),
+    }).where(eq(schema.videoTransitions.id, claim.rowId))
+    await executeCustomFade({
+      context,
+      rowId: claim.rowId,
+      previous: claim.previous,
+      from,
+      to,
+      style,
+      duration,
+      deps,
+    })
+    return
+  }
 
   if (kind === 'text') {
     const text = normalizeTransitionText({ title: row.textContent, subtitle: row.textSubtitle })

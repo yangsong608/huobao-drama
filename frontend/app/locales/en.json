@@ -1437,6 +1437,7 @@
       "undo": "Undo repairs",
       "undoDone": "Restored {n} shots",
       "runDone": "Action audit finished; repaired {n} items",
+      "manualDone": "{n} issue(s) cannot be auto-fixed and are marked for manual handling",
       "statusLabel": "Audit status",
       "trigger": {
         "manual": "Manual audit",
@@ -1522,8 +1523,19 @@
           "ai": "AI transition",
           "empty": "Empty shot",
           "scene": "Scene",
-          "text": "Text video"
+          "text": "Text video",
+          "fade": "Dissolve"
         },
+        "fadeStyleLabel": "Transition style",
+        "fadeStyle": {
+          "dissolve": "Cross dissolve",
+          "dip-black": "Dip to black",
+          "dip-white": "Dip to white",
+          "wipe-left": "Wipe left",
+          "slide-left": "Slide left",
+          "circle-open": "Circle open"
+        },
+        "fadeHint": "The clip joins the end of the previous shot and the start of the next locally, without using a video model.",
         "submit": "Create & generate",
         "submitting": "Submitting…",
         "cancel": "Cancel",
@@ -1686,6 +1698,7 @@
         "addCustom": "New transition shot",
         "degraded": "Scene image missing; generated as an empty shot",
         "editCustom": "Change type",
+        "switchKind": "Switch to another mode",
         "prompt": {
           "toggle": "Prompt",
           "label": "Transition video prompt",

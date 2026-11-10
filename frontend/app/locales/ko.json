@@ -1437,6 +1437,7 @@
       "undo": "이번 수정 취소",
       "undoDone": "스토리보드 {n}개를 복원했습니다",
       "runDone": "액션 검사 완료, 자동 수정 {n}건",
+      "manualDone": "{n}건은 자동 수정할 수 없어 수동 처리로 표시했습니다",
       "statusLabel": "검사 상태",
       "trigger": {
         "manual": "수동 검사",
@@ -1522,8 +1523,19 @@
           "ai": "AI 트랜지션",
           "empty": "빈 숏",
           "scene": "장면",
-          "text": "텍스트 영상"
+          "text": "텍스트 영상",
+          "fade": "디졸브"
         },
+        "fadeStyleLabel": "트랜지션 스타일",
+        "fadeStyle": {
+          "dissolve": "교차 디졸브",
+          "dip-black": "블랙 페이드",
+          "dip-white": "화이트 페이드",
+          "wipe-left": "왼쪽 와이프",
+          "slide-left": "왼쪽 슬라이드",
+          "circle-open": "서클 오픈"
+        },
+        "fadeHint": "앞뒤 숏의 끝과 시작을 로컬에서 합성하므로 비디오 모델을 사용하지 않습니다.",
         "submit": "생성 및 만들기",
         "submitting": "제출 중…",
         "cancel": "취소",
@@ -1686,6 +1698,7 @@
         "addCustom": "트랜지션 숏 만들기",
         "degraded": "장면 이미지가 없어 빈 숏으로 생성합니다",
         "editCustom": "종류 변경",
+        "switchKind": "다른 방식으로 변경",
         "prompt": {
           "toggle": "프롬프트",
           "label": "전환 영상 프롬프트",

@@ -66,19 +66,35 @@ export const LEGACY_BUILTIN_FILES: LegacyBuiltinFileRule[] = [
   },
   {
     path: 'skills/storyboard-auditor/SKILL.md',
-    sha256: ['73d21c14f321d137ee6c02925fde6e5e684f1c4bdb4133d8c337df4ad4b6cf53'],
+    sha256: [
+      '73d21c14f321d137ee6c02925fde6e5e684f1c4bdb4133d8c337df4ad4b6cf53',
+      '9689014430fc5fc1cb049810265aa2c69fdff623d9f67f23a884416d73abcbb6',
+      '2a40f9af38b4ca10c583b8e4d30dc833a8ad3c27153b9e1fbf2b6acbb75d9eb5',
+    ],
   },
   {
     path: 'skills/storyboard-auditor/SKILL.en.md',
-    sha256: ['868c738cffd15d1d846c24c8e6257fc37a2440d0852d9b2b3d3a3118a6624c82'],
+    sha256: [
+      '868c738cffd15d1d846c24c8e6257fc37a2440d0852d9b2b3d3a3118a6624c82',
+      '8724a532c753cfb0c98ec4d7a6baa8026101369ea2dbcba7cc87c603e3e114f2',
+      'c352c8cf195dc954b1d0e5cca405e3a068aa919f9c7ea3f9d4f7ee47bc970622',
+    ],
   },
   {
     path: 'skills/storyboard-auditor/SKILL.ja.md',
-    sha256: ['a84a9bfa264fcf2850e4e3faedb24a132fe71ee6454bcf37246230fd0802c95d'],
+    sha256: [
+      'a84a9bfa264fcf2850e4e3faedb24a132fe71ee6454bcf37246230fd0802c95d',
+      '6c2a02bab683361b03f328084df9331ac6434b05e200f80943d950682c6cf19a',
+      '3e958d9b0ec80834425667ac8fc14375133a1b730e9e2b664345eb6cab84bb57',
+    ],
   },
   {
     path: 'skills/storyboard-auditor/SKILL.ko.md',
-    sha256: ['d3e51139512aea042b431632699c288a3d0cd0a6de17d5912aca161d48a31859'],
+    sha256: [
+      'd3e51139512aea042b431632699c288a3d0cd0a6de17d5912aca161d48a31859',
+      '344927be5751c69db1e63a6418d8b8d4d1c4e08c9b300fc0ff2a72d584573708',
+      'd13248df23b2ada90b5671a3f6f08287c513e027c7b810eec3acd4c66b2c906e',
+    ],
   },
 ]
 

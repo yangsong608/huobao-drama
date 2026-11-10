@@ -56,6 +56,31 @@ test('左侧每个镜头卡片在摄像头按钮右侧显示逐镜检验状态�
   }
 })
 
+test('检验完成后干净的镜头不再显示检验状态标识', () => {
+  assert.match(episode, /v-if="auditShotMarkerVisible\(task\.storyboard\)"/)
+  assert.match(episode, /function auditShotMarkerVisible\(sb\) \{/)
+  assert.match(episode, /function auditShotMarkerVisible\(sb\) \{[\s\S]{0,360}if \(!job\) return true/)
+  assert.match(episode, /function auditShotMarkerVisible\(sb\) \{[\s\S]{0,360}if \(auditRunning\.value\) return true/)
+  assert.match(episode, /function auditShotMarkerVisible\(sb\) \{[\s\S]{0,420}shot\.stale \|\| shot\.status === 'running' \|\| shot\.status === 'failed'/)
+  assert.match(episode, /function auditShotMarkerVisible\(sb\) \{[\s\S]{0,480}errorCount \+ shot\.warningCount \+ shot\.infoCount > 0/)
+})
+
+test('镜头行操作按钮收进同一容器，栅格固定三列避免删除按钮换行', () => {
+  assert.match(episode, /class="video-task-actions"[\s\S]{0,600}class="btn btn-icon btn-sm video-task-action"/)
+  assert.match(episode, /class="video-task-actions"[\s\S]{0,4000}class="btn btn-icon btn-sm video-task-delete"/)
+  assert.match(episode, /\.video-task-row \{\s*display: grid;\s*grid-template-columns: 56px minmax\(0, 1fr\) auto;/)
+  assert.match(episode, /\.video-task-actions \{[^}]*justify-self: end;[^}]*display: flex;/)
+})
+
+test('检验抽屉位于遮罩容器内，避免被遮罩压暗与拦截点击', () => {
+  assert.match(episode, /<div v-if="auditPanel\.open" class="task-drawer-overlay" @click\.self="closeAuditPanel">\s*<aside\s+class="task-drawer audit-drawer"/)
+  assert.ok(!/<div v-if="auditPanel\.open" class="task-drawer-overlay"[^>]*\/>/.test(episode), '遮罩不能自闭合')
+  const drawerStart = episode.indexOf('class="task-drawer audit-drawer"')
+  const nextOverlay = episode.indexOf('class="overlay asset-detail-overlay"', drawerStart)
+  const section = episode.slice(drawerStart, nextOverlay)
+  assert.match(section, /<\/aside>\s*<\/div>\s*<div v-if="assetDetail\.open/, '检验抽屉必须在遮罩容器闭合前结束')
+})
+
 test('检验按最新任务轮询，拆分完成后补读并只应用最新请求', () => {
   assert.match(episode, /const auditState = ref\(\{ loading: false, job: null, loaded: false \}\)/)
   assert.match(episode, /const auditPoll = useVisibilityPolling\(/)
@@ -80,7 +105,7 @@ test('检验进行中禁用会改动分镜的入口', () => {
 })
 
 test('检验面板按五项分组展示问题、过滤、修复记录与撤销', () => {
-  assert.match(episode, /<aside v-if="auditPanel\.open" class="task-drawer audit-drawer"/)
+  assert.match(episode, /class="task-drawer audit-drawer"/)
   assert.match(episode, /auditCheckGroups/)
   assert.match(episode, /episode\.audit\.check\.\$\{group\.check\}/)
   assert.match(episode, /auditPanelFilter/)
@@ -118,6 +143,7 @@ test('检查 2 问题卡可直接打开过渡镜头创建弹窗，并按建议�
   assert.match(episode, /episode\.audit\.transition\.kind\.empty/)
   assert.match(episode, /episode\.audit\.transition\.kind\.scene/)
   assert.match(episode, /episode\.audit\.transition\.kind\.text/)
+  assert.match(episode, /episode\.audit\.transition\.kind\.fade/)
   assert.match(episode, /class="dialog transition-create-dialog"/)
 })
 
@@ -171,6 +197,18 @@ test('过渡镜头弹窗校验类型、时长 2–5 秒、文字 20/40 字与场
   assert.match(episode, /episode\.audit\.transition\.submitted/)
 })
 
+test('过渡弹窗支持本地转场与六种样式，转场不要求提示词', () => {
+  assert.match(episode, /const FADE_STYLE_VALUES = \['dissolve', 'dip-black', 'dip-white', 'wipe-left', 'slide-left', 'circle-open'\]/)
+  assert.match(episode, /fadeStyleOptions = computed/)
+  assert.match(episode, /v-if="transitionCreate\.kind === 'fade'"/)
+  assert.match(episode, /episode\.audit\.transition\.fadeStyleLabel/)
+  assert.match(episode, /episode\.audit\.transition\.fadeHint/)
+  assert.match(episode, /if \(kind === 'fade'\) payload\.style = transitionCreate\.value\.style/)
+  assert.match(episode, /transitionCreate\.kind !== 'text' && transitionCreate\.kind !== 'fade'/)
+  assert.match(episode, /function fadeStyleLabel\(style\)/)
+  assert.match(episode, /kind === 'fade' \? `\$\{label\} · \$\{fadeStyleLabel\(boundary\?\.style\)\}` : label/)
+})
+
 test('过渡详情区分 AI 与自定义类型，场景缺图显示降级标记', () => {
   assert.match(episode, /function transitionKindOf\(boundary\)/)
   assert.match(episode, /function transitionKindLabel\(boundary\)/)
@@ -179,6 +217,13 @@ test('过渡详情区分 AI 与自定义类型，场景缺图显示降级标记'
   assert.match(episode, /episode\.export\.aiTransition\.degraded/)
   assert.match(episode, /episode\.export\.aiTransition\.editCustom/)
   assert.match(episode, /class="ai-transition-kind"/)
+})
+
+test('过渡详情可切换类型，本地转场显示当前样式', () => {
+  assert.match(episode, /function switchTransitionKind\(boundary, kind\)/)
+  assert.match(episode, /episode\.export\.aiTransition\.switchKind/)
+  assert.match(episode, /transitionCreateKindOptions\.filter\(item => item\.value !== transitionKindOf\(transitionDetailBoundary\)\)/)
+  assert.match(episode, /transitionKindOf\(transitionDetailBoundary\) === 'fade'[\s\S]{0,120}fadeStyleLabel\(transitionDetailBoundary\.style\)/)
 })
 
 test('过渡卡片展示类型与降级状态，导出页可新建自定义过渡', () => {
@@ -215,9 +260,15 @@ test('四语言补齐动作检验、过渡类型与自动化阶段文案', () =>
     for (const key of ['semanticDisabled', 'semanticPartial', 'semanticFailed', 'semanticTruncated']) {
       assert.equal(typeof copy?.empty?.[key], 'string', `${lang} 缺少 audit.empty.${key}`)
     }
-    for (const kind of ['ai', 'empty', 'scene', 'text']) {
+    for (const kind of ['ai', 'empty', 'scene', 'text', 'fade']) {
       assert.equal(typeof copy?.transition?.kind?.[kind], 'string', `${lang} 缺少 audit.transition.kind.${kind}`)
     }
+    assert.equal(typeof copy?.transition?.fadeStyleLabel, 'string', `${lang} 缺少 audit.transition.fadeStyleLabel`)
+    assert.equal(typeof copy?.transition?.fadeHint, 'string', `${lang} 缺少 audit.transition.fadeHint`)
+    for (const style of ['dissolve', 'dip-black', 'dip-white', 'wipe-left', 'slide-left', 'circle-open']) {
+      assert.equal(typeof copy?.transition?.fadeStyle?.[style], 'string', `${lang} 缺少 audit.transition.fadeStyle.${style}`)
+    }
+    assert.equal(typeof bundle?.episode?.export?.aiTransition?.switchKind, 'string', `${lang} 缺少 export.aiTransition.switchKind`)
     assert.equal(typeof bundle?.episode?.tasks?.runStoryboardAudit, 'string', `${lang} 缺少 tasks.runStoryboardAudit`)
     assert.equal(typeof bundle?.detail?.automation?.stage?.storyboardAudit, 'string', `${lang} 缺少 detail.automation.stage.storyboardAudit`)
   }

@@ -42,7 +42,7 @@ export const AUDIT_RULE_CODES_BY_CHECK: Record<AuditCheck, readonly string[]> = 
     'speaker_unbound',
     'speaker_unknown',
   ],
-  2: ['continuity_missing', 'cross_scene_cut_without_continuity'],
+  2: ['continuity_missing', 'cross_scene_cut_without_continuity', 'adjacent_time_jump'],
   3: ['silent_shot_long', 'empty_shot_long'],
   4: [
     'line_insufficient_duration',
@@ -86,6 +86,8 @@ export interface AuditShotInput {
   movement: string | null
   continuity: string | null
   transition: string | null
+  time: string | null
+  transitionKind: string | null
   sceneId: number | null
   location: string | null
   referenceImages: string | null
@@ -363,6 +365,26 @@ function normalizeTransition(value: string | null | undefined): string {
   return (value || 'cut').trim().toLowerCase()
 }
 
+const TIME_OF_DAY_BUCKETS: Array<{ rank: number; pattern: RegExp }> = [
+  { rank: 1, pattern: /凌晨|黎明|拂晓|破晓/ },
+  { rank: 2, pattern: /清晨|早晨|早上|一早|晨/ },
+  { rank: 3, pattern: /上午/ },
+  { rank: 4, pattern: /中午|午间|午时|正午|晌午/ },
+  { rank: 5, pattern: /下午|午后/ },
+  { rank: 6, pattern: /傍晚|黄昏|日落|薄暮/ },
+  { rank: 7, pattern: /夜晚|晚上|夜里|夜间|深夜|午夜|入夜|夜/ },
+]
+
+/** 只识别明确的时段词；日/白天等泛化值不参与判断，避免把普通日夜场景当成跳时。 */
+function timeOfDayRank(value: string | null | undefined): number | null {
+  const text = (value || '').trim()
+  if (!text) return null
+  for (const bucket of TIME_OF_DAY_BUCKETS) {
+    if (bucket.pattern.test(text)) return bucket.rank
+  }
+  return null
+}
+
 function isExternalImage(value: string): boolean {
   return EXTERNAL_IMAGE_RE.test(value.trim())
 }
@@ -543,9 +565,9 @@ function checkVideoPrompt(
       code: 'prompt_segment_too_long',
       message: `视频提示词单个 3 秒段中的台词/旁白超过 ${thresholds.promptSegmentMaxChars} 个可发音字符。`,
       evidence: clip(unique(overlongSegments).join('；')),
-      suggestion: `压缩台词或把长句拆分到相邻时间段/分镜，每段不超过 ${thresholds.promptSegmentMaxChars} 字。`,
-      repairable: true,
-      repairAction: 'normalize_video_prompt',
+      // 缩短台词或跨段拆分必须改台词文本，受控修复不允许改台词，只能人工处理
+      suggestion: `人工压缩台词或把长句拆分到相邻时间段/分镜，每段不超过 ${thresholds.promptSegmentMaxChars} 字；自动修复不改台词。`,
+      repairable: false,
     })
   }
   if (actionInDialogue.length) {
@@ -610,10 +632,30 @@ function checkSpeakers(
   }
 }
 
-function checkContinuity(shots: AuditShotInput[], issues: AuditIssueDraft[]) {
+function checkContinuity(shots: AuditShotInput[], issues: AuditIssueDraft[], bridgedPairs: Set<string>) {
   for (let index = 1; index < shots.length; index += 1) {
     const shot = shots[index]
     const previous = shots[index - 1]
+    if (bridgedPairs.has(`${previous.id}:${shot.id}`)) continue
+    const previousRank = timeOfDayRank(previous.time)
+    const currentRank = timeOfDayRank(shot.time)
+    if (normalizeTransition(shot.transition) === 'cut'
+      && previousRank != null
+      && currentRank != null
+      && Math.abs(currentRank - previousRank) >= 2) {
+      pushIssue(issues, shot, {
+        check: 2,
+        severity: 'info',
+        code: 'adjacent_time_jump',
+        relatedStoryboardIds: [previous.id],
+        message: `相邻两镜时间从「${(previous.time || '').trim()}」直接硬切到「${(shot.time || '').trim()}」，成对判定会重点核对这里是否需要过渡。`,
+        evidence: `上一镜：第 ${previous.storyboardNumber} 镜「${(previous.time || '').trim()}」；本镜：第 ${shot.storyboardNumber} 镜「${(shot.time || '').trim()}」；转场：cut`,
+        suggestion: '等待成对判定结论；只有判定 broken 时才会按建议插入过渡分镜。',
+        repairable: false,
+        repairAction: null,
+        suggestedTransition: null,
+      })
+    }
     if (!isBlank(shot.continuity)) continue
     pushIssue(issues, shot, {
       check: 2,
@@ -1044,12 +1086,27 @@ function checkMentions(
 }
 
 export function evaluateStoryboardRules(input: StoryboardRuleInput): AuditIssueDraft[] {
-  const shots = [...input.shots].sort((left, right) => (
+  const ordered = [...input.shots].sort((left, right) => (
     left.storyboardNumber - right.storyboardNumber || left.id - right.id
   ))
+  // 过渡分镜是已有解决方案，不再作为检验对象；两侧真实分镜跨卡成对，由 AI 单独判定。
+  const shots = ordered.filter((shot) => shot.transitionKind == null)
+  const bridgedPairs = new Set<string>()
+  let previousReal: AuditShotInput | null = null
+  let previousRealIndex = -1
+  for (let index = 0; index < ordered.length; index += 1) {
+    const shot = ordered[index]
+    if (shot.transitionKind != null) continue
+    if (previousReal && index - previousRealIndex > 1) {
+      bridgedPairs.add(`${previousReal.id}:${shot.id}`)
+    }
+    previousReal = shot
+    previousRealIndex = index
+  }
+  const realIds = new Set(shots.map((shot) => shot.id))
   const linesByShot = new Map<number, AuditLineInput[]>()
   for (const line of input.lines) {
-    if (line.storyboardId == null) continue
+    if (line.storyboardId == null || !realIds.has(line.storyboardId)) continue
     const group = linesByShot.get(line.storyboardId) || []
     group.push(line)
     linesByShot.set(line.storyboardId, group)
@@ -1063,7 +1120,7 @@ export function evaluateStoryboardRules(input: StoryboardRuleInput): AuditIssueD
       checkShotFields(shot, issues, input.cast, linesByShot.get(shot.id) ?? [], thresholds)
     }
   }
-  if (checks.continuity !== false) checkContinuity(shots, issues)
+  if (checks.continuity !== false) checkContinuity(shots, issues, bridgedPairs)
   if (checks.silent !== false) checkSilentShots(shots, linesByShot, issues, thresholds)
   if (checks.lineDuration !== false) checkLineDurations(shots, linesByShot, issues, thresholds)
   if (checks.assets !== false) {
@@ -1139,6 +1196,11 @@ export function dedupeAuditIssues(issues: AuditIssueDraft[]): AuditIssueDraft[] 
   }
 
   for (const semantic of semanticOrder) {
+    // 检查 2 的规则提示只是给成对判定提供线索，不能和 AI 结论合并成一条。
+    if (semantic.check === 2) {
+      result.push(semantic)
+      continue
+    }
     const locationIndex = ruleLocations.get(ruleLocationKey(semantic))
     if (locationIndex == null) {
       result.push(semantic)

@@ -484,6 +484,8 @@ export const videoTransitions = sqliteTable('video_transitions', {
   /** text 类型主标题/副标题 */
   textContent: text('text_content'),
   textSubtitle: text('text_subtitle'),
+  /** fade 类型的本地转场样式：dissolve / dip-black / dip-white / wipe-left / slide-left / circle-open */
+  style: text('style'),
   /** 合片两端处理：fade / cut */
   edgeMode: text('edge_mode').notNull().default('fade'),
   fromVideoUrl: text('from_video_url'),

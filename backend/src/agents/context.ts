@@ -26,6 +26,8 @@ export interface AgentRequestContextValues {
   auditJobId?: number
   auditPhase?: 'audit' | 'repair'
   auditWindowIndex?: number
+  /** 动作检验：成对连贯判定的当前配对键（P{fromId}-{toId}） */
+  auditPairKey?: string
 }
 
 export function buildAgentRequestContext(values: AgentRequestContextValues): RequestContext<AgentRequestContextValues> {
@@ -43,6 +45,7 @@ export function buildAgentRequestContext(values: AgentRequestContextValues): Req
   if (typeof values.auditJobId === 'number') rc.set('auditJobId', values.auditJobId)
   if (values.auditPhase) rc.set('auditPhase', values.auditPhase)
   if (typeof values.auditWindowIndex === 'number') rc.set('auditWindowIndex', values.auditWindowIndex)
+  if (values.auditPairKey) rc.set('auditPairKey', values.auditPairKey)
   // 语言在构建处统一解析：4 条链路（chat/提取/图片提示词/视频提示词）都经过这里，
   // 全局设置一处生效；显式传入 values.language 可按请求覆盖
   rc.set('language', values.language ?? getContentLanguage())
@@ -78,4 +81,9 @@ export function getAuditPhase(requestContext: RequestContext | undefined): 'audi
 export function getAuditWindowIndex(requestContext: RequestContext | undefined): number | null {
   const v = requestContext?.get('auditWindowIndex' as never)
   return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null
+}
+
+export function getAuditPairKey(requestContext: RequestContext | undefined): string | null {
+  const v = requestContext?.get('auditPairKey' as never)
+  return typeof v === 'string' && v.trim() ? v.trim() : null
 }

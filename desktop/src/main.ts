@@ -31,7 +31,7 @@ let backendBundle = BACKEND_BUNDLE
 let runtimeResourcesDir = ''
 
 /** workspace 模板版本：内置模板更新时递增，触发向用户目录补缺失文件 */
-const TEMPLATE_VERSION = '11'
+const TEMPLATE_VERSION = '13'
 const STORAGE_CONFIG_FILE = 'storage-config.json'
 
 let mainWindow: BrowserWindow | null = null

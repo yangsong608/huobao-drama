@@ -71,6 +71,8 @@ function shot(overrides: Partial<AuditShotInput> = {}): AuditShotInput {
     movement: '固定',
     continuity: '承接上一镜',
     transition: 'cut',
+    time: null,
+    transitionKind: null,
     sceneId: 10,
     location: '房间',
     referenceImages: null,
@@ -201,6 +203,7 @@ test('每个 3 秒段台词或旁白超过 12 个可发音字符给警告', () =
   const issues = issuesByCode(tooLong, 'prompt_segment_too_long')
   assert.equal(issues.length, 1)
   assert.equal(issues[0].severity, 'warning')
+  assert.equal(issues[0].repairable, false, '缩短台词必须改台词文本，不允许自动修复')
   assert.match(issues[0].message, /12/)
 
   const actionLongText = evaluateStoryboardRules(input({
@@ -265,6 +268,67 @@ test('跨场景硬切且无连贯性时额外提示', () => {
   assert.equal(cross.length, 1)
   assert.equal(cross[0].storyboardId, 2)
   assert.equal(issuesByCode(result, 'continuity_missing').length, 2)
+})
+
+test('相邻镜头时间桶跳变且硬切时只给检查 2 线索提示，由成对判定决定是否插卡', () => {
+  const result = evaluateStoryboardRules(input({
+    shots: [
+      shot({ id: 377, storyboardNumber: 17, time: '清晨', continuity: '开场' }),
+      shot({ id: 378, storyboardNumber: 18, time: '午间', continuity: '回身继续安排自家这桌用饭' }),
+    ],
+  }))
+  const jumps = issuesByCode(result, 'adjacent_time_jump')
+  assert.equal(jumps.length, 1)
+  const issue = jumps[0]
+  assert.equal(issue.check, 2)
+  assert.equal(issue.storyboardId, 378)
+  assert.equal(issue.storyboardNumber, 18)
+  assert.deepEqual(issue.relatedStoryboardIds, [377])
+  assert.equal(issue.severity, 'info')
+  assert.equal(issue.repairable, false)
+  assert.equal(issue.repairAction, null)
+  assert.equal(issue.suggestedTransition, null)
+  assert.match(issue.message, /清晨/)
+  assert.match(issue.message, /午间/)
+  assert.match(issue.evidence || '', /第 17 镜/)
+})
+
+test('时间同义、时间差不足两档或非硬切时不报时间跳变', () => {
+  const cases: Array<[string | null, string | null, string]> = [
+    ['午间', '午时', 'cut'],
+    ['清晨', '上午', 'cut'],
+    ['清晨', '午间', 'fade'],
+  ]
+  for (const [previousTime, nextTime, transition] of cases) {
+    const result = evaluateStoryboardRules(input({
+      shots: [
+        shot({ id: 1, storyboardNumber: 1, time: previousTime, continuity: '开场' }),
+        shot({ id: 2, storyboardNumber: 2, time: nextTime, transition }),
+      ],
+    }))
+    assert.equal(issuesByCode(result, 'adjacent_time_jump').length, 0, `${previousTime}→${nextTime}/${transition}`)
+  }
+})
+
+test('时间缺失或无法识别时不报时间跳变', () => {
+  const result = evaluateStoryboardRules(input({
+    shots: [
+      shot({ id: 1, storyboardNumber: 1, time: null, continuity: '开场' }),
+      shot({ id: 2, storyboardNumber: 2, time: '某时', continuity: '承接' }),
+      shot({ id: 3, storyboardNumber: 3, time: '午间', continuity: '承接' }),
+    ],
+  }))
+  assert.equal(issuesByCode(result, 'adjacent_time_jump').length, 0)
+})
+
+test('断点已有过渡分镜时不再报时间跳变', () => {
+  const result = evaluateStoryboardRules(input({
+    shots: [
+      shot({ id: 1, storyboardNumber: 1, time: '清晨', continuity: '开场' }),
+      shot({ id: 2, storyboardNumber: 2, time: '午间', transitionKind: 'text', continuity: '承接' }),
+    ],
+  }))
+  assert.equal(issuesByCode(result, 'adjacent_time_jump').length, 0)
 })
 
 test('有角色绑定的无对话镜头 8 秒警告、12 秒错误', () => {
@@ -633,7 +697,7 @@ function baseIssue(overrides: Partial<AuditIssueDraft> = {}): AuditIssueDraft {
   }
 }
 
-test('规则与语义同位置合并，语义重复保留证据更完整的一条', () => {
+test('检查 2 的规则线索不与 AI 结论合并，语义重复仍保留证据更完整的一条', () => {
   const rule = baseIssue({ check: 2, code: 'continuity_missing', evidence: '规则证据', severity: 'warning' })
   const semanticShort = baseIssue({
     check: 2, source: 'semantic', code: 'semantic_continuity_break',
@@ -644,11 +708,14 @@ test('规则与语义同位置合并，语义重复保留证据更完整的一�
     evidence: '更完整的语义证据，说明上一镜尾动作没有承接', severity: 'error', windowIndex: 2,
   })
   const merged = dedupeAuditIssues([rule, semanticShort, semanticLong])
-  assert.equal(merged.length, 1)
-  assert.equal(merged[0].code, 'continuity_missing')
-  assert.equal(merged[0].source, 'rule+semantic')
-  assert.equal(merged[0].severity, 'error')
-  assert.match(merged[0].evidence || '', /更完整的语义证据/)
+  assert.equal(merged.length, 2)
+  const ruleKept = merged.find((issue) => issue.code === 'continuity_missing')
+  assert.equal(ruleKept?.source, 'rule')
+  assert.equal(ruleKept?.severity, 'warning')
+  const semanticKept = merged.find((issue) => issue.code === 'semantic_continuity_break')
+  assert.equal(semanticKept?.source, 'semantic')
+  assert.equal(semanticKept?.severity, 'error')
+  assert.match(semanticKept?.evidence || '', /更完整的语义证据/)
 
   const onlySemantic = dedupeAuditIssues([semanticShort, semanticLong])
   assert.equal(onlySemantic.length, 1)

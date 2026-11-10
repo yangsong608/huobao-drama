@@ -1437,6 +1437,7 @@
       "undo": "撤销本次修复",
       "undoDone": "已恢复 {n} 个分镜",
       "runDone": "动作检验完成，自动修复 {n} 项",
+      "manualDone": "还有 {n} 条问题无法自动修复，已标记为人工处理",
       "statusLabel": "检验状态",
       "trigger": {
         "manual": "手动检验",
@@ -1522,8 +1523,19 @@
           "ai": "AI 过渡",
           "empty": "空镜",
           "scene": "场景",
-          "text": "文字视频"
+          "text": "文字视频",
+          "fade": "转场"
         },
+        "fadeStyleLabel": "转场样式",
+        "fadeStyle": {
+          "dissolve": "交叉淡化",
+          "dip-black": "黑场",
+          "dip-white": "白场",
+          "wipe-left": "左划像",
+          "slide-left": "左滑动",
+          "circle-open": "圆形开场"
+        },
+        "fadeHint": "转场片段取相邻镜头的结尾与开头，在本地合成，不消耗视频模型。",
         "submit": "创建并生成",
         "submitting": "提交中…",
         "cancel": "取消",
@@ -1686,6 +1698,7 @@
         "addCustom": "新建过渡镜头",
         "degraded": "场景图缺失，已按空镜生成",
         "editCustom": "修改类型",
+        "switchKind": "改为其他方式",
         "prompt": {
           "toggle": "提示词",
           "label": "过渡视频提示词",

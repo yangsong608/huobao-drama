@@ -641,6 +641,7 @@ async function writeBackImageAssets(record: SysTaskRecord, localPath: string) {
   if (record.propId) {
     await db.update(schema.props).set({ imageUrl: localPath, updatedAt: now() }).where(eq(schema.props.id, record.propId))
   }
+  if (record.storyboardId || record.characterId || record.sceneId || record.propId) emitTaskChange(record)
 }
 
 /**
@@ -764,6 +765,7 @@ export async function handleVideoComplete(record: SysTaskRecord, videoUrl: strin
           errorMsg: null, completedAt: now(), updatedAt: now(),
         }).where(eq(schema.sysTask.id, record.id)).run()
       })
+      emitTaskChange(record)
       return
     }
 
@@ -821,6 +823,7 @@ export async function handleVideoComplete(record: SysTaskRecord, videoUrl: strin
     })
     // 事务提交后：仅当本次新建了拼接成片且该集还没有当前成片时，才接管当前指针
     if (newMergeId != null) bootstrapCurrentFilmIfEmpty(episodeId, newMergeId)
+    if (record.storyboardId || record.transitionId || timeline) emitTaskChange(record)
   } catch (error) {
     await failTask(record.id, safeTaskError(error), 'delivery_failed')
   }

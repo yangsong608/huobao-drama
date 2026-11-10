@@ -20,6 +20,9 @@ import {
 } from './storyboard-audit-rules.js'
 
 export const TRANSITION_TOKEN_RE = /@镜头(\d+)末帧/g
+/** continuity 里常见的「承接段17」「承接第 17 镜」「为第 19 镜」引用 */
+const SEGMENT_REFERENCE_RE = /承接段(\d+)/g
+const SHOT_REFERENCE_RE = /(承接第|为第)(\s*)(\d+)(\s*)镜/g
 
 const REWRITE_FIELDS = ['description', 'videoPrompt', 'result', 'continuity', 'imagePrompt'] as const
 export type TransitionRewriteField = (typeof REWRITE_FIELDS)[number]
@@ -37,6 +40,7 @@ export interface TransitionInsertionPlan {
   sceneName: string
   location: string
   time: string | null
+  text: string | null
 }
 
 export type TransitionInsertionResolution =
@@ -119,21 +123,30 @@ export function resolveTransitionInsertion(
   const anchorIndex = ordered.findIndex((shot) => shot.id === issue.storyboardId)
   if (anchorIndex < 0) return { reason: '问题所属分镜不存在或已删除，不能插入过渡分镜' }
   const anchor = ordered[anchorIndex]
+  if (anchor.transitionKind != null) {
+    return { reason: '问题所属分镜本身是过渡分镜，不能作为插卡锚点' }
+  }
   const relatedIds = [...new Set(issue.relatedStoryboardIds ?? [])]
     .filter((id) => Number.isFinite(id) && id !== anchor.id)
+  const relatedShots = relatedIds
+    .map((id) => ordered.find((shot) => shot.id === id))
+    .filter((shot): shot is AuditContextShot => shot != null)
+  if (relatedShots.some((shot) => shot.transitionKind != null)) {
+    return { reason: '断点相关镜头包含已存在的过渡分镜，不能重复插入过渡分镜' }
+  }
 
   let from: AuditContextShot | null = null
   let to: AuditContextShot | null = null
-  for (const relatedId of relatedIds) {
-    const relatedIndex = ordered.findIndex((shot) => shot.id === relatedId)
+  for (const related of relatedShots) {
+    const relatedIndex = ordered.findIndex((shot) => shot.id === related.id)
     if (relatedIndex === anchorIndex - 1) {
-      from = ordered[relatedIndex]
+      from = related
       to = anchor
       break
     }
     if (relatedIndex === anchorIndex + 1) {
       from = anchor
-      to = ordered[relatedIndex]
+      to = related
       break
     }
   }
@@ -175,6 +188,7 @@ export function resolveTransitionInsertion(
       sceneName: scene.sceneName,
       location: (to.location || from.location || scene.sceneName).trim(),
       time: to.time || from.time || null,
+      text: to.time || from.time || null,
     },
   }
 }
@@ -182,18 +196,46 @@ export function resolveTransitionInsertion(
 function rewriteTokens(
   text: string,
   numberMap: Map<number, number>,
+  referenceMap: Map<number, number> = numberMap,
 ): string {
-  return text.replace(TRANSITION_TOKEN_RE, (match, raw: string) => {
-    const current = Number(raw)
-    const next = numberMap.get(current)
-    if (next == null || next === current) return match
-    return `@镜头${next}末帧`
-  })
+  return text
+    .replace(TRANSITION_TOKEN_RE, (match, raw: string) => {
+      const current = Number(raw)
+      const next = numberMap.get(current)
+      if (next == null || next === current) return match
+      return `@镜头${next}末帧`
+    })
+    .replace(SEGMENT_REFERENCE_RE, (match, raw: string) => {
+      const current = Number(raw)
+      const next = referenceMap.get(current)
+      if (next == null || next === current) return match
+      return `承接段${next}`
+    })
+    .replace(SHOT_REFERENCE_RE, (match, prefix: string, lead: string, raw: string, tail: string) => {
+      const current = Number(raw)
+      const next = referenceMap.get(current)
+      if (next == null || next === current) return match
+      return `${prefix}${lead}${next}${tail}镜`
+    })
+}
+
+/** 断点后方那一镜的「承接…」应改指向插入卡；其余引用仍按原编号映射 */
+function buildReferenceMap(
+  entries: TransitionInsertionLayoutEntry[],
+  numberMap: Map<number, number>,
+): Map<number, number> {
+  const referenceMap = new Map(numberMap)
+  for (const entry of entries) {
+    if (entry.type !== 'insertion' || !entry.plan) continue
+    referenceMap.set(entry.plan.from.storyboardNumber, entry.number)
+  }
+  return referenceMap
 }
 
 function buildTextPatches(
   shots: AuditContextShot[],
   numberMap: Map<number, number>,
+  referenceMap: Map<number, number>,
 ): { patches: Map<number, Record<string, string>>; changedIds: number[] } {
   const patches = new Map<number, Record<string, string>>()
   const changedIds: number[] = []
@@ -202,7 +244,7 @@ function buildTextPatches(
     for (const field of REWRITE_FIELDS) {
       const before = shot[field]
       if (typeof before !== 'string' || !before) continue
-      const after = rewriteTokens(before, numberMap)
+      const after = rewriteTokens(before, numberMap, referenceMap)
       if (after !== before) patch[field] = after
     }
     if (Object.keys(patch).length) {
@@ -246,7 +288,11 @@ export function buildTransitionInsertionLayout(
   for (const shot of context.shots) {
     oldToNew.set(shot.storyboardNumber, numberById.get(shot.id) as number)
   }
-  const { patches, changedIds } = buildTextPatches(context.shots, oldToNew)
+  const { patches, changedIds } = buildTextPatches(
+    context.shots,
+    oldToNew,
+    buildReferenceMap(entries, oldToNew),
+  )
 
   return {
     entries,
@@ -258,19 +304,116 @@ export function buildTransitionInsertionLayout(
   }
 }
 
-function insertionCopy(plan: TransitionInsertionPlan, number: number, fromNumber: number, toNumber: number) {
-  const title = plan.kind === 'text' ? '文字过渡' : plan.kind === 'scene' ? '过渡场景' : '过渡空镜'
+interface TransitionCopyFlavor {
+  title: string
+  shotType: string
+  angle: string
+  movement: string
+  atmosphere: string
+  result: string
+  description: string
+  visual: string
+}
+
+/**
+ * 空镜过渡的四种拍法：按断点前镜编号轮换，避免一集所有断点都是同一种空镜。
+ * 编号只决定拍法，不改变类型与时长。
+ */
+const EMPTY_TRANSITION_FLAVORS: TransitionCopyFlavor[] = [
+  {
+    title: '过渡空镜',
+    shotType: '全景',
+    angle: '平视',
+    movement: '缓慢横移',
+    atmosphere: '环境空镜过渡',
+    result: '缓冲前后动作断点',
+    description: '环境全景轻微横移，交代空间与光线',
+    visual: '环境空镜，镜头缓慢横移，展示空间与光线',
+  },
+  {
+    title: '过渡空镜·光影',
+    shotType: '中景',
+    angle: '侧逆光',
+    movement: '固定机位',
+    atmosphere: '光影细节过渡',
+    result: '用光影变化衔接情绪',
+    description: '固定机位捕捉光斑、浮尘或雨丝的细微变化，画面保持轻微呼吸感',
+    visual: '光影细节空镜，固定机位，捕捉光斑与浮尘的细微变化',
+  },
+  {
+    title: '过渡空镜·细节',
+    shotType: '特写',
+    angle: '俯拍',
+    movement: '缓慢推近',
+    atmosphere: '道具细节过渡',
+    result: '用道具细节承接动作余韵',
+    description: '缓慢推近断点附近的道具或环境细节（门把手、杯中水汽、衣角），暗示动作余韵',
+    visual: '道具细节空镜，镜头缓慢推近门把手、杯中水汽或衣角等细节',
+  },
+  {
+    title: '过渡空镜·氛围',
+    shotType: '远景',
+    angle: '平视',
+    movement: '缓慢拉远',
+    atmosphere: '天气氛围过渡',
+    result: '拉开空间完成情绪转换',
+    description: '从场景局部缓慢拉远到远景，让天气与天色变化接管画面',
+    visual: '天气氛围空镜，镜头缓慢拉远，表现风雨或天色变化',
+  },
+]
+
+/** 场景过渡的三种拍法：定场、细节、环视，按断点前镜编号轮换 */
+const SCENE_TRANSITION_FLAVORS: TransitionCopyFlavor[] = [
+  {
+    title: '过渡场景',
+    shotType: '远景',
+    angle: '平视',
+    movement: '缓慢推近',
+    atmosphere: '环境定场过渡',
+    result: '交代新场景空间',
+    description: '以全景展示空间与光线，画面稳定后切入下一镜',
+    visual: '全景环境展示，交代空间与时间',
+  },
+  {
+    title: '过渡场景·细节',
+    shotType: '中景',
+    angle: '侧拍',
+    movement: '缓慢横移',
+    atmosphere: '场景细节过渡',
+    result: '用场景细节补足地点信息',
+    description: '以中景横移展示场景里的标志物与光线',
+    visual: '场景标志物中景，镜头缓慢横移',
+  },
+  {
+    title: '过渡场景·环视',
+    shotType: '远景',
+    angle: '低角度',
+    movement: '缓慢摇移',
+    atmosphere: '场景环视过渡',
+    result: '环视空间完成地点转换',
+    description: '低角度环视空间，从一侧缓慢摇到另一侧',
+    visual: '低角度环境环视，镜头缓慢摇移',
+  },
+]
+
+function pickTransitionFlavor(kind: 'empty' | 'scene', fromNumber: number): TransitionCopyFlavor {
+  const flavors = kind === 'scene' ? SCENE_TRANSITION_FLAVORS : EMPTY_TRANSITION_FLAVORS
+  const index = (Math.max(1, fromNumber) - 1) % flavors.length
+  return flavors[index]
+}
+
+export function insertionCopy(plan: TransitionInsertionPlan, number: number, fromNumber: number, toNumber: number) {
   const continuity = `承接第 ${fromNumber} 镜的尾画面，为第 ${toNumber} 镜的入场留出空间。`
   if (plan.kind === 'text') {
-    const text = '与此同时'
+    const text = (plan.text || '').trim() || '与此同时'
     return {
-      title,
+      title: '文字过渡',
       shotType: '特写',
       angle: '平视',
       movement: '固定',
       result: '完成文字转场',
       atmosphere: '黑场文字过渡',
-      description: `${title}：黑底画面中央出现「${text}」文字卡，停留后淡出，衔接前后场景。`,
+      description: `文字过渡：黑底画面中央出现「${text}」文字卡，停留后淡出，衔接前后场景。`,
       videoPrompt: `出场人物：无｜场景：@${plan.sceneName}\n0-3秒：黑底画面中央出现「${text}」文字卡，停留片刻后淡出。`,
       continuity,
       transition: 'fade',
@@ -280,16 +423,17 @@ function insertionCopy(plan: TransitionInsertionPlan, number: number, fromNumber
       storyboardNumber: number,
     }
   }
+  const flavor = pickTransitionFlavor(plan.kind, fromNumber)
   if (plan.kind === 'scene') {
     return {
-      title,
-      shotType: '远景',
-      angle: '平视',
-      movement: '缓慢推近',
-      result: '交代新场景空间',
-      atmosphere: '环境定场过渡',
-      description: `${title}：以全景展示${plan.location}的空间与光线，画面稳定后切入下一镜。`,
-      videoPrompt: `出场人物：无｜场景：@${plan.sceneName}\n0-3秒：${plan.location}的全景环境展示，交代空间与时间，画面稳定，无人物入画。`,
+      title: flavor.title,
+      shotType: flavor.shotType,
+      angle: flavor.angle,
+      movement: flavor.movement,
+      result: flavor.result,
+      atmosphere: flavor.atmosphere,
+      description: `${flavor.title}：${flavor.description}，画面稳定后切入下一镜。`,
+      videoPrompt: `出场人物：无｜场景：@${plan.sceneName}\n0-3秒：${plan.location}的${flavor.visual}，交代空间与时间，无人物入画。`,
       continuity,
       transition: 'cut',
       transitionText: null,
@@ -299,14 +443,14 @@ function insertionCopy(plan: TransitionInsertionPlan, number: number, fromNumber
     }
   }
   return {
-    title,
-    shotType: '全景',
-    angle: '平视',
-    movement: '缓慢横移',
-    result: '缓冲前后动作断点',
-    atmosphere: '环境空镜过渡',
-    description: `${title}：${plan.location}的环境空镜，画面轻微缓动，无人物入镜，用于缓冲前后动作。`,
-    videoPrompt: `出场人物：无｜场景：@${plan.sceneName}\n0-3秒：${plan.location}的环境空镜，画面轻微缓动，无人物入镜，用于承接前后场景。`,
+    title: flavor.title,
+    shotType: flavor.shotType,
+    angle: flavor.angle,
+    movement: flavor.movement,
+    result: flavor.result,
+    atmosphere: flavor.atmosphere,
+    description: `${flavor.title}：${plan.location}的${flavor.description}，无人物入镜，用于缓冲前后动作。`,
+    videoPrompt: `出场人物：无｜场景：@${plan.sceneName}\n0-3秒：${plan.location}的${flavor.visual}，无人物入镜，用于承接前后场景。`,
     continuity,
     transition: 'cut',
     transitionText: null,
@@ -368,6 +512,7 @@ export function applyTransitionInsertions(
   for (const shot of context.shots) {
     oldToNew.set(shot.storyboardNumber, layout.numberById.get(shot.id) ?? shot.storyboardNumber)
   }
+  const referenceMap = buildReferenceMap(layout.entries, oldToNew)
   for (const entry of layout.entries) {
     if (entry.type !== 'shot' || !entry.shot) continue
     const shot = entry.shot
@@ -380,7 +525,7 @@ export function applyTransitionInsertions(
       for (const field of REWRITE_FIELDS) {
         const before = fresh[field]
         if (typeof before !== 'string' || !before) continue
-        const after = rewriteTokens(before, oldToNew)
+        const after = rewriteTokens(before, oldToNew, referenceMap)
         if (after !== before) patch[field] = after
       }
     }
@@ -455,6 +600,8 @@ export function restoreTransitionBatch(
     insertedIds: number[]
     numberById: Record<string, number>
     transitionBackups: { id: number; enabled: boolean }[]
+    /** 插入卡编号 → 断点 from 原编号：回滚时把「承接插入卡」的引用还原 */
+    insertionReferences?: { insertedNumber: number; originalFromNumber: number }[]
   },
   ts: string,
 ): void {
@@ -483,6 +630,12 @@ export function restoreTransitionBatch(
       numberPatches.set(row.id, original)
     }
   }
+  const referenceMap = new Map(currentToOriginal)
+  for (const reference of entry.insertionReferences || []) {
+    if (reference.insertedNumber > 0 && reference.originalFromNumber > 0) {
+      referenceMap.set(reference.insertedNumber, reference.originalFromNumber)
+    }
+  }
 
   const assetRows = live.filter((row) => numberPatches.has(row.id))
   for (const row of live) {
@@ -492,7 +645,7 @@ export function restoreTransitionBatch(
     for (const field of REWRITE_FIELDS) {
       const before = row[field]
       if (typeof before !== 'string' || !before) continue
-      const after = rewriteTokens(before, currentToOriginal)
+      const after = rewriteTokens(before, currentToOriginal, referenceMap)
       if (after !== before) patch[field] = after
     }
     if (!Object.keys(patch).length) continue

@@ -10,9 +10,14 @@ import {
   buildLocalTransitionPrompt,
   buildTransitionBoundaries,
   customTransitionSourceHash,
+  DEFAULT_FADE_STYLE,
   effectiveTransitionDuration,
+  FADE_STYLES,
+  fadeTransitionSourceHash,
+  normalizeFadeStyle,
   normalizeTransitionKind,
   normalizeTransitionText,
+  parseFadeStyle,
   parseTransitionKind,
   transitionEdgeMode,
   transitionSourceHash,
@@ -119,13 +124,29 @@ test('过渡类型：历史空值按 ai，未知值在解析时拒绝', () => {
   assert.equal(normalizeTransitionKind('empty'), 'empty')
   assert.equal(normalizeTransitionKind('scene'), 'scene')
   assert.equal(normalizeTransitionKind('text'), 'text')
+  assert.equal(normalizeTransitionKind('fade'), 'fade')
   assert.equal(normalizeTransitionKind('bogus'), 'ai')
 
   assert.equal(parseTransitionKind('empty'), 'empty')
   assert.equal(parseTransitionKind('scene'), 'scene')
   assert.equal(parseTransitionKind('text'), 'text')
+  assert.equal(parseTransitionKind('fade'), 'fade')
   assert.equal(parseTransitionKind('ai'), 'ai')
   assert.throws(() => parseTransitionKind('bogus'), /类型不合法/)
+})
+
+test('本地转场样式：六种预设，未知值回落或拒绝', () => {
+  assert.deepEqual([...FADE_STYLES], [
+    'dissolve', 'dip-black', 'dip-white', 'wipe-left', 'slide-left', 'circle-open',
+  ])
+  assert.equal(DEFAULT_FADE_STYLE, 'dissolve')
+  assert.equal(normalizeFadeStyle('dip-black'), 'dip-black')
+  assert.equal(normalizeFadeStyle('DISSOLVE'), 'dissolve')
+  assert.equal(normalizeFadeStyle('bogus'), 'dissolve')
+  assert.equal(normalizeFadeStyle(null), 'dissolve')
+  assert.equal(parseFadeStyle('circle-open'), 'circle-open')
+  assert.throws(() => parseFadeStyle('bogus'), /转场样式不合法/)
+  assert.throws(() => parseFadeStyle(undefined), /转场样式不合法/)
 })
 
 test('文字视频两端硬切，其余过渡保持淡入淡出', () => {
@@ -133,6 +154,7 @@ test('文字视频两端硬切，其余过渡保持淡入淡出', () => {
   assert.equal(transitionEdgeMode('ai'), 'fade')
   assert.equal(transitionEdgeMode('empty'), 'fade')
   assert.equal(transitionEdgeMode('scene'), 'fade')
+  assert.equal(transitionEdgeMode('fade'), 'fade')
 })
 
 test('文字视频按可发音字符计数并校验标题副标题', () => {
@@ -194,6 +216,27 @@ test('自定义过渡使用独立指纹，不依赖相邻镜头视频', () => {
     duration: 3, audioMode: 'ambient',
   }), scene)
   assert.throws(() => customTransitionSourceHash({ ...base, kind: 'ai' as never }), /类型不合法/)
+  assert.throws(() => customTransitionSourceHash({ ...base, kind: 'fade' as never }), /fadeTransitionSourceHash/)
+})
+
+test('本地转场指纹随相邻视频与样式变化', () => {
+  const base = {
+    fromVideoUrl: 'static/projects/1/videos/a.mp4',
+    toVideoUrl: 'static/projects/1/videos/b.mp4',
+    fromSize: 1000,
+    fromMtimeMs: 1_000,
+    toSize: 2000,
+    toMtimeMs: 2_000,
+    style: 'dissolve' as const,
+    duration: 3,
+  }
+  const hash = fadeTransitionSourceHash(base)
+  assert.match(hash, /^[0-9a-f]{64}$/)
+  assert.equal(fadeTransitionSourceHash({ ...base }), hash)
+  assert.notEqual(fadeTransitionSourceHash({ ...base, style: 'dip-black' as const }), hash)
+  assert.notEqual(fadeTransitionSourceHash({ ...base, duration: 4 }), hash)
+  assert.notEqual(fadeTransitionSourceHash({ ...base, fromMtimeMs: 1_001 }), hash)
+  assert.notEqual(fadeTransitionSourceHash({ ...base, toVideoUrl: 'static/projects/1/videos/c.mp4' }), hash)
 })
 
 test('来源指纹随任一来源信息变化', () => {

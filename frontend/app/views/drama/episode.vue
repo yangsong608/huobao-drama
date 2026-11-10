@@ -810,52 +810,55 @@
                       <div v-if="videoModerationHint(task.error)" class="video-task-error-hint">{{ videoModerationHint(task.error) }}</div>
                     </div>
                   </div>
-                  <button
-                    v-if="!isComfyVideoMode"
-                    class="btn btn-icon btn-sm video-task-action"
-                    :title="videoTaskActionLabel(task.storyboard)"
-                    :disabled="videoTaskState(task.storyboard) === 'pending'"
-                    @click.stop="genVid(task.storyboard)"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-icon btn-sm video-task-audit"
-                    :class="auditShotClass(task.storyboard)"
-                    :title="auditShotTitle(task.storyboard)"
-                    :aria-label="auditShotTitle(task.storyboard)"
-                    @click.stop="openAuditPanel(task.storyboard.id)"
-                  >
-                    <Loader2 v-if="auditShotState(task.storyboard).status === 'running'" :size="12" class="animate-spin" />
-                    <svg v-else-if="auditShotState(task.storyboard).status === 'done' || auditShotState(task.storyboard).status === 'ruleOnly'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                    <svg v-else-if="auditShotState(task.storyboard).status === 'failed'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="7" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12" y2="16.6"/></svg>
-                    <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                    <span v-if="auditShotBadge(task.storyboard)" class="video-task-audit-badge">{{ auditShotBadge(task.storyboard) }}</span>
-                    <span v-if="auditShotState(task.storyboard).stale" class="video-task-audit-stale" aria-hidden="true" />
-                  </button>
-                  <button
-                    v-if="!videoSelectMode"
-                    type="button"
-                    class="btn btn-icon btn-sm video-task-delete"
-                    :title="t('episode.vid.deleteShot')"
-                    :aria-label="t('episode.vid.deleteShot')"
-                    :disabled="rn || shotDelete.loading"
-                    @click.stop="deleteStoryboard(task.storyboard)"
-                  >
-                    <Trash2 :size="12" />
-                  </button>
-                  <button
-                    v-if="!videoSelectMode"
-                    type="button"
-                    class="btn btn-icon btn-sm video-task-more"
-                    :title="t('tablet.more')"
-                    :aria-label="t('tablet.more')"
-                    @pointerdown.stop
-                    @click.stop="openTaskMenu($event, task)"
-                  >
-                    <Ellipsis :size="12" />
-                  </button>
+                  <div class="video-task-actions">
+                    <button
+                      v-if="!isComfyVideoMode"
+                      class="btn btn-icon btn-sm video-task-action"
+                      :title="videoTaskActionLabel(task.storyboard)"
+                      :disabled="videoTaskState(task.storyboard) === 'pending'"
+                      @click.stop="genVid(task.storyboard)"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                    </button>
+                    <button
+                      v-if="auditShotMarkerVisible(task.storyboard)"
+                      type="button"
+                      class="btn btn-icon btn-sm video-task-audit"
+                      :class="auditShotClass(task.storyboard)"
+                      :title="auditShotTitle(task.storyboard)"
+                      :aria-label="auditShotTitle(task.storyboard)"
+                      @click.stop="openAuditPanel(task.storyboard.id)"
+                    >
+                      <Loader2 v-if="auditShotState(task.storyboard).status === 'running'" :size="12" class="animate-spin" />
+                      <svg v-else-if="auditShotState(task.storyboard).status === 'done' || auditShotState(task.storyboard).status === 'ruleOnly'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                      <svg v-else-if="auditShotState(task.storyboard).status === 'failed'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="7" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12" y2="16.6"/></svg>
+                      <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                      <span v-if="auditShotBadge(task.storyboard)" class="video-task-audit-badge">{{ auditShotBadge(task.storyboard) }}</span>
+                      <span v-if="auditShotState(task.storyboard).stale" class="video-task-audit-stale" aria-hidden="true" />
+                    </button>
+                    <button
+                      v-if="!videoSelectMode"
+                      type="button"
+                      class="btn btn-icon btn-sm video-task-delete"
+                      :title="t('episode.vid.deleteShot')"
+                      :aria-label="t('episode.vid.deleteShot')"
+                      :disabled="rn || shotDelete.loading"
+                      @click.stop="deleteStoryboard(task.storyboard)"
+                    >
+                      <Trash2 :size="12" />
+                    </button>
+                    <button
+                      v-if="!videoSelectMode"
+                      type="button"
+                      class="btn btn-icon btn-sm video-task-more"
+                      :title="t('tablet.more')"
+                      :aria-label="t('tablet.more')"
+                      @pointerdown.stop
+                      @click.stop="openTaskMenu($event, task)"
+                    >
+                      <Ellipsis :size="12" />
+                    </button>
+                  </div>
                 </div>
                 </div>
                 <div v-if="isComfyVideoMode" class="video-task-footer">
@@ -1718,8 +1721,8 @@
       </div>
 
       <!-- ===== STORYBOARD AUDIT DRAWER ===== -->
-      <div v-if="auditPanel.open" class="task-drawer-overlay" @click.self="closeAuditPanel" />
-      <aside v-if="auditPanel.open" class="task-drawer audit-drawer" role="dialog" aria-modal="true" :aria-label="t('episode.audit.panel.title')">
+      <div v-if="auditPanel.open" class="task-drawer-overlay" @click.self="closeAuditPanel">
+        <aside class="task-drawer audit-drawer" role="dialog" aria-modal="true" :aria-label="t('episode.audit.panel.title')">
         <header class="task-drawer-head">
           <div>
             <div class="video-task-title">{{ t('episode.audit.panel.title') }}</div>
@@ -1827,7 +1830,8 @@
           </button>
           <button class="btn" style="margin-left:auto" @click="closeAuditPanel">{{ t('episode.audit.panel.close') }}</button>
         </footer>
-      </aside>
+        </aside>
+      </div>
 
       <div v-if="assetDetail.open && assetDetailItem" class="overlay asset-detail-overlay" @click.self="closeAssetDetail">
         <section
@@ -2179,6 +2183,13 @@
                 <option v-for="value in TRANSITION_CUSTOM_DURATIONS" :key="value" :value="value">{{ value }}s</option>
               </select>
             </label>
+            <label v-if="transitionCreate.kind === 'fade'" class="transition-create-field">
+              <span>{{ t('episode.audit.transition.fadeStyleLabel') }}</span>
+              <select v-model="transitionCreate.style" class="input" :disabled="transitionCreate.submitting">
+                <option v-for="option in fadeStyleOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+              <span class="dim" style="font-size:11px">{{ t('episode.audit.transition.fadeHint') }}</span>
+            </label>
             <label v-if="transitionCreate.kind === 'scene'" class="transition-create-field">
               <span>{{ t('episode.audit.transition.scene') }}</span>
               <select v-model.number="transitionCreate.sceneId" class="input" :disabled="transitionCreate.submitting">
@@ -2203,7 +2214,7 @@
                 </select>
               </label>
             </template>
-            <label v-else class="transition-create-field">
+            <label v-if="transitionCreate.kind !== 'text' && transitionCreate.kind !== 'fade'" class="transition-create-field">
               <span>{{ t('episode.audit.transition.prompt') }}</span>
               <textarea v-model="transitionCreate.prompt" class="input" rows="4" maxlength="1200" :disabled="transitionCreate.submitting" :placeholder="t('episode.audit.transition.promptPlaceholder')" />
             </label>
@@ -2248,6 +2259,17 @@
             </div>
             <div v-else-if="transitionDetailBoundary.error_msg" class="transition-detail-error">
               {{ mapError(transitionDetailBoundary.error_msg) }}
+            </div>
+            <div class="transition-detail-modes">
+              <span class="dim" style="font-size:11px">{{ t('episode.export.aiTransition.switchKind') }}</span>
+              <button
+                v-for="option in transitionCreateKindOptions.filter(item => item.value !== transitionKindOf(transitionDetailBoundary))"
+                :key="option.value"
+                type="button"
+                class="btn btn-sm"
+                :disabled="transitionDetailBoundary.status === 'processing' || transitionDetailBoundary.status === 'pending'"
+                @click="switchTransitionKind(transitionDetailBoundary, option.value)"
+              >{{ option.label }}</button>
             </div>
             <template v-if="transitionKindOf(transitionDetailBoundary) === 'ai'">
             <div v-if="transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'first') || transitionDetailEffectiveFrameUrl(transitionDetailBoundary, 'last')" class="transition-detail-frames">
@@ -2420,6 +2442,9 @@
                   <span v-if="transitionDetailBoundary.text_subtitle" class="dim">{{ transitionDetailBoundary.text_subtitle }}</span>
                 </div>
                 <p v-if="transitionDetailBoundary.prompt" class="transition-detail-custom-text">{{ transitionDetailBoundary.prompt }}</p>
+                <p v-if="transitionKindOf(transitionDetailBoundary) === 'fade'" class="transition-detail-custom-note">
+                  {{ t('episode.audit.transition.fadeStyleLabel') }}: {{ fadeStyleLabel(transitionDetailBoundary.style) }}
+                </p>
                 <p v-if="transitionDetailBoundary.scene_id" class="dim transition-detail-custom-note">
                   {{ getSceneName({ scene_id: transitionDetailBoundary.scene_id }) }}
                 </p>
@@ -3380,7 +3405,11 @@ function applyAuditData(data, { notify = false } = {}) {
     toast.success(t('episode.audit.runDone', { n: Number(job.fixed_count ?? job.fixedCount ?? 0) || 0 }))
     const inserted = auditInsertedTransitionCount(job)
     if (inserted > 0) toast.info(t('episode.audit.insertedDone', { n: inserted }))
-    const repaired = job.repair_status === 'done' || Number(job.fixed_count ?? job.fixedCount ?? 0) > 0
+    const manual = Number(job.manual_count ?? job.manualCount ?? 0) || 0
+    if (manual > 0) toast.info(t('episode.audit.manualDone', { n: manual }))
+    const repaired = job.repair_status === 'done'
+      || job.repair_status === 'partial'
+      || Number(job.fixed_count ?? job.fixedCount ?? 0) > 0
     if (repaired || inserted > 0 || job.rollback) void resyncStoryboards()
   } else if (job.status === 'failed') {
     auditToastJob = id
@@ -3559,6 +3588,15 @@ function auditShotBadge(sb) {
   const count = shot.errorCount + shot.warningCount
   return count > 0 ? String(count) : ''
 }
+// 检验完成后干净的镜头不再挂状态标识，只保留进行中/失败/过期/有问题的提示
+function auditShotMarkerVisible(sb) {
+  const job = auditJob.value
+  if (!job) return true
+  if (auditRunning.value) return true
+  const shot = auditShotState(sb)
+  if (shot.stale || shot.status === 'running' || shot.status === 'failed') return true
+  return shot.errorCount + shot.warningCount + shot.infoCount > 0
+}
 function storyboardTransitionKind(sb) {
   const kind = String(sb?.transition_kind || sb?.transitionKind || '')
   return ['empty', 'scene', 'text'].includes(kind) ? kind : ''
@@ -3588,11 +3626,13 @@ function gotoAssetPage() {
   closeAuditPanel()
 }
 
-// ===== 自定义过渡镜头：空镜 / 场景 / 文字视频 =====
+// ===== 自定义过渡镜头：转场 / 空镜 / 场景 / 文字视频 =====
 const TRANSITION_CUSTOM_DURATIONS = [2, 2.5, 3, 3.5, 4, 4.5, 5]
+const FADE_STYLE_VALUES = ['dissolve', 'dip-black', 'dip-white', 'wipe-left', 'slide-left', 'circle-open']
 const transitionCreate = ref({
   open: false,
   kind: 'empty',
+  style: 'dissolve',
   duration: 3,
   prompt: '',
   sceneId: null,
@@ -3604,10 +3644,13 @@ const transitionCreate = ref({
   submitting: false,
 })
 const transitionCreateKindOptions = computed(() => [
+  { value: 'fade', label: t('episode.audit.transition.kind.fade') },
   { value: 'empty', label: t('episode.audit.transition.kind.empty') },
   { value: 'scene', label: t('episode.audit.transition.kind.scene') },
   { value: 'text', label: t('episode.audit.transition.kind.text') },
 ])
+const fadeStyleOptions = computed(() =>
+  FADE_STYLE_VALUES.map(value => ({ value, label: t(`episode.audit.transition.fadeStyle.${value}`) })))
 const transitionCreateScenes = computed(() => bindableScenes.value.map(scene => ({
   id: scene.id,
   label: `${scene.location || scene.name || ''}${scene.time ? ` · ${scene.time}` : ''}`,
@@ -3630,10 +3673,16 @@ const transitionCreatePairs = computed(() => {
 })
 function transitionKindOf(boundary) {
   const kind = String(boundary?.kind || 'ai')
-  return ['empty', 'scene', 'text'].includes(kind) ? kind : 'ai'
+  return ['empty', 'scene', 'text', 'fade'].includes(kind) ? kind : 'ai'
+}
+function fadeStyleLabel(style) {
+  const key = String(style || '')
+  return t(`episode.audit.transition.fadeStyle.${FADE_STYLE_VALUES.includes(key) ? key : 'dissolve'}`)
 }
 function transitionKindLabel(boundary) {
-  return t(`episode.audit.transition.kind.${transitionKindOf(boundary)}`)
+  const kind = transitionKindOf(boundary)
+  const label = t(`episode.audit.transition.kind.${kind}`)
+  return kind === 'fade' ? `${label} · ${fadeStyleLabel(boundary?.style)}` : label
 }
 function openTransitionCreate(boundary = null) {
   const fromId = Number(boundary?.from_storyboard_id ?? boundary?.fromStoryboardId ?? 0) || 0
@@ -3643,6 +3692,7 @@ function openTransitionCreate(boundary = null) {
   transitionCreate.value = {
     open: true,
     kind: 'empty',
+    style: 'dissolve',
     duration: 3,
     prompt: '',
     sceneId: null,
@@ -3712,7 +3762,7 @@ async function transitionCreateSubmit() {
     toast.error(t('episode.audit.transition.needText'))
     return
   }
-  if (kind !== 'text' && !transitionCreate.value.prompt.trim()) {
+  if (kind !== 'text' && kind !== 'fade' && !transitionCreate.value.prompt.trim()) {
     toast.error(t('episode.audit.transition.needPrompt'))
     return
   }
@@ -3723,7 +3773,8 @@ async function transitionCreateSubmit() {
     kind,
     duration: transitionCreate.value.duration,
   }
-  if (kind !== 'text') payload.prompt = transitionCreate.value.prompt.trim()
+  if (kind !== 'text' && kind !== 'fade') payload.prompt = transitionCreate.value.prompt.trim()
+  if (kind === 'fade') payload.style = transitionCreate.value.style
   if (sceneId) payload.scene_id = sceneId
   if (kind === 'text') {
     payload.text_content = transitionCreate.value.title.trim()
@@ -3744,11 +3795,21 @@ function editTransitionCustom(boundary) {
   openTransitionCreate(boundary)
   const kind = transitionKindOf(boundary)
   if (kind !== 'ai') transitionCreate.value.kind = kind
+  transitionCreate.value.style = FADE_STYLE_VALUES.includes(String(boundary?.style || ''))
+    ? boundary.style
+    : 'dissolve'
   transitionCreate.value.duration = Number(boundary?.duration_requested ?? boundary?.durationRequested) || 3
   transitionCreate.value.prompt = String(boundary?.prompt || '')
   transitionCreate.value.title = String(boundary?.text_content ?? boundary?.textContent ?? '')
   transitionCreate.value.subtitle = String(boundary?.text_subtitle ?? boundary?.textSubtitle ?? '')
   transitionCreate.value.sceneId = Number(boundary?.scene_id ?? boundary?.sceneId) || null
+  closeTransitionDetail()
+}
+/** 详情页切换过渡方式：AI 过渡也能改成转场/空镜/场景/文字，复用新建弹窗 */
+function switchTransitionKind(boundary, kind) {
+  if (!boundary) return
+  openTransitionCreate(boundary)
+  transitionCreate.value.kind = kind
   closeTransitionDetail()
 }
 const imageViewer = ref({ open: false, src: '', title: '' })
@@ -8794,14 +8855,15 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   border-color: var(--action-primary);
   box-shadow: 0 0 0 3px var(--button-focus);
 }
-.video-method-pick { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.video-method-pick { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; white-space: nowrap; }
 .video-method-pick .video-method-select {
+  width: auto; max-width: 200px; flex: 0 0 auto;
   height: 26px; padding: 0 22px 0 8px; font-size: 11px;
   background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
   color: var(--text-1); cursor: pointer;
 }
 .video-method-select:disabled { opacity: .55; cursor: not-allowed; }
-.video-method-hint { font-size: 11px; color: var(--text-3); }
+.video-method-hint { font-size: 11px; color: var(--text-3); white-space: nowrap; }
 /* 分块拆分进度条：运行中显示已完成段数，失败/中断后提供断点续拆 */
 .video-split-banner {
   display: flex; align-items: center; gap: 8px;
@@ -9747,7 +9809,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 .video-task-row {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) auto auto;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
@@ -9881,6 +9943,13 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .video-task-state.is-done { color: var(--success); }
 .video-task-state.is-pending { color: var(--accent-text); }
 .video-task-state.is-failed { color: var(--warning); }
+.video-task-actions {
+  justify-self: end;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .video-task-action {
   justify-self: end;
   align-self: center;
@@ -10841,6 +10910,26 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   .sidebar { width: 180px; }
   .sidebar.collapsed { width: 46px; }
 
+  /* 平板/窄窗口：顶栏单行放不下模型选择器与全部操作按钮，
+     单行会把标题挤成 0 宽并把右侧按钮裁出屏幕；改为分行并允许内部换行 */
+  .studio-topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .studio-topbar-side {
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+  .studio-model-picks {
+    flex-wrap: wrap;
+    margin-right: 0;
+    padding-right: 0;
+    border-right: 0;
+  }
+  .studio-actions {
+    flex-wrap: wrap;
+  }
+
   /* 平板：检验抽屉全屏、过渡镜头弹窗全屏 */
   .task-drawer.audit-drawer { width: 100%; }
   .dialog.transition-create-dialog { width: 100%; max-width: 100%; }
@@ -10985,11 +11074,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   }
 
   .video-task-row {
-    grid-template-columns: 56px minmax(0, 1fr);
-  }
-
-  .video-task-action {
-    justify-self: start;
+    grid-template-columns: 56px minmax(0, 1fr) auto;
   }
 
   .image-viewer-overlay {
@@ -11287,6 +11372,12 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   background: rgba(0, 0, 0, 0.55);
   color: var(--warning);
   font-size: 9px;
+}
+.transition-detail-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 .transition-detail-custom {
   display: flex;
@@ -11933,7 +12024,8 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   gap: 10px;
 }
 @media (hover: none) and (pointer: coarse) {
-  .video-task-row { grid-template-columns: 56px minmax(0, 1fr) auto auto auto; }
+  .video-task-row { grid-template-columns: 56px minmax(0, 1fr) auto; }
+  .video-task-actions { gap: 6px; }
   .video-task-more {
     display: inline-flex;
     align-items: center;
@@ -11955,7 +12047,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 @media (max-width: 1180px) and (hover: none) and (pointer: coarse) {
   .video-task-row {
     min-height: 48px;
-    grid-template-columns: 96px minmax(0, 1fr) auto auto;
+    grid-template-columns: 96px minmax(0, 1fr) auto;
   }
 
   .video-task-preview {

@@ -662,10 +662,13 @@ test('插入过渡分镜：真实新增分镜、按 ID 重排编号、改写末�
   seedAssets()
   const episodeId = createEpisode()
   const first = createShot(episodeId, 1)
-  const second = createShot(episodeId, 2)
+  const second = createShot(episodeId, 2, {
+    continuity: '承接段1：@甲从门口走进屋内。',
+  })
   const third = createShot(episodeId, 3, {
     description: '【镜头3】@甲推门进来，承接 @镜头2末帧 的门口位置。',
     videoPrompt: promptFor(3, '参考 @镜头2末帧，@甲推门进来'),
+    continuity: '承接段2，承接第 2 镜的门口位置，为第 3 镜的入场留出空间。',
   })
   const frameAsset = db.insert(schema.assets).values({
     dramaId: DRAMA_ID,
@@ -742,6 +745,13 @@ test('插入过渡分镜：真实新增分镜、按 ID 重排编号、改写末�
   assert.match(thirdAfter.description || '', /@镜头3末帧/)
   const secondAfter = shotRow(second.id)
   assert.match(secondAfter.description || '', /【镜头2】/)
+  // continuity 里的「承接段N」「承接第 N 镜」「为第 N 镜」也要按新编号重排：
+  // 第二镜的承接改指插入卡（新第 2 镜），第三镜整体后移到第 4 镜
+  assert.equal(secondAfter.continuity, '承接段2：@甲从门口走进屋内。')
+  assert.equal(
+    thirdAfter.continuity,
+    '承接段3，承接第 3 镜的门口位置，为第 4 镜的入场留出空间。',
+  )
   // 原来第一→第二镜的过渡行不再代表相邻边界
   const transition = db.select().from(schema.videoTransitions).where(eq(schema.videoTransitions.id, boundary.id)).get()!
   assert.equal(transition.enabled, false)
@@ -771,6 +781,12 @@ test('插入过渡分镜：真实新增分镜、按 ID 重排编号、改写末�
   assert.match(shotRow(third.id).videoPrompt || '', /@镜头2末帧/)
   assert.doesNotMatch(shotRow(third.id).videoPrompt || '', /@镜头3末帧/)
   assert.match(shotRow(third.id).description || '', /@镜头2末帧/)
+  // 回滚把 continuity 的承接引用还原：第二镜回到承接段1，第三镜回到第 3 镜 / 为第 3 镜
+  assert.equal(shotRow(second.id).continuity, '承接段1：@甲从门口走进屋内。')
+  assert.equal(
+    shotRow(third.id).continuity,
+    '承接段2，承接第 2 镜的门口位置，为第 3 镜的入场留出空间。',
+  )
   const restoredAsset = db.select().from(schema.assets).where(eq(schema.assets.id, frameAsset.id)).get()!
   assert.equal(restoredAsset.storyboardNum, 2)
   assert.equal(restoredAsset.name, '镜头2末帧')
@@ -843,4 +859,67 @@ test('插入过渡分镜：策略关闭 autoInsertTransition 时拒绝', async (
   } finally {
     setStoryboardAuditPolicy({ autoRepair: { autoInsertTransition: true } })
   }
+})
+
+test('自动插入的空镜与场景过渡按断点轮换拍法，提示词保持信息头与时间轴', async () => {
+  const insertion = await import('../src/services/storyboard-audit-insertion.ts')
+  const plan = (kind: 'empty' | 'scene', fromNumber: number) => ({
+    issueId: 'issue',
+    anchorStoryboardId: 2,
+    anchorStoryboardNumber: fromNumber + 1,
+    from: { storyboardNumber: fromNumber },
+    to: { storyboardNumber: fromNumber + 1 },
+    kind,
+    sceneId: 1,
+    sceneName: '房间A',
+    location: '房间A',
+    time: '日',
+    text: null,
+  }) as any
+
+  const emptyTitles = new Set<string>()
+  const emptyFramings = new Set<string>()
+  for (let fromNumber = 1; fromNumber <= 4; fromNumber += 1) {
+    const copy = insertion.insertionCopy(plan('empty', fromNumber), fromNumber + 1, fromNumber, fromNumber + 1)
+    assert.equal(copy.transitionKind, 'empty')
+    assert.equal(copy.transition, 'cut')
+    assert.match(copy.title, /^过渡空镜/)
+    assert.match(copy.description, /^过渡空镜/)
+    assert.match(copy.videoPrompt, /^出场人物：无｜场景：@房间A\n0-3秒：/)
+    assert.match(copy.videoPrompt, /无人物入镜/)
+    assert.match(copy.continuity, new RegExp(`承接第 ${fromNumber} 镜`))
+    emptyTitles.add(copy.title)
+    emptyFramings.add(`${copy.shotType}/${copy.angle}/${copy.movement}`)
+  }
+  assert.equal(emptyTitles.size, 4)
+  assert.equal(emptyFramings.size, 4)
+  // 第五个断点回到第一种拍法：轮换是确定性的，不改变类型和时长
+  const fifth = insertion.insertionCopy(plan('empty', 5), 6, 5, 6)
+  const first = insertion.insertionCopy(plan('empty', 1), 2, 1, 2)
+  assert.equal(fifth.title, first.title)
+  assert.equal(fifth.shotType, first.shotType)
+
+  const sceneTitles = new Set<string>()
+  const sceneFramings = new Set<string>()
+  for (let fromNumber = 1; fromNumber <= 3; fromNumber += 1) {
+    const copy = insertion.insertionCopy(plan('scene', fromNumber), fromNumber + 1, fromNumber, fromNumber + 1)
+    assert.equal(copy.transitionKind, 'scene')
+    assert.equal(copy.transition, 'cut')
+    assert.match(copy.title, /^过渡场景/)
+    assert.match(copy.videoPrompt, /^出场人物：无｜场景：@房间A\n0-3秒：房间A的/)
+    sceneTitles.add(copy.title)
+    sceneFramings.add(`${copy.shotType}/${copy.angle}/${copy.movement}`)
+  }
+  assert.equal(sceneTitles.size, 3)
+  assert.equal(sceneFramings.size, 3)
+
+  const textCopy = insertion.insertionCopy(
+    { ...plan('empty', 1), kind: 'text', text: '三日后' } as any,
+    2,
+    1,
+    2,
+  )
+  assert.equal(textCopy.title, '文字过渡')
+  assert.equal(textCopy.transition, 'fade')
+  assert.match(textCopy.videoPrompt, /0-3秒：黑底画面中央出现「三日后」/)
 })

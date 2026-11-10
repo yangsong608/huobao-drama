@@ -17,6 +17,7 @@ import {
   storyboardAuditRuleOptions,
   type StoryboardAuditPolicy,
 } from './app-settings.js'
+import { getMaxSegmentSeconds } from './breakdown-methods.js'
 import {
   parsePromptSegments,
   planAuditWindows,
@@ -113,6 +114,17 @@ export interface AuditContextShot {
   fingerprint: string
 }
 
+export interface AuditContinuityPair {
+  key: string
+  index: number
+  from: AuditContextShot
+  to: AuditContextShot
+  bridge: AuditContextShot[]
+  crossCard: boolean
+  windowIndex: number
+  fingerprint: string
+}
+
 export interface AuditWindowContext {
   index: number
   targets: AuditContextShot[]
@@ -120,6 +132,7 @@ export interface AuditWindowContext {
   contextAfter: AuditContextShot | null
   fromShotNumber: number
   toShotNumber: number
+  pairs: AuditContinuityPair[]
   fingerprint: string
 }
 
@@ -128,12 +141,16 @@ export interface AuditEpisodeContext {
   dramaId: number
   episodeTitle: string
   episodeDuration: number
+  /** 当前拆分方式单段时长上限，修复延长时长时不得突破 */
+  maxSegmentSeconds: number
   script: string
   scriptTruncated: boolean
   cast: CastMember[]
   assets: AuditAssetCatalog
   shots: AuditContextShot[]
   windows: AuditWindowContext[]
+  continuityPairs: AuditContinuityPair[]
+  transitionIds: number[]
   ruleOnlyIds: number[]
   semanticTruncated: boolean
   policy: StoryboardAuditPolicy
@@ -175,6 +192,7 @@ export interface AuditShotFingerprintInput {
   imagePrompt?: string | null
   sceneId?: number | null
   location?: string | null
+  time?: string | null
   referenceImages?: string | null
   composedImage?: string | null
   firstFrameImage?: string | null
@@ -273,6 +291,7 @@ export function computeAuditShotFingerprint(shot: AuditShotFingerprintInput): st
     asText(shot.imagePrompt),
     shot.sceneId ?? null,
     asText(shot.location),
+    asText(shot.time),
     asText(shot.referenceImages),
     asText(shot.composedImage),
     asText(shot.firstFrameImage),
@@ -638,6 +657,8 @@ export function buildAuditEpisodeContext(
         movement: row.movement,
         continuity: row.continuity,
         transition: row.transition,
+        time: row.time,
+        transitionKind: row.transitionKind,
         sceneId: row.sceneId,
         location: row.location,
         referenceImages: row.referenceImages,
@@ -676,8 +697,13 @@ export function buildAuditEpisodeContext(
     fileExists,
   }
 
+  // 过渡分镜是已有解决方案，不参与单镜检验；窗口只规划真实分镜，真实分镜之间跨卡成对判定。
+  const realShots = shots.filter((shot) => shot.transitionKind == null)
+  const transitionIds = shots
+    .filter((shot) => shot.transitionKind != null)
+    .map((shot) => shot.id)
   const planning = policy.semantic.enabled && (policy.checks.shot || policy.checks.continuity || policy.checks.assets)
-    ? planAuditWindows(shots.map((shot) => ({
+    ? planAuditWindows(realShots.map((shot) => ({
       id: shot.id,
       storyboardNumber: shot.storyboardNumber,
     })), {
@@ -687,11 +713,11 @@ export function buildAuditEpisodeContext(
     })
     : {
       windows: [] as ReturnType<typeof planAuditWindows>['windows'],
-      ruleOnlyIds: shots.map((shot) => shot.id),
+      ruleOnlyIds: realShots.map((shot) => shot.id),
       truncated: false,
     }
   const shotById = new Map(shots.map((shot) => [shot.id, shot]))
-  const windows: AuditWindowContext[] = planning.windows.map((plan) => {
+  const baseWindows: Omit<AuditWindowContext, 'pairs'>[] = planning.windows.map((plan) => {
     const targets = plan.targets
       .map((target) => shotById.get(target.id))
       .filter((shot): shot is AuditContextShot => Boolean(shot))
@@ -705,25 +731,68 @@ export function buildAuditEpisodeContext(
       fingerprint: sha1(targets.map((shot) => shot.id).join(',')),
     }
   })
+  const windowIndexByToId = new Map<number, number>()
+  for (const window of baseWindows) {
+    for (const target of window.targets) {
+      if (!windowIndexByToId.has(target.id)) windowIndexByToId.set(target.id, window.index)
+    }
+  }
+  const continuityPairs: AuditContinuityPair[] = []
+  let previousReal: AuditContextShot | null = null
+  let bridge: AuditContextShot[] = []
+  for (const shot of shots) {
+    if (shot.transitionKind != null) {
+      if (previousReal) bridge.push(shot)
+      continue
+    }
+    if (previousReal) {
+      const windowIndex = windowIndexByToId.get(shot.id)
+      if (windowIndex != null) {
+        continuityPairs.push({
+          key: `P${previousReal.id}-${shot.id}`,
+          index: continuityPairs.length,
+          from: previousReal,
+          to: shot,
+          bridge,
+          crossCard: bridge.length > 0,
+          windowIndex,
+          fingerprint: stableHash([
+            previousReal.fingerprint,
+            shot.fingerprint,
+            ...bridge.map((item) => item.fingerprint),
+          ]),
+        })
+      }
+    }
+    previousReal = shot
+    bridge = []
+  }
+  const windows: AuditWindowContext[] = baseWindows.map((window) => ({
+    ...window,
+    pairs: continuityPairs.filter((pair) => pair.windowIndex === window.index),
+  }))
 
   return {
     episodeId,
     dramaId: episode.dramaId,
     episodeTitle: episode.title,
     episodeDuration: episode.duration ?? 0,
+    maxSegmentSeconds: getMaxSegmentSeconds(episode.breakdownMethod),
     script,
     scriptTruncated,
     cast,
     assets,
     shots,
     windows,
+    continuityPairs,
+    transitionIds,
     ruleOnlyIds: planning.ruleOnlyIds,
     semanticTruncated: planning.truncated,
     policy,
     ruleInput: {
       dramaId: episode.dramaId,
-      shots: shots.map((shot) => shot.ruleInput),
-      lines: shots.flatMap((shot) => shot.lines.map((line) => ({ ...line, storyboardId: shot.id }))),
+      shots: realShots.map((shot) => shot.ruleInput),
+      lines: realShots.flatMap((shot) => shot.lines.map((line) => ({ ...line, storyboardId: shot.id }))),
       cast,
       assets,
       options: { checks: ruleOptions.checks, thresholds: ruleOptions.thresholds },
@@ -777,12 +846,32 @@ const PROTECTION_LABELS: Record<AuditProtectionReason, string> = {
   active_task: '生成任务进行中',
 }
 
+const TRANSITION_KIND_LABELS: Record<string, string> = {
+  empty: '空镜',
+  scene: '场景卡',
+  text: '文字卡',
+}
+
+function transitionKindLabel(shot: AuditContextShot): string {
+  const kind = (shot.transitionKind || '').trim()
+  return TRANSITION_KIND_LABELS[kind] || kind || '过渡分镜'
+}
+
+function transitionCardText(shot: AuditContextShot): string {
+  return (shot.transitionText || shot.transitionSubtitle || shot.description || '').trim()
+}
+
 function shotBlock(shot: AuditContextShot, suffix = ''): string[] {
   const lines: string[] = []
   lines.push(`### #${shot.storyboardNumber} ${shot.title || `镜头${shot.storyboardNumber}`}${suffix}`)
+  if (shot.transitionKind != null) {
+    const text = transitionCardText(shot)
+    lines.push(`- 过渡分镜：${transitionKindLabel(shot)}${text ? `「${text}」` : ''}（已有过渡，不参与检验）`)
+    return lines
+  }
   lines.push(`- 时长：${shot.duration} 秒｜景别：${shot.shotType || '未填'}｜角度：${shot.angle || '未填'}｜运镜：${shot.movement || '未填'}`)
   lines.push(`- 转场：${shot.transition || 'cut'}｜连贯：${shot.continuity || '未填'}`)
-  lines.push(`- 场景：${shot.location || '未指定'}（场景资产：${assetStatusText(shot.sceneAsset)}）`)
+  lines.push(`- 场景：${shot.location || '未指定'}（场景资产：${assetStatusText(shot.sceneAsset)}）｜时间：${(shot.time || '').trim() || '未填'}`)
   lines.push(`- 出场角色：${shot.characterAssets.length ? shot.characterAssets.map((asset) => `${asset.name}${asset.linked ? '' : '（未关联本集）'}`).join('、') : '无'}`)
   if (shot.propAssets.length) {
     lines.push(`- 道具：${shot.propAssets.map((asset) => asset.name).join('、')}`)
@@ -832,27 +921,64 @@ function characterGroupText(shot: AuditContextShot): string {
   return shot.characterAssets.length ? shot.characterAssets.map((asset) => asset.name).join('、') : '无'
 }
 
-function adjacencyLines(window: AuditWindowContext): string[] {
-  const ordered = [
-    ...(window.contextBefore ? [window.contextBefore] : []),
-    ...window.targets,
-    ...(window.contextAfter ? [window.contextAfter] : []),
-  ]
-  const targetIds = new Set(window.targets.map((shot) => shot.id))
+export function buildAuditContinuityPrompt(
+  context: AuditEpisodeContext,
+  pair: AuditContinuityPair,
+  options: { recheck?: boolean } = {},
+): string {
+  const total = context.continuityPairs.length || 1
+  const autoInsert = context.policy.autoRepair.enabled
+    && context.policy.autoRepair.semanticFix
+    && context.policy.autoRepair.autoInsertTransition
   const lines: string[] = []
-  for (let index = 0; index + 1 < ordered.length; index += 1) {
-    const previous = ordered[index]
-    const next = ordered[index + 1]
-    if (!targetIds.has(previous.id) && !targetIds.has(next.id)) continue
-    lines.push(`### ${previous.storyboardNumber} → ${next.storyboardNumber}`)
-    lines.push(`- 上一镜末段：${promptEdgeText(previous, 'last')}`)
-    lines.push(`- 下一镜首段：${promptEdgeText(next, 'first')}`)
-    lines.push(`- 角色组：上一镜 ${characterGroupText(previous)}｜下一镜 ${characterGroupText(next)}`)
-    lines.push(`- 下一镜 continuity 声明：${(next.continuity || '').trim() || '（未填）'}`)
+  lines.push(options.recheck
+    ? '你是短剧分镜动作检验员。本次是修复后的成对复查：只判定这一对相邻真实分镜的衔接是否已经修好。'
+    : '你是短剧分镜动作检验员。本次只判定一对相邻真实分镜的衔接：上一镜的动作结果必须由下一镜的首段画面承接。')
+  lines.push('')
+  lines.push(`## 成对连贯判定 ${pair.index + 1}/${total}：#${pair.from.storyboardNumber} → #${pair.to.storyboardNumber}`)
+  lines.push('')
+  lines.push('## 上一镜')
+  lines.push(...shotBlock(pair.from))
+  lines.push('')
+  lines.push('## 下一镜')
+  lines.push(...shotBlock(pair.to))
+  lines.push('')
+  if (pair.crossCard) {
+    lines.push('## 中间过渡分镜（已存在的过渡，不再参与分析）')
+    for (const item of pair.bridge) {
+      const text = transitionCardText(item)
+      lines.push(`- #${item.storyboardNumber}｜${transitionKindLabel(item)}${text ? `：${text}` : ''}`)
+    }
+    lines.push('- 这些过渡分镜说明断点已经处理过：不要把它们当作检验对象，也不要建议再插入新的过渡分镜。')
+    lines.push('- 如果过渡分镜已经交代了时间、地点或人物变化，两侧真实分镜即使字面不同也应判 connected。')
+    lines.push('- 只有过渡分镜解释不足、两侧动作结果明显接不上时才判 broken；此时 suggestedTransition 必须为 null。')
     lines.push('')
   }
-  if (!lines.length) lines.push('- 无相邻镜头可对照')
-  return lines
+  lines.push('## 对照信息')
+  lines.push(`- 时间：上一镜 ${(pair.from.time || '').trim() || '未填'}｜下一镜 ${(pair.to.time || '').trim() || '未填'}`)
+  lines.push(`- 角色组：上一镜 ${characterGroupText(pair.from)}｜下一镜 ${characterGroupText(pair.to)}`)
+  lines.push(`- 上一镜末段：${promptEdgeText(pair.from, 'last')}`)
+  lines.push(`- 下一镜首段：${promptEdgeText(pair.to, 'first')}`)
+  lines.push('')
+  lines.push('## 判定规则')
+  lines.push('- 必须逐字阅读两侧完整视频提示词后再判断；continuity 字段只是声明，不是证据，声明与提示词不符时以提示词为准。')
+  lines.push('- 上一镜末段的动作、视线、位置、道具状态必须由下一镜首段可见地承接；接不上、跳时间、换地点、换人物组却没有可见过渡动作，判 broken。')
+  lines.push('- 只看这一对，不评价其他分镜，不修改分镜；证据必须引用两侧提示词里的具体差异。')
+  if (pair.crossCard) {
+    lines.push('- 本对跨过已存在的过渡分镜，suggestedTransition 必须为 null，服务端不会再次插入。')
+  } else if (autoInsert) {
+    lines.push('- 判 broken 且确实需要过渡时，填写 suggestedTransition（empty 空镜 / scene 场景 / text 文字卡）；服务端只会为这一对插入 1 个过渡分镜。')
+    lines.push('- 过渡类型按断点性质选择，不要一律填 empty：时间/年代/时刻明确跳变 → text；地点明确变化且下一镜有场景资产 → scene；同地点同时间只缺动作缓冲 → empty。')
+    lines.push('- 同一集连续多个断点不要重复同一种类型：能用 scene 或 text 合理交代时优先换用，只有同场景动作缓冲才继续 empty；空镜拍法由服务端轮换，不要重复描述同一种空镜。')
+  } else {
+    lines.push('- 本次不自动插入过渡分镜，suggestedTransition 一律填 null，由人工处理。')
+  }
+  lines.push('')
+  lines.push('## 结论提交')
+  lines.push('- 必须调用 report_continuity_verdict 提交结论：verdict=connected 或 broken，不能只在文字里说明。')
+  lines.push('- broken 时填写 severity（默认 warning，动作/场景直接断裂可用 error）、evidence（两侧提示词的具体差异）和 suggestion。')
+  lines.push('- 未调用工具视为本次判定失败，会触发重试。')
+  return lines.join('\n')
 }
 
 export function buildAuditWindowPrompt(
@@ -863,26 +989,25 @@ export function buildAuditWindowPrompt(
   const total = context.windows.length
   const lines: string[] = []
   if (options.recheck) {
-    lines.push('你是短剧分镜动作检验员。本次是修复后的复查：只复查目标分镜，重点确认修复没有引入新的动作、表情、连贯性或资产问题。')
+    lines.push('你是短剧分镜动作检验员。本次是修复后的复查：只复查目标分镜，重点确认修复没有引入新的动作、表情或资产问题。')
   } else {
-    lines.push('你是短剧分镜动作检验员。只检查「目标分镜」，窗口外分镜只读，仅用于判断前后连贯，不要对它们报问题。')
+    lines.push('你是短剧分镜动作检验员。只检查「目标分镜」，窗口外分镜只读，不要对它们报问题。')
   }
   lines.push('')
   lines.push(`## 动作检验${options.recheck ? '复查' : ''}窗口 ${window.index}/${total}`)
   lines.push(`- 目标：第 ${window.fromShotNumber}–${window.toShotNumber} 镜（${window.targets.length} 个）`)
   const reportable: string[] = []
   if (context.policy.checks.shot) reportable.push('semantic_shot_description（检查 1）')
-  if (context.policy.checks.continuity) reportable.push('semantic_continuity_break（检查 2）')
   if (context.policy.checks.assets) reportable.push('semantic_asset_mismatch（检查 5）')
-  lines.push(`- 可报告问题码：${reportable.length ? reportable.join('、') : '（本集策略已关闭语义检查项）'}`)
+  lines.push(`- 可报告问题码：${reportable.length ? reportable.join('、') : '（本集策略已关闭本窗口的语义检查项）'}`)
   lines.push('- 每条问题必须调用 report_storyboard_issues 上报；问题只报一次，没有问题时不要编造。')
   lines.push('- 上报时用 storyboardNumber 填写镜头号（如 17），storyboardId 可省略；相关镜头用 relatedStoryboardNumbers 填镜头号。')
+  if (context.policy.checks.continuity) {
+    lines.push('- 检查 2（相邻连贯）由逐对判定单独完成：本窗口不要报检查 2，也不要调用 report_continuity_verdict。')
+  }
   const autoRepair = context.policy.autoRepair
   if (autoRepair.enabled && autoRepair.semanticFix) {
     lines.push('- 只做判断，不修改分镜；repairable 可省略，服务端按策略判定是否进入受控修复。')
-    if (autoRepair.autoInsertTransition) {
-      lines.push('- 检查 2 若判断需要过渡，填 suggestedTransition（empty 空镜 / scene 场景 / text 文字卡）；服务端按策略决定是否自动插入过渡分镜。')
-    }
   } else {
     lines.push('- 只做判断，不修改分镜；repairable 一律填 false。')
   }
@@ -923,13 +1048,6 @@ export function buildAuditWindowPrompt(
   } else {
     for (const entry of contextShots) lines.push(...shotBlock(entry.shot, entry.suffix))
   }
-  lines.push('')
-  lines.push('## 相邻衔接对照（逐对核对，只对目标分镜报问题）')
-  lines.push('- 下一镜首段必须用可见的动作、视线、位置或道具承接上一镜末段的结果；接不上就是检查 2 的连贯问题。')
-  lines.push('- continuity 字段只是声明，不是证据；以视频提示词的时间轴为准，声明与首段画面不符时同样算不连贯。')
-  lines.push('- 换桌、换地点、换人物组或跳时间却没有过渡动作/过渡分镜时，报 semantic_continuity_break，并在 relatedStoryboardNumbers 里填写两侧镜头号。')
-  lines.push('')
-  lines.push(...adjacencyLines(window))
   return lines.join('\n')
 }
 
@@ -939,12 +1057,14 @@ const REPAIR_ACTION_GUIDE: Record<string, string> = {
   rewrite_description: '重写画面描述：description、videoPrompt、result；不新增角色、道具、剧情，不改台词文本',
   fix_continuity: '补连贯性：后一镜的 continuity、transition，必要时 description、videoPrompt',
   extend_duration: '延长镜头时长：duration 与 videoPrompt（时间轴必须同步）；只能增加，且不超过当前拆分方式单段上限',
-  insert_transition_shot: '插入过渡分镜：仅检查 2 且问题已给出 suggestedTransition；只传 issueId，服务端在断点生成空镜/场景/文字卡并重排镜头号',
 }
 
 export function buildAuditRepairPrompt(context: AuditEpisodeContext, issues: AuditIssue[]): string {
   const repairable = issues.filter((issue) => (
-    issue.status === 'open' && issue.repairable && issue.check !== 5
+    issue.status === 'open'
+    && issue.repairable
+    && issue.check !== 5
+    && issue.repairAction !== 'insert_transition_shot'
   ))
   const shotById = new Map(context.shots.map((shot) => [shot.id, shot]))
   const shotIds = [...new Set(repairable.map((issue) => issue.storyboardId))]
@@ -953,11 +1073,13 @@ export function buildAuditRepairPrompt(context: AuditEpisodeContext, issues: Aud
   lines.push('')
   lines.push('## 修复规则')
   lines.push('- 每条动作必须调用 apply_storyboard_repair 提交，只需引用问题编号 issueId；storyboardId 可省略，服务端按 issueId 定位分镜。')
-  lines.push('- 没有把握、需要创作判断或证据不足的问题不要提交动作，交给人工处理。')
+  lines.push('- 把本轮所有有把握的动作放在一次 apply_storyboard_repair 调用里批量提交；不要分批提交，也不要只处理一部分就结束。')
+  lines.push('- 没有把握、需要创作判断或证据不足的问题不要提交动作，交给人工处理；若确实没有任何可安全执行的动作，直接结束本轮。')
   lines.push('- 不新增角色、场景、道具、台词或旁白；不改台词文本与说话人。')
-  lines.push('- 只有 insert_transition_shot 会在断点新增 1 个过渡分镜，内容由服务端生成并重排镜头号；其他动作不得改变分镜数量或分镜号。')
+  lines.push(`- 延长时长只能增加且不得超过 ${context.maxSegmentSeconds} 秒（当前拆分方式单段上限）；超出上限的台词容量问题不要提交动作，交人工压缩或拆分台词。`)
+  lines.push('- 过渡分镜插入由服务端内部完成；你不要提交或描述任何插卡动作，也不要改变分镜数量或分镜号。')
   lines.push('- 带「只读」的分镜不允许修改；检查 5 的资产问题不允许自动修复。')
-  lines.push('- 同一分镜最多 3 条动作，同一字段只能修改一次；没有动作时不要调用工具。')
+  lines.push('- 同一分镜最多 3 条动作，同一字段只能修改一次。')
   lines.push('')
   lines.push('## 动作与允许字段')
   for (const [action, guide] of Object.entries(REPAIR_ACTION_GUIDE)) lines.push(`- ${action}：${guide}`)

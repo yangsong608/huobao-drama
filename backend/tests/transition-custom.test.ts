@@ -106,9 +106,11 @@ async function seedEpisode(options: {
 function fakeDeps() {
   const submissions: any[] = []
   const renders: any[] = []
+  const fades: any[] = []
   return {
     submissions,
     renders,
+    fades,
     deps: {
       submit: async (params: any) => {
         submissions.push(params)
@@ -122,6 +124,11 @@ function fakeDeps() {
         renders.push(input)
         fsSync.mkdirSync(path.dirname(input.absolutePath), { recursive: true })
         fsSync.writeFileSync(input.absolutePath, Buffer.alloc(2048))
+      },
+      renderFade: async (input: any) => {
+        fades.push(input)
+        fsSync.mkdirSync(path.dirname(input.absolutePath), { recursive: true })
+        fsSync.writeFileSync(input.absolutePath, Buffer.alloc(4096))
       },
     },
   }
@@ -235,6 +242,110 @@ test('文字过渡本地渲染完成，不占用视频模型与任务', async ()
   assert.equal(view.durationActual, 2.5)
   assert.match(view.videoUrl || '', new RegExp(`^static/projects/${dramaId}/transitions/.+\\.mp4$`))
   assert.ok(fsSync.existsSync(path.join(root, view.videoUrl!)))
+})
+
+test('本地转场：取相邻镜头首尾在本地合成，不占用视频模型与任务', async () => {
+  const { dramaId, episodeId, storyboardIds } = await seedEpisode({ videoConfigId: null })
+  const { submissions, fades, deps } = fakeDeps()
+
+  const view = await createCustomTransition({
+    episodeId,
+    fromStoryboardId: storyboardIds[0],
+    toStoryboardId: storyboardIds[1],
+    kind: 'fade',
+    style: 'dip-black',
+    duration: 2.5,
+  }, deps)
+
+  assert.equal(submissions.length, 0)
+  assert.equal(fades.length, 1)
+  const input = fades[0]
+  assert.equal(input.durationMs, 2500)
+  assert.equal(input.style, 'dip-black')
+  assert.equal(input.aspectRatio, '16:9')
+  assert.equal(input.resolution, '720p')
+  assert.equal(input.fps, 30)
+  const videos = await db.select().from(schema.storyboards)
+    .where(eq(schema.storyboards.episodeId, episodeId))
+  assert.equal(input.fromAbsolutePath, path.join(root, String(videos[0].videoUrl)))
+  assert.equal(input.toAbsolutePath, path.join(root, String(videos[1].videoUrl)))
+  assert.equal(view.kind, 'fade')
+  assert.equal(view.style, 'dip-black')
+  assert.equal(view.edgeMode, 'fade')
+  assert.equal(view.status, 'completed')
+  assert.equal(view.provider, 'local')
+  assert.equal(view.model, 'ffmpeg-xfade')
+  assert.equal(view.audioMode, 'silent')
+  assert.equal(view.durationActual, 2.5)
+  assert.match(view.videoUrl || '', new RegExp(`^static/projects/${dramaId}/transitions/fade-.+\\.mp4$`))
+  assert.ok(fsSync.existsSync(path.join(root, view.videoUrl!)))
+})
+
+test('本地转场校验样式与相邻镜头视频，缺失时明确报错', async () => {
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: null })
+  const { deps, fades } = fakeDeps()
+
+  await assert.rejects(createCustomTransition({
+    episodeId,
+    fromStoryboardId: storyboardIds[0],
+    toStoryboardId: storyboardIds[1],
+    kind: 'fade',
+    style: 'bogus',
+    duration: 3,
+  }, deps), /转场样式不合法/)
+  assert.equal(fades.length, 0)
+
+  await db.update(schema.storyboards).set({ videoUrl: 'static/projects/missing.mp4' })
+    .where(eq(schema.storyboards.id, storyboardIds[1]))
+  await assert.rejects(createCustomTransition({
+    episodeId,
+    fromStoryboardId: storyboardIds[0],
+    toStoryboardId: storyboardIds[1],
+    kind: 'fade',
+    style: 'dissolve',
+    duration: 3,
+  }, deps), /相邻镜头视频缺失/)
+  assert.equal(fades.length, 0)
+})
+
+test('本地转场指纹随相邻视频与样式变化，样式切换后重新渲染', async () => {
+  const { episodeId, storyboardIds } = await seedEpisode({ videoConfigId: null })
+  const { deps, fades } = fakeDeps()
+  const created = await createCustomTransition({
+    episodeId,
+    fromStoryboardId: storyboardIds[0],
+    toStoryboardId: storyboardIds[1],
+    kind: 'fade',
+    style: 'dissolve',
+    duration: 3,
+  }, deps)
+  assert.equal(created.status, 'completed')
+
+  const fresh = await listTransitions({ episodeId, storyboardIds })
+  assert.equal(fresh.boundaries[0].stale, false)
+
+  const fromVideo = (await db.select().from(schema.storyboards)
+    .where(eq(schema.storyboards.id, storyboardIds[0])))[0].videoUrl
+  fsSync.appendFileSync(path.join(root, String(fromVideo)), Buffer.alloc(16))
+  const afterVideo = await listTransitions({ episodeId, storyboardIds })
+  assert.equal(afterVideo.boundaries[0].stale, true, '相邻镜头视频变化应使本地转场过期')
+
+  const switched = await createCustomTransition({
+    episodeId,
+    fromStoryboardId: storyboardIds[0],
+    toStoryboardId: storyboardIds[1],
+    kind: 'fade',
+    style: 'circle-open',
+    duration: 4,
+  }, deps)
+  assert.equal(switched.id, created.id)
+  assert.equal(switched.style, 'circle-open')
+  assert.equal(switched.status, 'completed')
+  assert.equal(fades.length, 2)
+  assert.equal(fades[1].style, 'circle-open')
+  assert.equal(fades[1].durationMs, 4000)
+  const afterSwitch = await listTransitions({ episodeId, storyboardIds })
+  assert.equal(afterSwitch.boundaries[0].stale, false)
 })
 
 test('创建自定义过渡校验断点、类型、时长、场景归属与文字长度', async () => {

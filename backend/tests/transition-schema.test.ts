@@ -14,7 +14,7 @@ const root = await fs.mkdtemp(path.join(os.tmpdir(), 'huobao-transition-schema-'
 after(async () => { await fs.rm(root, { recursive: true, force: true }) })
 
 const TRANSITION_COLUMNS = [
-  'id', 'episode_id', 'drama_id', 'kind', 'scene_id', 'text_content', 'text_subtitle', 'edge_mode',
+  'id', 'episode_id', 'drama_id', 'kind', 'scene_id', 'text_content', 'text_subtitle', 'style', 'edge_mode',
   'from_storyboard_id', 'to_storyboard_id',
   'from_video_url', 'to_video_url', 'first_frame_url', 'last_frame_url',
   'first_frame_upload_url', 'last_frame_upload_url', 'reference_image_urls', 'source_hash',
@@ -128,9 +128,11 @@ test('旧库的过渡表补齐 prompt_source，历史提示词保持原样', () 
 
   const columns = (db.prepare('PRAGMA table_info(video_transitions)').all() as { name: string }[]).map(c => c.name)
   assert.ok(columns.includes('prompt_source'))
-  const row = db.prepare('SELECT prompt, prompt_source, status FROM video_transitions WHERE id = 1').get() as any
+  assert.ok(columns.includes('style'))
+  const row = db.prepare('SELECT prompt, prompt_source, style, status FROM video_transitions WHERE id = 1').get() as any
   assert.equal(row.prompt, '旧版文字提示词')
   assert.equal(row.prompt_source, null)
+  assert.equal(row.style, null)
   assert.equal(row.status, 'completed')
   db.close()
 })

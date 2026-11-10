@@ -323,29 +323,73 @@ test('窗口提示词区分目标与只读上下文，并写明截断、资产�
   assert.doesNotMatch(targetSection, /#15/)
 })
 
-test('窗口提示词提供相邻镜末段/首段对照，检查 2 以视频提示词承接为准', () => {
+test('过渡分镜不参与窗口，真实分镜跨卡成对判定并读取完整视频提示词', () => {
   const { scene } = seedDrama()
   const episodeId = createEpisode('剧本')
   linkEpisode(episodeId, 'scene', scene)
   createShot(episodeId, 1, {
     sceneId: scene,
+    time: '清晨',
     videoPrompt: '出场人物：@甲｜场景：@房间A\n0-3秒：@甲站在门口\n3-6秒：@甲转身离开',
   })
   createShot(episodeId, 2, {
     sceneId: scene,
+    time: '清晨',
     videoPrompt: '出场人物：@甲｜场景：@房间A\n0-3秒：@甲坐在桌前',
     continuity: '承接上一镜：@甲走到桌前',
   })
+  const bridge = createShot(episodeId, 3, {
+    sceneId: scene,
+    transitionKind: 'text',
+    transitionText: '午间',
+  })
+  createShot(episodeId, 4, {
+    sceneId: scene,
+    time: '午间',
+    videoPrompt: '出场人物：@甲｜场景：@房间A\n0-3秒：@甲推门进入',
+  })
 
   const context = ctx.buildAuditEpisodeContext(episodeId, { fileExists: () => true })
-  const prompt = ctx.buildAuditWindowPrompt(context, context.windows[0])
 
-  assert.match(prompt, /## 相邻衔接对照/)
-  assert.match(prompt, /1 → 2/)
-  assert.match(prompt, /上一镜末段：3-6秒：@甲转身离开/)
-  assert.match(prompt, /下一镜首段：0-3秒：@甲坐在桌前/)
+  assert.deepEqual(context.windows[0].targets.map((shot) => shot.storyboardNumber), [1, 2, 4])
+  assert.deepEqual(context.transitionIds, [bridge.id])
+  assert.deepEqual(context.ruleInput.shots.map((shot) => shot.storyboardNumber), [1, 2, 4])
+  assert.equal(context.continuityPairs.length, 2)
+  const direct = context.continuityPairs[0]
+  assert.equal(direct.key, `P${context.ruleInput.shots[0].id}-${context.ruleInput.shots[1].id}`)
+  assert.equal(direct.crossCard, false)
+  const crossCard = context.continuityPairs[1]
+  assert.equal(crossCard.from.storyboardNumber, 2)
+  assert.equal(crossCard.to.storyboardNumber, 4)
+  assert.equal(crossCard.crossCard, true)
+  assert.deepEqual(crossCard.bridge.map((shot) => shot.storyboardNumber), [3])
+  assert.equal(crossCard.windowIndex, 1)
+
+  const windowPrompt = ctx.buildAuditWindowPrompt(context, context.windows[0])
+  assert.doesNotMatch(windowPrompt, /## 相邻衔接对照/)
+  assert.doesNotMatch(windowPrompt, /semantic_continuity_break/)
+  assert.doesNotMatch(windowPrompt, /#3/)
+  assert.match(windowPrompt, /检查 2（相邻连贯）由逐对判定单独完成/)
+
+  const prompt = ctx.buildAuditContinuityPrompt(context, crossCard)
+  assert.match(prompt, /## 成对连贯判定 2\/2：#2 → #4/)
+  assert.match(prompt, /## 上一镜[\s\S]*0-3秒：@甲坐在桌前/)
+  assert.match(prompt, /## 下一镜[\s\S]*0-3秒：@甲推门进入/)
+  assert.match(prompt, /## 中间过渡分镜（已存在的过渡，不再参与分析）/)
+  assert.match(prompt, /#3｜文字卡：午间/)
+  assert.match(prompt, /suggestedTransition 必须为 null/)
+  assert.match(prompt, /report_continuity_verdict/)
+  assert.match(prompt, /上一镜末段：0-3秒：@甲坐在桌前/)
+  assert.match(prompt, /下一镜首段：0-3秒：@甲推门进入/)
   assert.match(prompt, /continuity 字段只是声明/)
-  assert.match(prompt, /换桌|换地点|换人物/)
+
+  const directPrompt = ctx.buildAuditContinuityPrompt(context, direct)
+  assert.match(directPrompt, /## 成对连贯判定 1\/2：#1 → #2/)
+  assert.doesNotMatch(directPrompt, /## 中间过渡分镜/)
+  assert.match(directPrompt, /suggestedTransition（empty 空镜 \/ scene 场景 \/ text 文字卡）/)
+  assert.match(directPrompt, /过渡类型按断点性质选择，不要一律填 empty/)
+  assert.match(directPrompt, /同一集连续多个断点不要重复同一种类型/)
+  assert.match(directPrompt, /空镜拍法由服务端轮换/)
 })
 
 test('检验策略关闭语义窗口时整集降级为仅规则并附带策略', async () => {
@@ -389,7 +433,7 @@ test('检验策略的窗口大小、步长与阈值传入上下文', async () =>
   assert.equal(context.ruleInput.options?.thresholds?.silentCharacterErrorMs, 9000)
 })
 
-test('窗口提示词按策略只列出启用的问题码与自动插入过渡指引', async () => {
+test('窗口提示词只报检查 1/5，检查 2 由成对提示词与结论工具承担', async () => {
   const { STORYBOARD_AUDIT_POLICY_DEFAULTS } = await import('../src/services/app-settings.ts')
   const { scene } = seedDrama()
   const episodeId = createEpisode('剧本')
@@ -412,10 +456,15 @@ test('窗口提示词按策略只列出启用的问题码与自动插入过渡�
 
   assert.doesNotMatch(prompt, /semantic_shot_description/)
   assert.doesNotMatch(prompt, /semantic_asset_mismatch/)
-  assert.match(prompt, /semantic_continuity_break/)
-  assert.match(prompt, /suggestedTransition/)
-  assert.match(prompt, /自动插入过渡分镜/)
+  assert.doesNotMatch(prompt, /semantic_continuity_break/)
+  assert.doesNotMatch(prompt, /suggestedTransition/)
+  assert.match(prompt, /检查 2（相邻连贯）由逐对判定单独完成/)
   assert.doesNotMatch(prompt, /repairable 一律填 false/)
+
+  const pair = context.continuityPairs[0]
+  const pairPrompt = ctx.buildAuditContinuityPrompt(context, pair)
+  assert.match(pairPrompt, /report_continuity_verdict/)
+  assert.match(pairPrompt, /suggestedTransition（empty 空镜 \/ scene 场景 \/ text 文字卡）/)
 
   const manualPolicy = {
     ...policy,
@@ -424,4 +473,34 @@ test('窗口提示词按策略只列出启用的问题码与自动插入过渡�
   const manualContext = ctx.buildAuditEpisodeContext(episodeId, { fileExists: () => true, policy: manualPolicy })
   const manualPrompt = ctx.buildAuditWindowPrompt(manualContext, manualContext.windows[0])
   assert.match(manualPrompt, /repairable 一律填 false/)
+  const manualPairPrompt = ctx.buildAuditContinuityPrompt(manualContext, manualContext.continuityPairs[0])
+  assert.match(manualPairPrompt, /suggestedTransition 一律填 null/)
+  assert.doesNotMatch(manualPairPrompt, /过渡类型按断点性质选择/)
+})
+
+test('修复提示词带单段时长上限与批量提交要求', async () => {
+  const { scene } = seedDrama()
+  const episodeId = createEpisode('剧本')
+  linkEpisode(episodeId, 'scene', scene)
+  db.update(schema.episodes).set({ breakdownMethod: 'hook-beat-extended' })
+    .where(eq(schema.episodes.id, episodeId)).run()
+  const shot = createShot(episodeId, 1, { sceneId: scene })
+  const context = ctx.buildAuditEpisodeContext(episodeId, { fileExists: () => true })
+
+  assert.equal(context.maxSegmentSeconds, 12)
+  const prompt = ctx.buildAuditRepairPrompt(context, [{
+    id: 'ISSUE-1',
+    check: 4,
+    source: 'rule',
+    severity: 'error',
+    code: 'shot_dialogue_over_capacity',
+    storyboardId: shot.id,
+    storyboardNumber: 1,
+    message: '台词超出镜头容量。',
+    repairable: true,
+    repairAction: 'extend_duration',
+    status: 'open',
+  }])
+  assert.match(prompt, /不得超过 12 秒/)
+  assert.match(prompt, /一次 apply_storyboard_repair 调用里批量提交/)
 })

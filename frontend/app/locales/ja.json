@@ -1437,6 +1437,7 @@
       "undo": "今回の修正を取り消す",
       "undoDone": "{n} 個の分镜を復元しました",
       "runDone": "アクション検査が完了しました。自動修正 {n} 件",
+      "manualDone": "{n} 件は自動修正できず、手動対応としてマークされました",
       "statusLabel": "検査状態",
       "trigger": {
         "manual": "手動検査",
@@ -1522,8 +1523,19 @@
           "ai": "AI トランジション",
           "empty": "空鏡",
           "scene": "シーン",
-          "text": "テキスト動画"
+          "text": "テキスト動画",
+          "fade": "ディゾルブ"
         },
+        "fadeStyleLabel": "トランジションスタイル",
+        "fadeStyle": {
+          "dissolve": "クロスディゾルブ",
+          "dip-black": "黒フェード",
+          "dip-white": "白フェード",
+          "wipe-left": "左ワイプ",
+          "slide-left": "左スライド",
+          "circle-open": "サークルオープン"
+        },
+        "fadeHint": "前後のショットの終わりと始まりをローカルで合成するため、動画モデルを消費しません。",
         "submit": "作成して生成",
         "submitting": "送信中…",
         "cancel": "キャンセル",
@@ -1686,6 +1698,7 @@
         "addCustom": "トランジションショットを作成",
         "degraded": "シーン画像がないため空鏡として生成します",
         "editCustom": "種類を変更",
+        "switchKind": "別の方式に変更",
         "prompt": {
           "toggle": "プロンプト",
           "label": "トランジション動画プロンプト",

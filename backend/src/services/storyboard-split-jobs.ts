@@ -725,8 +725,7 @@ export async function runStoryboardSplitJob(
       chunks: chunks.length,
       shots: liveCount,
       coverageFloor: coverage?.floor,
-      coverageActual: coverage?.actual,
-    })
+      coverageActual: coverage?.actual,    })
     if (coverage && !coverage.ok) {
       logTaskWarn('StoryboardSplit', 'coverage-shortfall', {
         jobId,
