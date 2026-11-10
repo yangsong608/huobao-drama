@@ -1054,6 +1054,24 @@ export const sqliteSchemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_status ON pipeline_jobs (status, resource, priority)`,
   `CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_episode ON pipeline_jobs (episode_id)`,
   `CREATE INDEX IF NOT EXISTS idx_script_chapters_import ON script_chapters (import_id, chapter_index)`,
+
+  // ===== 远程接力：已配对设备（只存令牌哈希，不存明文） =====
+  `CREATE TABLE IF NOT EXISTS remote_devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    token_hash TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'full',
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    user_agent TEXT,
+    last_ip TEXT
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_remote_devices_token ON remote_devices (token_hash)`,
+  `CREATE INDEX IF NOT EXISTS idx_remote_devices_expires ON remote_devices (expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_remote_devices_revoked ON remote_devices (revoked_at)`,
 ]
 
 /**

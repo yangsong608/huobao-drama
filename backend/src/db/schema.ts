@@ -571,6 +571,21 @@ export const appSettings = sqliteTable('app_settings', {
   updatedAt: text('updated_at').notNull(),
 })
 
+/** 远程接力已配对设备：只存令牌哈希；revoked_at/expires_at 任一失效即拒绝 */
+export const remoteDevices = sqliteTable('remote_devices', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  platform: text('platform').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  scope: text('scope').notNull().default('full'),
+  createdAt: text('created_at').notNull(),
+  lastSeenAt: text('last_seen_at'),
+  expiresAt: text('expires_at').notNull(),
+  revokedAt: text('revoked_at'),
+  userAgent: text('user_agent'),
+  lastIp: text('last_ip'),
+})
+
 // ===== V2 新增表 =====
 
 /** 音色档案：一个可复现的声音。旁白 scope='narrator' 且 characterId 为 null */
