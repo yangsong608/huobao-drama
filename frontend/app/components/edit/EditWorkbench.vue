@@ -1767,6 +1767,12 @@ onBeforeUnmount(() => {
   clearTimeout(derivedTimer)
   void saveNow()
 })
+
+defineExpose({
+  isDirty: () => dirty.value,
+  isSaving: () => saveStatus.value === 'saving',
+  reload,
+})
 </script>
 
 <style scoped>

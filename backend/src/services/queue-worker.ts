@@ -12,6 +12,7 @@ import { claimNextJob, completeJob, failJob, heartbeat, markOrphanedJobs, update
 import { isAutomationRunning, startAutomation } from './automation.js'
 import { getDubbingState, startDubbing } from './dubbing.js'
 import { logTaskError, logTaskProgress, logTaskSuccess } from '../utils/task-logger.js'
+import { emitChange } from './sync-events.js'
 
 const POLL_MS = 3000
 const JOB_TIMEOUT_MS = 3 * 60 * 60 * 1000
@@ -90,6 +91,7 @@ async function runJob(job: typeof schema.pipelineJobs.$inferSelect): Promise<voi
         bgmUrl: payload.bgmUrl,
         force: Boolean(payload.force),
       })
+      emitChange({ method: 'POST', path: `/api/v1/episodes/${job.episodeId}/dub`, source: 'queue' })
       await waitUntil(
         () => ['done', 'failed', 'stopped', 'idle'].includes(getDubbingState(job.episodeId!).status),
         job.id,

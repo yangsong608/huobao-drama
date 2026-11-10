@@ -38,6 +38,7 @@ import { getDubbingState, startDubbing } from './dubbing.js'
 import { applyVoiceProfiles, generateNarratorProfile, generateVoiceProfiles } from './voice-design.js'
 import { getNarratorVoice, getVoice, listVoiceRows, updateVoice } from './voice-profile.js'
 import { cancelJob, enqueueJob } from './job-queue.js'
+import { emitChange } from './sync-events.js'
 import { getDubbingDefaults, isQueueEnabled, ttsLanguageOf } from './app-settings.js'
 import { getAudioConfig, synthesize } from './tts.js'
 import { normalizeVideoAudioMode } from './video-audio.js'
@@ -832,18 +833,29 @@ export async function startAutomation(episodeId: number, opts: RunOptions = {}):
   }
 
   logTaskStart('Automation', 'run', { episodeId, dramaId: ep.dramaId })
+  // 各步骤直写业务表（非 REST），收尾统一补发一次变更事件供其他设备刷新
+  const markChanged = () => {
+    emitChange({ method: 'POST', path: `/api/v1/episodes/${episodeId}`, source: 'automation' })
+  }
   void (async () => {
     try {
       await stepRewrite(episodeId, ep.dramaId, opts)
       await updateProgress(episodeId, 'rewrite', 1, 1)
+      markChanged()
       await stepExtract(episodeId, ep.dramaId, opts)
+      markChanged()
       await stepVoices(episodeId, ep.dramaId, opts)
+      markChanged()
       await stepAssetImages(episodeId, opts)
       await stepStoryboards(episodeId, ep.dramaId, opts)
+      markChanged()
       await stepVideoPrompts(episodeId, ep.dramaId, opts)
+      markChanged()
       await stepStoryboardAudit(episodeId, ep.dramaId, opts)
+      markChanged()
       await stepVideos(episodeId, ep.dramaId)
       await stepDub(episodeId, ep.dramaId)
+      markChanged()
       await updateProgress(episodeId, 'done')
       await finishRun(episodeId, 'done')
       logTaskSuccess('Automation', 'run', { episodeId })

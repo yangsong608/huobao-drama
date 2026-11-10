@@ -1,5 +1,6 @@
 <template>
   <div class="page">
+    <RemoteChangeNotice :visible="remoteChange" @refresh="applyRemoteChange" @dismiss="keepLocalChanges" />
     <div v-if="store.loading && !novel" class="page-loading">{{ t('common.loading') }}</div>
 
     <div v-else-if="!novel" class="page-empty card">
@@ -221,6 +222,8 @@ import { useI18n } from 'vue-i18n'
 import { ArrowLeft, BookOpen, PenLine, Settings2 } from 'lucide-vue-next'
 import { useNovelStore } from '~/stores/novel'
 import { novelAPI } from '~/composables/useNovelApi'
+import { useSyncedRefresh, hasFocusedEditor } from '~/composables/useSyncedRefresh'
+import RemoteChangeNotice from '~/components/RemoteChangeNotice.vue'
 import InspirationCompass from '~/components/novel/compass/InspirationCompass.vue'
 
 definePageMeta({ layout: 'novel' })
@@ -338,6 +341,14 @@ async function load() {
     novel.value = await store.fetchNovel(id)
   } catch { /* store.error 已记录 */ }
 }
+
+const { remoteChange, applyRemoteChange, keepLocalChanges } = useSyncedRefresh({
+  id: 'novel-detail',
+  // 章节正文由 ChapterWriterPanel 单独注册，页面级刷新不碰 /chapters
+  match: path => /^\/api\/v1\/novels\/[^/]+(\/|$)/.test(path) && !/\/chapters(\/|$)/.test(path),
+  refresh: load,
+  isDirty: () => Boolean(settingsOpen.value || actionLoading.value || hasFocusedEditor()),
+})
 
 onMounted(load)
 </script>

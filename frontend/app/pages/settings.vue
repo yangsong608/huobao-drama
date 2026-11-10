@@ -28,7 +28,11 @@
         </div>
       </aside>
 
-      <div class="settings-content">
+      <div class="settings-content" :inert="remoteReadonly || null">
+        <div v-if="remoteReadonly" class="settings-readonly-banner" role="status">
+          <ShieldCheck :size="14" />
+          <span>{{ t('remote.readonly.notice') }}</span>
+        </div>
 
         <!-- ===== 通用（内容语言） ===== -->
         <div class="settings-tabpanel" role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general" tabindex="0" :hidden="tab !== 'general'">
@@ -89,8 +93,8 @@
             </div>
           </section>
 
-          <!-- 媒体工具（FFmpeg） -->
-          <section class="card svc-group">
+          <!-- 媒体工具（FFmpeg）：仅主机可见 -->
+          <section v-if="!isGuest" class="card svc-group">
             <div class="svc-group-head">
               <div class="svc-group-heading">
                 <span class="svc-group-title">{{ t('settings.general.mediaTitle') }}</span>
@@ -148,6 +152,115 @@
               </div>
             </template>
             <p class="config-empty">{{ t('settings.general.ffmpegDirHint') }}</p>
+          </section>
+        </div>
+        </div>
+
+        <!-- ===== 跨端接力（仅主机） ===== -->
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-remote" aria-labelledby="settings-tab-remote" tabindex="0" :hidden="tab !== 'remote'">
+        <div v-if="tab === 'remote'" class="settings-scroll">
+          <div class="settings-head">
+            <h2 class="settings-title">{{ t('settings.remote.title') }}</h2>
+            <p class="settings-desc">{{ t('settings.remote.desc') }}</p>
+          </div>
+
+          <section class="card svc-group remote-card">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
+                <span class="svc-group-title">{{ t('remote.dialog.title') }}</span>
+                <div class="svc-group-sub">{{ remoteStatusLabel }}</div>
+              </div>
+              <div class="remote-tab-actions">
+                <span class="tag" :class="remoteRunning ? 'tag-success' : ''">
+                  {{ remoteRunning ? t('remote.dialog.status.running') : t('remote.dialog.status.disabled') }}
+                </span>
+                <button
+                  v-if="remoteRunning"
+                  type="button"
+                  class="btn btn-sm"
+                  :disabled="remoteState.disabling"
+                  @click="remoteDisableConfirm = true"
+                >{{ t('remote.dialog.disable') }}</button>
+                <button
+                  v-else
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  :disabled="remoteState.enabling"
+                  @click="enableRemoteTab"
+                >{{ t('remote.dialog.enable') }}</button>
+                <button type="button" class="btn btn-sm" :disabled="!remoteRunning" @click="openRemoteDialog">
+                  {{ t('settings.remote.openDialog') }}
+                </button>
+              </div>
+            </div>
+            <p class="config-empty">{{ t('settings.remote.hint') }}</p>
+            <p v-if="remoteState.actionError" class="remote-tab-error" role="alert">
+              <TriangleAlert :size="14" />
+              <span>{{ remoteErrorMessage(remoteState.actionError) }}</span>
+            </p>
+          </section>
+
+          <section class="card svc-group remote-card">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
+                <span class="svc-group-title">{{ t('remote.dialog.settings') }}</span>
+                <div class="svc-group-sub">{{ t('settings.remote.settingsHint') }}</div>
+              </div>
+              <button class="btn btn-primary btn-sm ml-auto" :disabled="remoteState.saving" @click="saveRemoteTabSettings">
+                <Loader2 v-if="remoteState.saving" :size="13" class="animate-spin" />
+                {{ t('remote.dialog.save') }}
+              </button>
+            </div>
+            <div class="remote-settings-grid">
+              <label class="field">
+                <span class="field-label">{{ t('remote.dialog.deviceName') }}</span>
+                <input v-model="remoteForm.deviceName" class="input" maxlength="40" :placeholder="t('remote.dialog.deviceNamePlaceholder')" />
+              </label>
+              <label class="field">
+                <span class="field-label">{{ t('remote.dialog.port') }}</span>
+                <input v-model.number="remoteForm.port" class="input" type="number" inputmode="numeric" min="1024" max="65535" :disabled="remoteRunning" />
+                <span v-if="remoteRunning" class="field-hint">{{ t('remote.dialog.portLocked') }}</span>
+              </label>
+              <label class="field">
+                <span class="field-label">{{ t('remote.dialog.sessionDays') }}</span>
+                <select v-model.number="remoteForm.sessionDays" class="input">
+                  <option v-for="days in remoteSessionDayOptions" :key="days" :value="days">
+                    {{ t('remote.dialog.days', { n: days }) }}
+                  </option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label">{{ t('remote.dialog.bindAddress') }}</span>
+                <select v-model="remoteForm.bindAddress" class="input" :disabled="remoteRunning || !remoteAddressOptions.length">
+                  <option v-if="!remoteAddressOptions.length" value="">{{ t('remote.dialog.noAddress') }}</option>
+                  <option v-for="address in remoteAddressOptions" :key="address" :value="address">{{ address }}</option>
+                </select>
+                <span class="field-hint">{{ remoteRunning ? t('remote.dialog.bindLocked') : t('remote.dialog.bindHint') }}</span>
+              </label>
+            </div>
+          </section>
+
+          <section class="card svc-group remote-card">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
+                <span class="svc-group-title">{{ t('settings.remote.devicesTitle') }}</span>
+              </div>
+              <div class="remote-tab-actions">
+                <span class="tag">{{ t('remote.dialog.deviceCount', { n: remoteDevices.length }) }}</span>
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  :disabled="!remoteRevokeAllCount"
+                  @click="remoteRevokeAllConfirm = true"
+                >{{ t('remote.dialog.revokeAll') }}</button>
+              </div>
+            </div>
+            <RemoteDeviceList
+              :devices="remoteDevices"
+              :presence="presenceState.entries"
+              @revoke="askRemoteRevoke"
+              @relay="relayRemoteDevice"
+            />
           </section>
         </div>
         </div>
@@ -1323,7 +1436,7 @@
             <h2 class="settings-title">{{ t('settings.about.title') }}</h2>
             <p class="settings-desc">{{ t('settings.about.desc') }}</p>
           </div>
-          <section class="card svc-group">
+          <section v-if="!isGuest" class="card svc-group">
             <div class="svc-group-head">
               <div class="svc-group-heading">
                 <span class="svc-group-title">{{ t('settings.about.currentVersion', { v: updateState?.currentVersion || '…' }) }}</span>
@@ -2052,6 +2165,31 @@
         </div>
       </form>
     </div>
+    <RemoteAccessDialog :open="remoteDialogOpen" :next="route.fullPath" @close="closeRemoteDialog" />
+    <ConfirmDialog
+      :open="!!remoteRevokeDevice"
+      :title="t('remote.confirm.revokeTitle')"
+      :message="t('remote.confirm.revokeMessage', { name: remoteRevokeDevice?.name || '' })"
+      :loading="remoteRevokeLoading"
+      @confirm="confirmRemoteRevoke"
+      @cancel="remoteRevokeDevice = null"
+    />
+    <ConfirmDialog
+      :open="remoteDisableConfirm"
+      :title="t('remote.confirm.disableTitle')"
+      :message="t('remote.confirm.disableMessage')"
+      :loading="remoteState.disabling"
+      @confirm="confirmRemoteDisable"
+      @cancel="remoteDisableConfirm = false"
+    />
+    <ConfirmDialog
+      :open="remoteRevokeAllConfirm"
+      :title="t('remote.confirm.revokeAllTitle')"
+      :message="t('remote.confirm.revokeAllMessage', { n: remoteRevokeAllCount })"
+      :loading="remoteRevokeAllLoading"
+      @confirm="confirmRemoteRevokeAll"
+      @cancel="remoteRevokeAllConfirm = false"
+    />
     <ConfirmDialog
       :open="!!styleToDelete"
       :title="t('settings.styleDelete.title')"
@@ -2088,13 +2226,18 @@
 </template>
 
 <script setup>
-import { Plus, Pencil, Trash2, FileText, ChevronDown, Check, Loader2, Bot, Cpu, Sparkles, Palette, ExternalLink, Star, HardDrive, Database, RefreshCw, Download, Languages, SunMoon, X, Plug, KeyRound, Copy, ListOrdered, Mic, Music, BookOpen, Layers, ShieldCheck } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, FileText, ChevronDown, Check, Loader2, Bot, Cpu, Sparkles, Palette, ExternalLink, Star, HardDrive, Database, RefreshCw, Download, Languages, SunMoon, X, Plug, KeyRound, Copy, ListOrdered, Mic, Music, BookOpen, Layers, ShieldCheck, MonitorSmartphone, TriangleAlert } from 'lucide-vue-next'
 import BaseSelect from '~/components/BaseSelect.vue'
 import QueuePanel from '~/components/QueuePanel.vue'
+import RemoteAccessDialog from '~/components/RemoteAccessDialog.vue'
+import RemoteDeviceList from '~/components/RemoteDeviceList.vue'
 import { toast } from 'vue-sonner'
 import { toastError } from '~/composables/useToast'
 import { useI18n } from 'vue-i18n'
 import { aiConfigAPI, promptAPI, skillsAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, uploadAPI, pipelineRuleAPI, breakdownMethodAPI, dubbingAPI, bgmAPI } from '~/composables/useApi'
+import { useRemoteRole, remoteErrorMessage } from '~/composables/useRemoteGuest'
+import { useRemotePairing } from '~/composables/useRemotePairing'
+import { presenceState, refreshPresenceEntries, safePresenceRelayPath } from '~/composables/usePresence'
 import { useDesktopBridge } from '~/composables/useDesktopBridge'
 import { useMigrateState } from '~/composables/useMigrateState'
 import { useTheme } from '~/composables/useTheme'
@@ -2109,32 +2252,199 @@ const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
-const SETTINGS_TABS = ['ai', 'dubbing', 'novel', 'general', 'styles', 'rules', 'breakdown', 'audit', 'agents', 'queue', 'storage', 'mcp', 'about']
+const remoteRole = useRemoteRole()
+const isGuest = computed(() => remoteRole.role === 'guest')
+const remoteReadonly = computed(() => remoteRole.role === 'guest' && remoteRole.readonly)
+const GUEST_HIDDEN_TABS = new Set(['ai', 'storage', 'mcp', 'agents', 'remote'])
+
+const SETTINGS_TABS = ['ai', 'dubbing', 'novel', 'general', 'remote', 'styles', 'rules', 'breakdown', 'audit', 'agents', 'queue', 'storage', 'mcp', 'about']
 const requestedTab = typeof route.query.tab === 'string' ? route.query.tab : ''
 const showBrandImage = ref(true)
-const tab = ref(SETTINGS_TABS.includes(requestedTab) ? requestedTab : 'ai')
+function initialTab() {
+  if (SETTINGS_TABS.includes(requestedTab) && !(isGuest.value && GUEST_HIDDEN_TABS.has(requestedTab))) return requestedTab
+  return isGuest.value ? 'dubbing' : 'ai'
+}
+const tab = ref(initialTab())
 watch(tab, (value) => {
   if (route.query.tab !== value) router.replace({ query: { ...route.query, tab: value } })
 })
 watch(() => route.query.tab, (value) => {
   const next = typeof value === 'string' ? value : ''
-  if (SETTINGS_TABS.includes(next) && next !== tab.value) tab.value = next
+  if (SETTINGS_TABS.includes(next) && !(isGuest.value && GUEST_HIDDEN_TABS.has(next)) && next !== tab.value) tab.value = next
 })
-const baseTabs = computed(() => [
-  { id: 'ai', label: t('settings.tabs.ai'), icon: Cpu },
-  { id: 'dubbing', label: t('settings.tabs.dubbing'), icon: Mic },
-  { id: 'novel', label: t('settings.tabs.novel'), icon: BookOpen },
-  { id: 'general', label: t('settings.tabs.general'), icon: Languages },
-  { id: 'styles', label: t('settings.tabs.styles'), icon: Palette },
-  { id: 'rules', label: t('settings.tabs.rules'), icon: FileText },
-  { id: 'breakdown', label: t('settings.tabs.breakdown'), icon: Layers },
-  { id: 'audit', label: t('settings.tabs.audit'), icon: ShieldCheck },
-  { id: 'agents', label: t('settings.tabs.agents'), icon: Bot },
-  { id: 'queue', label: t('settings.tabs.queue'), icon: ListOrdered },
-  { id: 'storage', label: t('settings.tabs.storage'), icon: HardDrive },
-  { id: 'mcp', label: t('settings.tabs.mcp'), icon: Plug },
-  { id: 'about', label: t('settings.tabs.about'), icon: RefreshCw },
-])
+const baseTabs = computed(() => {
+  const tabs = [
+    { id: 'ai', label: t('settings.tabs.ai'), icon: Cpu },
+    { id: 'dubbing', label: t('settings.tabs.dubbing'), icon: Mic },
+    { id: 'novel', label: t('settings.tabs.novel'), icon: BookOpen },
+    { id: 'general', label: t('settings.tabs.general'), icon: Languages },
+    { id: 'remote', label: t('settings.tabs.remote'), icon: MonitorSmartphone },
+    { id: 'styles', label: t('settings.tabs.styles'), icon: Palette },
+    { id: 'rules', label: t('settings.tabs.rules'), icon: FileText },
+    { id: 'breakdown', label: t('settings.tabs.breakdown'), icon: Layers },
+    { id: 'audit', label: t('settings.tabs.audit'), icon: ShieldCheck },
+    { id: 'agents', label: t('settings.tabs.agents'), icon: Bot },
+    { id: 'queue', label: t('settings.tabs.queue'), icon: ListOrdered },
+    { id: 'storage', label: t('settings.tabs.storage'), icon: HardDrive },
+    { id: 'mcp', label: t('settings.tabs.mcp'), icon: Plug },
+    { id: 'about', label: t('settings.tabs.about'), icon: RefreshCw },
+  ]
+  if (!isGuest.value) return tabs
+  return tabs.filter(item => !GUEST_HIDDEN_TABS.has(item.id))
+})
+// 深链或角色变化后回到第一个可见页签，URL 不保留隐藏页签
+watch([() => remoteRole.ready, isGuest], () => {
+  if (!remoteRole.ready) return
+  if (baseTabs.value.some(item => item.id === tab.value)) return
+  tab.value = baseTabs.value[0]?.id || 'general'
+}, { immediate: true })
+
+// ===== 手机接力（仅主机可见） =====
+const {
+  state: remoteState,
+  refreshStatus: refreshRemoteStatus,
+  enableBridge: enableRemoteBridge,
+  disableBridge: disableRemoteBridge,
+  updateSettings: updateRemoteSettings,
+  revokeDevice: revokeRemoteDevice,
+  revokeAllDevices: revokeAllRemoteDevices,
+} = useRemotePairing()
+
+const remoteForm = reactive({ deviceName: '', port: 5680, sessionDays: 30, bindAddress: '' })
+const remoteDialogOpen = ref(false)
+const remoteDisableConfirm = ref(false)
+const remoteRevokeDevice = ref(null)
+const remoteRevokeLoading = ref(false)
+const remoteRevokeAllConfirm = ref(false)
+const remoteRevokeAllLoading = ref(false)
+const remoteSessionDayOptions = [7, 30, 90]
+
+const remoteRunning = computed(() => remoteState.status?.running === true)
+const remoteDevices = computed(() => remoteState.status?.devices ?? [])
+const remoteRevokeAllCount = computed(() => remoteDevices.value.filter(device => device.status === 'active').length)
+const remoteStatusKey = computed(() => {
+  if (!remoteState.ready && !remoteState.status) return 'loading'
+  if (remoteState.enabling) return 'enabling'
+  if (remoteState.disabling) return 'disabling'
+  if (remoteState.status?.state === 'error') return 'error'
+  return remoteRunning.value ? 'running' : 'disabled'
+})
+const remoteStatusLabel = computed(() => t(`remote.dialog.status.${remoteStatusKey.value}`))
+const remoteAddressOptions = computed(() => {
+  const list = [...(remoteState.status?.addresses ?? [])]
+  const current = remoteForm.bindAddress || remoteState.status?.bindAddress || ''
+  if (current && !list.includes(current)) list.unshift(current)
+  return list
+})
+
+function syncRemoteForm() {
+  const current = remoteState.status
+  if (!current) return
+  remoteForm.deviceName = current.deviceName
+  remoteForm.port = current.port
+  remoteForm.sessionDays = current.sessionDays
+  remoteForm.bindAddress = current.bindAddress || current.addresses[0] || ''
+}
+
+function notifyRemoteError() {
+  if (!remoteState.actionError) return
+  toast.error(remoteErrorMessage(remoteState.actionError))
+}
+
+async function loadRemoteTab() {
+  if (isGuest.value) return
+  await refreshRemoteStatus()
+  if (isGuest.value) return
+  syncRemoteForm()
+  void refreshPresenceEntries()
+}
+
+async function enableRemoteTab() {
+  const address = remoteForm.bindAddress || remoteState.status?.addresses[0] || ''
+  const ok = await enableRemoteBridge(address || undefined)
+  if (!ok) {
+    notifyRemoteError()
+    return
+  }
+  syncRemoteForm()
+  toast.success(t('remote.dialog.actionDone'))
+}
+
+function openRemoteDialog() {
+  remoteDialogOpen.value = true
+}
+
+function closeRemoteDialog() {
+  remoteDialogOpen.value = false
+  void loadRemoteTab()
+}
+
+async function saveRemoteTabSettings() {
+  const deviceName = remoteForm.deviceName.trim()
+  if (!deviceName) {
+    toast.error(t('remote.dialog.deviceNameRequired'))
+    return
+  }
+  const ok = await updateRemoteSettings({
+    deviceName,
+    port: Number(remoteForm.port),
+    sessionDays: remoteForm.sessionDays,
+  })
+  if (!ok) {
+    notifyRemoteError()
+    return
+  }
+  syncRemoteForm()
+  toast.success(t('remote.dialog.saved'))
+}
+
+function askRemoteRevoke(device) {
+  remoteRevokeDevice.value = device
+}
+
+async function confirmRemoteRevoke() {
+  const device = remoteRevokeDevice.value
+  if (!device || remoteRevokeLoading.value) return
+  remoteRevokeLoading.value = true
+  try {
+    const ok = await revokeRemoteDevice(device.id)
+    if (ok) toast.success(t('remote.dialog.actionDone'))
+    else notifyRemoteError()
+  } finally {
+    remoteRevokeLoading.value = false
+    remoteRevokeDevice.value = null
+  }
+}
+
+async function confirmRemoteRevokeAll() {
+  if (remoteRevokeAllLoading.value) return
+  remoteRevokeAllLoading.value = true
+  try {
+    const ok = await revokeAllRemoteDevices()
+    if (ok) toast.success(t('remote.dialog.actionDone'))
+    else notifyRemoteError()
+  } finally {
+    remoteRevokeAllLoading.value = false
+    remoteRevokeAllConfirm.value = false
+  }
+}
+
+async function confirmRemoteDisable() {
+  const ok = await disableRemoteBridge()
+  remoteDisableConfirm.value = false
+  if (ok) toast.success(t('remote.dialog.actionDone'))
+  else notifyRemoteError()
+}
+
+/** 反向接力：电脑端跳到手机当前所在页面；只接受站内路径 */
+function relayRemoteDevice(path) {
+  const safe = safePresenceRelayPath(path)
+  if (!safe) {
+    toast.error(t('remote.errors.badPath'))
+    return
+  }
+  void router.push(safe)
+}
 
 // ===== MCP 服务 =====
 const mcpStatus = ref({ enabled: false, running: false, port: 5780, url: '', token: '', tool_count: 0, tools: [], error: null })
@@ -3514,19 +3824,33 @@ function openAuditorAgent() {
 }
 
 onMounted(() => {
-  loadCfgs()
-  loadAgents()
-  loadAllSkills()
-  loadAgentPrompt(selectedAgent.value)
   loadStylePresets()
-  loadMcp()
   loadPipelineRules()
-  loadMediaSettings()
   if (tab.value === 'dubbing') loadDubbing()
   if (tab.value === 'novel') loadNovel()
   if (tab.value === 'breakdown') loadBreakdownMethods()
   if (tab.value === 'audit') loadAuditPolicy()
 })
+
+// 主机级设置等角色明确后再加载；访客不发起这些请求
+let hostSettingsLoaded = false
+function loadHostSettingsOnce() {
+  if (hostSettingsLoaded) return
+  hostSettingsLoaded = true
+  loadCfgs()
+  loadAgents()
+  loadAllSkills()
+  loadAgentPrompt(selectedAgent.value)
+  loadMcp()
+  loadMediaSettings()
+  if (tab.value === 'remote') void loadRemoteTab()
+}
+watch([() => remoteRole.ready, isGuest], ([ready]) => {
+  if (!ready || isGuest.value) return
+  loadHostSettingsOnce()
+  if (tab.value === 'storage') loadStorage()
+  if (tab.value === 'about') refreshUpdateState()
+}, { immediate: true })
 
 // ===== 应用内引导（设置页）：快捷配置 + 手动模板两步 =====
 const SETTINGS_TOUR = [
@@ -3571,10 +3895,12 @@ async function loadStorage() {
 }
 
 watch(tab, (active) => {
-  if (active === 'storage') loadStorage()
-  else stopUsagePoll()
-  if (active === 'general') loadMediaSettings()
   if (active === 'dubbing') loadDubbing()
+  if (active !== 'storage') stopUsagePoll()
+  if (!remoteRole.ready) return
+  if (active === 'storage' && !isGuest.value) loadStorage()
+  if (active === 'general' && !isGuest.value) loadMediaSettings()
+  if (active === 'remote' && !isGuest.value) loadRemoteTab()
 })
 
 async function pickTarget() {
@@ -3747,12 +4073,12 @@ async function applyUpdate() {
 }
 
 watch(tab, (t) => {
-  if (t === 'about') refreshUpdateState()
+  if (t === 'about' && remoteRole.ready && !isGuest.value) refreshUpdateState()
   if (t === 'rules') loadPipelineRules()
   if (t === 'breakdown') loadBreakdownMethods()
   if (t === 'audit') loadAuditPolicy()
   // 进入 Agent 页总是按当前内容语言重载（幂等）：兜住「先切语言、后进 Agent」的时序
-  if (t === 'agents') {
+  if (t === 'agents' && remoteRole.ready && !isGuest.value) {
     loadAgentPrompt(selectedAgent.value)
     loadAllSkills()
   }
@@ -3923,9 +4249,31 @@ onBeforeUnmount(stopUsagePoll)
 .nav-item.active { background: var(--accent-bg); color: var(--accent-text); font-weight: 650; }
 .nav-item:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--button-focus); }
 
-.settings-content { flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
-/* 12 个常驻 tabpanel 只靠 hidden 切换可见性，不设 display 覆盖 */
+.settings-content { flex: 1; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+/* 14 个常驻 tabpanel 只靠 hidden 切换可见性，不设 display 覆盖 */
 .settings-tabpanel { height: 100%; min-height: 0; }
+.settings-content > .settings-tabpanel { flex: 1 1 auto; height: auto; }
+.settings-readonly-banner {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 8px;
+  width: calc(100% - 56px); max-width: 1080px;
+  margin: 12px auto 0; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--warning-bg); color: var(--warning);
+  font-size: 12.5px; line-height: 1.4;
+}
+
+/* ===== 手机接力 ===== */
+.remote-card .svc-group-head { flex-wrap: wrap; }
+.remote-tab-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.remote-tab-actions .btn { min-height: 36px; }
+.remote-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 16px;
+  padding: 12px 20px;
+}
+.remote-tab-error { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; color: var(--error); font-size: 12px; }
 .settings-scroll { height: 100%; overflow-y: auto; padding: 20px 28px 48px; animation: fadeUp 0.3s var(--ease-out); }
 /* 各分组卡片之间的间距（通用页内容语言/外观等） */
 .settings-scroll > .card + .card { margin-top: 14px; }
@@ -4461,6 +4809,10 @@ onBeforeUnmount(stopUsagePoll)
   .nav-item { width: auto; flex: 0 0 auto; min-height: var(--tap-min, 44px); white-space: nowrap; }
   .settings-content, .settings-tabpanel { min-height: 0; }
   .settings-scroll { padding: 16px; }
+  .settings-readonly-banner { width: calc(100% - 32px); }
+  .remote-tab-actions { width: 100%; justify-content: flex-start; }
+  .remote-tab-actions .btn { min-height: var(--tap-min, 44px); }
+  .remote-settings-grid { grid-template-columns: 1fr; padding: 12px 16px; }
   .field-row, .cfg-setting-grid, .huobao-quick-row, .breakdown-layout { grid-template-columns: 1fr; }
   .config-row { flex-wrap: wrap; }
   .media-dir-actions { flex: 1 1 100%; }

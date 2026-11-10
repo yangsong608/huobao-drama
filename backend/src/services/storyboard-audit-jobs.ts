@@ -9,6 +9,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { logTaskError, logTaskProgress, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
+import { emitChange } from './sync-events.js'
 import { failAiTaskRun, finishAiTaskRun, startAiTaskRun } from './ai-task-runs.js'
 import { getConfigById, getTextConfig } from './ai.js'
 import {
@@ -1629,6 +1630,7 @@ export async function runStoryboardAuditJob(
       manualCount: finalIssues.filter((issue) => issue.status === 'manual').length,
       finishedAt,
     })
+    emitChange({ method: 'POST', path: `/api/v1/episodes/${initial.episodeId}`, source: 'audit' })
     finishAiTaskRun(sysTaskId, {
       audit_job_id: jobId,
       completed_windows: finalCompletedWindows,
@@ -1673,6 +1675,7 @@ export async function runStoryboardAuditJob(
         shotStatusJson: JSON.stringify(statuses),
         finishedAt: now(),
       })
+      emitChange({ method: 'POST', path: `/api/v1/episodes/${latest.episodeId}`, source: 'audit' })
       failAiTaskRun(sysTaskId, message)
     }
     logTaskError('StoryboardAudit', 'run-failed', { jobId, error: message })

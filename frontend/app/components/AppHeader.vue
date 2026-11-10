@@ -29,6 +29,7 @@
     </nav>
 
     <div class="header-right">
+      <RemoteStatusBadge />
       <!-- PWA 安装入口：可捕获安装事件或 iOS 未安装时显示，独立窗口/已安装不出现 -->
       <button
         v-if="showInstallEntry"
@@ -249,6 +250,7 @@ watch(locale, checkAiConfigs)
   margin-left: auto;
   display: flex; align-items: center;
 }
+.header-right :deep(.remote-status-badge) { margin-right: 4px; }
 /* GitHub 入口 — 与 ThemeToggle 同款圆形图标按钮 */
 .github-link {
   display: flex;
@@ -335,6 +337,7 @@ watch(locale, checkAiConfigs)
   .brand-text { display: none; }
   .nav-link { padding: 0 10px; }
   .nav-label { display: none; }
+  .header-right :deep(.remote-status-badge .rsb-label) { display: none; }
 }
 
 /* PWA 安装入口：与 GitHub / ThemeToggle 同排，桌面显示图标 + 文字 */

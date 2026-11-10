@@ -23,6 +23,7 @@ import { bootstrapCurrentFilmIfEmpty } from './film-hub.js'
 import type { AIConfig, ComfyTimelineTask, ImageProviderAdapter } from './adapters/types'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn, redactUrl } from '../utils/task-logger.js'
 import { withProviderSlot } from './provider-concurrency.js'
+import { emitChange } from './sync-events.js'
 
 type TaskType = 'image' | 'video'
 
@@ -606,6 +607,22 @@ async function handleImageCompleteBase64(record: SysTaskRecord, base64Data: stri
 }
 
 // 图片完成后回写业务表：分镜(按 frameType)、角色、场景、道具
+function taskResourcePath(record: SysTaskRecord): string | null {
+  if (record.episodeId) return `/api/v1/episodes/${record.episodeId}`
+  if (record.storyboardId) return `/api/v1/storyboards/${record.storyboardId}`
+  if (record.characterId) return `/api/v1/characters/${record.characterId}`
+  if (record.sceneId) return `/api/v1/scenes/${record.sceneId}`
+  if (record.propId) return `/api/v1/props/${record.propId}`
+  if (record.transitionId) return `/api/v1/transitions/${record.transitionId}`
+  return null
+}
+
+// 任务完成后的业务回写不走 REST，需显式补发变更事件
+function emitTaskChange(record: SysTaskRecord): void {
+  const path = taskResourcePath(record)
+  if (path) emitChange({ method: 'POST', path, source: 'generation' })
+}
+
 async function writeBackImageAssets(record: SysTaskRecord, localPath: string) {
   const params = parseTaskParams(record.params)
   if (record.storyboardId) {

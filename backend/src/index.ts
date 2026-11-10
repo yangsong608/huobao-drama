@@ -46,7 +46,15 @@ import novels from './routes/novels.js'
 import novelImports from './routes/novelImports.js'
 import novelJobs from './routes/novelJobs.js'
 import films from './routes/films.js'
+import remoteRoutes from './routes/remote.js'
+import syncRoutes from './routes/sync.js'
+import presenceRoutes from './routes/presence.js'
+import { createRemoteBridgePipeline } from './services/remote-bridge-pipeline.js'
+import { authenticateRemoteDevice, startRemoteDeviceCleanup, touchRemoteDevice } from './services/remote-devices.js'
+import { startPresenceCleanup } from './services/presence.js'
+import { getRemoteBridgeStatus, setRemoteBridgeFetch } from './services/remote-bridge.js'
 import { requestLogger, errorHandler } from './middleware/logger.js'
+import { syncEventMiddleware } from './middleware/sync-events.js'
 import { resumeInterruptedTasks } from './services/generation.js'
 import { initMcp, setMcpMainApp } from './services/mcp.js'
 import { markInterruptedAutomations, setAutomationApp } from './services/automation.js'
@@ -89,6 +97,8 @@ app.get('/api/v1/health', (c) => c.json({
 
 // API routes
 const api = new Hono()
+// 写请求成功后广播同步事件（远程/同步/在线状态自身接口除外）
+api.use('*', syncEventMiddleware)
 api.route('/dramas', dramas)
 api.route('/episodes', episodes)
 api.route('/storyboards', storyboards)
@@ -144,6 +154,12 @@ api.route('/novels', novels)
 api.route('/novel-jobs', novelJobs)
 // 成片中心：/episodes/:id/films、/films/:id、/episodes/:id/exports/:exportId/project-film
 api.route('/', films)
+// 远程接力：本机管理、公开配对与会话
+api.route('/remote', remoteRoutes)
+// 跨端同步：SSE 事件流与轮询降级
+api.route('/sync', syncRoutes)
+// 在线状态：心跳上报与按角色过滤的在线列表
+api.route('/presence', presenceRoutes)
 
 app.route('/api/v1', api)
 
@@ -208,6 +224,22 @@ refreshFfmpegConfig()
 setMcpMainApp(app)
 setAutomationApp(app)
 setVideoBatchApp(app)
+
+// 远程桥：委托回同一 Hono 应用；来源 IP 取自监听 socket，供限流与设备记录
+const remoteBridgePipeline = createRemoteBridgePipeline({
+  appFetch: (request) => app.fetch(request),
+  origin: () => getRemoteBridgeStatus().urls[0] || null,
+  authenticate: (token) => authenticateRemoteDevice(token),
+  touch: (record, ip) => { touchRemoteDevice(record, ip) },
+})
+setRemoteBridgeFetch((request, env) => {
+  const raw = env?.incoming?.socket?.remoteAddress || ''
+  const clientIp = raw.startsWith('::ffff:') ? raw.slice(7) : raw
+  return remoteBridgePipeline(request, clientIp || undefined)
+})
+startRemoteDeviceCleanup()
+startPresenceCleanup()
+
 await initMcp()
 startQueueWorker()
 // 批量视频：先恢复上次批次（接管已提交任务、回队未提交项），再启动 3 秒调度

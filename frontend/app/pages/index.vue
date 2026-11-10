@@ -1,5 +1,6 @@
 <template>
   <div class="page">
+    <RemoteChangeNotice :visible="remoteChange" @refresh="applyRemoteChange" @dismiss="keepLocalChanges" />
     <!-- 紧凑头部：标题 + 统计 + 新建 一行 -->
     <div class="launcher-head">
       <div class="head-left">
@@ -306,6 +307,8 @@ import { Clock, CircleHelp } from 'lucide-vue-next'
 import { dramaAPI, stylePresetAPI, aiConfigAPI, uploadAPI, settingsAPI } from '~/composables/useApi'
 import { textModelSupportsVision } from '~/utils/model-capabilities'
 import BaseSelect from '~/components/BaseSelect.vue'
+import RemoteChangeNotice from '~/components/RemoteChangeNotice.vue'
+import { useSyncedRefresh } from '~/composables/useSyncedRefresh'
 import { startTour, autoTour } from '~/composables/useTour'
 import { useOverlayHistory } from '~/composables/useOverlayHistory'
 
@@ -532,8 +535,8 @@ const filteredDramas = computed(() => {
   })
 })
 
-async function load() {
-  loading.value = true
+async function load(options = {}) {
+  if (!options.silent) loading.value = true
   try {
     const [res, presets, configs] = await Promise.all([
       dramaAPI.list(),
@@ -555,6 +558,14 @@ async function load() {
     loading.value = false
   }
 }
+
+const { remoteChange, applyRemoteChange, keepLocalChanges } = useSyncedRefresh({
+  id: 'drama-list',
+  match: (path) => /^\/api\/v1\/dramas(\/[^/]+)?$/.test(path),
+  refresh: () => load({ silent: true }),
+  isDirty: () => Boolean(showCreate.value || dramaToDelete.value || uploadingStyleRef.value || analyzingStyle.value),
+  isSaving: () => Boolean(deletingDrama.value || uploadingStyleRef.value),
+})
 
 function closeCreate() {
   showCreate.value = false

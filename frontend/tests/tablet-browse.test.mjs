@@ -337,7 +337,7 @@ test('触控可见：项目卡片操作在粗指针下常驻', () => {
   assert.match(cardCoarse, /\.more-wrap \{ opacity: 1; \}/)
 })
 
-test('没有新增路由与页面文件', () => {
+test('只新增远程配对页，业务路由与视图不受影响', () => {
   const config = readRoot('nuxt.config.ts')
   assert.equal(countOccurrences(config, 'pages.push('), 1, 'pages:extend 应只有一次 pages.push')
   const pushedFiles = config.match(/fileURLToPath\(new URL\('\.\/app\/views\/[^']+'/g) || []
@@ -351,14 +351,17 @@ test('没有新增路由与页面文件', () => {
     'pages/huobao-novel/[...slug].vue',
     'pages/index.vue',
     'pages/novels/index.vue',
+    'pages/pair.vue',
     'pages/settings.vue',
-  ], 'pages 目录不应新增文件')
+  ], 'pages 目录只允许增加远程配对页 /pair')
   assert.deepEqual(walkFiles('views/'), [
     'views/drama/detail.vue',
     'views/drama/edit.vue',
     'views/drama/episode.vue',
     'views/novel/detail.vue',
   ], 'views 目录不应新增文件')
+  const pairPage = read('pages/pair.vue')
+  assert.match(pairPage, /definePageMeta\(\{ layout: false \}\)/, '配对页必须使用独立布局')
 })
 
 test('四份 locale 的 tablet 键集合一致且新增文案复用既有键', () => {

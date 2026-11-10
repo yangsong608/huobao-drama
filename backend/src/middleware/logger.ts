@@ -21,6 +21,14 @@ function formatTime(): string {
   return new Date().toLocaleTimeString('zh-CN', { hour12: false })
 }
 
+/** 配对/会话请求体含一次性码、短码或等待令牌，不能进日志 */
+function isSensitiveBodyPath(path: string): boolean {
+  return path === '/api/v1/remote/session'
+    || path === '/api/v1/remote/logout'
+    || path.startsWith('/api/v1/remote/pair/')
+    || path.startsWith('/api/v1/remote/pairing/')
+}
+
 /**
  * 全局日志中间件 — 打印请求方法/路径/状态/耗时/请求体
  */
@@ -34,7 +42,7 @@ export const requestLogger: MiddlewareHandler = async (c, next) => {
   let bodyInfo = ''
   // 上传文件不克隆/读取请求体：避免记录音频内容，也让路由的大小限制先执行。
   const isFileUpload = c.req.header('content-type')?.toLowerCase().startsWith('multipart/form-data')
-  if (!isFileUpload && ['POST', 'PUT', 'PATCH'].includes(method)) {
+  if (!isFileUpload && !isSensitiveBodyPath(path) && ['POST', 'PUT', 'PATCH'].includes(method)) {
     try {
       const clone = c.req.raw.clone()
       const text = await clone.text()

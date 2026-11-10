@@ -17,6 +17,9 @@
           <div class="studio-meta-row">
             <span class="studio-meta-pill">{{ currentSubStageLabel }}</span>
             <span class="studio-meta-pill is-progress">{{ pipelineProgress }}/{{ pipelineTotal }}</span>
+            <span v-if="remoteReadonly" class="studio-meta-pill is-readonly" :title="t('remote.readonly.notice')">
+              {{ t('remote.readonly.badge') }}
+            </span>
             <span class="studio-meta-inline">{{ t('episode.topbar.meta', { roles: chars.length, shots: sbs.length }) }}</span>
             <span v-if="showNativeAudioDubbingHint" class="studio-meta-hint" :title="t('episode.topbar.nativeAudioDubbingHintTitle')">
               {{ t('episode.topbar.nativeAudioDubbingHint') }}
@@ -67,15 +70,16 @@
           />
         </div>
         <div class="studio-actions">
+          <RemoteStatusBadge />
           <LocaleSwitcher />
           <button class="btn btn-icon tour-help-btn" :title="t('tour.helpTitle')" @click="startEpisodeTour()">
             <CircleHelp :size="14" :stroke-width="1.8" />
           </button>
-          <button v-if="dubbingEnabled" class="btn" @click="openDubbingStage">
+          <button v-if="dubbingEnabled" class="btn" :disabled="remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : undefined" @click="openDubbingStage">
             <Mic :size="12" />
             {{ t('workbench.title') }}
           </button>
-          <button v-if="hasEditEntry" class="btn" @click="openEditWorkspace">
+          <button v-if="hasEditEntry" class="btn" :disabled="remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : undefined" @click="openEditWorkspace">
             <Scissors :size="12" />
             {{ t('edit.entry') }}
           </button>
@@ -95,6 +99,22 @@
         </div>
       </div>
     </header>
+
+    <div v-if="showDesktopRelayHint" class="remote-relay-hint" role="status">
+      <AlertCircle :size="14" class="remote-relay-icon" />
+      <span>{{ t('remote.pair.desktopRelayHint') }}</span>
+      <button
+        type="button"
+        class="remote-relay-close"
+        :aria-label="t('common.close')"
+        :title="t('common.close')"
+        @click="dismissDesktopRelayHint"
+      >
+        <X :size="14" />
+      </button>
+    </div>
+
+    <RemoteChangeNotice :visible="remoteChange" @refresh="applyRemoteChange" @dismiss="keepLocalChanges" />
 
     <div class="studio-body">
     <!-- ========== LEFT SIDEBAR ========== -->
@@ -260,7 +280,7 @@
             <div class="empty-title">{{ t('episode.script.emptyTitle') }}</div>
             <div class="empty-desc">{{ t('episode.script.emptyDesc') }}</div>
             <div class="step-empty-actions">
-              <button class="btn btn-primary" @click="doRewrite">
+              <button class="btn btn-primary" :disabled="remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : undefined" @click="doRewrite">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 {{ t('episode.script.startRewrite') }}
               </button>
@@ -334,7 +354,7 @@
               </div>
               <div class="empty-title">{{ t('episode.prod.emptyTitle') }}</div>
               <div class="empty-desc">{{ t('episode.prod.emptyDesc') }}</div>
-              <button class="btn btn-primary" :disabled="!!extractingTargets.length" @click="doExtractAll">
+              <button class="btn btn-primary" :disabled="!!extractingTargets.length || remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : undefined" @click="doExtractAll">
                 <Loader2 v-if="extractingTargets.length" :size="13" class="animate-spin" />
                 <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 {{ extractingTargets.length ? t('episode.prod.extractingTypesDots', { types: extractingLabels }) : t('episode.prod.startExtract') }}
@@ -611,12 +631,12 @@
               <div v-if="canResumeSplit && splitJob" class="empty-desc video-split-failed">{{ t('episode.sb.splitFailed', { chunk: (splitJob.completed_chunks || 0) + 1, total: splitJob.total_chunks || 0, error: splitJob.error || '' }) }}</div>
               <div class="empty-desc">{{ t('episode.sb.methodCurrent', { method: currentBreakdownMethodName }) }}</div>
               <div class="locked-config-banner">{{ t('episode.vid.lockedModel') }}{{ effectiveVideoModelLabel }}</div>
-              <button v-if="canResumeSplit" class="btn btn-primary video-split-resume" :disabled="splitStarting || auditRunning" @click="resumeSplit">
+              <button v-if="canResumeSplit" class="btn btn-primary video-split-resume" :disabled="splitStarting || auditRunning || remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : undefined" @click="resumeSplit">
                 <Loader2 v-if="splitStarting" :size="13" class="animate-spin" />
                 <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 {{ t('episode.sb.resumeSplit') }}
               </button>
-              <button class="btn btn-primary" :disabled="rn || methodSaving || splitRunning || splitStarting || auditRunning" :title="currentBreakdownMethodName" @click="doBreakdown">
+              <button class="btn btn-primary" :disabled="rn || methodSaving || splitRunning || splitStarting || auditRunning || remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : currentBreakdownMethodName" @click="doBreakdown">
                 <Loader2 v-if="splitRunning || splitStarting" :size="13" class="animate-spin" />
                 <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 {{ splitRunning ? splitProgressText : t('episode.sb.startBreak') }}
@@ -851,7 +871,8 @@
                     <button
                       type="button"
                       class="btn btn-primary"
-                      :disabled="comfyRunning || !!comfyPendingTaskId"
+                      :disabled="comfyRunning || !!comfyPendingTaskId || remoteReadonly"
+                      :title="remoteReadonly ? t('remote.readonly.notice') : undefined"
                       @click="runComfyEpisode"
                     >
                       <Loader2 v-if="comfyRunning" :size="11" class="animate-spin" />
@@ -1094,6 +1115,8 @@
                   <button
                     v-if="videoTaskState(selectedSb) !== 'pending'"
                     class="btn btn-primary btn-sm video-player-empty-action"
+                    :disabled="remoteReadonly"
+                    :title="remoteReadonly ? t('remote.readonly.notice') : undefined"
                     @click="genVid(selectedSb)"
                   >
                     {{ videoTaskActionLabel(selectedSb) }}
@@ -1237,7 +1260,8 @@
                   </div>
                   <button
                     class="btn btn-primary video-inspector-action"
-                    :disabled="videoTaskState(selectedSb) === 'pending'"
+                    :disabled="videoTaskState(selectedSb) === 'pending' || remoteReadonly"
+                    :title="remoteReadonly ? t('remote.readonly.notice') : undefined"
                     @click="genVid(selectedSb)"
                   >
                     {{ videoTaskActionLabel(selectedSb) }}
@@ -2071,7 +2095,7 @@
               >
                 {{ assetImageSrc(assetDetailItem) ? t('episode.asset.regenProp') : (isPendingPropImage(assetDetailItem.id) ? t('episode.asset.generating') : t('episode.asset.genProp')) }}
               </button>
-              <button class="btn btn-primary" :disabled="savingAssetDetail" @click="saveAssetDetail">
+              <button class="btn btn-primary" :disabled="savingAssetDetail || remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : undefined" @click="saveAssetDetail">
                 <Loader2 v-if="savingAssetDetail" :size="12" class="animate-spin" />
                 {{ t('episode.asset.saveChanges') }}
               </button>
@@ -2186,7 +2210,7 @@
           </div>
           <footer class="dialog-foot">
             <button class="btn" style="margin-left:auto" :disabled="transitionCreate.submitting" @click="closeTransitionCreate">{{ t('episode.audit.transition.cancel') }}</button>
-            <button class="btn btn-primary" :disabled="transitionCreate.submitting" @click="transitionCreateSubmit()">
+            <button class="btn btn-primary" :disabled="transitionCreate.submitting || remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : undefined" @click="transitionCreateSubmit()">
               <Loader2 v-if="transitionCreate.submitting" :size="11" class="animate-spin" />
               {{ transitionCreate.submitting ? t('episode.audit.transition.submitting') : t('episode.audit.transition.submit') }}
             </button>
@@ -2485,7 +2509,7 @@
           </div>
           <footer class="dialog-foot">
             <button class="btn" @click="assetCreate.open = false">{{ t('common.cancel') }}</button>
-            <button class="btn btn-primary" :disabled="assetCreate.saving" @click="saveAssetCreate">
+            <button class="btn btn-primary" :disabled="assetCreate.saving || remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : undefined" @click="saveAssetCreate">
               <Loader2 v-if="assetCreate.saving" :size="12" class="animate-spin" />
               {{ t('common.add') }}
             </button>
@@ -2517,7 +2541,7 @@
           </div>
           <footer class="dialog-foot">
             <button class="btn" @click="batchVideoConfirm.open = false">{{ t('common.cancel') }}</button>
-            <button class="btn btn-primary" @click="confirmBatchVideos">{{ t('episode.vid.confirmStart', { n: batchVideoConfirm.targets.length }) }}</button>
+            <button class="btn btn-primary" :disabled="remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : undefined" @click="confirmBatchVideos">{{ t('episode.vid.confirmStart', { n: batchVideoConfirm.targets.length }) }}</button>
           </footer>
         </div>
       </div>
@@ -2699,7 +2723,7 @@
             >
               {{ t('episode.export.aiTransition.regenerateMissing') }}
             </button>
-            <button class="btn btn-primary" :disabled="!mergeDialog.ids.length" @click="confirmMerge">
+            <button class="btn btn-primary" :disabled="!mergeDialog.ids.length || remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : undefined" @click="confirmMerge">
               {{ t('episode.export.mergeSelected', { n: mergeDialog.ids.length }) }}
             </button>
           </footer>
@@ -2789,6 +2813,9 @@ import { createStoryboardUpdateQueue } from '~/utils/storyboard-update-queue'
 import { toastError, mapError, MODERATION_RE } from '~/composables/useToast'
 import { useLongPress } from '~/composables/useLongPress'
 import { useOverlayHistory } from '~/composables/useOverlayHistory'
+import { useRemoteRole } from '~/composables/useRemoteGuest'
+import { usePresence } from '~/composables/usePresence'
+import { useSyncedRefresh, hasFocusedEditor } from '~/composables/useSyncedRefresh'
 import { useVisibilityPolling } from '~/composables/useVisibilityPolling'
 import { useViewport } from '~/composables/useViewport'
 import { TABLET_MAX } from '~/utils/tablet-layout'
@@ -2796,6 +2823,8 @@ import { checkUploadFile, uploadErrorKey } from '~/utils/upload-guard'
 import { shareNoticeKey, shareUrlOrFile } from '~/utils/export-share'
 import LocaleSwitcher from '~/components/LocaleSwitcher.vue'
 import EpisodeDeliveryDialog from '~/components/EpisodeDeliveryDialog.vue'
+import RemoteChangeNotice from '~/components/RemoteChangeNotice.vue'
+import RemoteStatusBadge from '~/components/RemoteStatusBadge.vue'
 import ContextMenu from '~/components/ContextMenu.vue'
 
 definePageMeta({ layout: 'studio' })
@@ -2812,6 +2841,14 @@ const stepsDrawerOpen = ref(false)
 
 const route = useRoute()
 const router = useRouter()
+const remoteRole = useRemoteRole()
+const remoteReadonly = computed(() => remoteRole.role === 'guest' && remoteRole.readonly)
+const showDesktopRelayHint = computed(() => route.query.relay === 'desktop' && remoteRole.role === 'guest')
+function dismissDesktopRelayHint() {
+  const query = { ...route.query }
+  delete query.relay
+  void router.replace({ path: route.path, query })
+}
 const dramaId = Number(route.params.id)
 const episodeNumber = Number(route.params.episodeNumber)
 const dubOpen = ref(false)
@@ -5711,6 +5748,9 @@ const activeSubStepKey = computed(() => {
   return 'export:merge'
 })
 
+const { setStage: setPresenceStage } = usePresence()
+watch(activeSubStepKey, key => setPresenceStage(key), { immediate: true })
+
 // ===== 平板页签 / 步骤抽屉 / 播放器暂停 =====
 const TABLET_PANES = ['shots', 'edit', 'preview']
 
@@ -6049,6 +6089,25 @@ async function refresh() {
   if (mergeData.value?.status === 'pending' || mergeData.value?.status === 'processing') startMergePolling()
   await Promise.all([loadGenTasks(), loadExportMerges(), loadFrameAssets(), loadStoryboardAudit({ silent: true })])
 }
+
+const { remoteChange, applyRemoteChange, keepLocalChanges } = useSyncedRefresh({
+  id: 'drama-episode',
+  match: path => /^\/api\/v1\/(episodes|storyboards|characters|scenes|props|merge|tasks|films|exports|agent\/storyboard_auditor)(\/|$)/.test(path),
+  refresh,
+  isDirty: () => Boolean(
+    hasPendingStoryboardUpdates()
+    || assetPromptDirty.value
+    || Object.values(transitionPromptDirty.value).some(Boolean)
+    || assetCreate.value.open
+    || hasFocusedEditor()
+  ),
+  isSaving: () => Boolean(
+    hasPendingStoryboardUpdates()
+    || savingAssetDetail.value
+    || assetCreate.value.saving
+    || methodSaving.value
+  ),
+})
 
 function saveRaw() { episodeAPI.update(epId.value, { content: localRaw.value }); episode.value.content = localRaw.value }
 function saveScr() { episodeAPI.update(epId.value, { script_content: localScript.value }); episode.value.script_content = localScript.value }
@@ -8038,6 +8097,42 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   padding: 0 9px;
   font-size: 10.5px;
   white-space: nowrap;
+}
+
+.remote-relay-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.remote-relay-icon { flex-shrink: 0; }
+.remote-relay-hint span { flex: 1; min-width: 0; }
+.remote-relay-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--warn-text);
+  cursor: pointer;
+}
+.remote-relay-close:hover { background: var(--warn-link-hover-bg); }
+.remote-relay-close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3.5px var(--button-focus);
+}
+@media (pointer: coarse) {
+  .remote-relay-close { width: var(--tap-min); height: var(--tap-min); }
 }
 
 .studio-body {

@@ -28,6 +28,8 @@
       </div>
     </header>
 
+    <RemoteChangeNotice :visible="remoteChange" @refresh="applyRemoteChange" @dismiss="keepLocalChanges" />
+
     <div class="writer-meta">
       <label>
         <span>{{ t('novels.writer.chapterSelect') }}</span>
@@ -164,6 +166,8 @@ import { novelAPI } from '~/composables/useNovelApi'
 import { novelErrorText, useNovelJobStream } from '~/composables/useNovelJobStream'
 import { useTheme } from '~/composables/useTheme'
 import { mapError } from '~/composables/useToast'
+import { useSyncedRefresh } from '~/composables/useSyncedRefresh'
+import RemoteChangeNotice from '~/components/RemoteChangeNotice.vue'
 import ChapterRelationGraph from './compass/ChapterRelationGraph.vue'
 import ChapterAtlasCard from './story/ChapterAtlasCard.vue'
 
@@ -235,6 +239,23 @@ const chapterParagraphs = computed(() =>
 const percent = computed(() => {
   if (!stage.value || !stage.value.total) return running.value ? 8 : 0
   return Math.max(0, Math.min(100, Math.round((stage.value.current / stage.value.total) * 100)))
+})
+
+const { remoteChange, applyRemoteChange, keepLocalChanges } = useSyncedRefresh({
+  id: 'novel-writer',
+  match: path => new RegExp(`^/api/v1/novels/${props.novel.id}/chapters(/|$)`).test(path),
+  refresh: async () => {
+    const fresh: any = await store.fetchNovel(props.novel.id)
+    const row = (fresh?.chapters || []).find((chapter: any) => chapter.chapterNo === chapterNo.value)
+    content.value = row?.content || ''
+    savedContent.value = content.value
+    baseUpdatedAt.value = row?.updatedAt || null
+    conflicted.value = null
+    saveState.value = 'idle'
+    emit('refresh')
+  },
+  isDirty: () => dirty.value || Boolean(conflicted.value) || running.value,
+  isSaving: () => saving.value || saveState.value === 'saving',
 })
 
 watch(() => props.initialChapterNo, (value) => {

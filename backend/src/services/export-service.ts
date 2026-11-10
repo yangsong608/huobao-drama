@@ -19,6 +19,7 @@ import {
   projectSubdirPath,
 } from './project-storage.js'
 import type { EnsureMergedResult } from './dubbing.js'
+import { emitChange } from './sync-events.js'
 import { compileMixPlan, hashMixPlan, type MixPlan } from './mix-plan.js'
 import {
   EXPORT_PRESETS,
@@ -982,6 +983,8 @@ async function executeExport(recordId: number, signal: AbortSignal, token: numbe
           .where(eq(schema.episodeExports.id, recordId))
           .run()
       }
+      // 后台导出完成后的成片投影不走 REST，补发一次变更事件
+      emitChange({ method: 'POST', path: `/api/v1/episodes/${episode.id}`, source: 'export' })
     }
   } catch (error) {
     if (!isCurrentRun(recordId, token)) return

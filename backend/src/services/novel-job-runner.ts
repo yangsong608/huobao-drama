@@ -3,6 +3,7 @@ import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { getChapter, saveChapter } from './novel-chapters.js'
+import { emitChange } from './sync-events.js'
 import { getNovel, updateNovel } from './novels.js'
 import { generateChapterBlueprint } from './novel/blueprint.js'
 import {
@@ -923,6 +924,7 @@ async function executeJob(ctx: JobRunContext): Promise<void> {
       errorCode: null,
       result: JSON.stringify(payload),
     })
+    emitChange({ method: 'POST', path: `/api/v1/novels/${ctx.novelId}`, source: 'novel-job' })
     emit(ctx.jobId, { type: 'done', result: payload })
   } catch (error) {
     handleFailure(ctx, error)
@@ -975,6 +977,7 @@ function handleFailure(ctx: JobRunContext, error: unknown) {
     error: message,
     errorCode: code,
   })
+  emitChange({ method: 'POST', path: `/api/v1/novels/${ctx.novelId}`, source: 'novel-job' })
   emit(ctx.jobId, { type: 'error', code, message })
 }
 

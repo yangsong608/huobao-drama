@@ -1,8 +1,34 @@
+import { getClientId } from './useClientId'
+import { assertClientWritable } from './useReadonly'
+
 export const API_BASE = '/api/v1'
 const BASE = API_BASE
 
+/** 远程 401/只读 403 统一派发模块级事件；是否跳转由 remote 插件按角色决定 */
+function notifyRemoteHttpError(status: number, errorCode: string | undefined, path: string): void {
+  if (typeof window === 'undefined') return
+  if (status === 401) {
+    window.dispatchEvent(new CustomEvent('huobao:remote-unauthorized', { detail: { path } }))
+  } else if (status === 403 && errorCode === 'REMOTE_READONLY') {
+    window.dispatchEvent(new CustomEvent('huobao:remote-readonly', { detail: { path } }))
+  }
+}
+
+/** 写成功通知实时同步：即使服务端事件 source 是设备 id，本页也能忽略自己的写事件 */
+function notifyLocalWrite(method: string, path: string): void {
+  if (typeof window === 'undefined') return
+  const normalized = method.toUpperCase()
+  if (normalized === 'GET' || normalized === 'HEAD' || normalized === 'OPTIONS') return
+  window.dispatchEvent(new CustomEvent('huobao:api-write', { detail: { method: normalized, path } }))
+}
+
+function clientHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return { ...extra, 'X-Client-Id': getClientId() }
+}
+
 async function req<T = any>(method: string, path: string, body?: any): Promise<T> {
-  const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' } }
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') assertClientWritable(path)
+  const opts: RequestInit = { method, headers: clientHeaders({ 'Content-Type': 'application/json' }) }
   if (body) opts.body = JSON.stringify(body)
 
   const start = performance.now()
@@ -18,15 +44,19 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
       const error = new Error(json.message || `${resp.status}`) as Error & {
         status?: number
         code?: string
+        errorCode?: string
         data?: any
       }
       error.status = resp.status || json.code
       error.code = json.code
+      error.errorCode = typeof json.error_code === 'string' ? json.error_code : undefined
       error.data = json.data
+      notifyRemoteHttpError(error.status || 0, error.errorCode, path)
       throw error
     }
 
     console.log(`%c[API] %c${method} ${path} %c${resp.status} %c${ms}ms`, 'color:#888', 'color:#66bb6a', 'color:#66bb6a;font-weight:bold', 'color:#888')
+    notifyLocalWrite(method, path)
     return json.data ?? json
   } catch (err: any) {
     if (!err.message?.match(/^\d{3}$/)) {
@@ -366,10 +396,16 @@ export interface UploadOptions {
 
 /**
  * 上传进度/取消（平板）：只有传入 options 时才用 XHR；
- * 未传 options 时继续走原来的 fetch 路径，行为逐字不变。
+ * 未传 options 时继续走 fetch 路径，仅追加 X-Client-Id 头。
  */
 function uploadFormXhr<T>(url: string, fd: FormData, options: UploadOptions): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    try {
+      assertClientWritable(url)
+    } catch (error) {
+      reject(error)
+      return
+    }
     const xhr = new XMLHttpRequest()
     let settled = false
     const signal = options.signal
@@ -394,6 +430,7 @@ function uploadFormXhr<T>(url: string, fd: FormData, options: UploadOptions): Pr
     }
 
     xhr.open('POST', url)
+    xhr.setRequestHeader('X-Client-Id', getClientId())
     xhr.upload.onprogress = (event) => {
       if (!options.onProgress) return
       const total = event.lengthComputable ? event.total : 0
@@ -410,10 +447,22 @@ function uploadFormXhr<T>(url: string, fd: FormData, options: UploadOptions): Pr
         json = null
       }
       if (xhr.status < 200 || xhr.status >= 300 || !json || (json.code && json.code >= 400)) {
-        fail(new Error(json?.message || `${xhr.status}`))
+        const error = new Error(json?.message || `${xhr.status}`) as Error & {
+          status?: number
+          code?: string
+          errorCode?: string
+          data?: any
+        }
+        error.status = xhr.status || json?.code
+        error.code = json?.code
+        error.errorCode = typeof json?.error_code === 'string' ? json.error_code : undefined
+        error.data = json?.data
+        notifyRemoteHttpError(error.status || 0, error.errorCode, url)
+        fail(error)
         return
       }
       done((json.data ?? json) as T)
+      notifyLocalWrite('POST', url)
     }
 
     if (signal) {
@@ -433,13 +482,30 @@ async function uploadForm<T = any>(
   fields: Record<string, string> = {},
   options?: UploadOptions,
 ): Promise<T> {
+  assertClientWritable(path)
   const fd = new FormData()
   fd.append('file', file)
   for (const [key, value] of Object.entries(fields)) fd.append(key, value)
   if (options) return uploadFormXhr<T>(`${BASE}${path}`, fd, options)
-  const resp = await fetch(`${BASE}${path}`, { method: 'POST', body: fd })
+  const resp = await fetch(`${BASE}${path}`, { method: 'POST', body: fd, headers: clientHeaders() })
   const json = await resp.json()
-  if (!resp.ok || (json.code && json.code >= 400)) throw new Error(json.message || `${resp.status}`)
+  if (!resp.ok || (json.code && json.code >= 400)) {
+    const errorCode = typeof json.error_code === 'string' ? json.error_code : undefined
+    const status = resp.status || json.code
+    notifyRemoteHttpError(status, errorCode, path)
+    const error = new Error(json.message || `${resp.status}`) as Error & {
+      status?: number
+      code?: string
+      errorCode?: string
+      data?: any
+    }
+    error.status = status
+    error.code = json.code
+    error.errorCode = errorCode
+    error.data = json.data
+    throw error
+  }
+  notifyLocalWrite('POST', path)
   return json.data ?? json
 }
 
@@ -1402,17 +1468,32 @@ export const taskAPI = {
 }
 
 async function uploadReq<T = any>(path: string, file: File, dramaId?: number): Promise<T> {
+  assertClientWritable(path)
   const fd = new FormData()
   fd.append('file', file)
   // 带项目时后端落到 static/projects/<id>/uploads，不带则走全局 uploads
   if (dramaId && Number.isSafeInteger(Number(dramaId))) fd.append('drama_id', String(dramaId))
   console.log(`%c[API] %cPOST %c${path} %c${file.name}`, 'color:#888', 'color:#4fc3f7;font-weight:bold', 'color:#ccc', 'color:#888')
-  const resp = await fetch(`${BASE}${path}`, { method: 'POST', body: fd })
+  const resp = await fetch(`${BASE}${path}`, { method: 'POST', body: fd, headers: clientHeaders() })
   const json = await resp.json()
   if (!resp.ok || (json.code && json.code >= 400)) {
     console.log(`%c[API] %cPOST ${path} %c${resp.status}`, 'color:#888', 'color:#ef5350', 'color:#ef5350;font-weight:bold')
-    throw new Error(json.message || `${resp.status}`)
+    const errorCode = typeof json.error_code === 'string' ? json.error_code : undefined
+    const status = resp.status || json.code
+    notifyRemoteHttpError(status, errorCode, path)
+    const error = new Error(json.message || `${resp.status}`) as Error & {
+      status?: number
+      code?: string
+      errorCode?: string
+      data?: any
+    }
+    error.status = status
+    error.code = json.code
+    error.errorCode = errorCode
+    error.data = json.data
+    throw error
   }
+  notifyLocalWrite('POST', path)
   return json.data ?? json
 }
 

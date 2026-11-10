@@ -20,6 +20,7 @@ import {
 import { createStoryboardAuditJob, interruptStoryboardAuditForEpisode } from './storyboard-audit-jobs.js'
 import { logTaskError, logTaskProgress, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
 import { buildAgentRequestContext, type AgentRequestContextValues } from '../agents/context.js'
+import { emitChange } from './sync-events.js'
 
 export const SPLIT_CHUNK_BUDGET = 1200
 
@@ -700,6 +701,7 @@ export async function runStoryboardSplitJob(
           chunk: `${chunk.index + 1}/${chunks.length}`,
           error: message,
         })
+        emitChange({ method: 'POST', path: `/api/v1/episodes/${row.episodeId}`, source: 'split' })
         return
       }
     }
@@ -713,6 +715,8 @@ export async function runStoryboardSplitJob(
       finishedAt: now(),
       updatedAt: now(),
     }).where(eq(schema.storyboardSplitJobs.id, jobId)).run()
+
+    emitChange({ method: 'POST', path: `/api/v1/episodes/${row.episodeId}`, source: 'split' })
 
     const coverage = getEpisodeCoverage(row.episodeId)
     logTaskSuccess('StoryboardSplit', 'done', {

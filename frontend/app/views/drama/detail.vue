@@ -1,5 +1,6 @@
 <template>
   <div class="page" v-if="drama">
+    <RemoteChangeNotice :visible="remoteChange" @refresh="applyRemoteChange" @dismiss="keepLocalChanges" />
     <!-- Header：单行紧凑 -->
     <div class="page-head card">
       <button class="back-btn" :title="t('common.back')" @click="navigateTo('/')">
@@ -852,6 +853,8 @@ import BaseSelect from '~/components/BaseSelect.vue'
 import GridSheetDialog from '~/components/GridSheetDialog.vue'
 import ScriptImportDialog from '~/components/ScriptImportDialog.vue'
 import NarratorVoiceDialog from '~/components/NarratorVoiceDialog.vue'
+import RemoteChangeNotice from '~/components/RemoteChangeNotice.vue'
+import { useSyncedRefresh } from '~/composables/useSyncedRefresh'
 import { useDesktopBridge } from '~/composables/useDesktopBridge'
 import { useOverlayHistory } from '~/composables/useOverlayHistory'
 import { episodeResolutionKey, videoCapabilityOptions, videoResolutionOptions, videoResolutionProvider } from '~/utils/video-resolution'
@@ -1129,6 +1132,14 @@ async function load() {
   }
   scheduleAutomationPoll()
 }
+
+const { remoteChange, applyRemoteChange, keepLocalChanges } = useSyncedRefresh({
+  id: 'drama-detail',
+  match: path => /^\/api\/v1\/(dramas\/[^/]+|episodes|characters|scenes|props)(\/|$)/.test(path),
+  refresh: load,
+  isDirty: () => Boolean(storageDialog.value || backgroundDialog.value || addDialog.value || gridOpen.value || importOpen.value || narratorOpen.value || editDialog.value),
+  isSaving: () => Boolean(storageSaving.value || backgroundSaving.value || creatingEpisode.value || editSaving.value || deletingEpisode.value || reworkingEpisode.value),
+})
 
 async function loadDubbingPref() {
   try {

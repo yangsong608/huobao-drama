@@ -1,22 +1,31 @@
 <template>
-  <div class="edit-page">
-    <div v-if="loading" class="edit-state">
-      <Loader2 :size="22" class="edit-spin" />
-      <p>{{ t('edit.loading') }}</p>
-    </div>
-    <div v-else-if="error" class="edit-state">
-      <h2>{{ t('edit.loadFailed') }}</h2>
-      <p>{{ error }}</p>
-      <button class="edit-btn is-primary" type="button" @click="load">{{ t('edit.retry') }}</button>
-    </div>
-    <EditWorkbench
-      v-else-if="state"
-      :key="workbenchKey"
-      :state="state"
-      :episode-label="episodeLabel"
-      @back="goBack"
-      @open-film="openFilm"
+  <div class="edit-shell">
+    <RemoteChangeNotice
+      class="edit-sync-notice"
+      :visible="remoteChange"
+      @refresh="applyRemoteChange"
+      @dismiss="keepLocalChanges"
     />
+    <div class="edit-page">
+      <div v-if="loading" class="edit-state">
+        <Loader2 :size="22" class="edit-spin" />
+        <p>{{ t('edit.loading') }}</p>
+      </div>
+      <div v-else-if="error" class="edit-state">
+        <h2>{{ t('edit.loadFailed') }}</h2>
+        <p>{{ error }}</p>
+        <button class="edit-btn is-primary" type="button" @click="load">{{ t('edit.retry') }}</button>
+      </div>
+      <EditWorkbench
+        v-else-if="state"
+        ref="workbenchRef"
+        :key="workbenchKey"
+        :state="state"
+        :episode-label="episodeLabel"
+        @back="goBack"
+        @open-film="openFilm"
+      />
+    </div>
   </div>
 </template>
 
@@ -24,7 +33,9 @@
 import { useI18n } from 'vue-i18n'
 import { Loader2 } from 'lucide-vue-next'
 import { dramaAPI, editAPI } from '~/composables/useApi'
+import { useSyncedRefresh } from '~/composables/useSyncedRefresh'
 import EditWorkbench from '~/components/edit/EditWorkbench.vue'
+import RemoteChangeNotice from '~/components/RemoteChangeNotice.vue'
 
 definePageMeta({ layout: 'studio' })
 
@@ -83,6 +94,16 @@ function openFilm(filmId) {
   navigateTo({ query: { ...route.query, film: String(filmId) } })
 }
 
+const workbenchRef = ref(null)
+
+const { remoteChange, applyRemoteChange, keepLocalChanges } = useSyncedRefresh({
+  id: 'drama-edit',
+  match: path => /^\/api\/v1\/episodes\/[^/]+\/edit(\/|$)/.test(path),
+  refresh: () => (workbenchRef.value ? workbenchRef.value.reload() : load()),
+  isDirty: () => Boolean(workbenchRef.value?.isDirty()),
+  isSaving: () => Boolean(workbenchRef.value?.isSaving()),
+})
+
 watch(filmParam, () => { if (!loading.value) load() })
 
 function goBack() {
@@ -95,6 +116,8 @@ defineExpose({ load })
 </script>
 
 <style scoped>
+.edit-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.edit-sync-notice { margin: 8px 8px 0; }
 .edit-page { flex: 1; min-height: 0; display: flex; background: var(--bg-base); }
 .edit-state {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;

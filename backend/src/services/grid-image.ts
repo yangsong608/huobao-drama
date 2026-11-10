@@ -13,6 +13,7 @@ import { getAbsolutePath } from '../utils/storage.js'
 import { projectStorageRelative, projectSubdirPath } from './project-storage.js'
 import { generateImage } from './generation.js'
 import { ffmpeg } from '../utils/ffmpeg.js'
+import { emitChange } from './sync-events.js'
 
 export interface GridCell {
   row: number
@@ -112,6 +113,8 @@ export async function syncGridSheet(id: number): Promise<GridSheet> {
     }
     if (status !== 'processing') {
       db.update(schema.gridSheets).set({ imageUrl, status, updatedAt: now() }).where(eq(schema.gridSheets.id, id)).run()
+      // GET 触发的落库不会经过写事件中间件，需显式补发
+      emitChange({ method: 'PUT', path: `/api/v1/grid/${id}`, source: 'server' })
     }
   }
 

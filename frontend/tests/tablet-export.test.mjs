@@ -719,7 +719,7 @@ test('所有上传入口接入预检，Edit picker 具备进度与取消', () =>
   assert.match(useApiSource, /signal\.addEventListener\('abort', onAbort, \{ once: true \}\)/)
   assert.match(useApiSource, /new DOMException\('Aborted', 'AbortError'\)/, '中止以 AbortError reject')
   assert.match(useApiSource, /if \(options\) return uploadFormXhr<T>\(`\$\{BASE\}\$\{path\}`, fd, options\)/, '只有传 options 才走 XHR')
-  assert.match(useApiSource, /const resp = await fetch\(`\$\{BASE\}\$\{path\}`, \{ method: 'POST', body: fd \}\)/, '未传 options 的 fetch 路径逐字不变')
+  assert.match(useApiSource, /const resp = await fetch\(`\$\{BASE\}\$\{path\}`, \{ method: 'POST', body: fd, headers: clientHeaders\(\) \}\)/, '未传 options 仍走 fetch，仅追加 X-Client-Id 头')
   assert.match(useApiSource, /uploadImage\(episodeId: number, file: File, options\?: UploadOptions\)/)
   assert.match(useApiSource, /uploadVideo\(episodeId: number, file: File, options\?: UploadOptions\)/)
   assert.match(useApiSource, /uploadForm\(`\/episodes\/\$\{episodeId\}\/edit\/assets\/images`, file, \{\}, options\)/)

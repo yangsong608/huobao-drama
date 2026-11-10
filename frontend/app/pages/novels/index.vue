@@ -1,5 +1,6 @@
 <template>
   <section class="page">
+    <RemoteChangeNotice :visible="remoteChange" @refresh="applyRemoteChange" @dismiss="keepLocalChanges" />
     <div class="launcher-head">
       <div class="head-left">
         <h1 class="launcher-title">{{ t('novels.title') }}</h1>
@@ -99,6 +100,8 @@ import { toast } from 'vue-sonner'
 import { useNovelStore } from '~/stores/novel'
 import NovelProjectCard from '~/components/novel/ProjectCard.vue'
 import NovelCreateProjectDialog from '~/components/novel/CreateProjectDialog.vue'
+import RemoteChangeNotice from '~/components/RemoteChangeNotice.vue'
+import { useSyncedRefresh, hasFocusedEditor } from '~/composables/useSyncedRefresh'
 
 definePageMeta({ layout: 'novel' })
 
@@ -135,6 +138,13 @@ function scheduleLoad() {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(load, 280)
 }
+
+const { remoteChange, applyRemoteChange, keepLocalChanges } = useSyncedRefresh({
+  id: 'novel-list',
+  match: path => /^\/api\/v1\/novels(\/[^/]+)?$/.test(path),
+  refresh: load,
+  isDirty: () => Boolean(showCreate.value || deleteTarget.value || hasFocusedEditor()),
+})
 
 watch(keyword, scheduleLoad)
 watch(status, load)
