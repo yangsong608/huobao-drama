@@ -14,6 +14,7 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { badRequest, notFound, success } from '../utils/response.js'
+import { outputGate, voiceGate } from '../utils/media-guard.js'
 import { db, schema } from '../db/index.js'
 import { eq } from 'drizzle-orm'
 import {
@@ -213,7 +214,7 @@ app.delete('/episodes/:id/audio/clips/:clipId', (c) => {
   }
 })
 
-app.post('/episodes/:id/audio/voice-clips', async (c) => {
+app.post('/episodes/:id/audio/voice-clips', voiceGate, async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   if (!findEpisode(episodeId)) return notFound(c, '集不存在')
@@ -233,7 +234,7 @@ app.post('/episodes/:id/audio/voice-clips', async (c) => {
   }
 })
 
-app.post('/episodes/:id/audio/preview', async (c) => {
+app.post('/episodes/:id/audio/preview', outputGate, async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   const episode = findEpisode(episodeId)

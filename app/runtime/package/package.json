@@ -1,0 +1,10 @@
+{
+  "name": "huobao-runtime-deps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Huobao Drama 运行时原生依赖（linux/arm64 glibc，仅生产依赖）",
+  "dependencies": {
+    "better-sqlite3": "12.11.1",
+    "sharp": "0.34.5"
+  }
+}

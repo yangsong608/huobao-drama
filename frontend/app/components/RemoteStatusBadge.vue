@@ -72,6 +72,7 @@ import { usePresence, presencePageLabel } from '~/composables/usePresence'
 import { useRealtimeSync } from '~/composables/useRealtimeSync'
 import { logoutRemoteSession, sanitizeRemoteNext, useRemoteRole } from '~/composables/useRemoteGuest'
 import { remotePairingAPI, type RemoteStatus } from '~/composables/useRemotePairing'
+import { isAppClient } from '~/composables/useAppBridge'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -88,7 +89,8 @@ const panelOpen = ref(false)
 
 const isGuest = computed(() => role.role === 'guest' && role.paired)
 const readonlyGuest = computed(() => isGuest.value && role.readonly)
-const visible = computed(() => isGuest.value || hostVisible.value)
+const isAppMode = isAppClient()
+const visible = computed(() => !isAppMode && (isGuest.value || hostVisible.value))
 const currentPath = computed(() => route.fullPath)
 const guestEntries = computed(() => presence.entries.filter(entry => entry.role === 'guest'))
 const hostEntry = computed(() => presence.entries.find(entry => entry.role === 'host') || null)
@@ -142,7 +144,7 @@ function applyHostStatus(running: boolean, activeDevices: number): void {
 }
 
 async function loadHostStatus(): Promise<void> {
-  if (role.role !== 'host' || !role.ready) return
+  if (isAppMode || role.role !== 'host' || !role.ready) return
   try {
     const status: RemoteStatus | null = await remotePairingAPI.status()
     const active = (status?.devices ?? []).filter(device => device.status === 'active').length
@@ -154,6 +156,12 @@ async function loadHostStatus(): Promise<void> {
 }
 
 function syncPresenceMode(): void {
+  if (isAppMode) {
+    hostVisible.value = false
+    hostActiveCount.value = 0
+    stop()
+    return
+  }
   if (isGuest.value) {
     hostVisible.value = false
     hostActiveCount.value = 0
@@ -168,7 +176,7 @@ function syncPresenceMode(): void {
 }
 
 function onRemoteStatusEvent(event: Event): void {
-  if (!role.ready || role.role === 'guest') return
+  if (isAppMode || !role.ready || role.role === 'guest') return
   const detail = (event as CustomEvent)?.detail || {}
   applyHostStatus(Boolean(detail.running), Number(detail.activeDevices) || 0)
 }

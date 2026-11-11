@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { success, badRequest } from '../utils/response.js'
+import { outputGate } from '../utils/media-guard.js'
 import { toSnakeCase } from '../utils/transform.js'
 import {
   deleteEpisodeFrameAsset,
@@ -33,7 +34,7 @@ app.get('/episodes/:id/frame-assets', async (c) => {
 })
 
 // POST /storyboards/:id/frame-assets/last — 抽末帧作为本集参考图资产（不改写首帧）
-app.post('/storyboards/:id/frame-assets/last', async (c) => {
+app.post('/storyboards/:id/frame-assets/last', outputGate, async (c) => {
   const storyboardId = parseId(c.req.param('id'))
   if (!storyboardId) return badRequest(c, '镜头 ID 非法')
   try {

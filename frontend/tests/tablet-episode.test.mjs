@@ -11,6 +11,9 @@ import assert from 'node:assert/strict'
 const APP_ROOT = new URL('../app/', import.meta.url)
 
 const EPISODE = 'views/drama/episode.vue'
+const ASSET_PANEL = 'components/EpisodeAssetPanel.vue'
+const STORYBOARD_LIST = 'components/EpisodeStoryboardList.vue'
+const TASK_DRAWER = 'components/EpisodeTaskDrawer.vue'
 const TOUR = 'composables/useTour.ts'
 
 const MQ_1180 = '@media (max-width: 1180px)'
@@ -93,6 +96,8 @@ function flattenKeys(value, prefix = '') {
 
 test('三页签与 ARIA：tablist、三个 tab、roving tabindex、方向键与三个面板', () => {
   const src = read(EPISODE)
+  const list = read(STORYBOARD_LIST)
+  const ui = `${src}\n${list}`
 
   assert.match(src, /<div class="video-tablet-tabs" role="tablist">/, '缺少 tablist 容器')
   const tabStart = src.indexOf('<div class="video-tablet-tabs" role="tablist">')
@@ -104,13 +109,13 @@ test('三页签与 ARIA：tablist、三个 tab、roving tabindex、方向键与�
     assert.match(src, new RegExp(`aria-controls="video-panel-${pane}"`), `缺少 ${pane} 的 aria-controls`)
     assert.match(src, new RegExp(`:tabindex="tabletPane === '${pane}' \\? 0 : -1"`), `${pane} 页签缺少 roving tabindex`)
     const paneIdPattern = new RegExp(`:id="isCompact \\? 'video-panel-${pane}' : undefined"`)
-    assert.match(src, paneIdPattern, `${pane} 面板缺少紧凑态 id`)
-    assert.match(src, new RegExp(`data-tablet-pane="${pane}"`), `缺少 data-tablet-pane="${pane}"`)
+    assert.match(ui, paneIdPattern, `${pane} 面板缺少紧凑态 id`)
+    assert.match(ui, new RegExp(`data-tablet-pane="${pane}"`), `缺少 data-tablet-pane="${pane}"`)
   }
 
   assert.match(src, /const tabletPane = ref\('shots'\)/, '默认页签必须为 shots')
-  assert.match(src, /:role="isCompact \? 'tabpanel' : undefined"/, '面板紧凑态缺少 tabpanel 角色')
-  assert.match(src, /:aria-labelledby="isCompact \? 'video-tab-shots' : undefined"/, '镜头面板缺少 aria-labelledby')
+  assert.match(ui, /:role="isCompact \? 'tabpanel' : undefined"/, '面板紧凑态缺少 tabpanel 角色')
+  assert.match(ui, /:aria-labelledby="isCompact \? 'video-tab-shots' : undefined"/, '镜头面板缺少 aria-labelledby')
   assert.match(src, /@keydown="onTabletTabsKeydown\(\$event, 'shots'\)"/, '页签缺少 keydown 接线')
 
   const handler = functionBlock(src, 'function onTabletTabsKeydown')
@@ -136,7 +141,11 @@ test('三页签与 ARIA：tablist、三个 tab、roving tabindex、方向键与�
 test('唯一播放器：class 只出现一次、面板用 v-show、<video> 数量不变', () => {
   const src = read(EPISODE)
   assert.equal(countOccurrences(src, 'class="video-player-video"'), 1, '主播放器必须唯一')
-  assert.equal(countOccurrences(src, '<video'), BASELINE_VIDEO_TAGS, '<video> 数量不得增加或减少')
+  assert.equal(
+    countOccurrences(src, '<video') + countOccurrences(read(TASK_DRAWER), '<video') + countOccurrences(read(STORYBOARD_LIST), '<video'),
+    BASELINE_VIDEO_TAGS,
+    '<video> 数量不得增加或减少',
+  )
 
   const paneAt = src.indexOf('class="video-preview-pane"')
   const previewPaneTag = src.slice(paneAt - 200, paneAt + 600)
@@ -149,12 +158,14 @@ test('唯一播放器：class 只出现一次、面板用 v-show、<video> 数�
 
 test('断点：1180/1080/900/744 齐备，且无 860/760 与 min-width 媒体查询', () => {
   const src = read(EPISODE)
+  const list = read(STORYBOARD_LIST)
+  const all = `${src}\n${list}`
   for (const literal of [MQ_1180, MQ_1080, MQ_900, MQ_744, COARSE_1180]) {
-    assert.ok(src.includes(literal), `缺少断点 ${literal}`)
+    assert.ok(all.includes(literal), `缺少断点 ${literal}`)
   }
-  assert.equal(src.includes('max-width: 860px'), false, '仍残留 max-width: 860px')
-  assert.equal(src.includes('max-width: 760px'), false, '仍残留 max-width: 760px')
-  assert.equal(src.includes('max-width: 743px'), false, '本任务不应使用 743 断点')
+  assert.equal(all.includes('max-width: 860px'), false, '仍残留 max-width: 860px')
+  assert.equal(all.includes('max-width: 760px'), false, '仍残留 max-width: 760px')
+  assert.equal(all.includes('max-width: 743px'), false, '本任务不应使用 743 断点')
 
   const preludes = src.match(/@media[^{]+\{/g) || []
   assert.ok(preludes.length >= 5, '媒体查询数量异常')
@@ -311,34 +322,42 @@ test('列宽：按档位限制/默认、可用宽度夹取、两个存储键、�
 
 test('触控镜头行：≤1180 粗指针 96×54、44px 操作、隐藏删除', () => {
   const src = read(EPISODE)
-  assert.ok(src.includes(COARSE_QUERY), '既有粗指针块必须保留')
+  const list = read(STORYBOARD_LIST)
+  assert.ok(src.includes(COARSE_QUERY) || list.includes(COARSE_QUERY), '既有粗指针块必须保留')
 
-  const coarse = mediaText(src, COARSE_1180)
+  const coarse = mediaText(list, COARSE_1180)
   assert.match(coarse, /\.video-task-row \{[^}]*min-height: 48px;[^}]*grid-template-columns: 96px minmax\(0, 1fr\) auto;/)
   assert.match(coarse, /\.video-task-preview \{[^}]*width: 96px;[^}]*height: 54px;[^}]*aspect-ratio: auto;/)
   assert.match(coarse, /\.video-task-action,\s*\.video-task-more \{[^}]*min-width: 44px;[^}]*min-height: 44px;/)
   assert.match(coarse, /\.video-task-delete \{ display: none; \}/)
 
-  const base = cssBlock(src, '.video-task-preview {')
+  const base = cssBlock(list, '.video-task-preview {')
   assert.match(base, /width: 56px/, '桌面缩略图仍为 56px')
 })
 
 test('栅格与导出：1180 资产 240、导出两列；900 资产单列；744 导出单列', () => {
   const src = read(EPISODE)
+  const assets = read(ASSET_PANEL)
   const wide = mediaText(src, MQ_1180)
-  assert.match(wide, /\.asset-grid,\s*\.character-asset-grid,\s*\.prod-grid \{\s*grid-template-columns: repeat\(auto-fill, minmax\(240px, 1fr\)\);\s*\}/)
+  assert.match(wide, /\.prod-grid \{\s*grid-template-columns: repeat\(auto-fill, minmax\(240px, 1fr\)\);\s*\}/)
   assert.match(wide, /\.export-grid \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/)
+  assert.match(
+    mediaText(assets, MQ_1180),
+    /\.asset-grid,\s*\.character-asset-grid \{\s*grid-template-columns: repeat\(auto-fill, minmax\(240px, 1fr\)\);\s*\}/,
+  )
 
   const medium = mediaText(src, MQ_900)
-  assert.match(medium, /\.asset-grid,\s*\.character-asset-grid,\s*\.prod-grid \{\s*grid-template-columns: 1fr;\s*\}/)
-  assert.match(medium, /\.character-asset-card \{\s*min-height: 0;\s*\}/)
+  assert.match(medium, /\.prod-grid \{\s*grid-template-columns: 1fr;\s*\}/)
+  const assetMedium = mediaText(assets, MQ_900)
+  assert.match(assetMedium, /\.asset-grid,\s*\.character-asset-grid \{\s*grid-template-columns: 1fr;\s*\}/)
+  assert.match(assetMedium, /\.character-asset-card \{\s*min-height: 0;\s*\}/)
 
   const narrow = mediaText(src, MQ_744)
   assert.match(narrow, /\.export-grid \{ grid-template-columns: 1fr; \}/)
 
   const legacy1080 = mediaText(src, MQ_1080)
-  assert.match(legacy1080, /\.character-asset-grid \{\s*grid-template-columns: repeat\(auto-fill, minmax\(240px, 1fr\)\);\s*\}/)
-  assert.equal(legacy1080.includes('minmax(420px'), false, '1080 角色栅格不应再使用 420px')
+  assert.equal(legacy1080.includes('.character-asset-grid'), false, '1080 不再重复声明角色栅格，统一由 1180 规则负责')
+  assert.equal(assets.includes('minmax(420px'), false, '角色栅格不应再使用 420px')
 })
 
 test('弹窗：查看器与资产详情按可视视口收敛、头部 sticky、关闭入口保留', () => {
@@ -377,10 +396,10 @@ test('底部操作栏：--app-vvh、安全区、三个入口与保存直通队�
   assert.match(medium, /\.video-tablet-actions \{[^}]*position: sticky;[^}]*bottom: calc\(100dvh - var\(--app-vvh, 100dvh\)\);/)
   assert.match(medium, /padding-bottom: calc\([^)]*var\(--safe-bottom\)\)/, '底部操作栏应叠加安全区')
   assert.match(medium, /\.video-tablet-actions \.btn \{[^}]*min-height: 44px;/)
-  assert.match(medium, /\.video-task-workbench \{[^}]*scroll-padding-bottom: calc\(72px \+ var\(--safe-bottom\)\);/)
-  assert.match(medium, /\.video-desc-textarea \{ min-height: 120px; \}/)
+  assert.match(medium, /\.video-task-workbench(?:,\s*\.video-task-workbench\.has-player)? \{[^}]*scroll-padding-bottom: calc\(72px \+ var\(--safe-bottom\)\);/)
+  assert.match(mediaText(read('components/EpisodeShotEditor.vue'), MQ_900), /\.video-desc-textarea \{ min-height: 120px; \}/)
   assert.match(medium, /\.video-tablet-bar \{[^}]*position: sticky;[^}]*top: 0;/)
-  assert.match(src, /class="textarea video-desc-textarea"/)
+  assert.match(read('components/EpisodeShotEditor.vue'), /class="textarea video-desc-textarea"/)
 
   assert.match(medium, /\.video-tablet-back \{[^}]*min-width: 44px;[^}]*min-height: 44px;/)
   assert.match(src, /@click="setTabletPane\('shots'\)"/)
@@ -417,16 +436,26 @@ test('暂停契约：切预览暂停缩略、离开预览与开抽屉暂停主�
 
 test('ComfyUI 模式下镜头列表始终可见且点击行不切页签', () => {
   const src = read(EPISODE)
-  assert.match(src, /v-show="!isCompact \|\| isComfyVideoMode \|\| tabletPane === 'shots'"/, 'ComfyUI 模式不得隐藏镜头列表')
+  assert.match(read(STORYBOARD_LIST), /v-show="!isCompact \|\| isComfyVideoMode \|\| tabletPane === 'shots'"/, 'ComfyUI 模式不得隐藏镜头列表')
   const rowClick = functionBlock(src, 'function onVideoTaskRowClick')
   assert.match(rowClick, /isCompact\.value && !isComfyVideoMode\.value/, 'ComfyUI 模式点击镜头行不得切到编辑页签')
 })
 
-test('≤744 任意面板都能从顶栏打开步骤抽屉', () => {
+test('紧凑 ComfyUI 模式：列表定高内部滚动，左下角提交入口不被压成 0 高', () => {
   const src = read(EPISODE)
-  assert.match(src, /v-if="isNarrow" type="button" class="btn topbar-steps-btn" @click="openStepsDrawer"/, '顶栏缺少窄屏步骤入口')
-  const topbar = src.slice(src.indexOf('<div class="studio-topbar-main">'), src.indexOf('<div class="studio-topbar-side">'))
-  assert.ok(topbar.includes('topbar-steps-btn'), '步骤入口应位于顶栏主区')
+  const list = read(STORYBOARD_LIST)
+  assert.match(src, /class="video-task-workbench has-player" :class="\{ 'is-comfy': isComfyVideoMode \}"/, '工作台缺少 ComfyUI 模式类')
+  const medium = mediaText(src, MQ_900)
+  assert.match(medium, /\.video-task-workbench\.is-comfy \{[^}]*grid-template-rows: auto auto;[^}]*align-content: start;/)
+  assert.match(list, /class="video-task-list"\s+:class="\{ 'is-comfy': isComfyVideoMode \}"/, '列表根缺少 ComfyUI 模式类')
+  assert.match(mediaText(list, MQ_900), /\.video-task-list\.is-comfy \{[^}]*height: clamp\(180px, 42vh, 420px\);/)
+})
+
+test('≤744 任意面板都能从「更多」浮层打开步骤抽屉', () => {
+  const src = read(EPISODE)
+  assert.match(src, /v-if="isNarrow" type="button" class="btn topbar-steps-btn" @click="mobileMoreOpen = false; openStepsDrawer\(\)"/, '顶栏缺少窄屏步骤入口')
+  const topbar = src.slice(src.indexOf('<header class="studio-topbar">'), src.indexOf('<div v-if="showDesktopRelayHint"'))
+  assert.ok(topbar.includes('topbar-steps-btn'), '步骤入口应位于顶栏模型与操作浮层')
   const narrow = mediaText(src, MQ_744)
   assert.match(
     narrow,

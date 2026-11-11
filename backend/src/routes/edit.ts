@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { badRequest, notFound, serverError, success } from '../utils/response.js'
+import { outputGate, ffprobeGate } from '../utils/media-guard.js'
 import { PeaksError, getPeaksForEditSource } from '../services/audio-peaks.js'
 import { roughCutEditPlan, suggestEditSubtitles } from '../services/edit-actions-service.js'
 import { getReadableEpisode, getWritableEpisode } from '../services/edit-access.js'
@@ -226,7 +227,7 @@ app.post('/episodes/:id/edit/assets/images', async (c) => {
   }
 })
 
-app.post('/episodes/:id/edit/assets/videos', async (c) => {
+app.post('/episodes/:id/edit/assets/videos', ffprobeGate, async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   try {
@@ -334,7 +335,7 @@ app.post('/episodes/:id/edit/subtitles/suggest', async (c) => {
   }
 })
 
-app.post('/episodes/:id/edit/render', async (c) => {
+app.post('/episodes/:id/edit/render', outputGate, async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   try {

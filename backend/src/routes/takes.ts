@@ -17,6 +17,7 @@ import type { Context } from 'hono'
 import { eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { badRequest, notFound, success } from '../utils/response.js'
+import { voiceGate } from '../utils/media-guard.js'
 import { getAudioConfig } from '../services/tts.js'
 import { capabilitiesFor } from '../services/tts-capabilities.js'
 import { analyzeLinePerformance } from '../services/line-performance.js'
@@ -141,7 +142,7 @@ takes.get('/lines/:id/takes', (c) => {
   return success(c, { items: listLineTakes(lineId).map(takeResponse) })
 })
 
-takes.post('/lines/:id/takes', async (c) => {
+takes.post('/lines/:id/takes', voiceGate, async (c) => {
   const lineId = parseId(c.req.param('id'))
   if (!lineId) return badRequest(c, '台词编号无效')
   const body = await c.req.json().catch(() => ({}))
@@ -225,7 +226,7 @@ takes.delete('/takes/:id', (c) => {
   }
 })
 
-takes.post('/episodes/:id/takes/batch', async (c) => {
+takes.post('/episodes/:id/takes/batch', voiceGate, async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   if (!loadEpisode(episodeId)) return notFound(c, '集不存在')

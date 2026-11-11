@@ -8,7 +8,7 @@
             <input
               type="file"
               accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
-              :disabled="uploading"
+              :disabled="uploading || probeBlocked"
               hidden
               @change="onUpload"
             />
@@ -17,6 +17,7 @@
           <button v-if="uploading" type="button" class="ed-cancel" @click="cancelUpload">{{ t('common.cancel') }}</button>
           <button type="button" class="ed-close" @click="$emit('close')">×</button>
         </header>
+        <MediaCapabilityNotice v-if="probeBlocked" action="probe" mode="inline" />
         <p v-if="uploading" class="ed-progress" role="status">{{ uploadProgress }}%</p>
         <p class="ed-hint">{{ t('edit.insertVideoNote') }}</p>
         <p v-if="error" class="ed-error">{{ error }}</p>
@@ -50,6 +51,8 @@ import { editAPI } from '~/composables/useApi'
 import { mediaUrl } from '~/utils/edit-plan'
 import { formatPrecise } from '~/utils/edit-timecode'
 import { checkUploadFile, uploadErrorKey } from '~/utils/upload-guard'
+import MediaCapabilityNotice from '~/components/MediaCapabilityNotice.vue'
+import { useMediaCapabilities } from '~/composables/useMediaCapabilities'
 
 // 视频选择器：分镜视频 + 项目 edit/assets 已上传视频。
 // 点击只 emit('insert')，插入位置与命令由 EditWorkbench 负责。
@@ -67,6 +70,8 @@ const loading = ref(false)
 const uploading = ref(false)
 const uploadProgress = ref(0)
 const error = ref('')
+const mediaCaps = useMediaCapabilities()
+const probeBlocked = computed(() => !mediaCaps.probeReady.value)
 let uploadAbort = null
 
 const items = computed(() => {
@@ -108,6 +113,10 @@ async function loadSources() {
 }
 
 async function onUpload(event) {
+  if (probeBlocked.value) {
+    error.value = t('media.capability.probeDisabled')
+    return
+  }
   const file = event.target?.files?.[0]
   event.target.value = ''
   if (!file) return

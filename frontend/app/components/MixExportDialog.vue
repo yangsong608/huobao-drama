@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { toast } from 'vue-sonner'
 import type { ExportKind, ExportSubtitleMode } from '~/composables/useApi'
+import ExportUnavailableNotice from '~/components/ExportUnavailableNotice.vue'
+import { useExportCapability } from '~/composables/useExportCapability'
 
 const props = defineProps<{
   open: boolean
@@ -21,6 +24,7 @@ const emit = defineEmits<{
   }): void
 }>()
 const { t, te } = useI18n()
+const { localOnly: exportLocalOnly } = useExportCapability()
 
 // locale 缺失时回退中文，保证四语言包同步前界面不空（与 FilmPicker 同策略）
 function label(key: string, fallback: string) {
@@ -50,12 +54,27 @@ watch(() => props.open, (open) => {
   setCurrent.value = false
   title.value = `第 ${props.episodeNumber} 集 混音成片（${new Date().toLocaleString()}）`
 })
+
+function start() {
+  if (exportLocalOnly.value) {
+    toast.info(t('export.gate.hint'))
+    return
+  }
+  emit('start', {
+    kind: kind.value,
+    preset: preset.value,
+    subtitleMode: subtitleMode.value,
+    title: title.value,
+    setCurrent: setCurrent.value,
+  })
+}
 </script>
 
 <template>
   <div v-if="open" class="modal-mask" @click.self="emit('close')">
     <div class="mix-export-dialog">
       <h3>{{ label('mix.export.title', '导出混音成片') }}</h3>
+      <ExportUnavailableNotice v-if="exportLocalOnly" />
       <label>{{ label('mix.export.source', '源成片') }}
         <input :value="kindLabel(source?.kind || 'concat')" disabled />
       </label>
@@ -85,9 +104,13 @@ watch(() => props.open, (open) => {
       <p v-if="active" class="hint">{{ active.status }} {{ active.progress || 0 }}%</p>
       <div class="actions">
         <button class="btn" type="button" @click="emit('close')">{{ t('common.cancel') }}</button>
-        <button class="btn btn-primary" type="button" :disabled="Boolean(active)" @click="emit('start', {
-          kind, preset, subtitleMode, title, setCurrent,
-        })">{{ label('mix.export.start', '开始导出') }}</button>
+        <button
+          class="btn btn-primary"
+          type="button"
+          :disabled="Boolean(active) || exportLocalOnly"
+          :title="exportLocalOnly ? t('export.gate.unavailable') : undefined"
+          @click="start"
+        >{{ label('mix.export.start', '开始导出') }}</button>
       </div>
     </div>
   </div>

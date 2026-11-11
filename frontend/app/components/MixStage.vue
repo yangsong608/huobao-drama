@@ -6,6 +6,7 @@
     @keydown="onKeydown"
     @pointerdown.capture="focusStage"
   >
+    <MediaCapabilityNotice v-if="outputBlocked" action="output" />
     <header class="mx-top">
       <div class="mx-top-left">
         <span class="mx-title"><SlidersHorizontal :size="14" /> {{ t('mix.title') }}</span>
@@ -230,15 +231,15 @@
           <b>{{ t('mix.emptyTitle') }}</b>
           <p>{{ t('mix.emptyHint') }}</p>
           <div class="mx-empty-actions">
-            <button class="mx-btn is-primary" type="button" :disabled="separationRunning || soundscapeRunning" @click="requestSeparate(false)">
+            <button class="mx-btn is-primary" type="button" :disabled="separationRunning || soundscapeRunning || separationBlocked" :title="separationBlocked ? t('media.capability.actionDisabled') : undefined" @click="requestSeparate(false)">
               <AudioWaveform :size="12" />
               {{ t('mix.separate') }}
             </button>
             <button
               class="mx-btn is-plain"
               type="button"
-              :disabled="!canGenerateSound || separationRunning || soundscapeRunning || loading"
-              :title="canGenerateSound ? t('mix.soundscape.entryHint') : t('mix.soundscape.needMerge')"
+              :disabled="!canGenerateSound || separationRunning || soundscapeRunning || loading || probeBlocked"
+              :title="probeBlocked ? t('media.capability.probeDisabled') : canGenerateSound ? t('mix.soundscape.entryHint') : t('mix.soundscape.needMerge')"
               @click="openSoundscape"
             >
               <Sparkles :size="12" />
@@ -347,7 +348,7 @@
         <input class="mx-time-input" type="number" min="0" step="0.1" :value="toSec(rangeStartMs)" :aria-label="t('mix.rangeStart')" @change="setRangeStart" />
         <span class="mx-muted">–</span>
         <input class="mx-time-input" type="number" min="0" step="0.1" :value="toSec(rangeEndMs)" :aria-label="t('mix.rangeEnd')" @change="setRangeEnd" />
-        <button class="mx-btn" type="button" :disabled="previewing || !episodeId || !hasAnyAudio || soundscapeRunning" @click="generatePreview()">
+        <button class="mx-btn" type="button" :disabled="previewing || !episodeId || !hasAnyAudio || soundscapeRunning || outputBlocked" :title="outputBlocked ? t('media.capability.actionDisabled') : undefined" @click="generatePreview()">
           <Loader2 v-if="previewing" :size="12" class="animate-spin" />
           <AudioLines v-else :size="12" />
           {{ previewing ? t('mix.previewing') : t('mix.preview') }}
@@ -466,6 +467,8 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import MediaCapabilityNotice from '~/components/MediaCapabilityNotice.vue'
+import { useMediaCapabilities } from '~/composables/useMediaCapabilities'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import {
@@ -652,6 +655,10 @@ let pendingRetime: { lineId: number; startMs: number } | null = null
 const addMenuOpen = ref(false)
 const emptyMenuOpen = ref(false)
 const inspectorOpen = ref(readInspectorPreference())
+const mediaCaps = useMediaCapabilities()
+const outputBlocked = computed(() => !mediaCaps.outputReady.value)
+const separationBlocked = computed(() => !mediaCaps.separationReady.value)
+const probeBlocked = computed(() => !mediaCaps.probeReady.value)
 const soundscapeOpen = ref(false)
 const soundscapePreviewing = ref(false)
 const soundscapeError = ref('')
@@ -1400,6 +1407,10 @@ function previewAsset(asset: EpisodeAudioAsset) {
 }
 
 async function onImportAudio(file: File) {
+  if (probeBlocked.value) {
+    toast.warning(t('media.capability.actionDisabled'))
+    return
+  }
   try {
     const asset = await importAudioAsset(file)
     if (asset) toast.success(t('mix.importDone', { name: assetLabel(asset) }))
@@ -1421,6 +1432,10 @@ function pausePreview() {
   pauseTransport()
 }
 async function generatePreview() {
+  if (outputBlocked.value) {
+    toast.warning(t('media.capability.actionDisabled'))
+    return
+  }
   if (!props.episodeId) return
   const episode = props.episodeId
   if (!hasAnyAudio.value) {
@@ -1548,6 +1563,10 @@ function onPreviewEnded() {
 }
 
 async function requestSeparate(force: boolean) {
+  if (separationBlocked.value) {
+    toast.warning(t('media.capability.actionDisabled'))
+    return
+  }
   if (!props.episodeId) return
   if (force || hasAssets.value) {
     openConfirm({
@@ -1600,6 +1619,10 @@ async function onSoundscapePreview(request: SoundscapeRequest) {
 }
 
 async function onSoundscapeStart(request: SoundscapeRequest) {
+  if (probeBlocked.value) {
+    toast.warning(t('media.capability.actionDisabled'))
+    return
+  }
   soundscapeError.value = ''
   try {
     await startSoundscape(request)
@@ -1993,5 +2016,42 @@ defineExpose({ seekTo, pause, play: togglePlay })
   .mx-transport { min-height: 44px; padding: 2px 8px; row-gap: 4px; }
   .mx-time-input { height: 44px; width: 68px; font-size: 16px; }
   .mx-master-range { width: 120px; }
+}
+/* 平板/窄屏：顶栏与走带不再被压扁，分区各自横向滚动，时间线保留可操作高度 */
+@media (max-width: 1180px) {
+  .mx-stage { height: auto; }
+  .mx-top { flex: none; }
+  .mx-top-left {
+    flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto;
+    scrollbar-width: none; overscroll-behavior-x: contain;
+  }
+  .mx-top-actions {
+    flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto;
+    scrollbar-width: none; overscroll-behavior-x: contain;
+  }
+  .mx-top-left::-webkit-scrollbar,
+  .mx-top-actions::-webkit-scrollbar { display: none; }
+  .mx-top-left > *, .mx-top-actions > * { flex: 0 0 auto; }
+  .mx-body { flex: 1 1 auto; min-height: 320px; }
+  .mx-transport {
+    flex: none; flex-wrap: nowrap; overflow-x: auto;
+    scrollbar-width: none; overscroll-behavior-x: contain;
+  }
+  .mx-transport::-webkit-scrollbar { display: none; }
+  .mx-transport-group { flex: 0 0 auto; flex-wrap: nowrap; }
+  .mx-transport-group.is-right { margin-left: 0; }
+}
+/* 手机：监看压成小画面，时间线固定 220px，操作区横向滑动保留全部能力 */
+@media (max-width: 743px) {
+  .mx-top { flex-direction: column; align-items: stretch; gap: 4px; padding: 6px 8px; }
+  .mx-top-left, .mx-top-actions { flex: 0 0 auto; width: 100%; }
+  .mx-zoom { width: 72px; height: 20px; }
+  .mx-monitor { padding: 4px 8px; gap: 8px; align-items: center; }
+  .mx-monitor-stage { width: 128px; }
+  .mx-monitor-stage :deep(.sub-stage) { max-height: 72px; }
+  .mx-monitor-hint { display: none; }
+  .mx-monitor-cue { font-size: 11px; }
+  .mx-body { flex: 0 0 220px; min-height: 220px; }
+  .mx-transport { padding: 6px 8px; }
 }
 </style>

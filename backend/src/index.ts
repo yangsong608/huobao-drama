@@ -22,7 +22,9 @@ import merge from './routes/merge.js'
 import skills from './routes/skills.js'
 import props from './routes/props.js'
 import settings from './routes/settings.js'
+import capabilities from './routes/capabilities.js'
 import storage from './routes/storage.js'
+import backups from './routes/backups.js'
 import mcpRoute from './routes/mcp.js'
 import pipelineRules from './routes/pipelineRules.js'
 import breakdownMethods from './routes/breakdownMethods.js'
@@ -54,6 +56,8 @@ import { authenticateRemoteDevice, startRemoteDeviceCleanup, touchRemoteDevice }
 import { startPresenceCleanup } from './services/presence.js'
 import { getRemoteBridgeStatus, setRemoteBridgeFetch } from './services/remote-bridge.js'
 import { requestLogger, errorHandler } from './middleware/logger.js'
+import { appTokenMiddleware } from './middleware/app-token.js'
+import { appStorageGuard } from './services/storage-guard.js'
 import { syncEventMiddleware } from './middleware/sync-events.js'
 import { resumeInterruptedTasks } from './services/generation.js'
 import { initMcp, setMcpMainApp } from './services/mcp.js'
@@ -87,6 +91,8 @@ app.use('*', cors({
 }))
 app.use('*', requestLogger)
 app.use('*', errorHandler)
+// 独立应用模式（HUOBAO_APP=1）下所有请求（含静态资源与 SSE）都必须携带应用令牌
+app.use('*', appTokenMiddleware)
 
 // Health check（version 供部署巡检/更新检查核对当前运行版本）
 app.get('/api/v1/health', (c) => c.json({
@@ -99,6 +105,8 @@ app.get('/api/v1/health', (c) => c.json({
 const api = new Hono()
 // 写请求成功后广播同步事件（远程/同步/在线状态自身接口除外）
 api.use('*', syncEventMiddleware)
+// 独立应用低空间守卫：低于 500MB 时阻止生成/同步等写入（读、删除、备份、设置仍可用）
+api.use('*', appStorageGuard)
 api.route('/dramas', dramas)
 api.route('/episodes', episodes)
 api.route('/storyboards', storyboards)
@@ -117,7 +125,10 @@ api.route('/merge', merge)
 api.route('/skills', skills)
 api.route('/props', props)
 api.route('/storage', storage)
+// 数据库备份与恢复（仅 HUOBAO_APP=1；路由内自行守卫）
+api.route('/backups', backups)
 api.route('/settings', settings)
+api.route('/capabilities', capabilities)
 api.route('/server-update', serverUpdate)
 api.route('/mcp', mcpRoute)
 api.route('/pipeline-rules', pipelineRules)
@@ -246,4 +257,8 @@ startQueueWorker()
 await resumeVideoBatches()
 startVideoBatchWorker()
 
-serve({ fetch: app.fetch, port, hostname })
+serve({ fetch: app.fetch, port, hostname }, (info) => {
+  const mode = process.env.HUOBAO_APP === '1' ? 'app' : process.env.HUOBAO_DESKTOP === '1' ? 'desktop' : 'server'
+  // 壳侧只解析前缀后的 JSON；令牌绝不进入就绪标记
+  console.log(`[huobao-ready] ${JSON.stringify({ port: info.port, mode, version: process.env.HUOBAO_VERSION || null })}`)
+})

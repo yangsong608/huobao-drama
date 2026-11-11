@@ -193,6 +193,11 @@ async function confirmDelete() {
   animation: fadeUp 0.35s var(--ease-out) both;
   background: var(--surface-base);
 }
+
+/* 动画结束后不得残留 transform，否则 position:fixed 遮罩会被限制在 .page 内 */
+@media (max-width: 1180px) {
+  .page { animation-fill-mode: backwards; }
+}
 .launcher-head {
   display: flex;
   align-items: center;

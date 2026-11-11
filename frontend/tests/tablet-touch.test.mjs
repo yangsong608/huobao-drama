@@ -86,6 +86,7 @@ const touchSource = readSource('utils/touch.ts')
 const longPressSource = readSource('composables/useLongPress.ts')
 const pinchSource = readSource('composables/usePinchZoom.ts')
 const episodeSource = readSource('views/drama/episode.vue')
+const storyboardListSource = readSource('components/EpisodeStoryboardList.vue')
 const editTimelineSource = readSource('components/edit/EditTimeline.vue')
 const mixTimelineSource = readSource('components/MixTimeline.vue')
 const mixStageSource = readSource('components/MixStage.vue')
@@ -269,8 +270,8 @@ test('新增触控文件与四类接入组件都不使用 touch 事件', () => {
 
 test('四类长按入口都带 data-long-press 与「更多」入口', () => {
   // 镜头行：长按表面 + 行尾更多按钮 + 复用现有动作
-  assert.match(episodeSource, /video-task-row[\s\S]{0,500}data-long-press/)
-  assert.match(episodeSource, /video-task-more/)
+  assert.match(storyboardListSource, /video-task-row[\s\S]{0,500}data-long-press/)
+  assert.match(storyboardListSource, /video-task-more/)
   assert.match(episodeSource, /useLongPress/)
   assert.match(episodeSource, /taskMenuItems/)
   assert.match(episodeSource, /genVid\(sb\)/)
@@ -301,7 +302,7 @@ test('四类长按入口都带 data-long-press 与「更多」入口', () => {
   assert.match(editSidebarSource, /useLongPress/)
 
   for (const [label, source] of [
-    ['episode', episodeSource],
+    ['EpisodeStoryboardList', storyboardListSource],
     ['EditTimeline', editTimelineSource],
     ['MixStage', mixStageSource],
     ['FilmPicker', filmPickerSource],
@@ -313,7 +314,7 @@ test('四类长按入口都带 data-long-press 与「更多」入口', () => {
 
 test('「更多」按钮默认隐藏，只在粗指针查询内显示', () => {
   const surfaces = [
-    ['views/drama/episode.vue', episodeSource, 'video-task-more'],
+    ['components/EpisodeStoryboardList.vue', storyboardListSource, 'video-task-more'],
     ['components/edit/EditTimeline.vue', editTimelineSource, 'ed-tool-more'],
     ['components/MixStage.vue', mixStageSource, 'mx-more'],
     ['components/FilmPicker.vue', filmPickerSource, 'film-more'],

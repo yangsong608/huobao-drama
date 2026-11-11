@@ -41,7 +41,7 @@
     </div>
 
     <!-- 抽屉遮罩：仅窄屏抽屉打开时出现，点击关闭；不销毁预览与时间线 -->
-    <div v-if="isCompact && drawer" class="ed-drawer-mask" @click="closeDrawer"></div>
+    <div v-if="compactUi && drawer" class="ed-drawer-mask" @click="closeDrawer"></div>
 
     <div
       class="ed-main"
@@ -207,7 +207,7 @@
 
     <!-- 字幕覆盖层渲染在 EditPreview 内部（EditSubtitleOverlay），此处只负责状态与安全区开关 -->
     <EditSubtitleList
-      :open="isCompact ? subtitlesDrawerOpen : subtitlesOpen"
+      :open="compactUi ? subtitlesDrawerOpen : subtitlesOpen"
       :cues="plan.subtitles"
       :selected-cue-id="selectedCueId"
       @close="closeSubtitleList"
@@ -545,15 +545,17 @@ const showSafeArea = ref(false)
 const subtitlesOpen = ref(false)
 
 // ---- 窄屏抽屉（媒体 / 检查器 / 字幕）：三者互斥，历史层只有一层 ----
-const { isTablet, isCompact, orientation } = useViewport()
+const { isTablet, isCompact, isShortLandscape, orientation } = useViewport()
 const isLandscape = computed(() => orientation.value === 'landscape')
+// 手机横屏（≤1000×≤520）与紧凑平板共用抽屉：侧栏/检查器/字幕都以覆盖层出现
+const compactUi = computed(() => isCompact.value || isShortLandscape.value)
 const drawer = ref(null)
 const inspectorCollapsed = ref(false)
-const mediaDrawerOpen = computed(() => isCompact.value && isDrawerOpen(drawer.value, 'media'))
-const inspectorDrawerOpen = computed(() => isCompact.value && isDrawerOpen(drawer.value, 'inspector'))
-const subtitlesDrawerOpen = computed(() => isCompact.value && isDrawerOpen(drawer.value, 'subtitles'))
-// 检查器 901–1180 可折叠；≤900 交给抽屉；≥1181 保持常显
-const inspectorHidden = computed(() => isTablet.value && !isCompact.value && inspectorCollapsed.value)
+const mediaDrawerOpen = computed(() => compactUi.value && isDrawerOpen(drawer.value, 'media'))
+const inspectorDrawerOpen = computed(() => compactUi.value && isDrawerOpen(drawer.value, 'inspector'))
+const subtitlesDrawerOpen = computed(() => compactUi.value && isDrawerOpen(drawer.value, 'subtitles'))
+// 检查器 901–1180 可折叠；≤900 或手机横屏交给抽屉；≥1181 保持常显
+const inspectorHidden = computed(() => isTablet.value && !compactUi.value && inspectorCollapsed.value)
 
 const drawerOverlay = useOverlayHistory(closeDrawer)
 
@@ -577,14 +579,14 @@ function openDrawer(name) {
   if (!wasOpen) drawerOverlay.open()
 }
 
-// 顶栏三个抽屉开关：≤900 用互斥抽屉；901–1180 沿用原行为/折叠；≥1181 不变
+// 顶栏三个抽屉开关：≤900 或手机横屏用互斥抽屉；其余平板沿用原行为/折叠；≥1181 不变
 function onToggleMedia() {
-  if (isCompact.value) toggleDrawer('media')
+  if (compactUi.value) toggleDrawer('media')
   else mediaOpen.value = !mediaOpen.value
 }
 
 function onToggleInspector() {
-  if (isCompact.value) {
+  if (compactUi.value) {
     toggleDrawer('inspector')
     return
   }
@@ -592,22 +594,22 @@ function onToggleInspector() {
 }
 
 function onToggleSubtitles() {
-  if (isCompact.value) toggleDrawer('subtitles')
+  if (compactUi.value) toggleDrawer('subtitles')
   else subtitlesOpen.value = !subtitlesOpen.value
 }
 
 function onOpenSubtitles() {
-  if (isCompact.value) openDrawer('subtitles')
+  if (compactUi.value) openDrawer('subtitles')
   else subtitlesOpen.value = true
 }
 
 function closeSubtitleList() {
-  if (isCompact.value) closeDrawer()
+  if (compactUi.value) closeDrawer()
   else subtitlesOpen.value = false
 }
 
 // 回到宽屏时清掉抽屉态与历史层，避免遗留已失效的返回标记
-watch(isCompact, (compact) => {
+watch(compactUi, (compact) => {
   if (!compact && drawer.value !== null) closeDrawer()
 })
 // 字幕轨显示状态：默认显示，工具栏「字幕 ▾ → 显示/隐藏字幕轨」切换（与 EditTimeline 的 prop 默认一致）
@@ -1483,17 +1485,17 @@ async function runSubtitleSuggest() {
 
 function openRevisions() {
   // 窄屏下版本抽屉要盖在顶部，先收起三抽屉（含历史层），避免叠层
-  if (isCompact.value) closeDrawer()
+  if (compactUi.value) closeDrawer()
   revisionsOpen.value = true
 }
 
 function openShortcuts() {
-  if (isCompact.value) closeDrawer()
+  if (compactUi.value) closeDrawer()
   shortcutsOpen.value = true
 }
 
 function openExportDialog() {
-  if (isCompact.value) closeDrawer()
+  if (compactUi.value) closeDrawer()
   exportOpen.value = true
 }
 
@@ -1829,7 +1831,7 @@ defineExpose({
   .ed-main.is-inspector-hidden { grid-template-columns: 200px minmax(320px, 1fr); }
   .ed-main.is-inspector-hidden .ed-inspector { display: none; }
 }
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-width: 1000px) and (max-height: 520px) {
   .ed-main, .ed-main.is-empty, .ed-main.is-inspector-hidden { grid-template-columns: minmax(0, 1fr); }
   /* 抽屉遮罩：位于抽屉之下、工作台内容之上；点击关闭 */
   .ed-drawer-mask { position: fixed; inset: 0; z-index: 55; background: rgba(0, 0, 0, .45); }
@@ -1842,5 +1844,11 @@ defineExpose({
     box-shadow: 0 0 30px rgba(0, 0, 0, .45);
   }
   .ed-main.is-inspector-hidden .ed-inspector { display: none; }
+}
+@media (max-width: 1000px) and (max-height: 520px) {
+  /* 手机横屏：预览与时间线并排，轨道获得完整高度 */
+  .ed-stage { flex-direction: row; gap: 8px; padding: 8px 10px; }
+  .ed-stage > .ed-preview { flex: 1 1 44%; min-width: 0; }
+  .ed-stage > .ed-timeline { flex: 1 1 56%; min-width: 0; }
 }
 </style>

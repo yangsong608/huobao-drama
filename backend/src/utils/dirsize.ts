@@ -16,11 +16,14 @@ export interface UsageBuckets {
   merged: number
   uploads: number
   temp: number
+  backups: number
+  sync: number
   other: number
   total: number
 }
 
 const DB_FILE_BASE = 'huobao.sqlite3'
+const APP_STORAGE_FILE = '.app-storage.json'
 
 /** 递归 walk，对每个普通文件回调（完整路径 + 大小）；目录不可读/文件竞态静默跳过 */
 async function walkFiles(dir: string, onFile: (filePath: string, size: number) => void): Promise<void> {
@@ -45,7 +48,9 @@ async function walkFiles(dir: string, onFile: (filePath: string, size: number) =
 
 /** 统计数据目录占用（按用途分桶）；db 桶 = SQLITE_PATH 主库 + -wal/-shm 三文件 */
 export async function dirUsage(dataRoot: string, sqlitePath: string): Promise<UsageBuckets> {
-  const usage: UsageBuckets = { db: 0, images: 0, videos: 0, merged: 0, uploads: 0, temp: 0, other: 0, total: 0 }
+  const usage: UsageBuckets = {
+    db: 0, images: 0, videos: 0, merged: 0, uploads: 0, temp: 0, backups: 0, sync: 0, other: 0, total: 0,
+  }
   const add = (bucket: keyof UsageBuckets, size: number) => {
     usage[bucket] += size
     usage.total += size
@@ -62,7 +67,16 @@ export async function dirUsage(dataRoot: string, sqlitePath: string): Promise<Us
   await walkFiles(dataRoot, (filePath, size) => {
     const rel = path.relative(dataRoot, filePath)
     if (rel === DB_FILE_BASE || rel.startsWith(DB_FILE_BASE + '-')) return // 已单独计入 db 桶
+    if (rel === APP_STORAGE_FILE) return // 壳写入的统计快照，不计占用
     const parts = rel.split(path.sep)
+    if (parts[0] === 'backups') {
+      add('backups', size)
+      return
+    }
+    if (parts[0] === 'sync') {
+      add('sync', size)
+      return
+    }
     // static/<sub>/... 与项目级 static/projects/<id>/<sub>/... 都按子目录归桶
     const sub = parts[0] === 'static'
       ? (parts[1] === 'projects' && parts.length >= 4 ? parts[3] : parts[1])

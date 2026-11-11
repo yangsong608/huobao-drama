@@ -6,6 +6,7 @@ const root = new URL('..', import.meta.url)
 const read = (path) => readFileSync(new URL(path, root), 'utf8')
 
 const page = read('app/views/drama/episode.vue')
+const storyboardList = read('app/components/EpisodeStoryboardList.vue')
 const useApi = read('app/composables/useApi.ts')
 
 test('episode video mode tabs switch between native and ComfyUI', () => {
@@ -16,6 +17,10 @@ test('episode video mode tabs switch between native and ComfyUI', () => {
   assert.match(page, /const episodeVideoMode = computed\(\(\) =>/)
   assert.doesNotMatch(page, /computed<'native'/)
   assert.match(page, /await episodeAPI\.update\(epId\.value, \{ video_mode: mode \}\)/)
+})
+
+test('无进行中批次时 data:null 返回空值而不是含 code/message 的信封', () => {
+  assert.match(useApi, /Object\.prototype\.hasOwnProperty\.call\(json, 'data'\) \? json\.data : json/)
 })
 
 test('video configs follow the active mode and write the matching episode field', () => {
@@ -32,12 +37,12 @@ test('ComfyUI mode keeps the task list, footer actions and mounts the token-gate
   assert.match(page, /v-if="recoverableVideoCount && !isComfyVideoMode"/)
   assert.match(page, /v-if="!isComfyVideoMode" class="btn btn-sm" :class="\{ 'is-on': videoSelectMode \}"/)
   // 左下角两个按钮：修改回到原生逐镜，提交直接运行整集工作流
-  assert.match(page, /<div v-if="isComfyVideoMode" class="video-task-footer">/)
-  assert.match(page, /class="video-task-footer-actions"[\s\S]*?@click="changeEpisodeVideoMode\('native'\)"/)
-  assert.match(page, /class="video-task-footer-actions"[\s\S]*?@click="runComfyEpisode"/)
+  assert.match(storyboardList, /<div v-if="isComfyVideoMode" class="video-task-footer">/)
+  assert.match(storyboardList, /class="video-task-footer-actions"[\s\S]*?emit\('mode-change', 'native'\)/)
+  assert.match(storyboardList, /class="video-task-footer-actions"[\s\S]*?emit\('run-comfy'\)/)
   // 右侧只挂载带令牌的工作流监控页，不再渲染旧预览面板
-  assert.match(page, /<section v-if="isComfyVideoMode" class="comfy-embed-stage">/)
-  assert.match(page, /<iframe[\s\S]*?:src="comfyUiUrl"[\s\S]*?referrerpolicy="no-referrer"/)
+  assert.match(storyboardList, /<section v-if="isComfyVideoMode" class="comfy-embed-stage">/)
+  assert.match(storyboardList, /<iframe[\s\S]*?:src="comfyUiUrl"[\s\S]*?referrerpolicy="no-referrer"/)
   assert.doesNotMatch(page, /comfy-workflow-panel/)
 })
 

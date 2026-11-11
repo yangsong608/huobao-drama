@@ -317,13 +317,16 @@ test('sw.js 安装缓存清单完整、单资源失败可容忍，激活只清�
   }
 })
 
-test('pwa.client.ts 在启动阶段接线，SW 注册受四条件约束', () => {
+test('pwa.client.ts 在启动阶段接线，SW 注册受五条件约束', () => {
   assert.match(pwaPluginSource, /defineNuxtPlugin\(/)
   assert.match(pwaPluginSource, /import\.meta\.env\.PROD/)
   assert.match(pwaPluginSource, /'serviceWorker' in navigator/)
   assert.match(pwaPluginSource, /window\.isSecureContext/)
   assert.match(pwaPluginSource, /huobaoDesktop/)
   assert.match(pwaPluginSource, /!hasDesktopShell/)
+  assert.match(pwaPluginSource, /hasAppShell/)
+  assert.match(pwaPluginSource, /!hasAppShell/)
+  assert.match(pwaPluginSource, /isAppClient\(\)/)
   assert.match(pwaPluginSource, /register\('\/sw\.js', \{ scope: '\/', updateViaCache: 'none' \}\)/)
   assert.match(pwaPluginSource, /addEventListener\('beforeinstallprompt'/)
   assert.match(pwaPluginSource, /event\.preventDefault\(\)/)
@@ -349,8 +352,8 @@ test('pwa.client.ts 在启动阶段接线，SW 注册受四条件约束', () => 
     'SW 注册必须检查安全上下文',
   )
   assert.ok(
-    pwaPluginSource.indexOf('if (hasDesktopShell) return') < pwaPluginSource.indexOf(".register('/sw.js'"),
-    '桌面壳必须提前返回，不注册 SW',
+    pwaPluginSource.indexOf('if (hasDesktopShell || hasAppShell) return') < pwaPluginSource.indexOf(".register('/sw.js'"),
+    '桌面壳与内嵌应用必须提前返回，不注册 SW',
   )
 })
 
@@ -452,7 +455,7 @@ test('AppHeader 安装入口与 iOS 说明符合契约，桌面不可安装时�
   assert.match(appHeaderSource, /t\('tablet\.installHint'\)/)
   assert.match(appHeaderSource, /t\('tablet\.close'\)/)
   assert.match(appHeaderSource, /v-if="showInstallEntry"/)
-  assert.match(appHeaderSource, /!isStandalone\.value && \(canInstall\.value \|\| isIos\.value\)/)
+  assert.match(appHeaderSource, /!isAppClient\(\) && !isStandalone\.value && \(canInstall\.value \|\| isIos\.value\)/)
   assert.match(appHeaderSource, /v-if="installHintOpen && isIos && !isStandalone"/)
   assert.match(appHeaderSource, /role="status"/)
   assert.match(appHeaderSource, /promptInstall\(\)/)
@@ -490,7 +493,7 @@ test('AppHeader 安装入口与 iOS 说明符合契约，桌面不可安装时�
   // P1 既有断点与 44px 命中区规则保留
   assert.match(appHeaderSource, /@media \(max-width: 1180px\)/)
   assert.match(appHeaderSource, /@media \(max-width: 743px\)/)
-  assert.match(appHeaderSource, /\.nav-link \{ min-height: 44px; \}/)
+  assert.match(appHeaderSource, /\.nav-link \{ min-height: 44px; min-width: 44px; justify-content: center; \}/)
   assert.match(appHeaderSource, /\.brand-text \{ display: none; \}/)
 })
 

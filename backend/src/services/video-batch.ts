@@ -6,6 +6,7 @@
  * - 重启后接管已有 sys_task，未提交项回队，避免重复计费
  */
 import type { Hono } from 'hono'
+import { withInternalAppToken } from '../middleware/app-token.js'
 import { and, eq, inArray } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { logTaskError, logTaskProgress, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
@@ -70,12 +71,12 @@ async function internalDispatcher(
   _batch: { id: number; episodeId: number; dramaId: number | null },
 ): Promise<number> {
   if (!internalApp) throw new Error('服务尚未就绪，请稍后重试')
-  const res = await internalApp.fetch(new Request(new URL('/api/v1/tasks', 'http://internal').toString(), {
+  const res = await internalApp.fetch(new Request(new URL('/api/v1/tasks', 'http://internal').toString(), withInternalAppToken({
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     // 请求体里的同名字段不可覆盖 type/storyboard_id，避免批次串镜
     body: JSON.stringify({ ...item.request, type: 'video', storyboard_id: item.storyboardId }),
-  }))
+  })))
   const text = await res.text()
   let json: any = null
   try { json = text ? JSON.parse(text) : null } catch { /* 非 JSON */ }

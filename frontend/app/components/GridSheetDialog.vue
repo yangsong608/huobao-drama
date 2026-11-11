@@ -80,9 +80,10 @@
           <div v-if="cells.length" class="grid-rect">
             <div class="grid-rect-head">
               <span>{{ t('grid.rectTitle') }}</span>
-              <button class="btn btn-sm" :disabled="splitting" @click="resplit">
+              <button class="btn btn-sm" :disabled="splitting || outputBlocked" :title="outputBlocked ? t('media.capability.actionDisabled') : undefined" @click="resplit">
                 {{ splitting ? t('grid.splitting') : t('grid.resplit') }}
               </button>
+              <MediaCapabilityNotice v-if="outputBlocked" action="output" mode="inline" />
             </div>
             <p class="field-hint">{{ t('grid.rectHint') }}</p>
             <div v-for="rect in rects" :key="`${rect.row}-${rect.col}`" class="grid-rect-row">
@@ -111,6 +112,8 @@ import BaseSelect from '~/components/BaseSelect.vue'
 import { gridAPI, characterAPI, sceneAPI, propAPI } from '~/composables/useApi'
 import { toastError } from '~/composables/useToast'
 import { useVisibilityPolling } from '~/composables/useVisibilityPolling'
+import MediaCapabilityNotice from '~/components/MediaCapabilityNotice.vue'
+import { useMediaCapabilities } from '~/composables/useMediaCapabilities'
 
 const props = defineProps<{
   open: boolean
@@ -121,6 +124,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: []; applied: [] }>()
 const { t } = useI18n()
+const mediaCaps = useMediaCapabilities()
+const outputBlocked = computed(() => !mediaCaps.outputReady.value)
 
 const kind = ref(props.kind || 'character')
 const rows = ref(2)
@@ -225,6 +230,10 @@ async function create() {
 }
 
 async function split(id: number, rectOverride?: any[]) {
+  if (outputBlocked.value) {
+    toastError(t('media.capability.actionDisabled'))
+    return
+  }
   splitting.value = true
   try {
     const result = await gridAPI.split(id, rectOverride?.length ? { inset: inset.value, cells: rectOverride } : { inset: inset.value })

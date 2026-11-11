@@ -620,6 +620,8 @@ select.input { appearance: auto; cursor: pointer; padding-right: 14px; }
    .dialog-body 已是 overflow-y:auto，底部 .dialog-foot 为独立兄弟节点，天然常驻。 */
 @media (max-width: 1180px) {
   .dialog { max-height: calc(var(--app-vvh, 100dvh) - var(--safe-top) - var(--safe-bottom) - 24px); }
+  /* 软键盘或视口差会让遮罩低于 --app-vvh，弹窗不得超过遮罩自身高度 */
+  .overlay > .dialog { max-height: min(calc(var(--app-vvh, 100dvh) - var(--safe-top) - var(--safe-bottom) - 24px), calc(100% - 24px)); }
   .dialog-body { overscroll-behavior: contain; }
   /* 有覆盖层时锁住页面滚动，避免平板背景跟随滚动手势；放进 ≤1180 分支，桌面弹窗的滚动行为保持不变 */
   html.huobao-overlay-open .page { overflow: hidden; }

@@ -52,12 +52,16 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
       error.errorCode = typeof json.error_code === 'string' ? json.error_code : undefined
       error.data = json.data
       notifyRemoteHttpError(error.status || 0, error.errorCode, path)
+      if (error.errorCode === 'MEDIA_UNAVAILABLE' && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('huobao:media-unavailable'))
+      }
       throw error
     }
 
     console.log(`%c[API] %c${method} ${path} %c${resp.status} %c${ms}ms`, 'color:#888', 'color:#66bb6a', 'color:#66bb6a;font-weight:bold', 'color:#888')
     notifyLocalWrite(method, path)
-    return json.data ?? json
+    // data:null 是合法空结果（如无进行中批次），不能回退成含 code/message 的信封
+    return json && Object.prototype.hasOwnProperty.call(json, 'data') ? json.data : json
   } catch (err: any) {
     if (!err.message?.match(/^\d{3}$/)) {
       const ms = Math.round(performance.now() - start)
@@ -80,6 +84,10 @@ export const api = {
   put: <T = any>(p: string, b?: any) => req<T>('PUT', p, b),
   patch: <T = any>(p: string, b?: any) => req<T>('PATCH', p, b),
   del: <T = any>(p: string) => req<T>('DELETE', p),
+}
+
+export const mediaCapabilitiesAPI = {
+  media: () => api.get<{ media: any }>('/capabilities'),
 }
 
 export const dramaAPI = {
@@ -1570,6 +1578,15 @@ export const stylePresetAPI = {
 
 export const storageAPI = {
   info: () => api.get('/storage'),
+}
+
+// 仅独立应用模式可用；浏览器/服务器模式后端返回 403
+export const backupAPI = {
+  list: () => api.get('/backups'),
+  create: () => api.post('/backups'),
+  del: (name: string) => api.del(`/backups/${encodeURIComponent(name)}`),
+  restore: (name: string) => api.post(`/backups/${encodeURIComponent(name)}/restore`),
+  downloadUrl: (name: string) => `${API_BASE}/backups/${encodeURIComponent(name)}/download`,
 }
 
 export interface StoryboardAuditPolicy {

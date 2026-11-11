@@ -216,16 +216,16 @@ test('工作台三抽屉共用一个历史层，切换只改名不重开', () =>
   // 回到宽屏即关闭抽屉，避免遗留历史标记
   assert.match(
     workbench,
-    /watch\(isCompact, \(compact\) => \{\s*\n\s*if \(!compact && drawer\.value !== null\) closeDrawer\(\)\s*\n\}\)/,
+    /watch\(compactUi, \(compact\) => \{\s*\n\s*if \(!compact && drawer\.value !== null\) closeDrawer\(\)\s*\n\}\)/,
   )
 
   // 按钮 / 遮罩 / Escape（useOverlayHistory）/ 返回手势共用 closeDrawer
-  assert.match(workbench, /v-if="isCompact && drawer" class="ed-drawer-mask" @click="closeDrawer"/)
+  assert.match(workbench, /v-if="compactUi && drawer" class="ed-drawer-mask" @click="closeDrawer"/)
   assert.match(workbench, /:drawer="mediaDrawerOpen"[\s\S]*?@close="closeDrawer"/)
   assert.match(workbench, /:drawer="inspectorDrawerOpen"[\s\S]*?@close="closeDrawer"/)
   assert.match(workbench, /@close="closeSubtitleList"/)
   const closeSubtitleBlock = functionBlock(workbench, 'closeSubtitleList')
-  assert.match(closeSubtitleBlock, /if \(isCompact\.value\) closeDrawer\(\)/)
+  assert.match(closeSubtitleBlock, /if \(compactUi\.value\) closeDrawer\(\)/)
   assert.match(closeSubtitleBlock, /subtitlesOpen\.value = false/)
 })
 
@@ -237,7 +237,7 @@ test('工作台布局：桌面三列、901–1180 窄三列可折叠、≤900 �
   assert.match(tabletBlock, /grid-template-columns: 200px minmax\(320px, 1fr\) 260px/)
   assert.match(tabletBlock, /\.ed-main\.is-inspector-hidden \{ grid-template-columns: 200px minmax\(320px, 1fr\); \}/)
   assert.match(tabletBlock, /\.ed-main\.is-inspector-hidden \.ed-inspector \{ display: none; \}/)
-  assert.match(workbench, /const inspectorHidden = computed\(\(\) => isTablet\.value && !isCompact\.value && inspectorCollapsed\.value\)/)
+  assert.match(workbench, /const inspectorHidden = computed\(\(\) => isTablet\.value && !compactUi\.value && inspectorCollapsed\.value\)/)
   assert.match(workbench, /'is-inspector-hidden': inspectorHidden/)
 
   const compactBlock = mediaBlock(workbench, '@media (max-width: 900px)')
@@ -263,7 +263,7 @@ test('抽屉不销毁预览与时间线，检查器横竖屏形态只在 ≤900 
   // 主播放器仍在 EditPreview；工作台自身不得内联第二个播放器
   assert.match(readSource('components/edit/EditPreview.vue'), /ref="videoRef"/)
   assert.equal((workbench.match(/<video/g) || []).length, 0, '工作台不得内联第二个播放器')
-  assert.match(workbench, /<div v-if="isCompact && drawer" class="ed-drawer-mask" @click="closeDrawer"><\/div>/)
+  assert.match(workbench, /<div v-if="compactUi && drawer" class="ed-drawer-mask" @click="closeDrawer"><\/div>/)
 
   const inspectorCompact = mediaBlock(inspector, '@media (max-width: 900px)')
   assert.match(inspectorCompact, /\.ed-inspector \{ display: none; \}/)
@@ -278,7 +278,7 @@ test('抽屉不销毁预览与时间线，检查器横竖屏形态只在 ≤900 
   assert.match(inspectorCompact, /width: min\(360px, 60vw\)/)
   assert.match(inspectorCompact, /\.ed-inspector\.is-drawer\.is-landscape \.ed-insp-grip \{ display: none; \}/)
   assert.match(workbench, /:class="\{ 'is-landscape': isLandscape \}"/)
-  assert.match(workbench, /const \{ isTablet, isCompact, orientation \} = useViewport\(\)/)
+  assert.match(workbench, /const \{ isTablet, isCompact, isShortLandscape, orientation \} = useViewport\(\)/)
   assert.match(workbench, /const isLandscape = computed\(\(\) => orientation\.value === 'landscape'\)/)
   assert.match(inspector, /:style="drawer \? \{ '--ed-insp-vh': `\$\{drawerVh\}dvh` \} : undefined"/)
 })
@@ -349,34 +349,34 @@ test('顶栏事件接线：媒体/检查器/字幕与次级面板先收抽屉', 
   assert.match(workbench, /@open-subtitles="onOpenSubtitles"/)
 
   const toggleMedia = functionBlock(workbench, 'onToggleMedia')
-  assert.match(toggleMedia, /if \(isCompact\.value\) toggleDrawer\('media'\)/)
+  assert.match(toggleMedia, /if \(compactUi\.value\) toggleDrawer\('media'\)/)
   assert.match(toggleMedia, /mediaOpen\.value = !mediaOpen\.value/)
 
   const toggleInspector = functionBlock(workbench, 'onToggleInspector')
-  assert.match(toggleInspector, /if \(isCompact\.value\) \{\s*\n\s*toggleDrawer\('inspector'\)/)
+  assert.match(toggleInspector, /if \(compactUi\.value\) \{\s*\n\s*toggleDrawer\('inspector'\)/)
   assert.match(toggleInspector, /if \(isTablet\.value\) inspectorCollapsed\.value = !inspectorCollapsed\.value/)
 
   const toggleSubtitles = functionBlock(workbench, 'onToggleSubtitles')
-  assert.match(toggleSubtitles, /if \(isCompact\.value\) toggleDrawer\('subtitles'\)/)
+  assert.match(toggleSubtitles, /if \(compactUi\.value\) toggleDrawer\('subtitles'\)/)
 
   // 时间线「打开字幕」是打开语义：已开时保持不动，不能误关
   const openSubtitles = functionBlock(workbench, 'onOpenSubtitles')
-  assert.match(openSubtitles, /if \(isCompact\.value\) openDrawer\('subtitles'\)/)
+  assert.match(openSubtitles, /if \(compactUi\.value\) openDrawer\('subtitles'\)/)
   assert.match(openSubtitles, /subtitlesOpen\.value = true/)
 
   const openRevisionsBlock = functionBlock(workbench, 'openRevisions')
-  assert.match(openRevisionsBlock, /if \(isCompact\.value\) closeDrawer\(\)/)
+  assert.match(openRevisionsBlock, /if \(compactUi\.value\) closeDrawer\(\)/)
   assert.match(openRevisionsBlock, /revisionsOpen\.value = true/)
 
   const openShortcutsBlock = functionBlock(workbench, 'openShortcuts')
-  assert.match(openShortcutsBlock, /if \(isCompact\.value\) closeDrawer\(\)/)
+  assert.match(openShortcutsBlock, /if \(compactUi\.value\) closeDrawer\(\)/)
   assert.match(openShortcutsBlock, /shortcutsOpen\.value = true/)
 
   const openExportBlock = functionBlock(workbench, 'openExportDialog')
-  assert.match(openExportBlock, /if \(isCompact\.value\) closeDrawer\(\)/)
+  assert.match(openExportBlock, /if \(compactUi\.value\) closeDrawer\(\)/)
   assert.match(openExportBlock, /exportOpen\.value = true/)
 
-  assert.match(workbench, /:open="isCompact \? subtitlesDrawerOpen : subtitlesOpen"/)
+  assert.match(workbench, /:open="compactUi \? subtitlesDrawerOpen : subtitlesOpen"/)
 
   const keydownBlock = functionBlock(workbench, 'onKeydown')
   assert.match(keydownBlock, /^\s*if \(event\.defaultPrevented\) return/m)

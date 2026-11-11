@@ -4,6 +4,7 @@
     <main class="content">
       <slot />
     </main>
+    <MobileTabBar />
   </div>
 </template>
 

@@ -6,6 +6,7 @@ const root = new URL('..', import.meta.url)
 const read = (path) => readFileSync(new URL(path, root), 'utf8')
 
 const episode = read('app/views/drama/episode.vue')
+const taskDrawer = read('app/components/EpisodeTaskDrawer.vue')
 const useApi = read('app/composables/useApi.ts')
 const locales = ['zh', 'en', 'ja', 'ko'].map((name) => JSON.parse(read(`app/locales/${name}.json`)))
 
@@ -31,6 +32,20 @@ test('task drawer renders tabs for generation, voices, audio, pipeline and expor
   assert.match(episode, /counts\.merges_active/)
 })
 
+test('task drawer markup lives in EpisodeTaskDrawer component', () => {
+  assert.match(episode, /<EpisodeTaskDrawer[\s\S]{0,900}:tabs="taskCenterTabs"[\s\S]{0,300}@update:tab="taskCenterTab = \$event"/)
+  assert.match(episode, /@recover="recoverTask"/)
+  assert.match(episode, /@view-image="openImageViewer"/)
+  assert.doesNotMatch(episode, /v-if="taskDrawer" class="task-drawer-overlay"/)
+  assert.match(taskDrawer, /<div v-if="open" class="task-drawer-overlay" @click\.self="emit\('close'\)">\s*<aside class="task-drawer"/)
+  assert.ok(!/<div v-if="open" class="task-drawer-overlay"[^>]*\/>/.test(taskDrawer), '遮罩不能自闭合')
+  assert.match(taskDrawer, /v-for="row in rows"/)
+  assert.match(taskDrawer, /emit\('recover', row\.id, row\.storyboardId\)/)
+  assert.match(taskDrawer, /emit\('diagnostics', row\.id\)/)
+  assert.match(taskDrawer, /emit\('view-image', previewSrc\(row\.previewUrl\), row\.targetLabel\)/)
+  assert.match(taskDrawer, /@media \(max-width: 1180px\) and \(hover: none\) and \(pointer: coarse\)/)
+})
+
 test('task center aggregates every persisted task source', () => {
   assert.match(episode, /taskAPI\.taskCenter\(epId\.value\)/)
   assert.match(episode, /\(taskCenterData\.value\?\.voices\?\.items \|\| \[\]\)/)
@@ -44,12 +59,12 @@ test('task center aggregates every persisted task source', () => {
 })
 
 test('non image/video task kinds have their own labels', () => {
-  assert.match(episode, /kind === 'audio'\) return t\('episode\.tasks\.kindAudio'\)/)
-  assert.match(episode, /kind === 'text'\) return t\('episode\.tasks\.kindText'\)/)
-  assert.match(episode, /kind === 'voice'\) return t\('episode\.tasks\.kindVoice'\)/)
-  assert.match(episode, /kind === 'pipeline'\) return t\('episode\.tasks\.kindPipeline'\)/)
-  assert.match(episode, /kind === 'export'\) return t\('episode\.tasks\.kindExport'\)/)
-  assert.match(episode, /return t\('episode\.tasks\.kindOther'\)/)
+  assert.match(taskDrawer, /kind === 'audio'\) return t\('episode\.tasks\.kindAudio'\)/)
+  assert.match(taskDrawer, /kind === 'text'\) return t\('episode\.tasks\.kindText'\)/)
+  assert.match(taskDrawer, /kind === 'voice'\) return t\('episode\.tasks\.kindVoice'\)/)
+  assert.match(taskDrawer, /kind === 'pipeline'\) return t\('episode\.tasks\.kindPipeline'\)/)
+  assert.match(taskDrawer, /kind === 'export'\) return t\('episode\.tasks\.kindExport'\)/)
+  assert.match(taskDrawer, /return t\('episode\.tasks\.kindOther'\)/)
 })
 
 test('task center copy exists in all four locales', () => {

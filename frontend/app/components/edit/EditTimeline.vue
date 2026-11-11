@@ -1177,6 +1177,20 @@ onBeforeUnmount(() => {
   .ed-head:nth-child(3) { height: 62px; }
 }
 
+@media (max-width: 743px), (max-width: 1000px) and (max-height: 520px) {
+  /* 手机：工具条单行横向滚动，避免换行后挤占轨道高度；轨道主体保留 172px */
+  .ed-timeline { padding: 8px; }
+  .ed-timeline-head { gap: 4px 8px; }
+  .ed-timeline-tools {
+    width: 100%; margin-left: 0; justify-content: flex-start; flex-wrap: nowrap;
+    overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .ed-timeline-tools::-webkit-scrollbar { display: none; }
+  .ed-timeline-tools > * { flex: 0 0 auto; }
+  .ed-timeline-body { min-height: 172px; }
+}
+
 @media (max-width: 1180px) and (hover: none) and (pointer: coarse) {
   /* 双指缩放期间禁止滚动容器原生手势，避免与 pinch 计算抢滚动 */
   .ed-tl-scroll.is-pinching { touch-action: none; }

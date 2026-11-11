@@ -104,7 +104,7 @@ test('分析结果不覆盖请求期间用户新写的草稿', () => {
 })
 
 test('提示词提交中禁用输入，输入框有无障碍标签', () => {
-  assert.match(episode, /class="input ai-transition-prompt-input"[\s\S]{0,320}:disabled="transitionPromptBusy\[transitionPromptKey\(b\)\]"/)
+  assert.match(episode, /class="input ai-transition-prompt-input"[\s\S]{0,320}:disabled="transitionPromptBusy\[transitionPromptKey\(b\)\](?: \|\| !mediaOutputReady)?"/)
   assert.match(episode, /:aria-label="t\('episode\.export\.aiTransition\.prompt\.label'\)"/)
   for (const [lang, bundle] of locales) {
     assert.ok(bundle?.episode?.export?.aiTransition?.prompt?.label, `${lang} 缺少 prompt.label`)

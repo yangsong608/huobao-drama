@@ -353,7 +353,8 @@ test('只新增远程配对页，业务路由与视图不受影响', () => {
     'pages/novels/index.vue',
     'pages/pair.vue',
     'pages/settings.vue',
-  ], 'pages 目录只允许增加远程配对页 /pair')
+    'pages/tasks.vue',
+  ], 'pages 目录只允许增加远程配对页 /pair 与手机任务中心 /tasks')
   assert.deepEqual(walkFiles('views/'), [
     'views/drama/detail.vue',
     'views/drama/edit.vue',

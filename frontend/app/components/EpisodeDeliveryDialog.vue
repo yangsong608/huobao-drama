@@ -14,7 +14,8 @@
       <div class="dialog-body">
         <div class="delivery-toolbar">
           <button class="btn" :disabled="loading" @click="load">{{ loading ? t('common.loading') : t('delivery.refresh') }}</button>
-          <button class="btn btn-primary" :disabled="rendering" @click="renderMotion">
+          <MediaCapabilityNotice v-if="outputBlocked" action="output" mode="inline" />
+          <button class="btn btn-primary" :disabled="rendering || outputBlocked" :title="outputBlocked ? t('media.capability.actionDisabled') : undefined" @click="renderMotion">
             {{ rendering ? t('delivery.rendering') : t('delivery.renderMotion') }}
           </button>
           <span class="field-hint">{{ t('delivery.renderHint') }}</span>
@@ -61,6 +62,8 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { mergeAPI, dubbingAPI } from '~/composables/useApi'
 import { toastError } from '~/composables/useToast'
+import MediaCapabilityNotice from '~/components/MediaCapabilityNotice.vue'
+import { useMediaCapabilities } from '~/composables/useMediaCapabilities'
 
 const props = defineProps<{
   open: boolean
@@ -69,6 +72,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: []; updated: [] }>()
 const { t } = useI18n()
+const mediaCaps = useMediaCapabilities()
+const outputBlocked = computed(() => !mediaCaps.outputReady.value)
 
 const loading = ref(false)
 const rendering = ref(false)
@@ -137,6 +142,10 @@ async function load() {
 }
 
 async function renderMotion() {
+  if (outputBlocked.value) {
+    toastError(t('media.capability.actionDisabled'))
+    return
+  }
   if (!props.episodeId || rendering.value) return
   if (!window.confirm(t('delivery.renderConfirm'))) return
   rendering.value = true

@@ -634,4 +634,17 @@ defineExpose({ seek, sync: seek, play, pause, video: videoRef })
 @media (max-width: 900px) {
   .ed-audio { display: none; }
 }
+@media (max-width: 743px), (max-width: 1000px) and (max-height: 520px) {
+  /* 手机：播放条换行成两行（按钮/倍速 + 时间/进度），保证 44px 命中且不横向溢出 */
+  .ed-preview { gap: 6px; }
+  .ed-transport {
+    height: auto; min-height: 44px; flex-wrap: wrap;
+    padding: 6px 8px; row-gap: 6px; column-gap: 6px;
+  }
+  .ed-transport-btn { width: 44px; min-width: 44px; height: 44px; }
+  .ed-transport-speed button { height: 44px; min-width: 40px; padding: 0 6px; }
+  .ed-clock { font-size: 10px; }
+  .ed-scrub { flex: 1 1 140px; min-width: 0; }
+  .ed-meta { display: none; }
+}
 </style>

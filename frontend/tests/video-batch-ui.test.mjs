@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = rel => readFileSync(path.join(root, rel), 'utf8')
 const episode = read('app/views/drama/episode.vue')
+const storyboardList = read('app/components/EpisodeStoryboardList.vue')
 const useApi = read('app/composables/useApi.ts')
 
 test('批量视频 API：创建、查询、停止走剧集接口', () => {
@@ -41,8 +42,8 @@ test('批次进度轮询：可见时 3 秒刷新、结束自动停、停止后�
   assert.match(episode, /videoBatchPoll\.stop\(\)/)
   assert.match(episode, /function stopBatchVideo/)
   assert.match(episode, /episodeAPI\.stopVideoBatch\(/)
-  assert.match(episode, /t\('episode\.vid\.batchStop'\)/)
-  assert.match(episode, /class="video-batch-strip"/)
+  assert.match(storyboardList, /t\('episode\.vid\.batchStop'\)/)
+  assert.match(storyboardList, /class="video-batch-strip"/)
   assert.match(episode, /videoBatchProgress/)
 })
 

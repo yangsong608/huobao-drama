@@ -11,6 +11,9 @@ export const TABLET_MAX = 1180
 export const COMPACT_MAX = 900
 /** 窄平板：<= 744 收起导航/品牌文字，744 本身仍属窄平板 */
 export const NARROW_MAX = 744
+/** 手机横屏：宽度接近平板但高度很矮，按紧凑布局处理（如 915×412、800×360） */
+export const SHORT_LANDSCAPE_MAX_W = 1000
+export const SHORT_LANDSCAPE_MAX_H = 520
 
 /** 长按判定时长（毫秒） */
 export const LONG_PRESS_MS = 500
@@ -44,4 +47,9 @@ export function isCompact(width: number): boolean {
 /** 是否为窄平板宽度（含 744 边界，745 起不再是窄平板） */
 export function isNarrow(width: number): boolean {
   return width <= NARROW_MAX
+}
+
+/** 是否为手机横屏（宽度不大于 1000 且高度不大于 520） */
+export function isShortLandscape(width: number, height: number): boolean {
+  return width <= SHORT_LANDSCAPE_MAX_W && height <= SHORT_LANDSCAPE_MAX_H
 }

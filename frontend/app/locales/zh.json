@@ -1,6 +1,7 @@
 {
   "app": {
-    "title": "火宝短剧",
+    "title": "MossHuobao",
+    "brandSub": "AI 短剧工坊",
     "updateAvailable": "发现新版本 v{version}，可在「设置 → 关于更新」中升级"
   },
   "characterVoice": {
@@ -55,6 +56,13 @@
       "audioGen": "声音生成"
     },
     "edit": "编辑"
+  },
+  "mobileNav": {
+    "label": "主导航",
+    "projects": "项目",
+    "tasks": "任务",
+    "novels": "小说",
+    "me": "我的"
   },
   "layout": {
     "nav": {
@@ -379,6 +387,7 @@
   "settings": {
     "groupBase": "基础",
     "tabs": {
+      "device": "本机与连接",
       "general": "通用",
       "remote": "手机接力",
       "ai": "AI 服务",
@@ -401,6 +410,58 @@
       "hint": "手机与电脑需在同一局域网；每次接入都需要在这台电脑上确认。",
       "settingsHint": "设备名、端口与登录有效期；绑定地址在下次开启时生效。",
       "devicesTitle": "已连接设备"
+    },
+    "device": {
+      "title": "本机与连接",
+      "desc": "管理这台设备与电脑的连接；数据默认保存在本机，只有扫码接力后才会使用电脑。",
+      "connection": {
+        "title": "连接状态",
+        "localBadge": "本机",
+        "guestBadge": "已连接电脑",
+        "localName": "本机运行",
+        "localDesc": "项目与数据保存在这台设备上，电脑断开也能继续使用。",
+        "guestDesc": "正在使用「{name}」的电脑数据，写操作在电脑执行。",
+        "localNote": "连接电脑后可继续电脑上的项目；断开后自动回到本机数据。",
+        "expires": "会话有效期至 {time}",
+        "unknownHost": "电脑",
+        "connect": "扫码连接电脑",
+        "backToLocal": "返回本机",
+        "disconnect": "断开电脑",
+        "scanUnavailable": "扫码接力尚未开放，请在电脑端设置 → 手机接力中查看进度。",
+        "localUnavailable": "当前环境无法切回本机，请重新打开应用。",
+        "hint": "扫码接力完成后，电脑端开启远程桥并展示一次性二维码，手机扫码并在电脑确认后接入。",
+        "disconnectTitle": "断开电脑？",
+        "disconnectMessage": "断开后将回到本机数据；电脑上的项目不会删除，可随时重新扫码连接。",
+        "disconnectConfirm": "断开电脑",
+        "disconnecting": "正在断开…",
+        "disconnectFailed": "断开失败，请重试"
+      },
+      "sync": {
+        "title": "数据同步",
+        "desc": "在手机与电脑之间单向拉取或推送项目数据；同步前会自动备份，且不传输 AI 密钥与设备会话。",
+        "notReady": "数据同步尚未开放；当前请使用电脑端继续处理，手机端数据保持本机。",
+        "action": "暂未开放"
+      },
+      "storage": {
+        "title": "存储与备份",
+        "desc": "查看占用分桶、创建/导出/恢复/删除数据库备份，均在「存储位置」中管理。",
+        "open": "前往存储位置"
+      },
+      "logs": {
+        "title": "运行日志",
+        "desc": "导出后端与壳日志到系统分享面板，用于排查启动与同步问题；日志不含会话令牌。",
+        "export": "导出日志",
+        "exporting": "正在导出…",
+        "exported": "日志已导出",
+        "failed": "日志导出失败",
+        "unavailable": "当前环境不支持导出日志，请在应用内使用。"
+      },
+      "version": {
+        "title": "版本",
+        "app": "应用与后端版本",
+        "unknown": "—",
+        "runtimeNote": "运行时版本随应用安装包提供，可在导出的日志中查看。"
+      }
     },
     "novel": {
       "title": "小说生成",
@@ -606,6 +667,7 @@
       "dataDir": "数据目录",
       "desktopMode": "桌面版",
       "serverMode": "服务器模式",
+      "appMode": "平板应用",
       "totalUsage": "总占用 {size}",
       "counting": "统计中…",
       "breakdown": {
@@ -615,12 +677,55 @@
         "merged": "拼接",
         "uploads": "上传",
         "temp": "临时",
+        "backups": "备份",
+        "sync": "同步",
+        "runtime": "运行时",
+        "logs": "日志",
+        "cache": "缓存",
         "other": "其他"
       },
       "diskFree": "磁盘剩余 {size}",
       "note": "数据目录包含 SQLite 数据库与全部生成媒体；Agent 技能（workspace）不在此列，不随迁移。",
       "serverNote": "服务器部署请通过 STORAGE_PATH / SQLITE_PATH 环境变量配置存储位置，改后重启服务生效。",
-      "loadFailed": "加载存储信息失败"
+      "warn": "存储空间紧张：可用空间低于 {size}，建议先导出备份并清理旧文件。",
+      "blocked": "可用空间不足 {size}，已停止新的生成与写入，请先清理空间。",
+      "appNote": "平板应用的数据保存在应用私有目录，运行时、日志与缓存也占用本机空间。",
+      "appUninstall": "卸载应用会同时删除数据库与媒体文件；卸载前请先导出备份。",
+      "loadFailed": "加载存储信息失败",
+      "backups": {
+        "title": "数据库备份",
+        "desc": "首次启动、版本升级与同步前会自动备份，最多保留 {count} 份。",
+        "create": "立即备份",
+        "empty": "暂无备份",
+        "pending": "备份 {name} 已请求恢复，重启应用后生效。",
+        "lastRestoreOk": "已从 {name} 恢复（{time}）",
+        "lastRestoreFailed": "从 {name} 恢复失败：{error}",
+        "download": "导出",
+        "restore": "恢复",
+        "delete": "删除",
+        "restoreTitle": "恢复数据库备份",
+        "restoreMessage": "将用 {name} 覆盖当前数据库并重启应用；当前数据会先自动备份为“恢复前”备份。是否继续？",
+        "restoreConfirm": "恢复并重启",
+        "restoring": "正在恢复…",
+        "deleteTitle": "删除备份",
+        "deleteMessage": "确定删除备份 {name}？此操作不可撤销。",
+        "created": "备份已创建",
+        "loadFailed": "加载备份列表失败",
+        "createFailed": "创建备份失败",
+        "restoreBridgeMissing": "当前环境不支持重启应用，无法恢复",
+        "restartFailed": "重启应用失败，请手动重启",
+        "restoreStarted": "已请求恢复，正在重启应用",
+        "restoreFailed": "恢复失败",
+        "deleted": "备份已删除",
+        "deleteFailed": "删除备份失败",
+        "reasons": {
+          "first-start": "首次启动",
+          "upgrade": "版本升级",
+          "pre-sync": "同步前",
+          "pre-restore": "恢复前",
+          "manual": "手动"
+        }
+      }
     },
     "about": {
       "title": "关于更新",
@@ -629,6 +734,8 @@
       "latestVersion": "最新版本 v{v}",
       "check": "检查更新",
       "webMode": "当前为浏览器 / 服务器模式，应用内更新仅桌面版可用。",
+      "appDesc": "应用随安装包更新，项目数据与设置会被保留；升级时安装新版 APK 覆盖即可。",
+      "appNote": "应用内版本随安装包更新；需要升级时请安装新版 APK。",
       "upToDate": "已是最新版本",
       "found": "发现新版本 v{v}",
       "downloading": "下载中 {p}%",
@@ -825,7 +932,7 @@
     },
     "mcp": {
       "title": "MCP 服务",
-      "desc": "把火宝短剧的全部接口以 MCP 工具开放给 Claude Code、Cursor、WorkBuddy 等客户端。服务独立监听本机回环端口，调用需要 Bearer token。",
+      "desc": "把 MossHuobao 的全部接口以 MCP 工具开放给 Claude Code、Cursor、WorkBuddy 等客户端。服务独立监听本机回环端口，调用需要 Bearer token。",
       "service": "服务开关",
       "running": "运行中 · 端口 {port}",
       "stopped": "已停止",
@@ -1839,6 +1946,17 @@
       "statusReady": "就绪",
       "statusFailed": "失败",
       "referenceAudioHint": "角色参考音频：生视频时用于对齐口型与音色，可上传片段或从音色版本同步。"
+    },
+    "mobileTabs": {
+      "label": "分集工作台导航",
+      "more": "更多",
+      "moreTitle": "模型与操作",
+      "closeMore": "收起",
+      "script": "剧本",
+      "storyboard": "分镜",
+      "assets": "资产",
+      "generate": "生成",
+      "tasks": "任务"
     }
   },
   "errors": {
@@ -1859,7 +1977,7 @@
     "helpTitle": "使用引导",
     "index": {
       "welcome": {
-        "title": "👋 欢迎使用火宝短剧",
+        "title": "👋 欢迎使用 MossHuobao",
         "desc": "小说 → 剧本 → 资产 → 分镜 → 视频 → 成片，一站式 AI 短剧制作。先配置 AI 服务，再创建第一个项目。"
       },
       "create": {
@@ -2863,7 +2981,7 @@
     },
     "legacy": {
       "title": "小说工具已合并",
-      "desc": "正在跳转到火宝短剧的小说工坊…",
+      "desc": "正在跳转到 MossHuobao 的小说工坊…",
       "action": "立即前往"
     },
     "genres": {
@@ -3329,6 +3447,12 @@
   },
   "export": {
     "noEpisode": "请先选择一集",
+    "gate": {
+      "title": "导出暂未开放",
+      "hint": "本机应用不包含视频合成与导出，合片、剪辑渲染、混音渲染和成片导出请连接电脑继续。",
+      "connect": "连接电脑继续",
+      "unavailable": "暂未开放"
+    },
     "checkTitle": "导出检查",
     "checkHint": "检查通过后即可导出；失败项可直接前往对应阶段处理。",
     "refresh": "刷新",
@@ -4069,6 +4193,20 @@
       "enableFailed": "手机接力启动失败，请重试",
       "notRunning": "请先开启手机接力",
       "portLocked": "运行中不能修改端口，请先关闭手机接力"
+    }
+  },
+  "media": {
+    "capability": {
+      "badge": "暂未开放",
+      "loading": "正在检测媒体能力…",
+      "failed": "无法检测媒体能力，产出功能暂不可用。请检查网络后重试。",
+      "retry": "重试",
+      "unavailableTitle": "产出功能暂未开放",
+      "unavailableBody": "当前服务端缺少 FFmpeg/FFprobe 必要组件；剧本、分镜、预览、播放与编辑仍可用。",
+      "settingsHint": "在设置 → 通用 → 媒体工具中配置 FFmpeg 目录",
+      "generationHint": "基础视频生成可用；海报帧、静音剥离与多段拼接可能不可用",
+      "actionDisabled": "当前服务端缺少 FFmpeg/FFprobe，无法执行该操作",
+      "probeDisabled": "当前服务端缺少 FFprobe，无法读取媒体信息"
     }
   }
 }

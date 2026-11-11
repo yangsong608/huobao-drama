@@ -10,6 +10,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { and, eq, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { badRequest, created, notFound, now, success } from '../utils/response.js'
+import { voiceGate } from '../utils/media-guard.js'
 import { AUDIO_MAX_BYTES, AudioUploadError, saveAudioUpload } from '../utils/audio-upload.js'
 import { getAbsolutePath } from '../utils/storage.js'
 import { ffmpeg } from '../utils/ffmpeg.js'
@@ -123,7 +124,7 @@ voices.put('/narrator', async (c) => {
   }
 })
 
-voices.post('/narrator/sample', async (c) => {
+voices.post('/narrator/sample', voiceGate, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const dramaId = parseId(String(body.drama_id ?? ''))
   if (!dramaId) return badRequest(c, 'drama_id 必填')
@@ -247,7 +248,7 @@ voices.get('/:id/auditions', (c) => {
   })
 })
 
-voices.post('/:id/auditions', async (c) => {
+voices.post('/:id/auditions', voiceGate, async (c) => {
   const id = parseId(c.req.param('id'))
   if (!id) return badRequest(c, '音色编号无效')
   const body = await c.req.json().catch(() => ({}))
@@ -294,7 +295,7 @@ voices.delete('/:id/auditions/:sampleId', (c) => {
   return success(c, { deleted: true })
 })
 
-voices.post('/:id/speech', async (c) => {
+voices.post('/:id/speech', voiceGate, async (c) => {
   const id = parseId(c.req.param('id'))
   if (!id) return badRequest(c, '音色编号无效')
   const body = await c.req.json().catch(() => ({}))
@@ -350,7 +351,7 @@ voices.post('/:id/design', async (c) => {
   }
 })
 
-voices.post('/:id/sample', async (c) => {
+voices.post('/:id/sample', voiceGate, async (c) => {
   const id = parseId(c.req.param('id'))
   if (!id) return badRequest(c, '音色编号无效')
   const body = await c.req.json().catch(() => ({}))
@@ -464,7 +465,7 @@ characterVoices.post('/:id/voice-profile/activate', async (c) => {
   }
 })
 
-characterVoices.post('/:id/voice-sample', async (c) => {
+characterVoices.post('/:id/voice-sample', voiceGate, async (c) => {
   const characterId = parseId(c.req.param('id'))
   if (!characterId) return badRequest(c, '角色编号无效')
   const body = await c.req.json().catch(() => ({}))
@@ -485,7 +486,7 @@ characterVoices.post('/:id/voice-sample', async (c) => {
   }
 })
 
-characterVoices.post('/:id/voice-clone', bodyLimit({
+characterVoices.post('/:id/voice-clone', voiceGate, bodyLimit({
   maxSize: AUDIO_MAX_BYTES + 64 * 1024,
   onError: (c) => badRequest(c, '音频文件大小不能超过 20MB'),
 }), async (c) => {
@@ -522,7 +523,7 @@ characterVoices.post('/:id/voice-clone', bodyLimit({
   }
 })
 
-characterVoices.post('/:id/voice-sync', async (c) => {
+characterVoices.post('/:id/voice-sync', voiceGate, async (c) => {
   const characterId = parseId(c.req.param('id'))
   if (!characterId) return badRequest(c, '角色编号无效')
   const body = await c.req.json().catch(() => ({}))

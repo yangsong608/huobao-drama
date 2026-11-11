@@ -146,11 +146,12 @@
         </div>
 
         <div class="take-generate">
-          <button class="btn btn-primary btn-sm" type="button" :disabled="!canGenerate" @click="generate">
+          <button class="btn btn-primary btn-sm" type="button" :disabled="!canGenerate" :title="voiceBlocked ? t('media.capability.actionDisabled') : undefined" @click="generate">
             <Loader2 v-if="generating" :size="11" class="animate-spin" />
             <AudioLines v-else :size="11" />
             {{ generating ? t('take.generating') : takes.length ? t('take.generateAnother') : t('take.generate') }}
           </button>
+          <MediaCapabilityNotice v-if="voiceBlocked" action="voice" mode="inline" />
           <span v-if="generating" class="take-hint">{{ t('take.generateHint') }}</span>
         </div>
       </section>
@@ -240,6 +241,8 @@ import { AudioLines, GitCompare, Loader2, Sparkles, UserPlus } from 'lucide-vue-
 import { useI18n } from 'vue-i18n'
 import type { LineContextPreview, LineTake, StoryboardLine, TakeOverrides, TtsCapabilities, VoiceProfile, VoiceProfileList } from '~/composables/useApi'
 import BaseSelect from '~/components/BaseSelect.vue'
+import MediaCapabilityNotice from '~/components/MediaCapabilityNotice.vue'
+import { useMediaCapabilities } from '~/composables/useMediaCapabilities'
 
 interface VoiceMetaEntry {
   name: string
@@ -336,7 +339,9 @@ const deepReady = computed(() => Boolean(
 ))
 const deepFallback = computed(() => mode.value === 'deep' && props.preview?.source === 'fallback')
 const paramsLocked = computed(() => mode.value === 'deep' && !deepReady.value)
-const canGenerate = computed(() => Boolean(props.line) && !props.generating && !paramsLocked.value)
+const mediaCaps = useMediaCapabilities()
+const voiceBlocked = computed(() => !mediaCaps.voiceReady.value)
+const canGenerate = computed(() => Boolean(props.line) && !props.generating && !paramsLocked.value && !voiceBlocked.value)
 const takesWithAudio = computed(() => props.takes.filter(item => item.audioUrl))
 const canCompare = computed(() =>
   Boolean(compareAId.value && compareBId.value && compareAId.value !== compareBId.value))

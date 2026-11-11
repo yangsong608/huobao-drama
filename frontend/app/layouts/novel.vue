@@ -6,6 +6,7 @@
         <slot />
       </n-config-provider>
     </div>
+    <MobileTabBar />
   </div>
 </template>
 

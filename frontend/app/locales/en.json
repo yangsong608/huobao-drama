@@ -1,6 +1,7 @@
 {
   "app": {
-    "title": "Huobao Shorts",
+    "title": "MossHuobao",
+    "brandSub": "AI Drama Studio",
     "updateAvailable": "New version v{version} is available. Upgrade in Settings → About."
   },
   "characterVoice": {
@@ -55,6 +56,13 @@
       "audioGen": "Sound generation"
     },
     "edit": "Edit"
+  },
+  "mobileNav": {
+    "label": "Main navigation",
+    "projects": "Projects",
+    "tasks": "Tasks",
+    "novels": "Novels",
+    "me": "Me"
   },
   "layout": {
     "nav": {
@@ -379,6 +387,7 @@
   "settings": {
     "groupBase": "Basic",
     "tabs": {
+      "device": "This device",
       "general": "General",
       "remote": "Phone relay",
       "ai": "AI Services",
@@ -401,6 +410,58 @@
       "hint": "Phone and computer must be on the same network; every connection requires confirmation on this computer.",
       "settingsHint": "Computer name, port and session length; the bind address applies the next time the relay starts.",
       "devicesTitle": "Connected devices"
+    },
+    "device": {
+      "title": "This device",
+      "desc": "Manage this device's connection to a computer. Data stays on this device unless you relay to a computer.",
+      "connection": {
+        "title": "Connection status",
+        "localBadge": "Local",
+        "guestBadge": "Computer connected",
+        "localName": "Running locally",
+        "localDesc": "Projects and data are stored on this device and remain available without a computer.",
+        "guestDesc": "Using data on “{name}”; write operations run on the computer.",
+        "localNote": "Connect to a computer to continue its projects; disconnecting returns to local data.",
+        "expires": "Session valid until {time}",
+        "unknownHost": "Computer",
+        "connect": "Scan to connect",
+        "backToLocal": "Back to local",
+        "disconnect": "Disconnect",
+        "scanUnavailable": "Scan relay is not available yet. Check Settings → Phone relay on the computer for progress.",
+        "localUnavailable": "Cannot switch back to local in this environment. Reopen the app.",
+        "hint": "After scan relay ships, start the remote bridge on the computer, scan its one-time QR code and confirm there.",
+        "disconnectTitle": "Disconnect from the computer?",
+        "disconnectMessage": "You will return to local data. Projects on the computer are kept and you can reconnect by scanning again.",
+        "disconnectConfirm": "Disconnect",
+        "disconnecting": "Disconnecting…",
+        "disconnectFailed": "Failed to disconnect. Try again."
+      },
+      "sync": {
+        "title": "Data sync",
+        "desc": "Pull or push project data one way between phone and computer. A backup is created first; AI keys and device sessions are never transferred.",
+        "notReady": "Data sync is not available yet. Continue on the computer for now; phone data stays local.",
+        "action": "Coming soon"
+      },
+      "storage": {
+        "title": "Storage & backups",
+        "desc": "Usage breakdown and database backup create/export/restore/delete are managed under Storage.",
+        "open": "Open storage"
+      },
+      "logs": {
+        "title": "Runtime logs",
+        "desc": "Export backend and shell logs to the system share sheet for startup and sync troubleshooting; session tokens are excluded.",
+        "export": "Export logs",
+        "exporting": "Exporting…",
+        "exported": "Logs exported",
+        "failed": "Failed to export logs",
+        "unavailable": "Exporting logs is only available inside the app."
+      },
+      "version": {
+        "title": "Version",
+        "app": "App & backend version",
+        "unknown": "—",
+        "runtimeNote": "The runtime version ships with the app package and is included in exported logs."
+      }
     },
     "novel": {
       "title": "Novel generation",
@@ -606,6 +667,7 @@
       "dataDir": "Data directory",
       "desktopMode": "Desktop",
       "serverMode": "Server",
+      "appMode": "Tablet App",
       "totalUsage": "Total usage {size}",
       "counting": "Counting…",
       "breakdown": {
@@ -615,12 +677,55 @@
         "merged": "Merged",
         "uploads": "Uploads",
         "temp": "Temp",
+        "backups": "Backups",
+        "sync": "Sync",
+        "runtime": "Runtime",
+        "logs": "Logs",
+        "cache": "Cache",
         "other": "Other"
       },
       "diskFree": "Disk free {size}",
       "note": "The data directory holds the SQLite database and all generated media; Agent skills (workspace) are not included and do not migrate.",
       "serverNote": "For server deployments, configure storage via STORAGE_PATH / SQLITE_PATH environment variables; restart to apply.",
-      "loadFailed": "Failed to load storage info"
+      "warn": "Low on storage: less than {size} available. Export a backup and clean up old files.",
+      "blocked": "Not enough space (under {size} available). New generations and writes are paused until you free up space.",
+      "appNote": "Tablet app data lives in the app's private directory; runtime, logs and cache also use local storage.",
+      "appUninstall": "Uninstalling the app deletes the database and media files; export a backup before uninstalling.",
+      "loadFailed": "Failed to load storage info",
+      "backups": {
+        "title": "Database Backups",
+        "desc": "Created automatically on first start, app upgrades and before sync; the latest {count} are kept.",
+        "create": "Back Up Now",
+        "empty": "No backups yet",
+        "pending": "Backup {name} is queued for restore and will apply after the app restarts.",
+        "lastRestoreOk": "Restored from {name} ({time})",
+        "lastRestoreFailed": "Restore from {name} failed: {error}",
+        "download": "Export",
+        "restore": "Restore",
+        "delete": "Delete",
+        "restoreTitle": "Restore Database Backup",
+        "restoreMessage": "This replaces the current database with {name} and restarts the app. Current data is backed up automatically as a pre-restore copy. Continue?",
+        "restoreConfirm": "Restore & Restart",
+        "restoring": "Restoring…",
+        "deleteTitle": "Delete Backup",
+        "deleteMessage": "Delete backup {name}? This cannot be undone.",
+        "created": "Backup created",
+        "loadFailed": "Failed to load backups",
+        "createFailed": "Failed to create backup",
+        "restoreBridgeMissing": "Restarting the app is not supported in this environment; cannot restore",
+        "restartFailed": "Failed to restart the app; restart it manually",
+        "restoreStarted": "Restore requested; restarting the app",
+        "restoreFailed": "Restore failed",
+        "deleted": "Backup deleted",
+        "deleteFailed": "Failed to delete backup",
+        "reasons": {
+          "first-start": "First start",
+          "upgrade": "Upgrade",
+          "pre-sync": "Before sync",
+          "pre-restore": "Before restore",
+          "manual": "Manual"
+        }
+      }
     },
     "about": {
       "title": "About & Updates",
@@ -629,6 +734,8 @@
       "latestVersion": "Latest version v{v}",
       "check": "Check for Updates",
       "webMode": "You are in browser/server mode; in-app updates are only available on desktop.",
+      "appDesc": "The app updates with its installation package; project data and settings are preserved. Install a new APK to upgrade in place.",
+      "appNote": "The app version updates with the installation package; install a new APK to upgrade.",
       "upToDate": "You're up to date",
       "found": "New version v{v} available",
       "downloading": "Downloading {p}%",
@@ -825,7 +932,7 @@
     },
     "mcp": {
       "title": "MCP server",
-      "desc": "Expose every Huobao Drama endpoint as MCP tools for Claude Code, Cursor, WorkBuddy and similar clients. The server binds to a local loopback port and requires a bearer token.",
+      "desc": "Expose every MossHuobao endpoint as MCP tools for Claude Code, Cursor, WorkBuddy and similar clients. The server binds to a local loopback port and requires a bearer token.",
       "service": "Service",
       "running": "Running · port {port}",
       "stopped": "Stopped",
@@ -1839,6 +1946,17 @@
       "statusReady": "Ready",
       "statusFailed": "Failed",
       "referenceAudioHint": "Character reference audio: aligns mouth shape and timbre during video generation. Upload a clip or sync a voice version."
+    },
+    "mobileTabs": {
+      "label": "Episode workbench navigation",
+      "more": "More",
+      "moreTitle": "Models and actions",
+      "closeMore": "Close",
+      "script": "Script",
+      "storyboard": "Storyboard",
+      "assets": "Assets",
+      "generate": "Generate",
+      "tasks": "Tasks"
     }
   },
   "errors": {
@@ -1859,7 +1977,7 @@
     "helpTitle": "Guide",
     "index": {
       "welcome": {
-        "title": "👋 Welcome to Huobao Drama",
+        "title": "👋 Welcome to MossHuobao",
         "desc": "Novel → script → assets → storyboard → video → final cut, all in one place. Configure AI services first, then create your first project."
       },
       "create": {
@@ -3329,6 +3447,12 @@
   },
   "export": {
     "noEpisode": "Select an episode first",
+    "gate": {
+      "title": "Export isn't available on this device yet",
+      "hint": "This app doesn't include video compositing or export. To merge shots, render an edit or export a film, connect to a computer and continue there.",
+      "connect": "Connect to a computer",
+      "unavailable": "Coming soon"
+    },
     "checkTitle": "Export checks",
     "checkHint": "Export unlocks when checks pass; jump to the relevant stage to fix failures.",
     "refresh": "Refresh",
@@ -4069,6 +4193,20 @@
       "enableFailed": "Phone relay failed to start. Try again.",
       "notRunning": "Turn on phone relay first.",
       "portLocked": "The port cannot change while running. Turn off phone relay first."
+    }
+  },
+  "media": {
+    "capability": {
+      "badge": "Temporarily unavailable",
+      "loading": "Checking media capabilities…",
+      "failed": "Media capabilities could not be detected. Output features are unavailable. Check your connection and retry.",
+      "retry": "Retry",
+      "unavailableTitle": "Output features temporarily unavailable",
+      "unavailableBody": "This server is missing FFmpeg/FFprobe. Scripts, storyboards, preview, playback and editing remain available.",
+      "settingsHint": "Configure the FFmpeg directory under Settings → General → Media tools",
+      "generationHint": "Basic video generation is available; poster frames, silent-audio stripping and multi-part concatenation may be unavailable",
+      "actionDisabled": "This server is missing FFmpeg/FFprobe, so this action cannot run",
+      "probeDisabled": "This server is missing FFprobe, so media information cannot be read"
     }
   }
 }

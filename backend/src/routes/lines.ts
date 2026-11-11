@@ -14,6 +14,7 @@ import type { Context } from 'hono'
 import { and, asc, eq, isNull, or, sql } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { badRequest, notFound, now, success } from '../utils/response.js'
+import { voiceGate } from '../utils/media-guard.js'
 import { extractEpisodeLines } from '../services/dialogue-extract.js'
 import { synthesizeEpisodeLines, getDubbingState } from '../services/dubbing.js'
 import { generateTake } from '../services/line-takes.js'
@@ -242,7 +243,7 @@ episodeLines.post('/:id/lines/extract', (c) => {
   }
 })
 
-episodeLines.post('/:id/lines/synthesize', async (c) => {
+episodeLines.post('/:id/lines/synthesize', voiceGate, async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   const episode = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
@@ -460,7 +461,7 @@ lines.post('/:id/restore', (c) => {
   }
 })
 
-lines.post('/:id/synthesize', async (c) => {
+lines.post('/:id/synthesize', voiceGate, async (c) => {
   const id = parseId(c.req.param('id'))
   if (!id) return badRequest(c, '台词编号无效')
   const row = db.select().from(schema.storyboardLines).where(eq(schema.storyboardLines.id, id)).get()

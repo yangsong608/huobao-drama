@@ -34,6 +34,113 @@
           <span>{{ t('remote.readonly.notice') }}</span>
         </div>
 
+        <!-- ===== 本机与连接（应用模式 / 访客） ===== -->
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-device" aria-labelledby="settings-tab-device" tabindex="0" :hidden="tab !== 'device'">
+        <div v-if="tab === 'device'" class="settings-scroll">
+          <div class="settings-head">
+            <h2 class="settings-title">{{ t('settings.device.title') }}</h2>
+            <p class="settings-desc">{{ t('settings.device.desc') }}</p>
+          </div>
+
+          <section class="card svc-group">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
+                <span class="svc-group-title">{{ t('settings.device.connection.title') }}</span>
+                <div class="svc-group-sub">{{ deviceConnected ? t('settings.device.connection.guestDesc', { name: deviceHostName }) : t('settings.device.connection.localDesc') }}</div>
+              </div>
+              <span class="tag device-state" :class="{ 'tag-accent': !deviceConnected }">{{ deviceConnected ? t('settings.device.connection.guestBadge') : t('settings.device.connection.localBadge') }}</span>
+            </div>
+            <div class="config-row">
+              <div class="provider-badge" style="background:var(--accent-bg);color:var(--accent)"><Smartphone :size="15" /></div>
+              <div class="config-main">
+                <div class="config-line"><span class="config-name">{{ deviceConnected ? deviceHostName : t('settings.device.connection.localName') }}</span></div>
+                <div class="config-sub">{{ deviceConnected ? t('settings.device.connection.expires', { time: deviceExpiryLabel }) : t('settings.device.connection.localNote') }}</div>
+              </div>
+              <div class="device-actions">
+                <button v-if="!deviceConnected" class="btn btn-primary btn-sm" :disabled="!appBridge" @click="connectToComputer">
+                  <QrCode :size="13" />
+                  {{ t('settings.device.connection.connect') }}
+                </button>
+                <template v-else>
+                  <button class="btn btn-sm" :disabled="!appBridge" @click="returnToLocalDevice">
+                    {{ t('settings.device.connection.backToLocal') }}
+                  </button>
+                  <button class="btn btn-sm" @click="deviceDisconnectConfirm = true">
+                    {{ t('settings.device.connection.disconnect') }}
+                  </button>
+                </template>
+              </div>
+            </div>
+            <p class="config-empty">{{ t('settings.device.connection.hint') }}</p>
+          </section>
+
+          <section class="card svc-group">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
+                <span class="svc-group-title">{{ t('settings.device.sync.title') }}</span>
+                <div class="svc-group-sub">{{ t('settings.device.sync.desc') }}</div>
+              </div>
+              <button class="btn btn-sm ml-auto" disabled>{{ t('settings.device.sync.action') }}</button>
+            </div>
+            <p class="config-empty">{{ t('settings.device.sync.notReady') }}</p>
+          </section>
+
+          <section class="card svc-group">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
+                <span class="svc-group-title">{{ t('settings.device.storage.title') }}</span>
+                <div class="svc-group-sub">{{ t('settings.device.storage.desc') }}</div>
+              </div>
+              <button class="btn btn-sm ml-auto" @click="tab = 'storage'">
+                <HardDrive :size="13" />
+                {{ t('settings.device.storage.open') }}
+              </button>
+            </div>
+          </section>
+
+          <section class="card svc-group">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
+                <span class="svc-group-title">{{ t('settings.device.logs.title') }}</span>
+                <div class="svc-group-sub">{{ t('settings.device.logs.desc') }}</div>
+              </div>
+              <button class="btn btn-sm ml-auto" :disabled="deviceLogsBusy || !appBridge" @click="exportDeviceLogs">
+                <Loader2 v-if="deviceLogsBusy" :size="13" class="animate-spin" />
+                <FileText v-else :size="13" />
+                {{ deviceLogsBusy ? t('settings.device.logs.exporting') : t('settings.device.logs.export') }}
+              </button>
+            </div>
+          </section>
+
+          <section class="card svc-group">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
+                <span class="svc-group-title">{{ t('settings.device.version.title') }}</span>
+                <div class="svc-group-sub">{{ t('settings.device.version.runtimeNote') }}</div>
+              </div>
+            </div>
+            <div class="config-row">
+              <div class="provider-badge" style="background:var(--accent-bg);color:var(--accent)"><RefreshCw :size="15" /></div>
+              <div class="config-main">
+                <div class="config-line"><span class="config-name">{{ t('settings.device.version.app') }}</span></div>
+                <div class="config-sub mono">{{ deviceVersion || t('settings.device.version.unknown') }}</div>
+              </div>
+            </div>
+          </section>
+
+          <ConfirmDialog
+            :open="deviceDisconnectConfirm"
+            :title="t('settings.device.connection.disconnectTitle')"
+            :message="t('settings.device.connection.disconnectMessage')"
+            :confirm-text="t('settings.device.connection.disconnectConfirm')"
+            :loading-text="t('settings.device.connection.disconnecting')"
+            :loading="deviceDisconnecting"
+            @confirm="confirmDisconnectDevice"
+            @cancel="deviceDisconnectConfirm = false"
+          />
+        </div>
+        </div>
+
         <!-- ===== 通用（内容语言） ===== -->
         <div class="settings-tabpanel" role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general" tabindex="0" :hidden="tab !== 'general'">
         <div v-if="tab === 'general'" class="settings-scroll">
@@ -125,6 +232,7 @@
                 <button class="btn btn-sm" :disabled="mediaSaving" @click="restoreMediaAuto">{{ t('settings.general.mediaAuto') }}</button>
               </div>
             </div>
+            <MediaCapabilityNotice action="output" />
             <template v-if="mediaStatus">
               <div class="config-row">
                 <div class="provider-badge style-badge"><HardDrive :size="15" /></div>
@@ -1315,7 +1423,7 @@
             <div class="config-row">
               <div class="provider-badge style-badge"><HardDrive :size="15" /></div>
               <div class="config-main">
-                <div class="config-line"><span class="config-name">{{ t('settings.storage.dataDir') }}</span><span class="tag mono">{{ storageInfo?.mode === 'desktop' ? t('settings.storage.desktopMode') : t('settings.storage.serverMode') }}</span></div>
+                <div class="config-line"><span class="config-name">{{ t('settings.storage.dataDir') }}</span><span class="tag mono">{{ storageModeLabel }}</span></div>
                 <div class="config-sub mono truncate">{{ storageInfo?.dataDir || t('common.loading') }}</div>
                 <div class="config-sub mono truncate">{{ storageInfo?.sqlitePath || '' }}</div>
               </div>
@@ -1324,7 +1432,7 @@
               <div class="provider-badge style-badge"><Database :size="15" /></div>
               <div class="config-main">
                 <div class="config-line">
-                  <span class="config-name">{{ t('settings.storage.totalUsage', { size: formatBytes(storageInfo.usage.total) }) }}</span>
+                  <span class="config-name">{{ t('settings.storage.totalUsage', { size: formatBytes(displayTotalBytes) }) }}</span>
                   <span v-if="storageInfo.usageStale" class="tag">{{ t('settings.storage.counting') }}</span>
                 </div>
                 <div class="storage-breakdown">
@@ -1334,13 +1442,62 @@
                   <span class="tag mono">{{ t('settings.storage.breakdown.merged') }} {{ formatBytes(storageInfo.usage.merged) }}</span>
                   <span class="tag mono">{{ t('settings.storage.breakdown.uploads') }} {{ formatBytes(storageInfo.usage.uploads) }}</span>
                   <span v-if="storageInfo.usage.temp" class="tag mono">{{ t('settings.storage.breakdown.temp') }} {{ formatBytes(storageInfo.usage.temp) }}</span>
+                  <span v-if="storageInfo.usage.backups" class="tag mono">{{ t('settings.storage.breakdown.backups') }} {{ formatBytes(storageInfo.usage.backups) }}</span>
+                  <span v-if="storageInfo.usage.sync" class="tag mono">{{ t('settings.storage.breakdown.sync') }} {{ formatBytes(storageInfo.usage.sync) }}</span>
                   <span v-if="storageInfo.usage.other" class="tag mono">{{ t('settings.storage.breakdown.other') }} {{ formatBytes(storageInfo.usage.other) }}</span>
+                  <template v-if="isAppStorage && storageInfo.app">
+                    <span class="tag mono">{{ t('settings.storage.breakdown.runtime') }} {{ formatBytes(storageInfo.app.runtimeBytes) }}</span>
+                    <span class="tag mono">{{ t('settings.storage.breakdown.logs') }} {{ formatBytes(storageInfo.app.logsBytes) }}</span>
+                    <span class="tag mono">{{ t('settings.storage.breakdown.cache') }} {{ formatBytes(storageInfo.app.cacheBytes) }}</span>
+                  </template>
                 </div>
                 <div v-if="storageInfo.freeBytes != null" class="config-sub">{{ t('settings.storage.diskFree', { size: formatBytes(storageInfo.freeBytes) }) }}</div>
               </div>
             </div>
+            <p v-if="storageInfo?.storage?.level === 'warn'" class="field-hint storage-warn">{{ t('settings.storage.warn', { size: formatBytes(storageInfo.storage.warnBytes) }) }}</p>
+            <p v-else-if="storageInfo?.storage?.level === 'blocked'" class="field-hint storage-blocked">{{ t('settings.storage.blocked', { size: formatBytes(storageInfo.storage.blockBytes) }) }}</p>
             <p class="config-empty">{{ t('settings.storage.note') }}</p>
-            <p v-if="!isDesktopMode" class="config-empty">{{ t('settings.storage.serverNote') }}</p>
+            <p v-if="!isDesktopMode && !isAppStorage" class="config-empty">{{ t('settings.storage.serverNote') }}</p>
+            <p v-if="isAppStorage" class="config-empty">{{ t('settings.storage.appNote') }}</p>
+            <p v-if="isAppStorage" class="config-empty">{{ t('settings.storage.appUninstall') }}</p>
+          </section>
+
+          <section v-if="isAppStorage" class="card svc-group">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
+                <span class="svc-group-title">{{ t('settings.storage.backups.title') }}</span>
+                <div class="svc-group-sub">{{ t('settings.storage.backups.desc', { count: backupInfo?.maxBackups || 3 }) }}</div>
+              </div>
+              <button class="btn btn-primary btn-sm ml-auto" :disabled="backupBusy" @click="createBackup">
+                <Loader2 v-if="backupBusy" :size="13" class="animate-spin" />
+                <Database v-else :size="13" />
+                {{ t('settings.storage.backups.create') }}
+              </button>
+            </div>
+            <p v-if="backupInfo?.pendingRestore" class="field-hint storage-warn">
+              {{ t('settings.storage.backups.pending', { name: backupInfo.pendingRestore.name }) }}
+            </p>
+            <p v-if="backupInfo?.lastRestore" class="field-hint" :class="backupInfo.lastRestore.ok ? '' : 'migrate-warn'">
+              {{ backupInfo.lastRestore.ok
+                ? t('settings.storage.backups.lastRestoreOk', { name: backupInfo.lastRestore.name, time: new Date(backupInfo.lastRestore.restoredAt).toLocaleString() })
+                : t('settings.storage.backups.lastRestoreFailed', { name: backupInfo.lastRestore.name, error: backupInfo.lastRestore.error || '' }) }}
+            </p>
+            <p v-if="!backupInfo?.backups?.length" class="config-empty">{{ t('settings.storage.backups.empty') }}</p>
+            <div v-for="item in backupInfo?.backups || []" :key="item.name" class="backup-row">
+              <div class="config-main">
+                <div class="config-line">
+                  <span class="config-name mono">{{ item.name }}</span>
+                  <span class="tag">{{ backupReasonLabel(item.reason) }}</span>
+                </div>
+                <div class="config-sub">{{ new Date(item.createdAt).toLocaleString() }} · {{ formatBytes(item.sizeBytes) }}</div>
+                <div class="config-sub mono truncate">{{ item.sha256 }}</div>
+              </div>
+              <div class="backup-actions">
+                <a class="btn btn-sm" :href="backupDownloadUrl(item.name)" :download="item.name">{{ t('settings.storage.backups.download') }}</a>
+                <button class="btn btn-sm" :disabled="backupBusy || !!backupInfo?.pendingRestore" @click="askRestore(item)">{{ t('settings.storage.backups.restore') }}</button>
+                <button class="btn btn-sm" :disabled="backupBusy || backupInfo?.pendingRestore?.name === item.name" @click="askDeleteBackup(item)">{{ t('settings.storage.backups.delete') }}</button>
+              </div>
+            </div>
           </section>
         </div>
         </div>
@@ -1434,9 +1591,9 @@
         <div v-if="tab === 'about'" class="settings-scroll">
           <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.about.title') }}</h2>
-            <p class="settings-desc">{{ t('settings.about.desc') }}</p>
+            <p class="settings-desc">{{ isAppMode ? t('settings.about.appDesc') : t('settings.about.desc') }}</p>
           </div>
-          <section v-if="!isGuest" class="card svc-group">
+          <section v-if="!isGuest && !isAppMode" class="card svc-group">
             <div class="svc-group-head">
               <div class="svc-group-heading">
                 <span class="svc-group-title">{{ t('settings.about.currentVersion', { v: updateState?.currentVersion || '…' }) }}</span>
@@ -1500,7 +1657,8 @@
             </div>
             <p v-else class="config-empty">{{ t('settings.about.empty') }}</p>
           </section>
-          <p v-if="desktopBridge" class="config-empty">{{ t('settings.about.note') }}</p>
+          <p v-if="isAppMode" class="config-empty">{{ t('settings.about.appNote') }}</p>
+          <p v-else-if="desktopBridge" class="config-empty">{{ t('settings.about.note') }}</p>
           <p v-else class="config-empty">{{ t('settings.about.serverNote') }}</p>
         </div>
         </div>
@@ -2136,7 +2294,7 @@
 
     <!-- 迁移确认（自建 dialog：ConfirmDialog 的删除语义/Enter 快捷键不合此处） -->
     <div v-if="migrateDialog" class="overlay" @click.self="!migrating && (migrateDialog = false)">
-      <form class="dialog" role="dialog" aria-modal="true" aria-labelledby="settings-migrate-title" @submit.prevent="startMigrate" @keydown="onSettingsDialogKeydown">
+      <form class="dialog migrate-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-migrate-title" @submit.prevent="startMigrate" @keydown="onSettingsDialogKeydown">
         <div class="dialog-head"><span class="dialog-title" id="settings-migrate-title">{{ t('settings.migrate.title') }}</span></div>
         <div class="dialog-body">
           <div class="field">
@@ -2165,6 +2323,26 @@
         </div>
       </form>
     </div>
+    <ConfirmDialog
+      :open="!!restoreTarget"
+      :title="t('settings.storage.backups.restoreTitle')"
+      :message="t('settings.storage.backups.restoreMessage', { name: restoreTarget?.name || '' })"
+      :confirm-text="t('settings.storage.backups.restoreConfirm')"
+      :loading-text="t('settings.storage.backups.restoring')"
+      :loading="backupBusy"
+      @cancel="restoreTarget = null"
+      @confirm="confirmRestore"
+    />
+    <ConfirmDialog
+      :open="!!deleteTarget"
+      :title="t('settings.storage.backups.deleteTitle')"
+      :message="t('settings.storage.backups.deleteMessage', { name: deleteTarget?.name || '' })"
+      :confirm-text="t('common.delete')"
+      :loading-text="t('common.deleteLoading')"
+      :loading="backupBusy"
+      @cancel="deleteTarget = null"
+      @confirm="confirmDeleteBackup"
+    />
     <RemoteAccessDialog :open="remoteDialogOpen" :next="route.fullPath" @close="closeRemoteDialog" />
     <ConfirmDialog
       :open="!!remoteRevokeDevice"
@@ -2226,7 +2404,7 @@
 </template>
 
 <script setup>
-import { Plus, Pencil, Trash2, FileText, ChevronDown, Check, Loader2, Bot, Cpu, Sparkles, Palette, ExternalLink, Star, HardDrive, Database, RefreshCw, Download, Languages, SunMoon, X, Plug, KeyRound, Copy, ListOrdered, Mic, Music, BookOpen, Layers, ShieldCheck, MonitorSmartphone, TriangleAlert } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, FileText, ChevronDown, Check, Loader2, Bot, Cpu, Sparkles, Palette, ExternalLink, Star, HardDrive, Database, RefreshCw, Download, Languages, SunMoon, X, Plug, KeyRound, Copy, ListOrdered, Mic, Music, BookOpen, Layers, ShieldCheck, MonitorSmartphone, TriangleAlert, Smartphone, QrCode } from 'lucide-vue-next'
 import BaseSelect from '~/components/BaseSelect.vue'
 import QueuePanel from '~/components/QueuePanel.vue'
 import RemoteAccessDialog from '~/components/RemoteAccessDialog.vue'
@@ -2234,11 +2412,14 @@ import RemoteDeviceList from '~/components/RemoteDeviceList.vue'
 import { toast } from 'vue-sonner'
 import { toastError } from '~/composables/useToast'
 import { useI18n } from 'vue-i18n'
-import { aiConfigAPI, promptAPI, skillsAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, uploadAPI, pipelineRuleAPI, breakdownMethodAPI, dubbingAPI, bgmAPI } from '~/composables/useApi'
-import { useRemoteRole, remoteErrorMessage } from '~/composables/useRemoteGuest'
+import { aiConfigAPI, promptAPI, skillsAPI, storageAPI, backupAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, uploadAPI, pipelineRuleAPI, breakdownMethodAPI, dubbingAPI, bgmAPI, api } from '~/composables/useApi'
+import { useRemoteRole, remoteErrorMessage, logoutRemoteSession } from '~/composables/useRemoteGuest'
 import { useRemotePairing } from '~/composables/useRemotePairing'
 import { presenceState, refreshPresenceEntries, safePresenceRelayPath } from '~/composables/usePresence'
 import { useDesktopBridge } from '~/composables/useDesktopBridge'
+import { isAppClient, useAppBridge } from '~/composables/useAppBridge'
+import MediaCapabilityNotice from '~/components/MediaCapabilityNotice.vue'
+import { useMediaCapabilities } from '~/composables/useMediaCapabilities'
 import { useMigrateState } from '~/composables/useMigrateState'
 import { useTheme } from '~/composables/useTheme'
 import { useViewport } from '~/composables/useViewport'
@@ -2255,25 +2436,37 @@ const router = useRouter()
 const remoteRole = useRemoteRole()
 const isGuest = computed(() => remoteRole.role === 'guest')
 const remoteReadonly = computed(() => remoteRole.role === 'guest' && remoteRole.readonly)
+const isAppMode = isAppClient()
 const GUEST_HIDDEN_TABS = new Set(['ai', 'storage', 'mcp', 'agents', 'remote'])
+const APP_HIDDEN_TABS = new Set(['remote', 'mcp'])
 
-const SETTINGS_TABS = ['ai', 'dubbing', 'novel', 'general', 'remote', 'styles', 'rules', 'breakdown', 'audit', 'agents', 'queue', 'storage', 'mcp', 'about']
+function tabAllowed(id) {
+  if (id === 'device') return isAppMode || isGuest.value
+  if (isGuest.value && GUEST_HIDDEN_TABS.has(id)) return false
+  if (isAppMode && APP_HIDDEN_TABS.has(id)) return false
+  return true
+}
+
+const SETTINGS_TABS = ['device', 'ai', 'dubbing', 'novel', 'general', 'remote', 'styles', 'rules', 'breakdown', 'audit', 'agents', 'queue', 'storage', 'mcp', 'about']
 const requestedTab = typeof route.query.tab === 'string' ? route.query.tab : ''
 const showBrandImage = ref(true)
 function initialTab() {
-  if (SETTINGS_TABS.includes(requestedTab) && !(isGuest.value && GUEST_HIDDEN_TABS.has(requestedTab))) return requestedTab
+  if (SETTINGS_TABS.includes(requestedTab) && tabAllowed(requestedTab)) return requestedTab
+  if (isAppMode) return 'device'
   return isGuest.value ? 'dubbing' : 'ai'
 }
 const tab = ref(initialTab())
 watch(tab, (value) => {
   if (route.query.tab !== value) router.replace({ query: { ...route.query, tab: value } })
+  if (value === 'device') void loadDeviceInfo()
 })
 watch(() => route.query.tab, (value) => {
   const next = typeof value === 'string' ? value : ''
-  if (SETTINGS_TABS.includes(next) && !(isGuest.value && GUEST_HIDDEN_TABS.has(next)) && next !== tab.value) tab.value = next
+  if (SETTINGS_TABS.includes(next) && tabAllowed(next) && next !== tab.value) tab.value = next
 })
 const baseTabs = computed(() => {
   const tabs = [
+    { id: 'device', label: t('settings.tabs.device'), icon: Smartphone },
     { id: 'ai', label: t('settings.tabs.ai'), icon: Cpu },
     { id: 'dubbing', label: t('settings.tabs.dubbing'), icon: Mic },
     { id: 'novel', label: t('settings.tabs.novel'), icon: BookOpen },
@@ -2289,8 +2482,7 @@ const baseTabs = computed(() => {
     { id: 'mcp', label: t('settings.tabs.mcp'), icon: Plug },
     { id: 'about', label: t('settings.tabs.about'), icon: RefreshCw },
   ]
-  if (!isGuest.value) return tabs
-  return tabs.filter(item => !GUEST_HIDDEN_TABS.has(item.id))
+  return tabs.filter(item => tabAllowed(item.id))
 })
 // 深链或角色变化后回到第一个可见页签，URL 不保留隐藏页签
 watch([() => remoteRole.ready, isGuest], () => {
@@ -2298,6 +2490,72 @@ watch([() => remoteRole.ready, isGuest], () => {
   if (baseTabs.value.some(item => item.id === tab.value)) return
   tab.value = baseTabs.value[0]?.id || 'general'
 }, { immediate: true })
+
+// ===== 本机与连接（应用模式 / 访客） =====
+const deviceConnected = computed(() => remoteRole.role === 'guest' && remoteRole.paired)
+const deviceHostName = computed(() => remoteRole.serverName || t('settings.device.connection.unknownHost'))
+const deviceExpiryLabel = computed(() => remoteRole.expiresAt ? new Date(remoteRole.expiresAt).toLocaleString() : '—')
+const deviceDisconnectConfirm = ref(false)
+const deviceDisconnecting = ref(false)
+const deviceLogsBusy = ref(false)
+const deviceVersion = ref('')
+
+async function loadDeviceInfo() {
+  if (!isAppMode || deviceVersion.value) return
+  try {
+    const health = await api.get('/health')
+    deviceVersion.value = health?.version || ''
+  } catch { /* 版本读取失败不阻塞连接分区 */ }
+}
+
+function connectToComputer() {
+  if (!appBridge) {
+    toast.warning(t('settings.device.connection.scanUnavailable'))
+    return
+  }
+  appBridge.openScanner()
+}
+
+function returnToLocalDevice() {
+  if (!appBridge) {
+    toast.warning(t('settings.device.connection.localUnavailable'))
+    return
+  }
+  appBridge.backToLocal()
+}
+
+async function confirmDisconnectDevice() {
+  if (deviceDisconnecting.value) return
+  deviceDisconnecting.value = true
+  try {
+    await logoutRemoteSession()
+    deviceDisconnectConfirm.value = false
+    if (appBridge) appBridge.backToLocal()
+    else await router.push('/pair')
+  } catch (e) {
+    toastError(e, { fallback: 'settings.device.connection.disconnectFailed' })
+  } finally {
+    deviceDisconnecting.value = false
+  }
+}
+
+async function exportDeviceLogs() {
+  if (deviceLogsBusy.value) return
+  if (!appBridge?.exportLogs) {
+    toast.warning(t('settings.device.logs.unavailable'))
+    return
+  }
+  deviceLogsBusy.value = true
+  try {
+    const result = await appBridge.exportLogs()
+    if (result?.ok) toast.success(t('settings.device.logs.exported'))
+    else toast.error(result?.error || t('settings.device.logs.failed'))
+  } catch (e) {
+    toastError(e, { fallback: 'settings.device.logs.failed' })
+  } finally {
+    deviceLogsBusy.value = false
+  }
+}
 
 // ===== 手机接力（仅主机可见） =====
 const {
@@ -2352,7 +2610,7 @@ function notifyRemoteError() {
 }
 
 async function loadRemoteTab() {
-  if (isGuest.value) return
+  if (isGuest.value || isAppMode) return
   await refreshRemoteStatus()
   if (isGuest.value) return
   syncRemoteForm()
@@ -3826,10 +4084,12 @@ function openAuditorAgent() {
 onMounted(() => {
   loadStylePresets()
   loadPipelineRules()
+  if (tab.value === 'device') void loadDeviceInfo()
   if (tab.value === 'dubbing') loadDubbing()
   if (tab.value === 'novel') loadNovel()
   if (tab.value === 'breakdown') loadBreakdownMethods()
   if (tab.value === 'audit') loadAuditPolicy()
+  if (tab.value === 'storage' && !isGuest.value) loadStorage()
 })
 
 // 主机级设置等角色明确后再加载；访客不发起这些请求
@@ -3841,7 +4101,7 @@ function loadHostSettingsOnce() {
   loadAgents()
   loadAllSkills()
   loadAgentPrompt(selectedAgent.value)
-  loadMcp()
+  if (!isAppMode) loadMcp()
   loadMediaSettings()
   if (tab.value === 'remote') void loadRemoteTab()
 }
@@ -3849,7 +4109,7 @@ watch([() => remoteRole.ready, isGuest], ([ready]) => {
   if (!ready || isGuest.value) return
   loadHostSettingsOnce()
   if (tab.value === 'storage') loadStorage()
-  if (tab.value === 'about') refreshUpdateState()
+  if (tab.value === 'about' && !isAppMode) refreshUpdateState()
 }, { immediate: true })
 
 // ===== 应用内引导（设置页）：快捷配置 + 手动模板两步 =====
@@ -3872,6 +4132,24 @@ const migrateFiles = ref(true)
 const migrating = ref(false)
 
 const isDesktopMode = computed(() => storageInfo.value?.mode === 'desktop' && !!desktopBridge)
+const appBridge = useAppBridge()
+const isAppStorage = computed(() => storageInfo.value?.mode === 'app')
+const storageModeLabel = computed(() => {
+  const mode = storageInfo.value?.mode
+  if (mode === 'app') return t('settings.storage.appMode')
+  if (mode === 'desktop') return t('settings.storage.desktopMode')
+  return t('settings.storage.serverMode')
+})
+const displayTotalBytes = computed(() => {
+  const info = storageInfo.value
+  if (!info) return 0
+  if (info.mode === 'app' && info.app) return info.app.totalBytes || info.usage?.total || 0
+  return info.usage?.total || 0
+})
+const backupInfo = ref(null)
+const backupBusy = ref(false)
+const restoreTarget = ref(null)
+const deleteTarget = ref(null)
 
 // 存储占用 2s 轮询至新鲜（后端 stale-while-revalidate）；隐藏暂停、卸载必停
 const usagePoll = useVisibilityPolling(async () => {
@@ -3891,7 +4169,90 @@ async function loadStorage() {
     // 占用为空或统计已过期时轮询至新鲜
     stopUsagePoll()
     if (storageInfo.value?.usageStale || !storageInfo.value?.usage) usagePoll.start()
+    if (storageInfo.value?.mode === 'app') await loadBackups()
   } catch (e) { toastError(e, { fallback: 'settings.storage.loadFailed' }) }
+}
+
+async function loadBackups() {
+  try {
+    backupInfo.value = await backupAPI.list()
+  } catch (e) {
+    toastError(e, { fallback: 'settings.storage.backups.loadFailed' })
+  }
+}
+
+function backupReasonLabel(reason) {
+  const known = ['first-start', 'upgrade', 'pre-sync', 'pre-restore', 'manual']
+  return t(`settings.storage.backups.reasons.${known.includes(reason) ? reason : 'manual'}`)
+}
+
+function backupDownloadUrl(name) {
+  return backupAPI.downloadUrl(name)
+}
+
+async function createBackup() {
+  if (backupBusy.value) return
+  backupBusy.value = true
+  try {
+    await backupAPI.create()
+    toast.success(t('settings.storage.backups.created'))
+    await loadStorage()
+  } catch (e) {
+    toastError(e, { fallback: 'settings.storage.backups.createFailed' })
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+function askRestore(item) {
+  if (backupBusy.value) return
+  restoreTarget.value = item
+}
+
+async function confirmRestore() {
+  const target = restoreTarget.value
+  if (!target || backupBusy.value) return
+  if (!appBridge?.restartBackend) {
+    toast.error(t('settings.storage.backups.restoreBridgeMissing'))
+    return
+  }
+  backupBusy.value = true
+  try {
+    await backupAPI.restore(target.name)
+    const accepted = appBridge.restartBackend()
+    restoreTarget.value = null
+    if (!accepted) {
+      toast.error(t('settings.storage.backups.restartFailed'))
+      return
+    }
+    // 壳进入重启遮罩；恢复完成后自动重载本页，无需前端轮询
+    toast.success(t('settings.storage.backups.restoreStarted'))
+  } catch (e) {
+    toastError(e, { fallback: 'settings.storage.backups.restoreFailed' })
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+function askDeleteBackup(item) {
+  if (backupBusy.value) return
+  deleteTarget.value = item
+}
+
+async function confirmDeleteBackup() {
+  const target = deleteTarget.value
+  if (!target || backupBusy.value) return
+  backupBusy.value = true
+  try {
+    await backupAPI.del(target.name)
+    deleteTarget.value = null
+    toast.success(t('settings.storage.backups.deleted'))
+    await loadStorage()
+  } catch (e) {
+    toastError(e, { fallback: 'settings.storage.backups.deleteFailed' })
+  } finally {
+    backupBusy.value = false
+  }
 }
 
 watch(tab, (active) => {
@@ -3951,6 +4312,7 @@ const MEDIA_SOURCE_LABELS = {
 const mediaFfmpegDir = ref('')
 const mediaStatus = ref(null)
 const mediaSaving = ref(false)
+const mediaCaps = useMediaCapabilities()
 
 function applyMediaPayload(payload) {
   mediaFfmpegDir.value = payload?.settings?.ffmpegDir || ''
@@ -3970,6 +4332,7 @@ async function saveMediaSettings() {
   mediaSaving.value = true
   try {
     applyMediaPayload(await settingsAPI.saveMedia(mediaFfmpegDir.value.trim()))
+    void mediaCaps.refresh()
     if (mediaStatus.value?.ffmpeg?.available && mediaStatus.value?.ffprobe?.available) {
       toast.success(t('settings.general.mediaSaved'))
     } else {
@@ -4008,6 +4371,7 @@ const updateApplying = ref(false)
 const serverUpdateMode = ref('manual') // 'watchtower' | 'manual'，仅服务器模式有意义
 
 async function refreshUpdateState() {
+  if (isAppMode) return
   try {
     if (desktopBridge) {
       updateState.value = await desktopBridge.getUpdateState()
@@ -4233,6 +4597,7 @@ onBeforeUnmount(stopUsagePoll)
 .settings-nav {
   width: 220px; flex-shrink: 0; padding: 16px 12px 16px; border-right: 1px solid var(--border);
   display: flex; flex-direction: column; gap: 14px;
+  overflow-y: auto; min-height: 0; overscroll-behavior: contain;
 }
 .nav-group { display: flex; flex-direction: column; gap: 2px; }
 .nav-group-label {
@@ -4704,6 +5069,21 @@ onBeforeUnmount(stopUsagePoll)
 }
 
 /* 存储位置 */
+.device-state {
+  flex: none;
+  align-self: flex-start;
+  white-space: nowrap;
+}
+.device-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.device-actions .btn {
+  min-height: 36px;
+}
 .storage-breakdown {
   display: flex;
   flex-wrap: wrap;
@@ -4712,6 +5092,30 @@ onBeforeUnmount(stopUsagePoll)
 }
 .migrate-warn {
   color: var(--error);
+}
+.migrate-dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+.storage-warn {
+  color: var(--warning);
+}
+.storage-blocked {
+  color: var(--error);
+}
+.backup-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+}
+.backup-row + .backup-row {
+  border-top: 1px solid var(--border);
+}
+.backup-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .update-bar {
   width: 220px;
@@ -4812,6 +5216,8 @@ onBeforeUnmount(stopUsagePoll)
   .settings-readonly-banner { width: calc(100% - 32px); }
   .remote-tab-actions { width: 100%; justify-content: flex-start; }
   .remote-tab-actions .btn { min-height: var(--tap-min, 44px); }
+  .device-actions { width: 100%; justify-content: flex-start; }
+  .device-actions .btn { min-height: var(--tap-min, 44px); }
   .remote-settings-grid { grid-template-columns: 1fr; padding: 12px 16px; }
   .field-row, .cfg-setting-grid, .huobao-quick-row, .breakdown-layout { grid-template-columns: 1fr; }
   .config-row { flex-wrap: wrap; }
@@ -4829,6 +5235,20 @@ onBeforeUnmount(stopUsagePoll)
     max-height: calc(var(--app-vvh, 100dvh) - var(--safe-top, 0px) - var(--safe-bottom, 0px) - 24px);
   }
   .breakdown-layout { grid-template-columns: 1fr; }
+}
+/* 窄横屏（如 915×412）：竖向页签高度不足，改为顶部横向页签 */
+@media (max-width: 1080px) and (max-height: 600px) {
+  .settings-layout { flex-direction: column; }
+  .settings-nav {
+    width: auto; flex-direction: row; align-items: center; gap: 6px;
+    overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
+    padding: 8px 10px calc(8px + var(--safe-bottom, 0px));
+    border-right: none; border-bottom: 1px solid var(--border);
+  }
+  .nav-group { flex-direction: row; align-items: center; gap: 4px; }
+  .nav-group-label { display: none; }
+  .nav-item { width: auto; flex: 0 0 auto; min-height: var(--tap-min, 44px); white-space: nowrap; }
+  .settings-content, .settings-tabpanel { min-height: 0; }
 }
 
 /* 粗指针：复合选择器的 scoped 特异性高于全局兜底，需在本页补足命中区 */

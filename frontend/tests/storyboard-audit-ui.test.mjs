@@ -3,6 +3,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 const episode = readFileSync(new URL('../app/views/drama/episode.vue', import.meta.url), 'utf8')
+const storyboardList = readFileSync(new URL('../app/components/EpisodeStoryboardList.vue', import.meta.url), 'utf8')
+const auditDrawer = readFileSync(new URL('../app/components/StoryboardAuditDrawer.vue', import.meta.url), 'utf8')
+const taskDrawer = readFileSync(new URL('../app/components/EpisodeTaskDrawer.vue', import.meta.url), 'utf8')
 const api = readFileSync(new URL('../app/composables/useApi.ts', import.meta.url), 'utf8')
 const detail = readFileSync(new URL('../app/views/drama/detail.vue', import.meta.url), 'utf8')
 const locales = ['zh', 'en', 'ja', 'ko'].map(lang => [
@@ -37,27 +40,27 @@ test('视频制作页工具栏提供动作检验按钮与状态标签', () => {
 })
 
 test('左侧每个镜头卡片在摄像头按钮右侧显示逐镜检验状态图标', () => {
-  const rowStart = episode.indexOf('v-for="task in videoTaskRows"')
-  const rowEnd = episode.indexOf('class="video-task-footer"')
-  const row = episode.slice(rowStart, rowEnd)
+  const rowStart = storyboardList.indexOf('v-for="task in rows"')
+  const rowEnd = storyboardList.indexOf('class="video-task-footer"')
+  const row = storyboardList.slice(rowStart, rowEnd)
   const cameraAt = row.indexOf('class="btn btn-icon btn-sm video-task-action"')
   const auditAt = row.indexOf('class="btn btn-icon btn-sm video-task-audit"')
   const deleteAt = row.indexOf('class="btn btn-icon btn-sm video-task-delete"')
   assert.ok(cameraAt > 0, '镜头卡片应有摄像头按钮')
   assert.ok(auditAt > cameraAt, '检验图标应在摄像头按钮右侧')
   assert.ok(deleteAt > auditAt, '检验图标应在删除按钮之前')
-  assert.match(row, /@click\.stop="openAuditPanel\(task\.storyboard\.id\)"/)
-  assert.match(row, /auditShotState\(task\.storyboard\)/)
+  assert.match(row, /@click\.stop="emit\('open-audit', task\.storyboard\.id\)"/)
+  assert.match(row, /task\.auditStatus/)
   assert.match(row, /video-task-audit-badge/)
   assert.match(row, /video-task-audit-stale/)
   assert.match(episode, /function auditShotState\(sb\)/)
   for (const state of ['pending', 'running', 'done', 'failed']) {
-    assert.match(episode, new RegExp(`is-\\$\\{shot\\.status\\}|audit-shot-${state}`), `缺少 ${state} 状态样式`)
+    assert.match(storyboardList, new RegExp(`audit-shot-${state}`), `缺少 ${state} 状态样式`)
   }
 })
 
 test('检验完成后干净的镜头不再显示检验状态标识', () => {
-  assert.match(episode, /v-if="auditShotMarkerVisible\(task\.storyboard\)"/)
+  assert.match(storyboardList, /v-if="task\.auditVisible"/)
   assert.match(episode, /function auditShotMarkerVisible\(sb\) \{/)
   assert.match(episode, /function auditShotMarkerVisible\(sb\) \{[\s\S]{0,360}if \(!job\) return true/)
   assert.match(episode, /function auditShotMarkerVisible\(sb\) \{[\s\S]{0,360}if \(auditRunning\.value\) return true/)
@@ -66,19 +69,17 @@ test('检验完成后干净的镜头不再显示检验状态标识', () => {
 })
 
 test('镜头行操作按钮收进同一容器，栅格固定三列避免删除按钮换行', () => {
-  assert.match(episode, /class="video-task-actions"[\s\S]{0,600}class="btn btn-icon btn-sm video-task-action"/)
-  assert.match(episode, /class="video-task-actions"[\s\S]{0,4000}class="btn btn-icon btn-sm video-task-delete"/)
-  assert.match(episode, /\.video-task-row \{\s*display: grid;\s*grid-template-columns: 56px minmax\(0, 1fr\) auto;/)
-  assert.match(episode, /\.video-task-actions \{[^}]*justify-self: end;[^}]*display: flex;/)
+  assert.match(storyboardList, /class="video-task-actions"[\s\S]{0,600}class="btn btn-icon btn-sm video-task-action"/)
+  assert.match(storyboardList, /class="video-task-actions"[\s\S]{0,4000}class="btn btn-icon btn-sm video-task-delete"/)
+  assert.match(storyboardList, /\.video-task-row \{\s*display: grid;\s*grid-template-columns: 56px minmax\(0, 1fr\) auto;/)
+  assert.match(storyboardList, /\.video-task-actions \{[^}]*justify-self: end;[^}]*display: flex;/)
 })
 
 test('检验抽屉位于遮罩容器内，避免被遮罩压暗与拦截点击', () => {
-  assert.match(episode, /<div v-if="auditPanel\.open" class="task-drawer-overlay" @click\.self="closeAuditPanel">\s*<aside\s+class="task-drawer audit-drawer"/)
-  assert.ok(!/<div v-if="auditPanel\.open" class="task-drawer-overlay"[^>]*\/>/.test(episode), '遮罩不能自闭合')
-  const drawerStart = episode.indexOf('class="task-drawer audit-drawer"')
-  const nextOverlay = episode.indexOf('class="overlay asset-detail-overlay"', drawerStart)
-  const section = episode.slice(drawerStart, nextOverlay)
-  assert.match(section, /<\/aside>\s*<\/div>\s*<div v-if="assetDetail\.open/, '检验抽屉必须在遮罩容器闭合前结束')
+  assert.match(auditDrawer, /<div v-if="open" class="task-drawer-overlay" @click\.self="emit\('close'\)">\s*<aside\s+class="task-drawer audit-drawer"/)
+  assert.ok(!/<div v-if="open" class="task-drawer-overlay"[^>]*\/>/.test(auditDrawer), '遮罩不能自闭合')
+  assert.match(episode, /<StoryboardAuditDrawer[\s\S]*?@close="closeAuditPanel"/, '分集页必须挂载检验抽屉组件')
+  assert.match(auditDrawer, /<\/aside>\s*<\/div>\s*<\/template>/, '检验抽屉必须在遮罩容器闭合前结束')
 })
 
 test('检验按最新任务轮询，拆分完成后补读并只应用最新请求', () => {
@@ -105,23 +106,28 @@ test('检验进行中禁用会改动分镜的入口', () => {
 })
 
 test('检验面板按五项分组展示问题、过滤、修复记录与撤销', () => {
-  assert.match(episode, /class="task-drawer audit-drawer"/)
-  assert.match(episode, /auditCheckGroups/)
-  assert.match(episode, /episode\.audit\.check\.\$\{group\.check\}/)
-  assert.match(episode, /auditPanelFilter/)
-  assert.match(episode, /episode\.audit\.filter\.\$\{option\.key\}/)
-  assert.match(episode, /auditPanelIssues/)
-  assert.match(episode, /auditIssueText\(issue\)/)
-  assert.match(episode, /issue\.check === 2 && issue\.suggestedTransition/)
-  assert.match(episode, /openTransitionCreateFromIssue\(issue\)/)
-  assert.match(episode, /issue\.check === 5/)
-  assert.match(episode, /gotoAssetPage\(\)/)
-  assert.match(episode, /undoAuditRepair\(\)/)
+  assert.match(auditDrawer, /class="task-drawer audit-drawer"/)
+  assert.match(episode, /const auditCheckGroups = computed/)
+  assert.match(auditDrawer, /v-for="group in checkGroups"/)
+  assert.match(auditDrawer, /episode\.audit\.check\.\$\{group\.check\}/)
+  assert.match(episode, /const auditPanelFilter = computed/)
+  assert.match(auditDrawer, /episode\.audit\.filter\.\$\{option\.key\}/)
+  assert.match(episode, /const auditPanelIssues = computed/)
+  assert.match(auditDrawer, /function issueText\(issue: any\)/)
+  assert.match(auditDrawer, /\{\{ issueText\(issue\) \}\}/)
+  assert.match(auditDrawer, /issue\.check === 2 && issue\.suggestedTransition/)
+  assert.match(episode, /function openTransitionCreateFromIssue\(issue\)/)
+  assert.match(auditDrawer, /emit\('create-transition', issue\)/)
+  assert.match(auditDrawer, /issue\.check === 5/)
+  assert.match(episode, /function gotoAssetPage\(\)/)
+  assert.match(auditDrawer, /emit\('goto-assets'\)/)
+  assert.match(episode, /async function undoAuditRepair\(\)/)
+  assert.match(auditDrawer, /emit\('undo'\)/)
   assert.match(episode, /storyboardAuditAPI\.undo\(/)
-  assert.match(episode, /auditJob\.repair_log/)
-  assert.match(episode, /episode\.audit\.empty\.clean/)
-  assert.match(episode, /episode\.audit\.empty\.ruleOnly/)
-  assert.match(episode, /episode\.audit\.empty\.stale/)
+  assert.match(auditDrawer, /job\?\.repair_log/)
+  assert.match(auditDrawer, /episode\.audit\.empty\.clean/)
+  assert.match(auditDrawer, /episode\.audit\.empty\.ruleOnly/)
+  assert.match(auditDrawer, /episode\.audit\.empty\.stale/)
 })
 
 test('点击逐镜图标打开面板并只显示该镜问题，可定位与回到整集', () => {
@@ -130,8 +136,8 @@ test('点击逐镜图标打开面板并只显示该镜问题，可定位与回�
   assert.match(episode, /function auditIssueVisible\(issue\)/)
   assert.match(episode, /issue\.storyboardId === auditPanel\.value\.shotId/)
   assert.match(episode, /function locateAuditShot\(issue\)/)
-  assert.match(episode, /episode\.audit\.panel\.showAllShots/)
-  assert.match(episode, /episode\.audit\.panel\.locateShot/)
+  assert.match(auditDrawer, /episode\.audit\.panel\.showAllShots/)
+  assert.match(auditDrawer, /episode\.audit\.panel\.locateShot/)
 })
 
 test('检查 2 问题卡可直接打开过渡镜头创建弹窗，并按建议预填类型', () => {
@@ -156,7 +162,8 @@ test('过渡建议按字符串类型与关联分镜定位边界，兼容蛇形�
 
 test('检验完成与仅规则状态使用后端 done / skipped_no_model 字面量', () => {
   assert.match(episode, /if \(job\.status === 'done'\) \{[\s\S]{0,160}episode\.audit\.runDone/)
-  assert.match(episode, /auditJob\?\.semantic_status === 'skipped_no_model'/)
+  assert.match(episode, /status === 'skipped_no_model'/)
+  assert.match(auditDrawer, /job\?\.semantic_status === 'skipped_no_model'/)
 })
 
 test('检验完成自动刷新分镜并保持按 ID 选中，插入过渡镜头后可见', () => {
@@ -170,18 +177,18 @@ test('检验完成自动刷新分镜并保持按 ID 选中，插入过渡镜头�
   assert.match(episode, /episode\.audit\.insertedDone/)
   assert.match(episode, /function storyboardTransitionKind\(sb\)/)
   assert.match(episode, /transition_kind/)
-  assert.match(episode, /video-task-transition-tag/)
+  assert.match(storyboardList, /video-task-transition-tag/)
   assert.match(episode, /episode\.audit\.transition\.badge/)
 })
 
 test('语义检验关闭、部分失败与截断在面板明确提示', () => {
   assert.match(episode, /const auditSemanticNote = computed\(/)
-  assert.match(episode, /auditJob\?\.semantic_status === 'disabled'/)
-  assert.match(episode, /episode\.audit\.empty\.semanticDisabled/)
-  assert.match(episode, /episode\.audit\.empty\.semanticPartial/)
-  assert.match(episode, /episode\.audit\.empty\.semanticFailed/)
-  assert.match(episode, /episode\.audit\.empty\.semanticTruncated/)
-  assert.match(episode, /class="audit-semantic-note"/)
+  assert.match(episode, /if \(status === 'disabled'\) return t\('episode\.audit\.empty\.semanticDisabled'\)/)
+  assert.match(episode, /'episode\.audit\.empty\.semanticDisabled'/)
+  assert.match(episode, /'episode\.audit\.empty\.semanticPartial'/)
+  assert.match(episode, /'episode\.audit\.empty\.semanticFailed'/)
+  assert.match(episode, /'episode\.audit\.empty\.semanticTruncated'/)
+  assert.match(auditDrawer, /class="audit-semantic-note"/)
 })
 
 test('过渡镜头弹窗校验类型、时长 2–5 秒、文字 20/40 字与场景归属', () => {
@@ -235,7 +242,7 @@ test('过渡卡片展示类型与降级状态，导出页可新建自定义过�
 })
 
 test('任务中心识别整集动作检验任务', () => {
-  assert.match(episode, /if \(kind === 'storyboard_audit'\) return t\('episode\.tasks\.runStoryboardAudit'\)/)
+  assert.match(taskDrawer, /if \(kind === 'storyboard_audit'\) return t\('episode\.tasks\.runStoryboardAudit'\)/)
 })
 
 test('四语言补齐动作检验、过渡类型与自动化阶段文案', () => {
@@ -276,8 +283,8 @@ test('四语言补齐动作检验、过渡类型与自动化阶段文案', () =>
 })
 
 test('平板端检验抽屉与过渡弹窗全屏适配，检验按钮触摸区域不小于 28px', () => {
-  assert.match(episode, /\.video-task-audit\s*\{[^}]*min-width:\s*28px/)
-  assert.match(episode, /\.video-task-audit\s*\{[^}]*min-height:\s*28px/)
-  assert.match(episode, /@media \(max-width: 1180px\) \{[\s\S]{0,4000}\.audit-drawer\s*\{[^}]*width:\s*100%/)
+  assert.match(storyboardList, /\.video-task-audit\s*\{[^}]*min-width:\s*28px/)
+  assert.match(storyboardList, /\.video-task-audit\s*\{[^}]*min-height:\s*28px/)
+  assert.match(auditDrawer, /@media \(max-width: 1180px\) \{[\s\S]{0,4000}\.task-drawer\.audit-drawer\s*\{[^}]*width:\s*100%/)
   assert.match(episode, /@media \(max-width: 1180px\) \{[\s\S]{0,6000}\.transition-create-dialog\s*\{[^}]*width:\s*100%/)
 })

@@ -150,4 +150,15 @@ onMounted(() => {
 .queue-note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
 .queue-actions { display: flex; gap: 8px; }
 .queue-actions .wb-mini { background: none; border: none; padding: 0; font: inherit; font-size: 11px; color: var(--accent, #2b7bd6); cursor: pointer; }
+
+/* 手机：任务行改为可换行卡片，操作满足 44px 命中区 */
+@media (max-width: 743px) {
+  .queue-controls { gap: 8px; }
+  .queue-stats { margin-left: 0; width: 100%; }
+  .queue-row { flex-wrap: wrap; row-gap: 6px; padding: 10px; }
+  .queue-note { flex: 1 0 100%; white-space: normal; line-height: 1.5; }
+  .queue-actions { margin-left: auto; }
+  .queue-actions .wb-mini { min-width: 44px; min-height: 44px; padding: 0 8px; }
+  .queue-controls .btn { min-height: 44px; }
+}
 </style>

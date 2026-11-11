@@ -11,6 +11,8 @@ import { maybeAutoImportMysql } from './mysql-import.js'
 import { setProjectStorageSettingsLoader } from '../services/project-storage.js'
 import { MEDIA_FFMPEG_DIR_KEY } from '../utils/media-paths.js'
 import { setFfmpegDirLoader } from '../utils/ffmpeg.js'
+import { applyPendingRestore, prepareStartupBackup } from '../services/db-backups.js'
+import { DATA_ROOT } from '../utils/paths.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // src/db → 上三级为仓库根（与 utils/paths.ts 的推断层级一致）
@@ -21,7 +23,24 @@ const repoRoot = path.resolve(__dirname, '../../..')
 export const dbPath = process.env.SQLITE_PATH || path.join(repoRoot, 'data', 'huobao.sqlite3')
 fs.mkdirSync(path.dirname(dbPath), { recursive: true })
 
-const sqlite = new Database(dbPath)
+// 恢复与自动备份都必须在打开连接前完成：恢复是整文件替换，备份需要旧库一致的落盘状态。
+// 恢复请求只会由独立应用模式的后端接口写入；备份仅在 HUOBAO_APP=1 下自动触发，避免改变桌面版行为。
+const restoreResult = await applyPendingRestore({ dbPath, dataRoot: DATA_ROOT })
+if (restoreResult) {
+  const detail = restoreResult.error ? ` - ${restoreResult.error}` : ''
+  console.log(`[db] 启动恢复${restoreResult.ok ? '完成' : '失败'}: ${restoreResult.name}${detail}`)
+}
+if (process.env.HUOBAO_APP === '1') {
+  const startupBackup = await prepareStartupBackup({
+    dbPath,
+    dataRoot: DATA_ROOT,
+    appVersion: process.env.HUOBAO_VERSION,
+  })
+  if (startupBackup.created) console.log(`[db] 自动备份已创建: ${startupBackup.created.name}`)
+  else if (startupBackup.error) console.error(`[db] 自动备份失败: ${startupBackup.error}`)
+}
+
+export const sqlite: Database.Database = new Database(dbPath)
 
 // WAL：生成任务轮询与页面读并发时不互相阻塞；busy_timeout 兜底写锁竞争
 sqlite.pragma('journal_mode = WAL')

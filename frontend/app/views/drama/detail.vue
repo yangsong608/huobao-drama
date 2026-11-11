@@ -1593,6 +1593,11 @@ onMounted(() => {
   animation: fadeUp 0.35s var(--ease-out) both;
 }
 
+/* 动画结束后不得残留 transform，否则 position:fixed 遮罩会被限制在 .page 内 */
+@media (max-width: 1180px) {
+  .page { animation-fill-mode: backwards; }
+}
+
 /* Header card：单行紧凑 */
 .page-head {
   display: flex;
@@ -2209,7 +2214,7 @@ onMounted(() => {
 .mat-detail-overlay { z-index: 118; padding: 28px; }
 .mat-detail-dialog {
   width: min(1040px, calc(100vw - 56px));
-  max-height: calc(100vh - 56px);
+  max-height: calc(var(--app-vvh, 100dvh) - 56px);
 }
 .mat-detail-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -2356,11 +2361,12 @@ onMounted(() => {
 /* 底部操作栏 */
 .mat-detail-foot {
   display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px; padding: 12px 16px;
   border-top: 1px solid var(--surface-outline);
 }
 .mat-detail-secondary-actions,
-.mat-detail-primary-actions { display: flex; align-items: center; gap: 8px; }
+.mat-detail-primary-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 
 /* 项目存储目录 */
 .storage-dialog { width: 580px; max-width: calc(100vw - 32px); }
@@ -2497,6 +2503,12 @@ onMounted(() => {
   .ep-grid { grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr)); }
   .ep-card { min-height: 48px; }
   .ep-meta-row { flex-wrap: wrap; overflow: visible; }
+
+  .mat-detail-overlay { padding: 16px; }
+  .mat-detail-dialog {
+    width: calc(100vw - 32px);
+    max-height: calc(var(--app-vvh, 100dvh) - 32px);
+  }
 }
 @media (max-width: 900px) {
   .page { padding: 16px 16px calc(88px + var(--safe-bottom)); }
@@ -2507,6 +2519,11 @@ onMounted(() => {
   .ep-actions { opacity: 1; } /* 移动端始终显示操作按钮 */
   .dialog-foot { flex-wrap: wrap; gap: 10px; }
   .dialog-foot-copy { display: none; }
+
+  .mat-detail-shell { grid-template-columns: 1fr; }
+  .mat-detail-preview-panel { position: static; }
+  .mat-detail-edit-grid { grid-template-columns: 1fr; }
+  .mat-detail-head { flex-wrap: wrap; }
 }
 
 /* 触控设备：行尾操作（删除 / 进入制作）满足 44px 命中区 */

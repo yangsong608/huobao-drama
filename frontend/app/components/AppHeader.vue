@@ -3,12 +3,12 @@
     <div class="header-left">
       <button class="brand" @click="navigateTo('/')">
         <div class="brand-mark">
-          <img v-if="showBrandImage" :src="brandLogo" alt="火宝短剧" class="brand-logo" @error="showBrandImage = false" />
-          <span v-else class="brand-fallback">火</span>
+          <img v-if="showBrandImage" :src="brandLogo" alt="MossHuobao" class="brand-logo" @error="showBrandImage = false" />
+          <span v-else class="brand-fallback">M</span>
         </div>
         <div class="brand-text">
-          <span class="brand-name">火宝短剧</span>
-          <span class="brand-sub">Huobao Shorts</span>
+          <span class="brand-name">MossHuobao</span>
+          <span class="brand-sub">{{ t('app.brandSub') }}</span>
         </div>
       </button>
     </div>
@@ -89,6 +89,7 @@ import { BookOpen, LayoutGrid, Settings, TriangleAlert, Github, Download, X } fr
 import { useI18n } from 'vue-i18n'
 import { aiConfigAPI } from '~/composables/useApi'
 import { usePwa } from '~/composables/usePwa'
+import { isAppClient } from '~/composables/useAppBridge'
 import brandLogo from '~/assets/brand-logo.png'
 
 const { t, locale } = useI18n()
@@ -107,8 +108,8 @@ const {
 const installButtonRef = ref(null)
 const installHintRef = ref(null)
 
-// 已安装/独立窗口隐藏；可捕获安装事件或 iOS 未安装时显示
-const showInstallEntry = computed(() => !isStandalone.value && (canInstall.value || isIos.value))
+// 已安装/独立窗口/内嵌应用隐藏；可捕获安装事件或 iOS 未安装时显示
+const showInstallEntry = computed(() => !isAppClient() && !isStandalone.value && (canInstall.value || isIos.value))
 
 function closeInstallHint() {
   if (installHintOpen.value) toggleInstallHint()
@@ -224,8 +225,8 @@ watch(locale, checkAiConfigs)
 .brand-text { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
 .brand-name {
   font-size: 15px; font-weight: 700;
-  /* ChatFire 签名：品牌字标火焰橙渐变 */
-  background: var(--accent-gradient);
+  /* MossHuobao 字标：苔绿到余烬金渐变 */
+  background: linear-gradient(135deg, #66906a 0%, #9dbe8a 45%, #e8a33d 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -318,7 +319,8 @@ watch(locale, checkAiConfigs)
   .brand-name { white-space: nowrap; }
   .header-nav { flex-shrink: 0; }
   .header-right { flex-shrink: 0; }
-  .nav-link { min-height: 44px; }
+  .nav-link { min-height: 44px; min-width: 44px; justify-content: center; }
+  .github-link { width: 44px; height: 44px; }
   .header-right :deep(.theme-toggle),
   .header-right :deep(.locale-trigger) { min-height: 44px; }
   .header-right :deep(.theme-toggle) { min-width: 44px; }
@@ -331,12 +333,12 @@ watch(locale, checkAiConfigs)
   .nav-link { padding: 0 14px; }
 }
 
-/* 窄平板（<=743）：复用原 720 窄屏规则，隐藏品牌文字与导航文字并压缩 padding */
+/* 手机（<=743）：主导航改由底部页签承担，顶栏只保留品牌与右侧工具 */
 @media (max-width: 743px) {
   .header { padding: 0 12px; gap: 12px; }
   .brand-text { display: none; }
-  .nav-link { padding: 0 10px; }
   .nav-label { display: none; }
+  .header-nav { display: none; }
   .header-right :deep(.remote-status-badge .rsb-label) { display: none; }
 }
 

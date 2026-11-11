@@ -54,7 +54,7 @@ const LOCALES = ['zh', 'en', 'ja', 'ko'].map((locale) => ({
   data: JSON.parse(readSource(`locales/${locale}.json`)),
 }))
 
-const TAB_IDS = ['ai', 'dubbing', 'novel', 'general', 'remote', 'styles', 'rules', 'breakdown', 'audit', 'agents', 'queue', 'storage', 'mcp', 'about']
+const TAB_IDS = ['device', 'ai', 'dubbing', 'novel', 'general', 'remote', 'styles', 'rules', 'breakdown', 'audit', 'agents', 'queue', 'storage', 'mcp', 'about']
 const GUEST_HIDDEN = ['ai', 'storage', 'mcp', 'agents', 'remote']
 
 function panel(source, id) {
@@ -68,16 +68,17 @@ function panel(source, id) {
 test('页签顺序：remote 紧跟 general，访客过滤主机级页签', () => {
   assert.match(settings, new RegExp(`const SETTINGS_TABS = \\[${TAB_IDS.map(id => `'${id}'`).join(', ')}\\].*`))
   assert.match(settings, /const GUEST_HIDDEN_TABS = new Set\(\['ai', 'storage', 'mcp', 'agents', 'remote'\]\)/)
+  assert.match(settings, /const APP_HIDDEN_TABS = new Set\(\['remote', 'mcp'\]\)/)
   assert.ok(
     settings.indexOf("{ id: 'general'") < settings.indexOf("{ id: 'remote'"),
     'remote 页签必须排在 general 之后',
   )
   assert.match(settings, /\{ id: 'remote', label: t\('settings\.tabs\.remote'\), icon: MonitorSmartphone \}/)
-  assert.match(settings, /return tabs\.filter\(item => !GUEST_HIDDEN_TABS\.has\(item\.id\)\)/)
+  assert.match(settings, /return tabs\.filter\(item => tabAllowed\(item\.id\)\)/)
 
   const initial = functionBlock(settings, 'initialTab')
   assert.match(initial, /SETTINGS_TABS\.includes\(requestedTab\)/)
-  assert.match(initial, /!\(isGuest\.value && GUEST_HIDDEN_TABS\.has\(requestedTab\)\)/)
+  assert.match(initial, /tabAllowed\(requestedTab\)/)
   assert.match(initial, /return isGuest\.value \? 'dubbing' : 'ai'/)
 })
 
@@ -87,7 +88,7 @@ test('深链回退：角色就绪后隐藏页签落到第一个可见页签，UR
     settings.indexOf('const baseTabs = computed'),
   )
   assert.match(routeWatch, /SETTINGS_TABS\.includes\(next\)/)
-  assert.match(routeWatch, /!\(isGuest\.value && GUEST_HIDDEN_TABS\.has\(next\)\)/)
+  assert.match(routeWatch, /tabAllowed\(next\)/)
   assert.match(routeWatch, /next !== tab\.value\) tab\.value = next/)
 
   const fallback = settings.slice(
@@ -167,7 +168,7 @@ test('访客不发起主机级请求：角色就绪后仅主机加载', () => {
   for (const call of ['loadCfgs()', 'loadAgents()', 'loadAllSkills()', 'loadAgentPrompt(selectedAgent.value)', 'loadMcp()', 'loadMediaSettings()', 'loadRemoteTab()']) {
     assert.ok(once.includes(call), `loadHostSettingsOnce 缺少 ${call}`)
   }
-  assert.match(settings, /watch\(\[\(\) => remoteRole\.ready, isGuest\], \(\[ready\]\) => \{\s*\n\s*if \(!ready \|\| isGuest\.value\) return\s*\n\s*loadHostSettingsOnce\(\)\s*\n\s*if \(tab\.value === 'storage'\) loadStorage\(\)\s*\n\s*if \(tab\.value === 'about'\) refreshUpdateState\(\)/)
+  assert.match(settings, /watch\(\[\(\) => remoteRole\.ready, isGuest\], \(\[ready\]\) => \{\s*\n\s*if \(!ready \|\| isGuest\.value\) return\s*\n\s*loadHostSettingsOnce\(\)\s*\n\s*if \(tab\.value === 'storage'\) loadStorage\(\)\s*\n\s*if \(tab\.value === 'about' && !isAppMode\) refreshUpdateState\(\)/)
 
   assert.match(settings, /if \(!remoteRole\.ready\) return/)
   assert.match(settings, /if \(active === 'storage' && !isGuest\.value\) loadStorage\(\)/)
@@ -177,7 +178,7 @@ test('访客不发起主机级请求：角色就绪后仅主机加载', () => {
   assert.match(settings, /if \(t === 'agents' && remoteRole\.ready && !isGuest\.value\) \{/)
 
   const loadRemote = functionBlock(settings, 'loadRemoteTab')
-  assert.match(loadRemote, /if \(isGuest\.value\) return/)
+  assert.match(loadRemote, /if \(isGuest\.value \|\| isAppMode\) return/)
   assert.match(loadRemote, /await refreshRemoteStatus\(\)/)
   assert.match(loadRemote, /if \(isGuest\.value\) return/)
   assert.match(loadRemote, /syncRemoteForm\(\)/)
@@ -192,7 +193,19 @@ test('访客保留创作设置；general 仅隐藏媒体，about 更新卡仅主
   assert.equal((general.match(/<section v-if="!isGuest"/g) || []).length, 1)
 
   const about = panel(settings, 'about')
-  assert.match(about, /<section v-if="!isGuest" class="card svc-group">/)
+  assert.match(about, /<section v-if="!isGuest && !isAppMode" class="card svc-group">/)
+  assert.match(about, /isAppMode \? t\('settings\.about\.appDesc'\) : t\('settings\.about\.desc'\)/)
+  assert.match(about, /t\('settings\.about\.appNote'\)/)
+})
+
+test('四语：应用模式关于页描述与提示非空', () => {
+  for (const { locale, data } of LOCALES) {
+    for (const key of ['appDesc', 'appNote']) {
+      const value = data.settings?.about?.[key]
+      assert.equal(typeof value, 'string', `${locale} settings.about.${key}`)
+      assert.ok(value.length > 0, `${locale} settings.about.${key} 为空`)
+    }
+  }
 })
 
 test('只读访客：设置内容 inert 并展示只读原因', () => {

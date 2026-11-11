@@ -12,6 +12,7 @@ import { computed, onBeforeUnmount, onMounted, readonly, ref } from 'vue'
 import {
   isCompact as isCompactWidth,
   isNarrow as isNarrowWidth,
+  isShortLandscape as isShortLandscapeSize,
   isTablet as isTabletWidth,
 } from '~/utils/tablet-layout'
 
@@ -34,6 +35,7 @@ export function useViewport() {
   const isTablet = computed(() => isTabletWidth(width.value))
   const isCompact = computed(() => isCompactWidth(width.value))
   const isNarrow = computed(() => isNarrowWidth(width.value))
+  const isShortLandscape = computed(() => isShortLandscapeSize(width.value, height.value))
 
   // SSR：不注册监听、不访问 document，直接给默认值
   if (!hasWindow) {
@@ -45,6 +47,7 @@ export function useViewport() {
       isTablet,
       isCompact,
       isNarrow,
+      isShortLandscape,
     }
   }
 
@@ -138,5 +141,6 @@ export function useViewport() {
     isTablet,
     isCompact,
     isNarrow,
+    isShortLandscape,
   }
 }

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = rel => readFileSync(path.join(root, rel), 'utf8')
 const episode = read('app/views/drama/episode.vue')
+const storyboardList = read('app/components/EpisodeStoryboardList.vue')
 
 test('视频制作页加载拆分方案并同步当前剧集选择', () => {
   assert.match(episode, /import \{[^}]*breakdownMethodAPI[^}]*\} from '~\/composables\/useApi'/)
@@ -39,27 +40,28 @@ test('重新拆分与空态提示使用当前方案名', () => {
 })
 
 test('视频任务列表提供新增镜头并继承源镜头绑定', () => {
-  assert.match(episode, /t\('episode\.vid\.addShot'\)/)
+  assert.match(storyboardList, /t\('episode\.vid\.addShot'\)/)
   assert.match(episode, /t\('episode\.vid\.addShotHint'\)/)
   assert.match(episode, /async function addStoryboard/)
   assert.match(episode, /storyboardAPI\.create\(/)
   assert.match(episode, /Math\.max\(2, Math\.min\(10, videoDurationMax\.value \|\| 10\)\)/)
-  assert.match(episode, /ref="sbDescriptionInput"/)
-  assert.match(episode, /sbDescriptionInput\.value\?\.focus/)
+  assert.match(episode, /ref="shotEditorRef"/)
+  assert.match(episode, /shotEditorRef\.value\?\.focusDescription\(\)/)
   assert.match(episode, /videoSelectMode\.value = false/)
   assert.ok(!/storyboardAPI\.create\(\{[\s\S]{0,800}storyboard_number/.test(episode), '新增镜头不传分镜号，由后端自动编号')
 })
 
 test('视频任务行提供删除入口与确认弹窗', () => {
   assert.match(episode, /t\('episode\.vid\.deleteShot'\)/)
-  assert.match(episode, /:aria-label="t\('episode\.vid\.deleteShot'\)"/)
+  assert.match(storyboardList, /:aria-label="t\('episode\.vid\.deleteShot'\)"/)
   assert.match(episode, /function deleteStoryboard/)
   assert.match(episode, /async function confirmDeleteStoryboard/)
   assert.match(episode, /storyboardAPI\.del\(/)
   assert.match(episode, /shotDelete\.value\.nextId/)
   assert.match(episode, /:open="shotDelete\.open"/)
-  assert.match(episode, /class="btn btn-icon btn-sm video-task-delete"/)
-  assert.match(episode, /@click\.stop="deleteStoryboard/)
+  assert.match(storyboardList, /class="btn btn-icon btn-sm video-task-delete"/)
+  assert.match(storyboardList, /@click\.stop="emit\('delete', task\.storyboard\)"/)
+  assert.match(episode, /@delete="deleteStoryboard"/)
   assert.match(episode, /episode\.vid\.deleteDone/)
 })
 

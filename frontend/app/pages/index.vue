@@ -660,6 +660,11 @@ onMounted(() => setTimeout(() => autoTour('index', INDEX_TOUR, t), 600))
   background: var(--surface-base);
 }
 
+/* 动画结束后不得残留 transform，否则 position:fixed 遮罩会被限制在 .page 内 */
+@media (max-width: 1180px) {
+  .page { animation-fill-mode: backwards; }
+}
+
 /* 紧凑头部：标题 + 副标题 + 统计 + 新建 一行 */
 .launcher-head {
   display: flex;

@@ -18,6 +18,7 @@
  */
 import { and, desc, eq } from 'drizzle-orm'
 import type { Hono } from 'hono'
+import { withInternalAppToken } from '../middleware/app-token.js'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { mastra } from '../mastra/index.js'
@@ -42,6 +43,7 @@ import { emitChange } from './sync-events.js'
 import { getDubbingDefaults, isQueueEnabled, ttsLanguageOf } from './app-settings.js'
 import { getAudioConfig, synthesize } from './tts.js'
 import { normalizeVideoAudioMode } from './video-audio.js'
+import { getMediaCapabilities, type MediaCapabilities } from './media-capabilities.js'
 import { logTaskError, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 
 export type AutomationStatus = 'idle' | 'running' | 'done' | 'failed' | 'stopped' | 'interrupted'
@@ -104,7 +106,7 @@ async function callApi(method: string, path: string, body?: unknown): Promise<an
   if (!mainApp) throw new Error('服务尚未就绪，请稍后重试')
   const init: RequestInit = { method, headers: { 'Content-Type': 'application/json' } }
   if (body !== undefined) init.body = JSON.stringify(body)
-  const res = await mainApp.fetch(new Request(new URL(path, 'http://internal').toString(), init))
+  const res = await mainApp.fetch(new Request(new URL(path, 'http://internal').toString(), withInternalAppToken(init)))
   const text = await res.text()
   let json: any = null
   try { json = text ? JSON.parse(text) : null } catch { /* 非 JSON */ }
@@ -150,7 +152,7 @@ async function updateProgress(
     .where(eq(schema.episodes.id, episodeId))
 }
 
-export async function finishRun(episodeId: number, status: AutomationStatus, error?: string) {
+export async function finishRun(episodeId: number, status: AutomationStatus, error?: string, note?: string) {
   await db.update(schema.episodes)
     .set({
       ...(status === 'done' ? { sourceStale: false } : {}),
@@ -158,12 +160,19 @@ export async function finishRun(episodeId: number, status: AutomationStatus, err
       // 失败时保留最后阶段，界面才能区分「视频生成失败」并提示图文动画兜底
       automationStage: status === 'done' ? 'done' : (status === 'stopped' ? 'stopped' : undefined),
       automationProgress: status === 'done' ? 100 : undefined,
-      automationNote: null,
+      // done 可保留阶段内说明（如跳过配音/合片）；失败与停止清空
+      automationNote: status === 'done' ? (note ?? null) : null,
       automationError: error ? error.slice(0, 500) : null,
       automationFinishedAt: now(),
       updatedAt: now(),
     })
     .where(eq(schema.episodes.id, episodeId))
+}
+
+/** 配音前的能力判定：配音既生成音频也必然合片，两个开关必须同时为真 */
+export function dubMediaSkipNote(media: MediaCapabilities): string | null {
+  if (media.voiceActions && media.outputActions) return null
+  return '当前服务端未检测到 FFmpeg/FFprobe，已跳过自动配音与合片；请在设置页恢复媒体工具后手动重试'
 }
 
 /** 启动时把上次进程遗留的 running 标成 interrupted，避免界面永远转圈 */
@@ -729,20 +738,28 @@ async function stepVideos(episodeId: number, dramaId: number) {
   }
 }
 
-/** 8. 配音：先抽台词，再跑整集配音；未开自动配音或没有语音服务时跳过 */
-async function stepDub(episodeId: number, dramaId: number) {
+/** 8. 配音：先抽台词，再跑整集配音；未开自动配音、缺少媒体能力或没有语音服务时跳过 */
+export async function stepDub(episodeId: number, dramaId: number): Promise<string | undefined> {
   assertRunning(episodeId)
   const ep = await loadEpisode(episodeId)
   if (!ep) throw new Error('剧集不存在')
   if (!ep.autoDub) {
     await updateProgress(episodeId, 'dub', 1, 1, '未开启自动配音，已跳过')
     logTaskProgress('Automation', 'skip-dub', { episodeId, reason: 'auto_dub=0' })
-    return
+    return undefined
+  }
+  const media = await getMediaCapabilities()
+  const mediaNote = dubMediaSkipNote(media)
+  if (mediaNote) {
+    // 能力检查必须在抽台词与 startDubbing 之前，避免产生无意义的台词与任务记录
+    await updateProgress(episodeId, 'dub', 1, 1, mediaNote)
+    logTaskProgress('Automation', 'skip-dub', { episodeId, reason: 'media_unavailable' })
+    return mediaNote
   }
   const audio = await getActiveConfig('audio')
   if (!audio) {
     await updateProgress(episodeId, 'dub', 1, 1, '未配置语音服务，已跳过配音')
-    return
+    return undefined
   }
 
   await updateProgress(episodeId, 'dub', 0, 1, '抽取台词')
@@ -854,10 +871,10 @@ export async function startAutomation(episodeId: number, opts: RunOptions = {}):
       await stepStoryboardAudit(episodeId, ep.dramaId, opts)
       markChanged()
       await stepVideos(episodeId, ep.dramaId)
-      await stepDub(episodeId, ep.dramaId)
+      const dubNote = await stepDub(episodeId, ep.dramaId)
       markChanged()
-      await updateProgress(episodeId, 'done')
-      await finishRun(episodeId, 'done')
+      await updateProgress(episodeId, 'done', undefined, undefined, dubNote)
+      await finishRun(episodeId, 'done', undefined, dubNote)
       logTaskSuccess('Automation', 'run', { episodeId })
     } catch (error: any) {
       const stopped = error instanceof StoppedError || runs.get(episodeId)?.stop
@@ -871,6 +888,12 @@ export async function startAutomation(episodeId: number, opts: RunOptions = {}):
   })()
 
   return true
+}
+
+/** 测试用：模拟已占用的自动化运行占位，避免为单个步骤启动整条流水线 */
+export function __setAutomationRunForTests(episodeId: number, running: boolean): void {
+  if (running) runs.set(episodeId, { stop: false, startedAt: now() })
+  else runs.delete(episodeId)
 }
 
 /** 停止：标记后由等待循环在下一个检查点退出 */

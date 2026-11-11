@@ -43,7 +43,7 @@ export default defineNuxtConfig({
   },
   app: {
     head: {
-      title: '火宝短剧',
+      title: 'MossHuobao',
       meta: [
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
         // 脚本执行前的默认主题色，useTheme 会在客户端按浅/深色同步 content
@@ -57,8 +57,8 @@ export default defineNuxtConfig({
       ],
       link: [
         // v 参数用于 favicon 缓存穿透（浏览器对 favicon 缓存独立于 HTTP 缓存，换图必须 bump）
-        { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon.png?v=20261002' },
-        { rel: 'shortcut icon', type: 'image/png', href: '/favicon.png?v=20261002' },
+        { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon.png?v=20261107' },
+        { rel: 'shortcut icon', type: 'image/png', href: '/favicon.png?v=20261107' },
         { rel: 'manifest', href: '/manifest.webmanifest' },
         { rel: 'apple-touch-icon', sizes: '180x180', href: '/icons/apple-touch-icon.png' },
       ],

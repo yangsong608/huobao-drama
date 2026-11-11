@@ -6,6 +6,7 @@ const root = new URL('..', import.meta.url)
 const read = (path) => readFileSync(new URL(path, root), 'utf8')
 
 const episode = read('app/views/drama/episode.vue')
+const taskDrawer = read('app/components/EpisodeTaskDrawer.vue')
 const useApi = read('app/composables/useApi.ts')
 const locales = ['zh', 'en', 'ja', 'ko'].map((name) => JSON.parse(read(`app/locales/${name}.json`)))
 
@@ -16,8 +17,9 @@ test('task API exposes episode-scoped bulk clear', () => {
 test('task drawer only offers clearing finished tasks behind confirmation', () => {
   // 清空范围只统计 completed/failed，保留进行中任务与成片版本
   assert.match(episode, /const genTaskClearableCount = computed\(\(\) =>\s*genTasks\.value\.filter\(t => t\.status === 'completed' \|\| t\.status === 'failed'\)\.length/)
-  assert.match(episode, /:disabled="!genTaskClearableCount \|\| clearTasks\.loading"/)
-  assert.match(episode, /@click="clearTasks\.open = true"/)
+  assert.match(taskDrawer, /:disabled="!clearableCount \|\| clearing"/)
+  assert.match(taskDrawer, /@click="emit\('clear'\)"/)
+  assert.match(episode, /@clear="clearTasks\.open = true"/)
   assert.match(episode, /taskAPI\.clearByEpisode\(epId\.value\)/)
   assert.match(episode, /failedVideoMessages\.value = \{\}/)
   assert.match(episode, /t\('episode\.tasks\.clearTitle'\)/)

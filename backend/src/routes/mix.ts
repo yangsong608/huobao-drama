@@ -13,6 +13,7 @@ import path from 'path'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { badRequest, notFound, serverError, success } from '../utils/response.js'
+import { outputGate, separationGate, ffprobeGate } from '../utils/media-guard.js'
 import { db, schema } from '../db/index.js'
 import { asc, eq } from 'drizzle-orm'
 import {
@@ -330,7 +331,7 @@ app.post('/episodes/:id/mix/lines/:lineId/restore', async (c) => {
   }
 })
 
-app.post('/episodes/:id/mix/preview', async (c) => {
+app.post('/episodes/:id/mix/preview', outputGate, async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   const episode = findEpisode(episodeId)
@@ -368,7 +369,7 @@ app.post('/episodes/:id/mix/preview', async (c) => {
   }
 })
 
-app.post('/episodes/:id/mix/render', async (c) => {
+app.post('/episodes/:id/mix/render', outputGate, async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   const episode = findEpisode(episodeId)
@@ -393,7 +394,7 @@ app.post('/episodes/:id/mix/render', async (c) => {
   }
 })
 
-app.post('/episodes/:id/audio/separate', async (c) => {
+app.post('/episodes/:id/audio/separate', separationGate, async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   const episode = findEpisode(episodeId)
@@ -445,7 +446,7 @@ app.get('/episodes/:id/audio/assets', (c) => {
   }
 })
 
-app.post('/episodes/:id/audio/assets/import', bodyLimit({
+app.post('/episodes/:id/audio/assets/import', ffprobeGate, bodyLimit({
   maxSize: AUDIO_MAX_BYTES + 64 * 1024,
   onError: (c) => badRequest(c, '音频文件大小不能超过 20MB'),
 }), async (c) => {
@@ -515,7 +516,7 @@ export function createSoundscapeRoutes(deps: SoundscapeDeps = {}) {
     }
   })
 
-  routes.post('/episodes/:id/audio/soundscape', async (c) => {
+  routes.post('/episodes/:id/audio/soundscape', ffprobeGate, async (c) => {
     const episodeId = parseId(c.req.param('id'))
     if (!episodeId) return badRequest(c, '集编号无效')
     const episode = findEpisode(episodeId)

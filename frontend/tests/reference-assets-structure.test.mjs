@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 const episode = readFileSync(new URL('../app/views/drama/episode.vue', import.meta.url), 'utf8')
+const editor = readFileSync(new URL('../app/components/EpisodeShotEditor.vue', import.meta.url), 'utf8')
 const updateQueue = readFileSync(new URL('../app/utils/storyboard-update-queue.ts', import.meta.url), 'utf8')
 const locales = ['zh', 'en', 'ja', 'ko'].map(lang => [
   lang,
@@ -19,14 +20,14 @@ test('参考素材面板展示项目级素材，并标记是否已关联当前�
   assert.match(episode, /linked: episodeCharacterIdSet\.value\.has/)
   assert.match(episode, /linked: episodeSceneIdSet\.value\.has/)
   assert.match(episode, /linked: episodePropIdSet\.value\.has/)
-  assert.match(episode, /asset\.linked \? '' : t\('episode\.ref\.projectAsset'\)/)
+  assert.match(editor, /asset\.linked \? '' : t\('episode\.ref\.projectAsset'\)/)
 })
 
 test('场景单选、角色/道具多选在界面有明确提示', () => {
   assert.match(episode, /kind: 'character', label: t\('common\.role'\), hint: t\('episode\.ref\.multiSelect'\)/)
   assert.match(episode, /kind: 'scene', label: t\('common\.scene'\), hint: t\('episode\.ref\.singleSelect'\)/)
   assert.match(episode, /kind: 'prop', label: t\('common\.prop'\), hint: t\('episode\.ref\.multiSelect'\)/)
-  assert.match(episode, /t\('episode\.ref\.scopeHint'\)/)
+  assert.match(editor, /t\('episode\.ref\.scopeHint'\)/)
 })
 
 test('绑定其他集素材时本地同步关联，下一次刷新后仍可见', () => {

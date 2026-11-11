@@ -10,6 +10,7 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { badRequest, notFound, serverError, success } from '../utils/response.js'
+import { outputGate } from '../utils/media-guard.js'
 import {
   ExportError,
   cancelExport,
@@ -77,7 +78,7 @@ app.get('/episodes/:id/exports', (c) => {
   return success(c, { items: listExports(episodeId).map(exportView) })
 })
 
-app.post('/episodes/:id/exports', async (c) => {
+app.post('/episodes/:id/exports', outputGate, async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   const body = await c.req.json().catch(() => ({}))
@@ -120,7 +121,7 @@ app.post('/exports/:id/cancel', async (c) => {
   }
 })
 
-app.post('/exports/:id/retry', async (c) => {
+app.post('/exports/:id/retry', outputGate, async (c) => {
   const id = parseId(c.req.param('id'))
   if (!id) return badRequest(c, '导出编号无效')
   try {

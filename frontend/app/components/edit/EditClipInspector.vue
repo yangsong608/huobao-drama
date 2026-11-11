@@ -923,7 +923,7 @@ onBeforeUnmount(() => releaseGrip(null))
 .ed-insp-warnings b { color: var(--warning); font-weight: 600; }
 /* 抽屉头默认不渲染（仅 drawer 模式出现） */
 .ed-insp-drawer-head { display: none; }
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-width: 1000px) and (max-height: 520px) {
   /* 窄屏检查器默认隐藏，仅作为底部/右侧抽屉打开时显示 */
   .ed-inspector { display: none; }
   .ed-inspector.is-drawer {

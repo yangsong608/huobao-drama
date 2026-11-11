@@ -309,7 +309,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onMoreKeydown, true)
   .ed-action { width: 28px; padding: 0; justify-content: center; }
   .ed-icon-inspector { display: inline-flex; }
 }
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-width: 1000px) and (max-height: 520px) {
   /* 两行工具栏：行 1 返回/标题/状态，行 2 撤销重做保存与主操作；允许换行、不横向滚动 */
   .ed-top-wrap { position: relative; z-index: 56; }
   .ed-top { height: auto; min-height: 52px; padding: 6px 8px; flex-wrap: wrap; gap: 4px; }
@@ -345,6 +345,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onMoreKeydown, true)
   }
   .ed-more-item:hover { background: var(--bg-hover); }
   .ed-more-item:disabled { opacity: .45; cursor: not-allowed; }
+}
+@media (max-width: 743px) {
+  /* 手机两行收口：行 1 返回/状态，行 2 撤销重做 + 主操作；保存状态沿用行 1 芯片，避免第三行 */
+  .ed-top { padding: 4px 8px; gap: 4px; }
+  .ed-top-row1 { gap: 4px; }
+  .ed-top-row2 { gap: 4px; }
+  .ed-top-left { flex-wrap: nowrap; gap: 4px; min-width: 0; }
+  .ed-chip { padding: 0 6px; }
+  .ed-top-center { flex: 0 0 auto; gap: 4px; }
+  .ed-top-center .ed-save { display: none; }
+  .ed-top-right { gap: 4px; }
 }
 @media (max-width: 1180px) and (hover: none) and (pointer: coarse) {
   /* 粗指针下顶栏图标与操作按钮至少 44px 命中 */

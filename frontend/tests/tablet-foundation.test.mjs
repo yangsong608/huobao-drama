@@ -342,7 +342,7 @@ test('AppHeader 断点为 743/900/1180，744-1180 单行且入口可点', () => 
   // 744-1180 单行不换行由结构约束保证：左侧品牌区不收缩、品牌名不折行
   assert.match(tablet, /\.header-left \{ flex-shrink: 0; \}/)
   assert.match(tablet, /\.brand-name \{ white-space: nowrap; \}/)
-  assert.match(tablet, /\.nav-link \{ min-height: 44px; \}/)
+  assert.match(tablet, /\.nav-link \{ min-height: 44px; min-width: 44px; justify-content: center; \}/)
   assert.match(tablet, /\.theme-toggle/)
   assert.match(tablet, /\.locale-trigger/)
   assert.match(tablet, /min-height: 44px/)
@@ -374,6 +374,8 @@ test('新增媒体查询宽度仅来自 1180/900/744/743，且无容器查询', 
 test('12 个 video 全部补齐 playsinline 与 webkit-playsinline', () => {
   const files = [
     'views/drama/episode.vue',
+    'components/EpisodeStoryboardList.vue',
+    'components/EpisodeTaskDrawer.vue',
     'components/SubtitlePreview.vue',
     'components/edit/EditPreview.vue',
   ]
@@ -391,12 +393,8 @@ test('12 个 video 全部补齐 playsinline 与 webkit-playsinline', () => {
   assert.equal(total, 12, `<video> 总数应为 12，实际 ${total}`)
 
   // 列表缩略视频保持静音预加载，不抢音频
-  for (const line of [
-    /preload="none"\s+playsinline\s+webkit-playsinline\s+muted/,
-    /preload="none" muted playsinline webkit-playsinline/,
-  ]) {
-    assert.match(episodeSource, line)
-  }
+  assert.match(readSource('components/EpisodeStoryboardList.vue'), /preload="none"\s+playsinline\s+webkit-playsinline\s+muted/)
+  assert.match(episodeSource, /preload="none" muted playsinline webkit-playsinline/)
 
   const subtitlePreview = readSource('components/SubtitlePreview.vue')
   assert.match(subtitlePreview, /preload="metadata"[^>]*playsinline[^>]*webkit-playsinline/s)

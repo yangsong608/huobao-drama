@@ -591,7 +591,7 @@ onUnmounted(() => {
 <style scoped>
 .remote-dialog {
   width: min(980px, calc(100vw - 32px));
-  max-height: calc(100vh - 48px);
+  max-height: calc(var(--app-vvh, 100dvh) - 48px);
 }
 .dialog-head-copy { min-width: 0; }
 .dialog-desc {
@@ -823,7 +823,7 @@ onUnmounted(() => {
   .remote-status-actions { width: 100%; margin-left: 19px; }
 }
 @media (max-width: 560px) {
-  .remote-dialog { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+  .remote-dialog { width: calc(100vw - 16px); max-height: calc(var(--app-vvh, 100dvh) - 16px); }
   .qr-code { width: 168px; height: 168px; }
   .remote-action { flex: 1 1 100%; }
 }

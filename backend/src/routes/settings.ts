@@ -20,6 +20,7 @@ import {
   type ContentLanguage,
 } from '../services/app-settings.js'
 import { getFfmpegStatus } from '../utils/ffmpeg.js'
+import { invalidateMediaCapabilities } from '../services/media-capabilities.js'
 import { MediaPathValidationError } from '../utils/media-paths.js'
 import { success, badRequest } from '../utils/response.js'
 
@@ -101,6 +102,8 @@ app.put('/media', async (c) => {
     if (error instanceof MediaPathValidationError) return badRequest(c, error.message)
     throw error
   }
+  // 保存后立即失效能力快照，下一次 /capabilities 得到新二进制状态
+  invalidateMediaCapabilities()
   return success(c, await mediaPayload())
 })
 

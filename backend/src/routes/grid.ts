@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import { eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { badRequest, created, notFound, success } from '../utils/response.js'
+import { outputGate } from '../utils/media-guard.js'
 import { createGridSheet, splitGridSheet, syncGridSheet, updateGridCells } from '../services/grid-image.js'
 
 const app = new Hono()
@@ -49,7 +50,7 @@ app.get('/:id', async (c) => {
   }
 })
 
-app.post('/:id/split', async (c) => {
+app.post('/:id/split', outputGate, async (c) => {
   const id = parseId(c.req.param('id'))
   if (!id) return badRequest(c, '宫格编号无效')
   const body = await c.req.json().catch(() => ({}))

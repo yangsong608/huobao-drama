@@ -7,6 +7,8 @@
           <button type="button" class="ed-close" :disabled="busy" @click="close()">×</button>
         </header>
 
+        <ExportUnavailableNotice v-if="exportLocalOnly" />
+
         <section v-if="warnings.length" class="ed-warn-list">
           <b>{{ t('edit.exportWarningTitle') }}</b>
           <p v-for="w in warnings" :key="w.code">{{ t(w.i18nKey) }}</p>
@@ -41,7 +43,8 @@
           <button
             type="button"
             class="ed-start"
-            :disabled="busy || !canEdit || !warningsAcked"
+            :disabled="busy || !canEdit || !warningsAcked || exportLocalOnly"
+            :title="exportLocalOnly ? t('export.gate.unavailable') : undefined"
             @click="startExport"
           >
             {{ busy ? t('edit.exportRunning') : t('edit.exportStart') }}
@@ -56,7 +59,10 @@
 
 <script setup>
 import { useI18n } from 'vue-i18n'
+import { toast } from 'vue-sonner'
 import { editAPI } from '~/composables/useApi'
+import ExportUnavailableNotice from '~/components/ExportUnavailableNotice.vue'
+import { useExportCapability } from '~/composables/useExportCapability'
 import { useVisibilityPolling } from '~/composables/useVisibilityPolling'
 import { collectExportWarnings } from '~/utils/edit-export-warnings'
 
@@ -72,6 +78,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'exported'])
 const { t } = useI18n()
+const { localOnly: exportLocalOnly } = useExportCapability()
 
 const busy = ref(false)
 const warningsAcked = ref(false)
@@ -112,6 +119,10 @@ function stopPolling() {
 
 function startExport() {
   if (busy.value) return
+  if (exportLocalOnly.value) {
+    toast.info(t('export.gate.hint'))
+    return
+  }
   busy.value = true
   error.value = ''
   progressText.value = t('edit.exportRunning')

@@ -68,8 +68,9 @@
             <p class="ex-hint">{{ t('export.reuseHint') }}</p>
           </div>
         </header>
+        <ExportUnavailableNotice v-if="exportLocalOnly" />
         <div class="ex-start-grid">
-          <button class="ex-start" type="button" :disabled="!canStart || !checks?.mixReady" @click="start('mix')">
+          <button class="ex-start" type="button" :disabled="exportLocalOnly || !canStart || !checks?.mixReady" :title="exportLocalOnly ? t('export.gate.unavailable') : undefined" @click="start('mix')">
             <FileAudio :size="16" />
             <b>{{ t('export.exportMix') }}</b>
             <span>{{ t('export.mixHint') }}</span>
@@ -77,14 +78,15 @@
           <button
             class="ex-start is-primary"
             type="button"
-            :disabled="!canStart || !checks?.videoReady || (subtitleMode !== 'none' && !checks?.subtitles.ok)"
+            :disabled="exportLocalOnly || !canStart || !checks?.videoReady || (subtitleMode !== 'none' && !checks?.subtitles.ok)"
+            :title="exportLocalOnly ? t('export.gate.unavailable') : undefined"
             @click="start('video')"
           >
             <Film :size="16" />
             <b>{{ t('export.exportVideo') }}</b>
             <span>{{ t('export.videoHint') }}</span>
           </button>
-          <button class="ex-start" type="button" :disabled="!canStart || !checks?.stemsReady" @click="start('stems')">
+          <button class="ex-start" type="button" :disabled="exportLocalOnly || !canStart || !checks?.stemsReady" :title="exportLocalOnly ? t('export.gate.unavailable') : undefined" @click="start('stems')">
             <Layers :size="16" />
             <b>{{ t('export.exportStems') }}</b>
             <span>{{ t('export.stemsHint') }}</span>
@@ -228,6 +230,8 @@
             v-if="record.status === 'failed' || record.status === 'cancelled'"
             class="ex-btn is-tiny"
             type="button"
+            :disabled="exportLocalOnly"
+            :title="exportLocalOnly ? t('export.gate.unavailable') : undefined"
             @click="retry(record.id)"
           >
             {{ t('export.retry') }}
@@ -272,7 +276,9 @@ import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { ExportKind, ExportRecord, ExportStatus } from '~/composables/useApi'
 import BaseSelect from '~/components/BaseSelect.vue'
+import ExportUnavailableNotice from '~/components/ExportUnavailableNotice.vue'
 import { useViewport } from '~/composables/useViewport'
+import { useExportCapability } from '~/composables/useExportCapability'
 import { shareNoticeKey, shareUrlOrFile } from '~/utils/export-share'
 
 const props = defineProps<{
@@ -287,6 +293,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const { isTablet } = useViewport()
+const { localOnly: exportLocalOnly } = useExportCapability()
 
 const {
   checks,
@@ -321,13 +328,21 @@ function ensureOnline() {
   return false
 }
 
-// 模板仍调用 start('mix') / retry(id)，这里包一层离线守卫
+// 模板仍调用 start('mix') / retry(id)，这里包一层能力与离线守卫
 function start(kind: ExportKind, overrides: Parameters<typeof startExport>[1] = {}) {
+  if (exportLocalOnly.value) {
+    toast.info(t('export.gate.hint'))
+    return null
+  }
   if (!ensureOnline()) return null
   return startExport(kind, overrides)
 }
 
 function retry(id: number) {
+  if (exportLocalOnly.value) {
+    toast.info(t('export.gate.hint'))
+    return false
+  }
   if (!ensureOnline()) return false
   return retryExport(id)
 }

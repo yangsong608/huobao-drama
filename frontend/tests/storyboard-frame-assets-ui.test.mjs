@@ -6,6 +6,8 @@ const root = new URL('..', import.meta.url)
 const read = (path) => readFileSync(new URL(path, root), 'utf8')
 
 const episode = read('app/views/drama/episode.vue')
+const editor = read('app/components/EpisodeShotEditor.vue')
+const inspector = read('app/components/EpisodeShotInspector.vue')
 const useApi = read('app/composables/useApi.ts')
 
 const FRAME_ASSET_KEYS = [
@@ -79,26 +81,28 @@ test('生成提示词自动加入上一分镜尾帧 @ 引用', () => {
 })
 
 test('提示词 @ 候选与提示条展示上一分镜尾帧', () => {
-  assert.match(episode, /episode\.frameAssets\.previousRef/)
-  assert.match(episode, /episode\.frameAssets\.autoPromptHint/)
+  assert.match(inspector, /episode\.frameAssets\.previousRef/)
+  assert.match(editor, /episode\.frameAssets\.autoPromptHint/)
   assert.match(episode, /previousShotFrameRef/)
 })
 
 test('检查器展示本镜首帧与本集资产，可设首帧、清首帧、删资产', () => {
-  assert.match(episode, /t\('episode\.frameAssets\.title'\)/)
-  assert.match(episode, /t\('episode\.frameAssets\.onlyThisEpisode'\)/)
-  assert.match(episode, /t\('episode\.frameAssets\.noFirstFrame'\)/)
-  assert.match(episode, /t\('episode\.frameAssets\.clearFirstFrame'\)/)
-  assert.match(episode, /@click="clearShotFirstFrame\(selectedSb\)"/)
+  assert.match(inspector, /t\('episode\.frameAssets\.title'\)/)
+  assert.match(inspector, /t\('episode\.frameAssets\.onlyThisEpisode'\)/)
+  assert.match(inspector, /t\('episode\.frameAssets\.noFirstFrame'\)/)
+  assert.match(inspector, /t\('episode\.frameAssets\.clearFirstFrame'\)/)
+  assert.match(episode, /@clear-first-frame="clearShotFirstFrame\(selectedSb\)"/)
   assert.match(episode, /episodeFrameAssets/)
-  assert.match(episode, /@click="setShotFirstFrame\(asset\)"/)
-  assert.match(episode, /@click(?:\.stop)?="removeFrameAsset\(asset\)"/)
+  assert.match(inspector, /@click="emit\('set-first-frame', asset\)"/)
+  assert.match(episode, /@set-first-frame="setShotFirstFrame"/)
+  assert.match(inspector, /@click\.stop="emit\('remove-frame-asset', asset\)"/)
+  assert.match(episode, /@remove-frame-asset="removeFrameAsset"/)
   assert.match(episode, /t\('episode\.frameAssets\.deleteConfirm'\)/)
   assert.match(episode, /storyboard_id/)
   assert.match(episode, /selectedSb\?\.id|selectedSb\.value\?\.id/)
-  assert.match(episode, /v-else-if="isCurrentShotAsset\(asset\)"/, '本镜来源资产仍需展示并标记')
-  assert.match(episode, /t\('episode\.frameAssets\.fromCurrentShot'\)/)
-  assert.match(episode, /:aria-label="t\('episode\.frameAssets\.delete'\)"/)
+  assert.match(inspector, /v-if="!asset\.current"/, '本镜来源资产仍需展示并标记')
+  assert.match(inspector, /t\('episode\.frameAssets\.fromCurrentShot'\)/)
+  assert.match(inspector, /:aria-label="t\('episode\.frameAssets\.delete'\)"/)
 })
 
 test('失败提示不复用成功文案', () => {

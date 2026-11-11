@@ -8,6 +8,7 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { badRequest, notFound, success } from '../utils/response.js'
+import { outputGate, voiceGate } from '../utils/media-guard.js'
 import { db, schema } from '../db/index.js'
 import { renderMotionPost } from '../services/motion-post.js'
 import { eq } from 'drizzle-orm'
@@ -35,7 +36,7 @@ function parseId(raw: string | undefined): number | null {
 }
 
 /** POST /episodes/:id/dub — 启动整集配音 */
-app.post('/episodes/:id/dub', async (c) => {
+app.post('/episodes/:id/dub', voiceGate, async (c) => {
   if (!isDubbingEnabled()) return disabled(c)
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
@@ -118,7 +119,7 @@ app.get('/episodes/:id/timeline', async (c) => {
 })
 
 /** POST /episodes/:id/motion-post — 图文动画兜底版本 */
-app.post('/episodes/:id/motion-post', async (c) => {
+app.post('/episodes/:id/motion-post', outputGate, async (c) => {
   const episodeId = parseId(c.req.param('id'))
   if (!episodeId) return badRequest(c, '集编号无效')
   const episode = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()

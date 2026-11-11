@@ -16,6 +16,7 @@ import crypto from 'node:crypto'
 import type { Context, Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { and, eq, isNull } from 'drizzle-orm'
+import { withInternalAppToken } from '../middleware/app-token.js'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
 import { MAX_ASSET_REFERENCE_IMAGES, parseReferenceImages } from '../utils/asset-references.js'
@@ -155,7 +156,7 @@ async function callApi(method: string, path: string, options: ApiCallOptions = {
     init.body = JSON.stringify(options.body)
     init.headers = { 'Content-Type': 'application/json' }
   }
-  const res = await mainApp.fetch(new Request(url.toString(), init))
+  const res = await mainApp.fetch(new Request(url.toString(), withInternalAppToken(init)))
   const text = await res.text()
   let json: any = null
   try { json = text ? JSON.parse(text) : null } catch { /* 非 JSON 响应 */ }
@@ -171,7 +172,7 @@ async function callApi(method: string, path: string, options: ApiCallOptions = {
 async function callApiRaw(method: string, path: string, body: FormData): Promise<any> {
   if (!mainApp) throw new Error('服务尚未就绪，请稍后重试')
   const url = new URL(path.startsWith('/') ? path : `/${path}`, 'http://internal')
-  const res = await mainApp.fetch(new Request(url.toString(), { method: method.toUpperCase(), body }))
+  const res = await mainApp.fetch(new Request(url.toString(), withInternalAppToken({ method: method.toUpperCase(), body })))
   const text = await res.text()
   let json: any = null
   try { json = text ? JSON.parse(text) : null } catch { /* 非 JSON 响应 */ }
@@ -231,7 +232,7 @@ async function callUpload(kind: 'image' | 'video' | 'audio', args: any): Promise
   if (args?.drama_id !== undefined && args?.drama_id !== null && args?.drama_id !== '') {
     form.append('drama_id', String(Number(args.drama_id)))
   }
-  const res = await mainApp.fetch(new Request(`http://internal/api/v1/upload/${kind}`, { method: 'POST', body: form }))
+  const res = await mainApp.fetch(new Request(`http://internal/api/v1/upload/${kind}`, withInternalAppToken({ method: 'POST', body: form })))
   const text = await res.text()
   let json: any = null
   try { json = text ? JSON.parse(text) : null } catch { /* 非 JSON */ }

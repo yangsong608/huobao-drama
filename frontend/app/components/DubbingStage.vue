@@ -46,7 +46,7 @@
       </button>
     </div>
 
-    <div :class="['dub-body', { 'is-generate': currentStep === 2 }]">
+    <div :class="['dub-body', { 'is-generate': currentStep === 2, 'is-mix': currentStep === 3 }]">
       <section class="dub-main">
         <!-- 1. 台词准备 -->
         <template v-if="currentStep === 0">
@@ -280,6 +280,7 @@
 
         <!-- 3. 生成 -->
         <template v-else-if="currentStep === 2">
+          <MediaCapabilityNotice v-if="voiceBlocked" action="voice" />
           <div class="dub-toolbar">
             <div class="dub-filters">
               <button
@@ -298,7 +299,8 @@
                 v-if="failedCount"
                 class="btn btn-sm"
                 type="button"
-                :disabled="generationRunning || retryingFailed"
+                :disabled="generationRunning || retryingFailed || voiceBlocked"
+                :title="voiceBlocked ? t('media.capability.actionDisabled') : undefined"
                 @click="retryFailed"
               >
                 <Loader2 v-if="retryingFailed" :size="11" class="animate-spin" />
@@ -326,7 +328,8 @@
                   v-if="!generationRunning"
                   class="btn btn-sm is-primary"
                   type="button"
-                  :disabled="!lines.length"
+                  :disabled="!lines.length || voiceBlocked"
+                  :title="voiceBlocked ? t('media.capability.actionDisabled') : undefined"
                   @click="startGenerationBatch"
                 >
                   <Play :size="11" />
@@ -597,6 +600,8 @@ import LineEditorDialog from '~/components/LineEditorDialog.vue'
 import LineList from '~/components/LineList.vue'
 import MixStage from '~/components/MixStage.vue'
 import TakeInspector from '~/components/TakeInspector.vue'
+import MediaCapabilityNotice from '~/components/MediaCapabilityNotice.vue'
+import { useMediaCapabilities } from '~/composables/useMediaCapabilities'
 
 const props = withDefaults(defineProps<{
   episodeId: number | null
@@ -698,6 +703,8 @@ const currentStep = computed(() => Math.max(0, Math.min(props.step || 0, stepDef
 
 // ===== 平板：步骤条横向滚动 + 检查器抽屉 =====
 const { isTablet, isCompact } = useViewport()
+const mediaCaps = useMediaCapabilities()
+const voiceBlocked = computed(() => !mediaCaps.voiceReady.value)
 // 平板（≤1180）检查器变抽屉；紧凑（≤900）再变底部抽屉
 const dubDrawer = computed(() => isTablet.value)
 const dubBottomDrawer = computed(() => isCompact.value)
@@ -1374,5 +1381,38 @@ watch(() => props.step, step => {
   }
   .dub-player { flex-wrap: wrap; }
   .dub-player-audio { width: 100%; }
+}
+/* 手机：步骤条独占一行，操作区收成横向滚动一行，避免把步骤压到只剩几十像素 */
+@media (max-width: 743px) {
+  .dub-head { flex-direction: column; align-items: stretch; gap: 6px; }
+  .dub-steps { flex: none; width: 100%; }
+  .dub-head-actions {
+    flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px;
+    scrollbar-width: none; overscroll-behavior-x: contain;
+  }
+  .dub-head-actions::-webkit-scrollbar { display: none; }
+  .dub-head-actions > * { flex: 0 0 auto; }
+  .dub-toolbar-actions {
+    width: 100%; margin-left: 0; flex-wrap: nowrap; overflow-x: auto;
+    padding-bottom: 2px; scrollbar-width: none; overscroll-behavior-x: contain;
+  }
+  .dub-toolbar-actions::-webkit-scrollbar { display: none; }
+  .dub-toolbar-actions > * { flex: 0 0 auto; }
+  .dub-player { gap: 8px; padding: 6px 8px; }
+  .dub-mix-stage :deep(.mx-stage) { flex: 0 0 auto; min-height: 0; }
+}
+/* 平板/手机窄宽：混音台按内容撑开，由 dub-mix-stage 负责滚动，不再压扁内部时间线 */
+@media (max-width: 1180px) {
+  .dub-mix-stage :deep(.mx-stage) { flex: 0 0 auto; min-height: 0; }
+}
+/* 手机横屏：高度很矮，整个配音工作台滚动，主体保留可用高度 */
+@media (max-width: 1000px) and (max-height: 520px) {
+  .dubbing-stage { overflow-y: auto; overscroll-behavior-y: contain; }
+  .dub-head, .dub-banner, .dub-player { flex: none; }
+  .dub-player { position: static; }
+  .dub-body, .dub-body.is-generate { flex: 0 0 520px; min-height: 520px; }
+  .dub-body.is-mix { flex: 0 0 auto; min-height: 520px; }
+  .dub-mix-stage { overflow: visible; }
+  .dub-main { min-height: 0; }
 }
 </style>

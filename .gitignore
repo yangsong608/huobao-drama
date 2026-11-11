@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 .pnpm-store/
+# 本地开发用符号链接（共享主仓库依赖），避免误提交
+/backend/node_modules
+/frontend/node_modules
 
 # Build output
 dist/
@@ -102,3 +105,7 @@ Thumbs.db
 
 # External reference repositories (cloned for read-only analysis; not tracked)
 reference/
+
+# A1 原型运行时与临时探针产物（本地生成，不入库）
+/app/prototype/runtime/
+/app/prototype/tmp-a1/

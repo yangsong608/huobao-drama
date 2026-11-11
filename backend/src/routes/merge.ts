@@ -17,6 +17,7 @@ import {
 } from '../services/transition-service.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { hasActiveStoryboardAudit } from '../services/storyboard-audit-jobs.js'
+import { outputGate } from '../utils/media-guard.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 
 const app = new Hono()
@@ -37,7 +38,7 @@ async function readJsonBody(c: any): Promise<any> {
 }
 
 // POST /episodes/:id/merge — 拼接镜头视频(body.storyboard_ids 可选,只拼所选)
-app.post('/episodes/:id/merge', async (c) => {
+app.post('/episodes/:id/merge', outputGate, async (c) => {
   const episodeId = Number(c.req.param('id'))
   const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId))
   if (!ep) return badRequest(c, '剧集不存在')
@@ -112,7 +113,7 @@ app.get('/episodes/:id/transitions', async (c) => {
 })
 
 // POST /episodes/:id/transitions/prepare — 为缺失/过期断点创建生成任务（不等待完成）
-app.post('/episodes/:id/transitions/prepare', async (c) => {
+app.post('/episodes/:id/transitions/prepare', outputGate, async (c) => {
   const episodeId = Number(c.req.param('id'))
   if (Number.isInteger(episodeId) && episodeId > 0 && await hasActiveStoryboardAudit(episodeId)) {
     return badRequest(c, '检验进行中，暂不能生成过渡镜头')
@@ -210,7 +211,7 @@ app.post('/episodes/:id/transitions/prepare', async (c) => {
 })
 
 // POST /episodes/:id/transitions/custom — 新建/切换自定义过渡（转场/空镜/场景/文字）
-app.post('/episodes/:id/transitions/custom', async (c) => {
+app.post('/episodes/:id/transitions/custom', outputGate, async (c) => {
   const episodeId = Number(c.req.param('id'))
   if (!Number.isInteger(episodeId) || episodeId <= 0) return badRequest(c, '剧集不存在')
   if (await hasActiveStoryboardAudit(episodeId)) {
@@ -257,7 +258,7 @@ app.post('/episodes/:id/transitions/custom', async (c) => {
 })
 
 // POST /transitions/:id/retry — 按原配置重试单个断点；可带用户改写后的提示词与文本模型
-app.post('/transitions/:id/retry', async (c) => {
+app.post('/transitions/:id/retry', outputGate, async (c) => {
   const id = Number(c.req.param('id'))
   if (!Number.isInteger(id) || id <= 0) return badRequest(c, '过渡片段不存在')
   const body = await readJsonBody(c)
@@ -286,7 +287,7 @@ app.post('/transitions/:id/retry', async (c) => {
 })
 
 // POST /transitions/:id/analyze — 用视觉模型重新分析断点两帧，返回提示词（不落库）
-app.post('/transitions/:id/analyze', async (c) => {
+app.post('/transitions/:id/analyze', outputGate, async (c) => {
   const id = Number(c.req.param('id'))
   if (!Number.isInteger(id) || id <= 0) return badRequest(c, '过渡片段不存在')
   const body = await readJsonBody(c)

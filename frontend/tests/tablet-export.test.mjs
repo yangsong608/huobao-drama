@@ -741,8 +741,8 @@ test('ExportStage 平板分享入口、尺寸、离线守卫与保存提示', ()
   assert.match(exportStageSource, /const key = shareNoticeKey\(outcome\)/)
 
   assert.match(exportStageSource, /function ensureOnline\(\) \{[\s\S]{0,160}navigator\.onLine !== false[\s\S]{0,120}t\('tablet\.status\.needServer'\)/)
-  assert.match(exportStageSource, /function start\(kind: ExportKind[\s\S]{0,120}if \(!ensureOnline\(\)\) return null/)
-  assert.match(exportStageSource, /function retry\(id: number\) \{[\s\S]{0,120}if \(!ensureOnline\(\)\) return false/)
+  assert.match(exportStageSource, /function start\(kind: ExportKind[\s\S]{0,280}if \(!ensureOnline\(\)\) return null/)
+  assert.match(exportStageSource, /function retry\(id: number\) \{[\s\S]{0,280}if \(!ensureOnline\(\)\) return false/)
 
   // 输出卡与记录动作区各一个分享按钮（仅平板、完成后）
   assert.equal(countOccurrences(exportStageSource, 'shareRecord(outputRecord)'), 1, '输出卡分享入口')
