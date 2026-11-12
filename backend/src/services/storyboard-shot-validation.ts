@@ -112,6 +112,7 @@ export function validateRepairedShot(input: RepairedShotInput): RepairedShotVali
     duration: input.duration,
     shotLabel: label,
     checkSubshots: true,
+    forbidShotMarkers: true,
   }))
 
   const sourceIntent = detectVocalIntent(source)

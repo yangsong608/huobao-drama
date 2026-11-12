@@ -779,7 +779,7 @@ const saveStoryboards = createTool({
         failures: dialogueFailures.join('；'),
       })
       throw new Error(
-        `拒绝保存：video_prompt 没有逐字保留 description 的台词和标点。3 秒分段可以拆开句子，但不允许压缩、删字、改字或丢标点。${dialogueFailures.join('；')}。请从 description 对应【镜头N】逐字复制台词（含全部标点）后重试。`,
+        `拒绝保存：video_prompt 没有逐字保留 description 的台词和标点。3 秒分段可以拆开句子，但不允许压缩、删字、改字或丢标点。${dialogueFailures.join('；')}。请从 description 逐字复制台词（含全部标点）后重试。`,
       )
     }
 
@@ -1025,7 +1025,10 @@ const updateStoryboard = createTool({
     if ('result' in fields) updates.result = fields.result
     if ('atmosphere' in fields) updates.atmosphere = fields.atmosphere
     if ('image_prompt' in fields) updates.imagePrompt = fields.image_prompt
-    if ('video_prompt' in fields) updates.videoPrompt = fields.video_prompt
+    if ('video_prompt' in fields) {
+      updates.videoPrompt = fields.video_prompt
+      updates.finalPromptOverride = null
+    }
     if ('bgm_prompt' in fields) updates.bgmPrompt = fields.bgm_prompt
     if ('sound_effect' in fields) updates.soundEffect = fields.sound_effect
     if ('transition' in fields) updates.transition = fields.transition
@@ -1475,6 +1478,7 @@ const saveRepairedStoryboard = createTool({
       atmosphere: input.atmosphere,
       imagePrompt: input.image_prompt,
       videoPrompt,
+      finalPromptOverride: null,
       transition: input.transition || skeleton.transition || 'cut',
       continuity: input.continuity || skeleton.continuity,
       sceneId: canonicalScene,
@@ -1807,6 +1811,7 @@ const saveSoundPlan = createTool({
         : null
       db.update(schema.storyboards).set({
         videoPrompt: prompt,
+        finalPromptOverride: null,
         soundUnitKey: unitKey,
         soundCue: JSON.stringify({
           plan_id: planId,

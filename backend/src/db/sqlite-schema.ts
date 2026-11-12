@@ -167,6 +167,7 @@ export const sqliteSchemaStatements = [
     atmosphere TEXT,
     image_prompt TEXT,
     video_prompt TEXT,
+    final_prompt_override TEXT,
     bgm_prompt TEXT,
     sound_effect TEXT,
     description TEXT,
@@ -1777,6 +1778,7 @@ export function initSqliteSchema(sqlite: Database.Database) {
   // 分镜内容指纹：台词抽取幂等
   const storyboardColumns = new Set((sqlite.prepare('PRAGMA table_info(storyboards)').all() as { name: string }[]).map(c => c.name))
   if (!storyboardColumns.has('source_hash')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN source_hash TEXT')
+  if (!storyboardColumns.has('final_prompt_override')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN final_prompt_override TEXT')
   if (!storyboardColumns.has('transition')) sqlite.exec("ALTER TABLE storyboards ADD COLUMN transition TEXT DEFAULT 'cut'")
   if (!storyboardColumns.has('continuity')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN continuity TEXT')
   // 自动插入的过渡分镜：类型与文字卡内容；历史分镜为空按普通分镜处理。

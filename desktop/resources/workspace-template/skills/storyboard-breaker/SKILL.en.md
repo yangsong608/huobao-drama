@@ -11,7 +11,7 @@ One storyboard = one video generation task = one camera setup + one subject + on
 
 - Each storyboard is 6-15 seconds.
 - Only continuous movement within the same camera setup is allowed. A new camera setup, subject, action or emotional beat requires a new storyboard.
-- Never write 【镜头2】 or later sub-shots inside one storyboard; time segments within one setup are not sub-shots.
+- Do not write 【镜头N】 numbering in the description and never cut between sub-shots inside one storyboard; time segments within one setup are not sub-shots.
 
 ## 2. Script coverage
 
@@ -31,7 +31,7 @@ One storyboard = one video generation task = one camera setup + one subject + on
 
 | Field | Requirement |
 |---|---|
-| `description` | One continuous shot: who + concrete action + body detail + expression + position/eyeline; at most one 【镜头1】, never 【镜头2】 or later |
+| `description` | One continuous shot: who + concrete action + body detail + expression + position/eyeline; do not write 【镜头N】 numbering |
 | `duration` | 6-15 seconds; internal time segments 1-6 seconds each |
 | `scene_id` | Canonical scene ID |
 | `character_ids` | Characters actually visible; empty array when none |
@@ -61,4 +61,4 @@ Sound is not written here: BGM/ambience are designed in step 4 by scene/plot sou
 
 - Call `save_storyboards` in batches of at most 8; first batch uses `replace_existing: true`, later batches omit it.
 - `shot_number` increases in story order; do not stop before all storyboards are saved.
-- Self-check before saving: multiple sub-shots, missing blocking, missing action endpoints, missing negative constraints or scene aliases must be fixed first.
+- Self-check before saving: any 【镜头N】 numbering, missing blocking, missing action endpoints, missing negative constraints or scene aliases must be fixed first.

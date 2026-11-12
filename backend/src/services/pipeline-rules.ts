@@ -30,7 +30,7 @@ export const DEFAULT_PIPELINE_RULES: Record<PipelineRuleKey, string> = {
   'extract.scenes': '请从本集剧本中提取所有场景信息（地点、时间、光影等），先用 read_existing_scenes 读取已有场景去重，再用 save_dedup_scenes 保存。本次只提取场景，不要提取角色和道具。',
   'extract.props': '请从本集剧本中提取关键道具——必须同时满足：① 直接推动剧情（出现/交接/损坏/发现会引发情节转折，如凶器、信物、关键文件、定情礼物、证据）；② 值得单独生成白底单品图（分镜会给它特写或反复出现）。判定三问任一答"否"即放弃：删掉它剧情依然成立吗？它只是随手使用的日常物品（手机、筷子、水杯）吗？它是场景陈设（桌椅、灯具）吗？宁可少提不要多提，一集通常 0-3 个，超过 3 个只保留最重要的 3 个，没有就一个都不提取（save_dedup_props 传空数组）。description 只记录物品外貌。先用 read_existing_props 读取已有道具去重，再用 save_dedup_props 保存。本次只提取道具，不要提取角色和场景。',
   storyboards: `请基于当前集剧本拆分分镜。
-一个分镜 = 一个机位 + 一个主体 + 一个连续动作；需要换机位、换主体、换动作/情绪节点时新开分镜，禁止在一个分镜里写多个【镜头N】子镜头。
+一个分镜 = 一个机位 + 一个主体 + 一个连续动作；需要换机位、换主体、换动作/情绪节点时新开分镜，description 不写【镜头N】编号。
 本次视频模型：{{videoModel}}，请按该模型的特性与时长限制生成 video_prompt。
 
 项目已有角色：{{characters}}
@@ -45,7 +45,7 @@ export const DEFAULT_PIPELINE_RULES: Record<PipelineRuleKey, string> = {
 - 只有纯环境空镜才可以不绑定角色
 
 固定字段：
-- description：只写一个连续镜头的可见画面、动作、表情、站位、视线、道具；最多一个【镜头1】，禁止【镜头2】及以后
+- description：只写一个连续镜头的可见画面、动作、表情、站位、视线、道具；不要写【镜头1】【镜头2】等任何编号，禁止子镜头切镜
 - duration：每个分镜 6-15 秒
 - transition：cut / fade / dissolve / wipe
 - continuity：承接上一镜的尾动作、视线、站位、环境声；第一镜写「开场」

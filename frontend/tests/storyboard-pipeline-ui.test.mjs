@@ -11,7 +11,7 @@ const locales = ['zh', 'en', 'ja', 'ko'].map(lang => [
 ])
 
 test('视频制作页使用独立的拆分进度面板，不再用 banner + 空状态重复进度', () => {
-  assert.match(episode, /class="video-split-panel"/)
+  assert.match(episode, /['"]video-split-panel['"]/)
   assert.match(episode, /v-if="splitRunning \|\| \(canResumeSplit && splitJob\) \|\| \(splitJob\?\.status === 'done' && splitJob\?\.skipped_shots > 0\)"/)
   assert.match(episode, /class="video-split-progress-track"/)
   assert.match(episode, /class="video-split-chunk-list"/)
@@ -147,6 +147,99 @@ test('视频页显示原剧本摘录与计划台词，衔接转场移出折叠�
   for (const [lang, bundle] of locales) {
     const sb = bundle.episode?.sb || {}
     for (const key of ['sourceExcerpt', 'sourceExcerptTag', 'sourceExcerptHint', 'planSpeech', 'descAiHint', 'transitionHint', 'advancedFields']) {
+      assert.equal(typeof sb[key], 'string', `${lang} 缺少 episode.sb.${key}`)
+    }
+  }
+})
+
+test('四语言画面描述提示禁止镜头编号', () => {
+  for (const [lang, bundle] of locales) {
+    const hint = bundle.episode?.sb?.descHint || ''
+    assert.doesNotMatch(hint, /逐子镜头|【镜头2】|【Shot 2】|【ショット2】|【샷2】/, `${lang} 仍在提示逐子镜头`)
+    assert.match(hint, /不写【镜头1】|do not write 【Shot 1】|【ショット1】などの番号は書きません|【샷1】 같은 번호는 쓰지 않습니다/, `${lang} 未提示禁止镜头编号`)
+  }
+})
+
+test('拆分面板可手动收起展开，完成态带问题分镜也能收起', () => {
+  assert.match(episode, /splitPanelCollapsed/)
+  assert.match(episode, /function toggleSplitPanel\(\)/)
+  assert.match(episode, /aria-controls="video-split-panel-body"/)
+  assert.match(episode, /v-show="!splitPanelCollapsed" id="video-split-panel-body"/)
+  assert.match(episode, /'is-collapsed': splitPanelCollapsed/)
+  assert.match(episode, /huobao:split-panel-collapsed:/)
+  for (const [lang, bundle] of locales) {
+    const sb = bundle.episode?.sb || {}
+    assert.equal(typeof sb.splitPanelCollapse, 'string', `${lang} 缺少 episode.sb.splitPanelCollapse`)
+    assert.equal(typeof sb.splitPanelExpand, 'string', `${lang} 缺少 episode.sb.splitPanelExpand`)
+    for (const key of ['manualSkip', 'manualSkipReason', 'skippedSummary', 'skippedTag', 'skippedNumbers', 'skippedHint', 'skippedView', 'skippedShort']) {
+      assert.equal(typeof sb[key], 'string', `${lang} 缺少 episode.sb.${key}`)
+    }
+    assert.equal(bundle.settings?.ai?.skippedTag, undefined, `${lang} 的跳过文案不应留在 settings.ai`)
+  }
+})
+
+test('步骤追踪使用本地化步骤名、状态、范围与定位', () => {
+  assert.match(episode, /traceStepLabel\(step\.step_key\)/)
+  assert.match(episode, /traceStatusLabel\(step\.status\)/)
+  assert.match(episode, /traceItemLabel\(step\)/)
+  assert.match(episode, /traceScopeLabel\(step\?\.scope\)/)
+  assert.doesNotMatch(episode, /traceScopeLabel\(step\.scope\)/)
+  assert.doesNotMatch(episode, /\{\{ step\.step_key \}\}/)
+  assert.doesNotMatch(episode, /\{\{ step\.status \}\}/)
+  assert.match(episode, /Number\(chunk\[1\]\) \+ 1/)
+  const steps = ['prepare', 'skeleton-split', 'skeleton-gate', 'shot-repair', 'shot-validate', 'sound-design', 'sound-validate', 'finalize']
+  const statuses = ['pending', 'running', 'passed', 'failed', 'skipped', 'manual', 'done', 'interrupted']
+  const scopes = ['episode', 'chunk', 'shot']
+  for (const [lang, bundle] of locales) {
+    const labels = bundle.settings?.pipeline?.traceLabels || {}
+    for (const key of steps) assert.equal(typeof labels.steps?.[key], 'string', `${lang} 缺少 traceLabels.steps.${key}`)
+    for (const key of statuses) assert.equal(typeof labels.status?.[key], 'string', `${lang} 缺少 traceLabels.status.${key}`)
+    for (const key of scopes) assert.equal(typeof labels.scope?.[key], 'string', `${lang} 缺少 traceLabels.scope.${key}`)
+    for (const key of ['itemEpisode', 'itemChunk', 'itemShot', 'empty']) {
+      assert.equal(typeof labels[key], 'string', `${lang} 缺少 traceLabels.${key}`)
+    }
+  }
+})
+
+test('声音计划抽屉可只重跑声音设计', () => {
+  assert.match(api, /rerunSound: \(runId: number\) => api\.post\(`\/pipelines\/runs\/\$\{runId\}\/rerun-sound`/)
+  assert.match(episode, /function rerunSoundDesign\(\)/)
+  assert.match(episode, /pipelineChainAPI\.rerunSound\(job\.id\)/)
+  assert.match(episode, /episode\.soundPanel\.rerunConfirm/)
+  for (const [lang, bundle] of locales) {
+    const panel = bundle.episode?.soundPanel || {}
+    for (const key of ['rerun', 'rerunHint', 'rerunConfirm', 'rerunStarted', 'rerunFailed']) {
+      assert.equal(typeof panel[key], 'string', `${lang} 缺少 episode.soundPanel.${key}`)
+    }
+  }
+})
+
+test('每个分镜提供优化按钮，按第二步修补与第三步校验重跑', () => {
+  assert.match(api, /optimize: \(id: number\) => api\.post\(`\/storyboards\/\$\{id\}\/optimize`/)
+  assert.match(episode, /async function optimizeShot\(sb\)/)
+  assert.match(episode, /storyboardAPI\.optimize\(sb\.id\)/)
+  assert.match(episode, /class="btn btn-icon btn-sm video-task-action video-task-optimize"/)
+  assert.match(episode, /function pipelineShotFor\(sb\)/)
+  for (const [lang, bundle] of locales) {
+    const sb = bundle.episode?.sb || {}
+    for (const key of ['optimize', 'optimizeHint', 'optimizeNoPlan', 'optimizeRunning', 'optimizeDone', 'optimizeWarnings', 'optimizeFailed']) {
+      assert.equal(typeof sb[key], 'string', `${lang} 缺少 episode.sb.${key}`)
+    }
+  }
+})
+
+test('最终提示词预览可编辑，生成使用覆盖值，上游变化单向刷新', () => {
+  assert.match(episode, /function finalGenerationPrompt\(sb\)/)
+  assert.match(episode, /prompt: finalGenerationPrompt\(sb\)/)
+  assert.match(episode, /finalPromptOverrideValue\(sb\) \|\| autoFinalPromptFor\(sb\)/)
+  assert.match(episode, /const finalPromptDraft = ref\(''\)/)
+  assert.match(episode, /function commitFinalPrompt\(\)/)
+  assert.match(episode, /final_prompt_override/)
+  assert.match(episode, /class="textarea video-final-prompt-textarea"/)
+  assert.match(episode, /auto === lastFinalPromptAuto/)
+  for (const [lang, bundle] of locales) {
+    const sb = bundle.episode?.sb || {}
+    for (const key of ['finalPromptSection', 'finalPromptHint', 'finalPromptManual', 'finalPromptAuto', 'finalPromptReset', 'finalPromptRefreshed']) {
       assert.equal(typeof sb[key], 'string', `${lang} 缺少 episode.sb.${key}`)
     }
   }

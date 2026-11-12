@@ -441,6 +441,15 @@ test('逐镜校验：原剧本无台词时禁止自行加台词，小说自带�
     duration: 6,
   })
   assert.match(missingNovelLine.errors.join('；'), /漏掉了原剧本台词/)
+
+  const markedShot = validateRepairedShot({
+    sourceExcerpt: '张三站在门口。',
+    description: '【镜头1】张三站在门口张望。',
+    videoPrompt: basePrompt('张望。'),
+    characterIds: [1],
+    duration: 6,
+  })
+  assert.match(markedShot.errors.join('；'), /【镜头N】/)
 })
 
 test('声音增量：跨单元 BGM 继续不重启，环境声换场重新建立', () => {
@@ -507,6 +516,82 @@ test('四段式管线：预拆→逐镜修补→逐镜校验→声音设计，�
   assert.equal(rewritten.error, undefined)
   const updated = liveStoryboards(fixture.episodeId)[0]
   assert.match(updated.videoPrompt || '', /声音：BGM：本镜进入/)
+})
+
+test('只重跑声音设计：不重新拆分/修补，生成新版本并重写声音行', async () => {
+  const fixture = await makePipelineWithShot2Failure({ shot2HasLine: true })
+  await svc.runStoryboardPipelineJob(fixture.jobId, fixture.runners as any)
+  let job = svc.getStoryboardPipelineJob(fixture.jobId)!
+  assert.equal(job.status, 'done')
+  assert.equal(fixture.calls().soundCalls, 1)
+  const firstPlan = await api.request(`/storyboards/sound-plan/${fixture.episodeId}`)
+  assert.equal((await firstPlan.json() as any).data.plan.version, 1)
+
+  const queued = await svc.rerunStoryboardPipelineSound(fixture.jobId, { autorun: false })
+  assert.equal(queued.stage, 'sound')
+  assert.ok(['pending', 'running'].includes(String(queued.status)))
+  assert.equal(queued.sound_units, 0)
+
+  await svc.runStoryboardPipelineJob(fixture.jobId, fixture.runners as any)
+  job = svc.getStoryboardPipelineJob(fixture.jobId)!
+  assert.equal(job.status, 'done')
+  assert.equal(job.stage, 'sound')
+  assert.equal(fixture.calls().soundCalls, 2, '重跑只应再次执行声音阶段')
+  const secondPlan = await api.request(`/storyboards/sound-plan/${fixture.episodeId}`)
+  assert.equal((await secondPlan.json() as any).data.plan.version, 2)
+  const rows = liveStoryboards(fixture.episodeId)
+  assert.match(rows[0].videoPrompt || '', /声音：/)
+})
+
+test('逐镜校验未全部通过时拒绝重跑声音设计', async () => {
+  const fixture = await makePipelineWithShot2Failure({ shot2HasLine: false })
+  await svc.runStoryboardPipelineJob(fixture.jobId, fixture.runners as any)
+  const job = svc.getStoryboardPipelineJob(fixture.jobId)!
+  assert.equal(job.status, 'failed')
+  await assert.rejects(
+    () => svc.rerunStoryboardPipelineSound(fixture.jobId, { autorun: false }),
+    /未通过校验/,
+  )
+})
+
+test('单镜优化：只重跑修补与校验，保留其它分镜和声音行', async () => {
+  const fixture = await makePipelineWithShot2Failure({ shot2HasLine: true })
+  await svc.runStoryboardPipelineJob(fixture.jobId, fixture.runners as any)
+  const before = liveStoryboards(fixture.episodeId)
+  const shot1 = before.find(row => row.storyboardNumber === 1)!
+  assert.match(shot1.videoPrompt || '', /声音：/)
+  db.update(schema.storyboards).set({ finalPromptOverride: '旧的手动最终提示词' })
+    .where(eq(schema.storyboards.id, shot1.id)).run()
+
+  const result = await svc.optimizeStoryboardShot(shot1.id, {
+    runners: { repair: fixture.runners.repair } as any,
+  })
+  assert.equal(result.shot_number, 1)
+  assert.equal(fixture.calls().soundCalls, 1, '单镜优化不应重跑声音阶段')
+  assert.equal(liveStoryboards(fixture.episodeId).length, 2, '其它分镜不能被重拆或删除')
+  const updated = liveStoryboards(fixture.episodeId).find(row => row.id === shot1.id)!
+  assert.match(updated.videoPrompt || '', /声音：/, '优化后必须保留原有声音行')
+  assert.equal(updated.finalPromptOverride, null, '上游提示词变化后最终提示词覆盖必须失效')
+  const skeleton1 = skeletonRows(fixture.jobId).find(row => row.storyboardNumber === 1)!
+  assert.equal(skeleton1.status, 'validated')
+  assert.equal(svc.getStoryboardPipelineJob(fixture.jobId)?.status, 'done')
+})
+
+test('单镜优化连续失败时停在人工队列并返回问题', async () => {
+  const fixture = await makePipelineWithShot2Failure({ shot2HasLine: true })
+  await svc.runStoryboardPipelineJob(fixture.jobId, fixture.runners as any)
+  const shot1 = liveStoryboards(fixture.episodeId).find(row => row.storyboardNumber === 1)!
+  await assert.rejects(
+    () => svc.optimizeStoryboardShot(shot1.id, { runners: { repair: async () => {} } as any }),
+    /优化未通过/,
+  )
+  const skeleton1 = skeletonRows(fixture.jobId).find(row => row.storyboardNumber === 1)!
+  assert.equal(skeleton1.status, 'manual')
+  const job = svc.getStoryboardPipelineJob(fixture.jobId)!
+  assert.equal(job.status, 'failed')
+  assert.equal(job.stage, 'repair')
+  assert.equal(job.current_shot_number, 1)
+  assert.match(job.error || '', /优化未通过/)
 })
 
 test('四段式管线：某一镜连续修补失败时停在该镜，不进入下一镜和声音设计', async () => {

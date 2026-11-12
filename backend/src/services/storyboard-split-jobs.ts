@@ -413,7 +413,7 @@ export function buildChunkMessage(input: SplitChunkRunnerInput, sceneBindingBloc
     `- 本段范围：${input.chunk.label}，约 ${chunkChars} 字`,
     `- 只拆分下面给出的剧本片段，不要拆分或改写其它场次；read_storyboard_context 在本模式下也只返回本段。`,
     `- 本段分镜数下限：${chunkFloor} 个（按 0.12 秒/字、单镜最长 ${input.maxSegmentSeconds} 秒、90% 折算）。`,
-    `- 直接调用 save_storyboards 保存本段全部分镜；一个分镜只能一个机位/一个主体/一个连续动作，禁止多个【镜头N】子镜头。shot_number 由系统跨段统一连续编号，按剧情顺序填写即可。`,
+    `- 直接调用 save_storyboards 保存本段全部分镜；一个分镜只能一个机位/一个主体/一个连续动作，description 不写【镜头N】编号。shot_number 由系统跨段统一连续编号，按剧情顺序填写即可。`,
     `- 时间帧必须从 0 连续写到 duration：例如 duration 9 秒要写 0-3、3-6、6-9，不能只写 0-4 就结束；最后一段结束必须等于 duration。`,
     `- 每个分镜的 video_prompt 必须固定四区：信息头 → 「画面调度：画面左：…；画面右：…；过…肩；背景地标：窗在左后、门在右后；轴线A；动作起点：…；动作终点：…」→ 时间帧 → 负面约束。没有地标写「背景地标：无」；单人/空镜轴线写「轴线无」；双人及以上写「轴线A/B」。同一场戏的屏幕左右、轴线、地标侧先在第一镜定一次，后续同场分镜沿用，禁止交换人物左右或门窗侧；缺少任意一项保存会被拒绝。`,
     `- 不要传 replace_existing：旧分镜与跨段编号由系统处理；第 1 块保存前旧分镜会被整体清空，不要把旧分镜当成参考。`,

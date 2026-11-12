@@ -634,15 +634,22 @@
                 </button>
               </div>
             </div>
-            <div v-if="splitRunning || (canResumeSplit && splitJob) || (splitJob?.status === 'done' && splitJob?.skipped_shots > 0)" class="video-split-panel">
+            <div v-if="splitRunning || (canResumeSplit && splitJob) || (splitJob?.status === 'done' && splitJob?.skipped_shots > 0)" :class="['video-split-panel', { 'is-collapsed': splitPanelCollapsed }]">
               <div class="video-split-panel-head">
                 <div class="video-split-panel-copy">
                   <div class="video-split-panel-title">{{ t('episode.sb.title') }} · {{ pipelineStageLabel }} · {{ selectedChainName }}</div>
                   <div class="video-split-panel-sub">{{ splitProgressText }}</div>
                   <div v-if="splitRunning" class="video-split-panel-elapsed">{{ t('episode.sb.breakingElapsed', { s: breakdownElapsed }) }}</div>
                   <div v-else-if="splitJob?.error" class="video-split-panel-error">{{ splitJob.error }}</div>
+                  <span v-if="splitPanelCollapsed && splitJob?.status === 'done' && splitJob?.skipped_shots > 0" class="tag video-split-collapsed-tag">
+                    {{ t('episode.sb.skippedTag') }} · {{ splitJob.skipped_shots }}
+                  </span>
                 </div>
                 <div class="video-split-panel-actions">
+                  <button type="button" class="btn btn-sm video-split-toggle" :aria-expanded="!splitPanelCollapsed" aria-controls="video-split-panel-body" @click="toggleSplitPanel">
+                    <svg :class="['video-split-toggle-icon', { 'is-collapsed': splitPanelCollapsed }]" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                    {{ t(splitPanelCollapsed ? 'episode.sb.splitPanelExpand' : 'episode.sb.splitPanelCollapse') }}
+                  </button>
                   <button v-if="splitRunning" type="button" class="btn btn-sm" :disabled="splitPausing" @click="pauseSplit">
                     <Loader2 v-if="splitPausing" :size="11" class="animate-spin" />
                     {{ t('episode.sb.splitPause') }}
@@ -653,6 +660,7 @@
                   </button>
                 </div>
               </div>
+              <div v-show="!splitPanelCollapsed" id="video-split-panel-body">
               <div class="video-split-progress-track">
                 <div class="video-split-progress-fill" :style="{ width: splitPercent + '%' }" />
               </div>
@@ -726,6 +734,7 @@
                     {{ t('episode.sb.skippedView') }}
                   </button>
                 </div>
+              </div>
               </div>
             </div>
             <div v-else-if="!sbs.length" class="step-empty video-task-empty-state">
@@ -910,6 +919,18 @@
                     </div>
                   </div>
                   <div class="video-task-actions">
+                    <button
+                      v-if="!videoSelectMode"
+                      type="button"
+                      class="btn btn-icon btn-sm video-task-action video-task-optimize"
+                      :title="pipelineShotFor(task.storyboard) ? t('episode.sb.optimizeHint') : t('episode.sb.optimizeNoPlan')"
+                      :aria-label="t('episode.sb.optimize')"
+                      :disabled="Boolean(optimizingShotId) || splitRunning || !pipelineShotFor(task.storyboard)"
+                      @click.stop="optimizeShot(task.storyboard)"
+                    >
+                      <Loader2 v-if="optimizingShotId === task.id" :size="12" class="animate-spin" />
+                      <Sparkles v-else :size="12" />
+                    </button>
                     <button
                       v-if="!isComfyVideoMode"
                       class="btn btn-icon btn-sm video-task-action"
@@ -1160,6 +1181,23 @@
                     />
                     <p class="voice-reference-hint">{{ t('characterVoice.referenceHint') }}</p>
                     <p v-if="previousShotFrameRef" class="voice-reference-hint">{{ t('episode.frameAssets.autoPromptHint', { token: previousShotFrameRef.token }) }}</p>
+                    <div class="video-final-prompt">
+                      <div class="video-inspector-prompt-head">
+                        <span class="video-inspector-label">{{ t('episode.sb.finalPromptSection') }}</span>
+                        <span class="tag">{{ finalPromptOverrideActive ? t('episode.sb.finalPromptManual') : t('episode.sb.finalPromptAuto') }}</span>
+                        <button type="button" class="btn btn-sm" :disabled="!finalPromptOverrideActive" @click="resetFinalPrompt">
+                          {{ t('episode.sb.finalPromptReset') }}
+                        </button>
+                      </div>
+                      <p class="voice-reference-hint">{{ t('episode.sb.finalPromptHint') }}</p>
+                      <textarea
+                        v-model="finalPromptDraft"
+                        class="textarea video-final-prompt-textarea"
+                        rows="8"
+                        spellcheck="false"
+                        @blur="commitFinalPrompt"
+                      />
+                    </div>
                   </section>
               </div>
               </div>
@@ -1911,7 +1949,7 @@
           <div class="task-drawer-head">
             <div>
               <div class="video-task-title">{{ t('settings.pipeline.trace', '步骤追踪') }}</div>
-              <div class="video-task-meta">{{ selectedChainName }} · #{{ splitJob?.id }} · {{ splitJob?.status }}</div>
+              <div class="video-task-meta">{{ selectedChainName }} · #{{ splitJob?.id }} · {{ traceStatusLabel(splitJob?.status) }}</div>
             </div>
             <button class="btn btn-ghost btn-icon" :aria-label="t('common.close')" @click="pipelineTrace.open = false"><X :size="14" /></button>
           </div>
@@ -1919,16 +1957,16 @@
           <div v-else class="pipeline-trace-list">
             <div v-for="step in pipelineTrace.steps" :key="step.id" class="pipeline-trace-step">
               <div class="pipeline-trace-head">
-                <span class="tag">{{ step.status }}</span>
-                <strong>{{ step.step_key }}</strong>
-                <span class="dim">{{ step.scope }} · {{ step.item_key }}</span>
+                <span class="tag">{{ traceStatusLabel(step.status) }}</span>
+                <strong>{{ traceStepLabel(step.step_key) }}</strong>
+                <span class="dim">{{ traceItemLabel(step) }}</span>
                 <span v-if="step.attempts > 1" class="tag">×{{ step.attempts }}</span>
               </div>
               <div v-if="step.issues?.length" class="pipeline-trace-issues">
                 <div v-for="(issue, idx) in step.issues" :key="idx">{{ issue }}</div>
               </div>
             </div>
-            <div v-if="!pipelineTrace.steps.length" class="task-drawer-empty">{{ t('episode.audit.empty.title') }}</div>
+            <div v-if="!pipelineTrace.steps.length" class="task-drawer-empty">{{ t('settings.pipeline.traceLabels.empty') }}</div>
           </div>
         </aside>
       </div>
@@ -1946,7 +1984,13 @@
                 <template v-else>{{ t('episode.soundPanel.empty') }}</template>
               </div>
             </div>
-            <button class="btn btn-ghost btn-icon" :aria-label="t('episode.soundPanel.close')" @click="closeSoundPlan"><X :size="14" /></button>
+            <div class="task-drawer-head-actions">
+              <button type="button" class="btn btn-sm" :disabled="soundRerunBusy || splitRunning || !splitJob" :title="t('episode.soundPanel.rerunHint')" @click="rerunSoundDesign">
+                <Loader2 v-if="soundRerunBusy" :size="11" class="animate-spin" />
+                {{ t('episode.soundPanel.rerun') }}
+              </button>
+              <button class="btn btn-ghost btn-icon" :aria-label="t('episode.soundPanel.close')" @click="closeSoundPlan"><X :size="14" /></button>
+            </div>
           </header>
           <div class="task-drawer-body">
             <div v-if="soundPlanPanel.loading" class="step-empty">{{ t('episode.soundPanel.loading') }}</div>
@@ -2976,7 +3020,7 @@ import { useI18n } from 'vue-i18n'
 import {
   Users, FileText, FolderKanban, Clapperboard, Download, Loader2,
   Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors, Ellipsis,
-  Share2, AlertCircle,
+  Share2, AlertCircle, Sparkles,
 } from 'lucide-vue-next'
 import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, planningAPI, pipelineChainAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
@@ -3062,6 +3106,30 @@ const { running: rn, runningType: rt, run: runAgent } = useAgent()
 const splitJob = ref(null)
 const splitStarting = ref(false)
 const splitLastCompleted = ref(0)
+const splitPanelCollapsed = ref(false)
+let splitPanelJobId = null
+function splitPanelStorageKey(jobId) {
+  return `huobao:split-panel-collapsed:${jobId}`
+}
+function syncSplitPanelState(job) {
+  const jobId = Number(job?.id) || 0
+  if (!jobId || jobId === splitPanelJobId) return
+  splitPanelJobId = jobId
+  try {
+    splitPanelCollapsed.value = localStorage.getItem(splitPanelStorageKey(jobId)) === '1'
+  } catch {
+    splitPanelCollapsed.value = false
+  }
+}
+function toggleSplitPanel() {
+  splitPanelCollapsed.value = !splitPanelCollapsed.value
+  const jobId = Number(splitJob.value?.id) || 0
+  if (!jobId) return
+  try {
+    if (splitPanelCollapsed.value) localStorage.setItem(splitPanelStorageKey(jobId), '1')
+    else localStorage.removeItem(splitPanelStorageKey(jobId))
+  } catch { /* 忽略持久化失败 */ }
+}
 const splitRunning = computed(() => ['pending', 'running'].includes(String(splitJob.value?.status || '')))
 const canResumeSplit = computed(() => ['failed', 'interrupted'].includes(String(splitJob.value?.status || '')))
 const resumeSplitLabel = computed(() => (splitJob.value?.stage || 'skeleton') === 'skeleton'
@@ -3108,6 +3176,7 @@ function pipelineShotClass(status) {
 
 // ===== 第四步声音计划（只读时间线） =====
 const soundPlanPanel = ref({ open: false, loading: false, plan: null, cues: [] })
+const soundRerunBusy = ref(false)
 const soundTracks = [
   { kind: 'bgm' },
   { kind: 'ambience' },
@@ -3141,6 +3210,23 @@ async function openSoundPlan() {
 }
 function closeSoundPlan() {
   soundPlanPanel.value.open = false
+}
+async function rerunSoundDesign() {
+  const job = splitJob.value
+  if (!job?.id || soundRerunBusy.value || splitRunning.value) return
+  if (!window.confirm(t('episode.soundPanel.rerunConfirm'))) return
+  soundRerunBusy.value = true
+  try {
+    const result = await pipelineChainAPI.rerunSound(job.id)
+    if (result?.job) applySplitJob(result.job)
+    closeSoundPlan()
+    toast.success(t('episode.soundPanel.rerunStarted'))
+    if (splitRunning.value) startSplitPolling()
+  } catch (e) {
+    toastError(e, { fallback: 'episode.soundPanel.rerunFailed' })
+  } finally {
+    soundRerunBusy.value = false
+  }
 }
 
 async function pauseSplit() {
@@ -3195,6 +3281,7 @@ function onSceneGeographySaved(geography) {
 
 function applySplitJob(job, options = {}) {
   if (!job) return
+  syncSplitPanelState(job)
   const prevStatus = splitJob.value?.status
   const prevStage = splitJob.value?.stage
   splitJob.value = job
@@ -3290,6 +3377,30 @@ const breakdownMethodKey = ref('standard')
 const chainTemplates = ref([])
 const selectedChainKey = ref('standard-four-stage')
 const pipelineTrace = reactive({ open: false, loading: false, steps: [], job: null })
+function traceLabel(path, fallback) {
+  return te(path) ? t(path) : fallback
+}
+function traceStepLabel(key) {
+  const raw = String(key || '')
+  return raw ? traceLabel(`settings.pipeline.traceLabels.steps.${raw}`, raw) : ''
+}
+function traceStatusLabel(status) {
+  const raw = String(status || '')
+  return raw ? traceLabel(`settings.pipeline.traceLabels.status.${raw}`, raw) : ''
+}
+function traceScopeLabel(scope) {
+  const raw = String(scope || '')
+  return raw ? traceLabel(`settings.pipeline.traceLabels.scope.${raw}`, raw) : ''
+}
+function traceItemLabel(step) {
+  const raw = String(step?.item_key || '')
+  if (raw === 'episode') return t('settings.pipeline.traceLabels.itemEpisode')
+  const chunk = raw.match(/^chunk-(\d+)$/)
+  if (chunk) return t('settings.pipeline.traceLabels.itemChunk', { n: Number(chunk[1]) + 1 })
+  const shot = raw.match(/^shot-(\d+)$/)
+  if (shot) return t('settings.pipeline.traceLabels.itemShot', { n: Number(shot[1]) })
+  return raw ? `${traceScopeLabel(step?.scope)} · ${raw}` : traceScopeLabel(step?.scope)
+}
 const skipReason = ref('')
 const skipStarting = ref(false)
 const skippedShotNumbers = computed(() =>
@@ -6073,16 +6184,18 @@ const transitionOptions = computed(() => [
   { label: t('episode.sb.transitionWipe'), value: 'wipe' },
 ])
 const selectedSb = ref(null)
-const selectedPipelineShot = computed(() => {
+const optimizingShotId = ref(null)
+function pipelineShotFor(sb) {
   const shots = splitJob.value?.shots || []
-  const storyboardId = Number(selectedSb.value?.id)
+  const storyboardId = Number(sb?.id)
   if (storyboardId) {
     const byId = shots.find(shot => Number(shot.storyboard_id ?? shot.storyboardId) === storyboardId)
     if (byId) return byId
   }
-  const number = storyboardNumberOf(selectedSb.value)
+  const number = storyboardNumberOf(sb)
   return number ? shots.find(shot => Number(shot.number) === number) || null : null
-})
+}
+const selectedPipelineShot = computed(() => pipelineShotFor(selectedSb.value))
 const selectedSourceExcerpt = computed(() =>
   String(selectedPipelineShot.value?.source_excerpt ?? selectedPipelineShot.value?.sourceExcerpt ?? '').trim())
 const selectedPlanSpeech = computed(() => {
@@ -6092,6 +6205,86 @@ const selectedPlanSpeech = computed(() => {
     .map(item => ({ speaker: String(item?.speaker || '').trim(), text: String(item?.text || '').trim() }))
     .filter(item => item.text)
 })
+async function optimizeShot(sb) {
+  if (!sb?.id || optimizingShotId.value) return
+  if (splitRunning.value) {
+    toast.info(t('episode.sb.optimizeRunning'))
+    return
+  }
+  const shot = pipelineShotFor(sb)
+  if (!shot) {
+    toast.info(t('episode.sb.optimizeNoPlan'))
+    return
+  }
+  optimizingShotId.value = sb.id
+  try {
+    const result = await storyboardAPI.optimize(sb.id)
+    await resyncStoryboards()
+    await restoreSplitJob()
+    toast.success(t('episode.sb.optimizeDone', { n: result?.shot_number || storyboardNumberOf(sb) }))
+    if (result?.warnings?.length) {
+      toast.info(t('episode.sb.optimizeWarnings', { n: result.warnings.length }))
+    }
+  } catch (e) {
+    await resyncStoryboards().catch(() => {})
+    await restoreSplitJob().catch(() => {})
+    toastError(e, { fallback: 'episode.sb.optimizeFailed', duration: 8000 })
+  } finally {
+    optimizingShotId.value = null
+  }
+}
+const finalPromptDraft = ref('')
+const finalPromptSbId = ref(null)
+let lastFinalPromptAuto = ''
+const finalPromptAuto = computed(() => autoFinalPromptFor(selectedSb.value))
+const finalPromptOverrideActive = computed(() => Boolean(finalPromptOverrideValue(selectedSb.value)))
+watch([() => selectedSb.value?.id, finalPromptAuto], ([id, auto]) => {
+  const sb = selectedSb.value
+  if (!sb || !id) {
+    finalPromptSbId.value = null
+    finalPromptDraft.value = ''
+    lastFinalPromptAuto = ''
+    return
+  }
+  if (id !== finalPromptSbId.value) {
+    finalPromptSbId.value = id
+    lastFinalPromptAuto = auto
+    finalPromptDraft.value = finalPromptOverrideValue(sb) || auto
+    return
+  }
+  if (auto === lastFinalPromptAuto) return
+  lastFinalPromptAuto = auto
+  finalPromptDraft.value = auto
+  if (finalPromptOverrideValue(sb)) {
+    updateField(sb, 'final_prompt_override', '')
+    toast.info(t('episode.sb.finalPromptRefreshed'))
+  }
+}, { immediate: true })
+watch(() => finalPromptOverrideValue(selectedSb.value), (value) => {
+  const sb = selectedSb.value
+  if (!sb || Number(sb.id) !== Number(finalPromptSbId.value)) return
+  if (value) {
+    finalPromptDraft.value = value
+    return
+  }
+  lastFinalPromptAuto = finalPromptAuto.value
+  finalPromptDraft.value = finalPromptAuto.value
+})
+function commitFinalPrompt() {
+  const sb = selectedSb.value
+  if (!sb) return
+  const value = finalPromptDraft.value.trim()
+  const auto = autoFinalPromptFor(sb)
+  updateField(sb, 'final_prompt_override', value && value !== auto ? value : '')
+}
+function resetFinalPrompt() {
+  const sb = selectedSb.value
+  if (!sb) return
+  updateField(sb, 'final_prompt_override', '')
+  const auto = autoFinalPromptFor(sb)
+  lastFinalPromptAuto = auto
+  finalPromptDraft.value = auto
+}
 const preflightReport = ref(null)
 const preflightStale = ref(false)
 const preflightBusy = ref(false)
@@ -6277,7 +6470,7 @@ function saveScr() { episodeAPI.update(epId.value, { script_content: localScript
 const pipelineRules = ref({})
 const DEFAULT_REWRITE_RULE = '请读取剧本并改写为格式化剧本，然后保存'
 const DEFAULT_BREAKDOWN_RULE = `请基于当前集剧本拆分分镜。
-一个分镜 = 一个机位 + 一个主体 + 一个连续动作；需要换机位、换主体、换动作/情绪节点时新开分镜，禁止在一个分镜里写多个【镜头N】子镜头。
+一个分镜 = 一个机位 + 一个主体 + 一个连续动作；需要换机位、换主体、换动作/情绪节点时新开分镜，description 不要写【镜头1】【镜头2】等任何编号。
 本次视频模型：{{videoModel}}，请按该模型的特性与时长限制生成 video_prompt。
 
 项目已有角色：{{characters}}
@@ -6290,7 +6483,7 @@ const DEFAULT_BREAKDOWN_RULE = `请基于当前集剧本拆分分镜。
 - 每个镜头出现关键道具（被使用、交接、特写或在画面中明显可见）时，从上述项目已有道具中绑定 prop_ids（ID 必须来自上述列表）；没有道具出现可传空数组
 - 上述素材可能来自同项目其他剧集，可直接复用；保存时会自动关联到当前集
 - 只有纯环境空镜头才可以不绑定角色
-- 每个分镜 6-15 秒；只写一个连续镜头，禁止【镜头2】及以后`
+- 每个分镜 6-15 秒；只写一个连续镜头，不写【镜头N】编号`
 
 async function loadPipelineRules() {
   try {
@@ -6534,7 +6727,7 @@ async function genVideoPrompt(sb) {
 
 该分镜信息:时长 ${sb.duration || 10}s;场景:${getSceneName(sb) || '未绑定'};角色:${charNames};道具:${propNames}。
 
-请先调用 read_storyboard_context 获取该分镜的画面描述(含【镜头N】子镜头与台词/旁白)、氛围及时长,据此生成 video_prompt(按 3 秒分段换行、用 @角色名/@场景名/@道具名 引用参考素材；段落内允许多镜头切镜,但不跨场景,切镜点对齐 description 的【镜头N】结构),然后调用 update_storyboard 保存到分镜 ID:${sb.id}。只更新 video_prompt 字段,不要改动其他字段,不要重新拆分整集。`,
+请先调用 read_storyboard_context 获取该分镜的画面描述(一个连续镜头的画面与台词/旁白)、氛围及时长,据此生成 video_prompt(按 3 秒分段换行、用 @角色名/@场景名/@道具名 引用参考素材；一个分镜内不切镜,不换景别/角度/对象,相邻分镜之间可换机位但不跨场景),然后调用 update_storyboard 保存到分镜 ID:${sb.id}。只更新 video_prompt 字段,不要改动其他字段,不要重新拆分整集。`,
       drama_id: dramaId,
       episode_id: epId.value,
       model: chatModelOverride() || undefined,
@@ -7160,6 +7353,16 @@ function resolveVideoPromptRefs(sb) {
   })
 }
 
+function finalPromptOverrideValue(sb) {
+  return String(sb?.final_prompt_override ?? sb?.finalPromptOverride ?? '').trim()
+}
+function autoFinalPromptFor(sb) {
+  return sb ? resolveVideoPromptRefs(sb) : ''
+}
+function finalGenerationPrompt(sb) {
+  return finalPromptOverrideValue(sb) || autoFinalPromptFor(sb)
+}
+
 // 分镜时长（视频生成参数区直接编辑并保存到分镜）：
 // 下限 2s，上限按当前模型/分辨率收紧（本地 H3 720p 为 8s），列表/批量/单次生成统一读取该值
 function onVideoDurationChange(e) {
@@ -7353,7 +7556,7 @@ function buildVideoGenerationParams(sb) {
   const params = {
     storyboard_id: sb.id,
     drama_id: dramaId,
-    prompt: resolveVideoPromptRefs(sb),
+    prompt: finalGenerationPrompt(sb),
     duration: Number(sb.duration || 10),
     aspect_ratio: dramaAspectRatio.value,
     generate_audio: audioMode !== 'ambient' && audioMode !== 'silent',
@@ -9064,6 +9267,11 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   box-shadow: var(--shadow-sm);
 }
 .video-split-panel-head { display: flex; align-items: flex-start; gap: 16px; }
+.video-split-panel.is-collapsed { padding: 10px 18px; margin: 10px auto; }
+.video-split-panel.is-collapsed .video-split-panel-head { align-items: center; }
+.video-split-toggle-icon { transition: transform .15s ease; }
+.video-split-toggle-icon.is-collapsed { transform: rotate(-90deg); }
+.video-split-collapsed-tag { margin-top: 6px; }
 .video-split-panel-copy { flex: 1; min-width: 0; }
 .video-split-panel-title { font-size: 15px; font-weight: 700; color: var(--text-0); }
 .video-split-panel-sub { margin-top: 3px; font-size: 12px; color: var(--text-2); }
@@ -10196,6 +10404,8 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   height: 24px;
   padding: 0;
 }
+.video-task-optimize { color: var(--accent); }
+.video-task-optimize:disabled { color: var(--text-3); }
 .video-task-delete {
   justify-self: end;
   align-self: center;
@@ -10302,6 +10512,14 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   background: var(--bg-1);
 }
 .video-inspector-label { color: var(--text-0); font-size: 12px; font-weight: 700; }
+.video-final-prompt { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.video-final-prompt-textarea {
+  min-height: 150px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  resize: vertical;
+}
 .video-inspector-label-hero {
   color: var(--accent);
   font-size: 13px;

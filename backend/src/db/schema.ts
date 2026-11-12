@@ -198,6 +198,8 @@ export const storyboards = sqliteTable('storyboards', {
   atmosphere: text('atmosphere'),
   imagePrompt: text('image_prompt'),
   videoPrompt: text('video_prompt'),
+  /** 提交给生成模型的最终提示词覆盖；空表示按 video_prompt + 参考图自动组装 */
+  finalPromptOverride: text('final_prompt_override'),
   bgmPrompt: text('bgm_prompt'),
   soundEffect: text('sound_effect'),
   description: text('description'),

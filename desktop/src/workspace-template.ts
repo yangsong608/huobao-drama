@@ -29,7 +29,9 @@ export const LEGACY_BUILTIN_FILES: LegacyBuiltinFileRule[] = [
 
       '8dfa926fa5484f68aabc921684feb6dad6138580f1975e2b07b29aecb72aa942',
 
-      'dfb83b59c74ad58698b1c6a8d568e4d21722206704b6bdb04f46a38c517040ee'
+      'dfb83b59c74ad58698b1c6a8d568e4d21722206704b6bdb04f46a38c517040ee',
+
+      '7e0d1d63f5f808dcd5acec5c777efc6770f3c8d306d70655cd50b5617d1bdbce'
     ],
   },
   {
@@ -41,7 +43,9 @@ export const LEGACY_BUILTIN_FILES: LegacyBuiltinFileRule[] = [
 
       'c797b83661146ac42abc5acddc47bc83f9d7d709e73e04db0068f3fa76a28582',
 
-      'ed31618697594d022282dacfa9ab6309e2d8f71b1b12c786149f4851576bf87c'
+      'ed31618697594d022282dacfa9ab6309e2d8f71b1b12c786149f4851576bf87c',
+
+      '29fd1e26323e045fe4b3cdd0a5ca5295023e59c51be7dfaae22df039b1ec9720'
     ],
   },
   {
@@ -53,7 +57,9 @@ export const LEGACY_BUILTIN_FILES: LegacyBuiltinFileRule[] = [
 
       'ddcedb9c40134704342c8c1089132dca92d2b1e5ad63f9e87d3e89360ecb1b7b',
 
-      'e109df39a94cff10d0b14719e100a4418175fb54e5450904cff9de4fc328bae1'
+      'e109df39a94cff10d0b14719e100a4418175fb54e5450904cff9de4fc328bae1',
+
+      'eda5b9d8737931078ce1881f27a0dfb7bed49f8b5b68d3862c4472682109baa5'
     ],
   },
   {
@@ -65,7 +71,9 @@ export const LEGACY_BUILTIN_FILES: LegacyBuiltinFileRule[] = [
 
       '3f9a7237403b809232d146387fcdc91bcab36c6551831bd8fd9c3f9567c22cba',
 
-      '3f52ab9948ebf0bd189e08cf3ecf7836383b09bf22c113948b354b644ef6e60f'
+      '3f52ab9948ebf0bd189e08cf3ecf7836383b09bf22c113948b354b644ef6e60f',
+
+      'c9ef2f59a122a23f0c874d0cd2fd26d0ca26ac469336e8f4bd5154d823ba54c9'
     ],
   },
   {

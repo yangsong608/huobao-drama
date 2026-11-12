@@ -55,6 +55,28 @@ test('单机位/固定四区校验：合法通过，多子镜和缺调度被拒�
   assert.ok(missing.some(item => item.includes('负面约束')))
 })
 
+test('新拆分禁止任何【镜头N】编号；旧数据编辑默认不拦截', () => {
+  const marked = '【镜头1】唐大郎起身，抬眼看向范仲淹。'
+  const strict = validateStoryboardUnit({
+    description: marked,
+    videoPrompt: FIXED_PROMPT,
+    duration: 10,
+    forbidShotMarkers: true,
+  })
+  assert.ok(strict.some(item => item.includes('【镜头N】')))
+  assert.deepEqual(validateStoryboardUnit({
+    description: marked,
+    videoPrompt: FIXED_PROMPT,
+    duration: 10,
+  }), [])
+  assert.deepEqual(validateStoryboardUnit({
+    description: '唐大郎起身，抬眼看向范仲淹。',
+    videoPrompt: FIXED_PROMPT,
+    duration: 10,
+    forbidShotMarkers: true,
+  }), [])
+})
+
 test('canonical 场景归组：同名大堂 54/55/56 只保留一个 canonical，剧本场次可绑定', async () => {
   db.insert(schema.dramas).values({ id: 1, title: '场景测试', createdAt: ts, updatedAt: ts }).run()
   db.insert(schema.episodes).values({ id: 1, dramaId: 1, episodeNumber: 1, title: '第1集', createdAt: ts, updatedAt: ts }).run()

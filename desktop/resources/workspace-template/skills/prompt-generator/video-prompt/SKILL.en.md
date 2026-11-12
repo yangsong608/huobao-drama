@@ -1,11 +1,11 @@
 ---
 name: video-prompt
-description: Video prompt specification — generates a time-segmented video-generation prompt from storyboard-segment content, with cuts allowed within a segment
+description: Video prompt specification — generates a time-segmented video prompt from one continuous storyboard shot
 ---
 
 # Video Prompt (storyboard segment → video_prompt)
 
-From a single storyboard segment's description (containing the 【镜头N】 sub-shot structure and dialogue/narration) / atmosphere / duration, generate the `video_prompt` that drives AI video generation. **One storyboard segment = one 8-15-second video, with cuts allowed inside it**: consecutive segments may be different shots (change of shot size/angle/subject), joined with hard cuts; but the whole segment **never crosses scenes** and never uses flashbacks.
+From a single storyboard shot's description (the visuals and dialogue/narration of one continuous camera) / atmosphere / duration, generate the `video_prompt` that drives AI video generation. **One storyboard shot = one 6-15-second single-camera video with no cuts inside**: create a new shot when the camera setup, angle or subject must change; it **never crosses scenes** and never uses flashbacks; do not write 【镜头N】 numbering in the description.
 
 ## Format
 
@@ -14,9 +14,9 @@ The **first line of the `video_prompt` is the header**: first introduce which ch
 ```
 Characters: @Xiaoming, @Xiaohong | Scene: @Coffee Shop
 Blocking: Screen left: @Xiaoming; screen right: @Xiaohong; over @Xiaohong's right shoulder; window back-left, door back-right; action start: @Xiaoming looks down at his phone; action end: @Xiaoming looks up at @Xiaohong
-0-3s: @Coffee Shop, close shot, static camera; @Xiaoming looks down at his phone, fingers repeatedly tapping the table, expression anxious.
-3-6s: Cut to a wide shot of the doorway; the doorbell rings as @Xiaohong pushes the door open and walks in, bringing in a gust of cold air.
-6-9s: Cut back to a medium shot; @Xiaohong walks over with a smile and sits down across from Xiaoming; @Xiaoming says: "You finally made it."
+0-3s: @Coffee Shop, medium static shot; @Xiaoming sits screen-right looking down at his phone, fingers repeatedly tapping the table, expression anxious.
+3-6s: The doorbell rings; @Xiaoming looks up toward the screen-left doorway and stops tapping.
+6-9s: @Xiaohong pushes the door open, walks over and sits screen-right; @Xiaoming smiles and says: "You finally made it."
 Negative constraints: only listed on-screen cast; no face/costume changes or extra people; no subtitles; no modern items
 ```
 
@@ -34,8 +34,8 @@ Split into 1-6 second segments (3 seconds by default), each segment on its own l
 
 The `description` is the sole content source of the video_prompt (visuals, actions, dialogue, and narration are all in it). Conversion rules:
 
-- Each `【镜头N】` in the `description` maps to **1-2 consecutive segments (1-6 seconds each, 3 seconds by default)** — same order, no omissions, no merging, no new sub-shots
-- Dialogue/narration is extracted from the `@CharacterName says: "..."` / `Narration (voice-over): "..."` entries inside the corresponding `【镜头N】` (legacy `CharacterName says: ...` / `Narration: ...` is accepted but must be normalized on output) and assigned to that sub-shot's mapped segments; **do not invent new dialogue beyond the description**; camera moves, shot sizes, expressions, psychology, and actions must never become dialogue or narration
+- The continuous `description` maps to **1-3 consecutive time frames (1-6 seconds each, 3 seconds by default)** — same order, no omissions, no cuts; do not write 【镜头N】 numbering in the description
+- Dialogue/narration is extracted verbatim from the `@CharacterName says: "..."` / `Narration (voice-over): "..."` entries in the `description` (legacy `CharacterName says: ...` / `Narration: ...` is accepted but must be normalized on output) and assigned to the matching time frames; **do not invent new dialogue beyond the description**; camera moves, shot sizes, expressions, psychology, and actions must never become dialogue or narration
 - Visual actions follow the `description`; `atmosphere` is only used to supplement each segment's lighting, color tone, and mood descriptions
 
 ## Within-Segment Structure
@@ -45,11 +45,11 @@ Organize each segment's content in this order (items with no content may be omit
 **Time range + scene @reference + shot size/camera move + character @reference + main action·expression + dialogue/narration + mood and lighting**
 
 - **The first segment must establish the space**: scene + camera position + each character's position and state, so the audience knows at a glance where we are and whom to watch
-- **Cuts**: start a post-cut segment with a transition word such as "cut to / cut back", and restate the shot size and subject; cut points should align with the `【镜头N】` structure in the storyboard `description`
-- **Shot size/camera move**: one camera state per segment (close shot / medium shot / wide shot / close-up; static / push / pull / pan / tracking); the camera move is continuous within a single sub-shot and may change after a cut
+- **Continuous camera**: no cuts inside one storyboard shot and no changes of shot size/angle/subject; time frames only advance action and emotion within the same camera setup
+- **Shot size/camera move**: one camera state for the whole shot (close shot / medium shot / wide shot / close-up; static / push / pull / pan / tracking) with one active camera move; create a new shot to change the camera move
 - **Action**: one main action per segment, with concrete visible verbs (walk, turn around, look up, clench, pause)
 - **All emotion must become visible description**: no abstract words like "he is very sad / the mood is tense" — write it as "he lowers his head, fingers clench the rim of the cup, breathing grows heavier"
-- **Dialogue/narration**: dialogue is written only as `@CharacterName says: "line"`; narration/inner monologue only as `Narration (voice-over): "line"`; **keep the 3-second segments — 12 Chinese characters per segment is only a capacity hint**, never a reason to delete or reword: copy dialogue verbatim from the corresponding 【镜头N】 in the description, including every punctuation mark and filler particle; split long lines only at original punctuation or semantic pauses, and the segments concatenated must reproduce the original text character for character; a segment without dialogue may note ambient/action sounds (e.g. "machines keep roaring")
+- **Dialogue/narration**: dialogue is written only as `@CharacterName says: "line"`; narration/inner monologue only as `Narration (voice-over): "line"`; **keep the 3-second segments — 12 Chinese characters per segment is only a capacity hint**, never a reason to delete or reword: copy dialogue verbatim from the description, including every punctuation mark and filler particle; split long lines only at original punctuation or semantic pauses, and the segments concatenated must reproduce the original text character for character; a segment without dialogue may note ambient/action sounds (e.g. "machines keep roaring")
 
 ## Reference Rules
 

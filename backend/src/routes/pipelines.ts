@@ -19,6 +19,7 @@ import {
   getStoryboardPipelineTrace,
   pauseStoryboardPipelineJob,
   resumeStoryboardPipelineJob,
+  rerunStoryboardPipelineSound,
   skipStoryboardPipelineShot,
 } from '../services/storyboard-pipeline.js'
 
@@ -167,6 +168,14 @@ app.post('/runs/:id/skip-shot', async (c) => {
         body.reason ? String(body.reason) : undefined,
       ),
     })
+  } catch (error) {
+    return badRequest(c, errorMessage(error))
+  }
+})
+
+app.post('/runs/:id/rerun-sound', async (c) => {
+  try {
+    return success(c, { job: await rerunStoryboardPipelineSound(Number(c.req.param('id'))) })
   } catch (error) {
     return badRequest(c, errorMessage(error))
   }

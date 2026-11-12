@@ -9,6 +9,7 @@ import { getStoryboardContract, syncEpisodeContracts, syncStoryboardContract } f
 import { evaluateStoryboardGenerationGate } from '../services/storyboard-generation-gate.js'
 import { getPreflightState, runVisualPreflight } from '../services/storyboard-visual-preflight.js'
 import { getAcceptanceState, runAcceptance } from '../services/storyboard-acceptance.js'
+import { optimizeStoryboardShot } from '../services/storyboard-pipeline.js'
 
 const app = new Hono()
 const TRANSITIONS = new Set(['cut', 'fade', 'dissolve', 'wipe'])
@@ -275,6 +276,16 @@ app.post('/', async (c) => {
 })
 
 // PUT /storyboards/:id
+app.post('/:id/optimize', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return badRequest(c, '分镜 id 无效')
+  try {
+    return success(c, await optimizeStoryboardShot(id))
+  } catch (error) {
+    return badRequest(c, error instanceof Error ? error.message : String(error))
+  }
+})
+
 app.put('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const body = await c.req.json()
@@ -291,6 +302,7 @@ app.put('/:id', async (c) => {
     title: 'title', description: 'description', shot_type: 'shotType',
     angle: 'angle', movement: 'movement', duration: 'duration',
     video_prompt: 'videoPrompt',
+    final_prompt_override: 'finalPromptOverride',
     image_prompt: 'imagePrompt', scene_id: 'sceneId', location: 'location',
     time: 'time', atmosphere: 'atmosphere', result: 'result',
     bgm_prompt: 'bgmPrompt', sound_effect: 'soundEffect',
@@ -301,6 +313,10 @@ app.put('/:id', async (c) => {
   const updates: Record<string, any> = { updatedAt: now() }
   for (const [snakeKey, camelKey] of Object.entries(fieldMap)) {
     if (snakeKey in body) updates[camelKey] = snakeKey === 'transition' ? normalizeTransition(body.transition) : body[snakeKey]
+  }
+  // 上游提示词一变，旧的最终提示词覆盖自动失效，避免生成时继续用过期文本
+  if ('video_prompt' in body && !('final_prompt_override' in body)) {
+    updates.finalPromptOverride = null
   }
 
   const bindingError = await ensureStoryboardBindings(

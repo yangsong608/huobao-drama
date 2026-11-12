@@ -642,7 +642,8 @@ export async function buildVideoRequest(episodeId: number, sb: typeof schema.sto
   const props = allProps.filter(p => propLinks.some(l => l.propId === p.id) && !p.deletedAt)
   // 优先用合同落库的画内人物；旧数据回落信息头解析；都没有才送全部绑定角色。
   const contractCastIds = parseStoredIdList(sb.castOnScreen)
-  const headerCastNames = parsePromptCastNames(sb.videoPrompt)
+  const promptSource = String(sb.finalPromptOverride || sb.videoPrompt || '')
+  const headerCastNames = parsePromptCastNames(promptSource)
   const onScreenChars = contractCastIds.length
     ? chars.filter(c => contractCastIds.includes(c.id))
     : headerCastNames.length
@@ -673,7 +674,7 @@ export async function buildVideoRequest(episodeId: number, sb: typeof schema.sto
     if (item.name && !(item.name in nameToIndex)) nameToIndex[item.name] = i + 1
   })
   const names = Object.keys(nameToIndex).sort((a, b) => b.length - a.length)
-  const rawPrompt = String(sb.videoPrompt || '')
+  const rawPrompt = promptSource
   const prompt = names.length
     ? rawPrompt.replace(/@([^\s@#]+)/g, (match, raw: string) => {
       for (const name of names) {

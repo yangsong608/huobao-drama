@@ -162,6 +162,7 @@ export const pipelineChainAPI = {
   continueRun: (runId: number) => api.post(`/pipelines/runs/${runId}/continue`, {}),
   skipShot: (runId: number, shotNumber: number, reason?: string) =>
     api.post(`/pipelines/runs/${runId}/skip-shot`, { shot_number: shotNumber, reason }),
+  rerunSound: (runId: number) => api.post(`/pipelines/runs/${runId}/rerun-sound`, {}),
 }
 
 export const frameAssetAPI = {
@@ -282,6 +283,7 @@ export const storyboardAPI = {
   runPreflight: (id: number, data: any = {}) => api.post(`/storyboards/${id}/preflight`, data),
   acceptance: (id: number) => api.get(`/storyboards/${id}/acceptance`),
   runAcceptance: (id: number, data: any = {}) => api.post(`/storyboards/${id}/acceptance`, data),
+  optimize: (id: number) => api.post(`/storyboards/${id}/optimize`, {}),
   syncContracts: (episodeId: number) => api.post('/storyboards/contracts/sync', { episode_id: episodeId }),
   soundPlan: (episodeId: number) => api.get(`/storyboards/sound-plan/${episodeId}`),
 }

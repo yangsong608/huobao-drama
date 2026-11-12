@@ -2,14 +2,14 @@
  * 分镜单位与固定分区硬约束
  *
  * 设计：一个分镜 = 一个机位 + 一个主体 + 一个连续动作。
- * 同一机位内的连续运动可以写多个时间帧，但不能再出现【镜头2】这种子镜头切镜。
+ * 同一机位内的连续运动可以写多个时间帧，但不能再出现【镜头N】这类子镜头编号。
  * 保存层用本文件校验；Agent 系统提示词末尾也注入同一段规则，覆盖旧方案里的段落制表述。
  */
 import { parsePromptSections, parsePromptSegments } from './storyboard-audit-rules.js'
 
 export const STORYBOARD_UNIT_RULES = `### 分镜单位与提示词硬约束（最高优先级，覆盖之前任何相反表述）
 - 一个分镜 = 一个机位 + 一个主体 + 一个连续动作。需要换机位、换主体、换动作/情绪节点时，必须新开分镜；不要在一个分镜里切镜。
-- description 只能写一个连续镜头，最多一个【镜头1】或直接写连续画面；禁止【镜头2】及以后。同一机位内的连续运动可写成多个时间帧，但那些时间帧不是子镜头。
+- description 只能写一个连续镜头：直接写谁、动作、表情、站位/视线，不要写【镜头1】【镜头2】等任何编号。同一机位内的连续运动可写成多个时间帧，但那些时间帧不是子镜头。
 - 每个分镜 6-15 秒；分镜内部时间帧每段 1-6 秒，连续不重叠，最后一段结束时间等于 duration。
 - video_prompt 固定四区，顺序不可变：
   1. 第一行信息头「出场人物：@角色A、@角色B｜场景：@场景名」；
@@ -45,6 +45,8 @@ export interface StoryboardUnitInput {
   shotLabel?: string
   /** 手工只改视频提示词时可关闭子镜数量检查；拆分保存始终开启 */
   checkSubshots?: boolean
+  /** 新拆分必须关闭；旧数据编辑保持默认，不因历史【镜头N】标记阻断保存 */
+  forbidShotMarkers?: boolean
 }
 
 const ACTION_START_RE = /(?:动作起点|动作开始|起始动作|起势|動作開始|동작\s*시작|action\s*start)\s*[：:]\s*([^；;。\n]+)/i
@@ -66,8 +68,12 @@ export function validateStoryboardUnit(input: StoryboardUnitInput): string[] {
   }
   const prompt = String(input.videoPrompt || '')
   const subshots = [...description.matchAll(/【镜头\s*\d+】/g)].length
-  if (input.checkSubshots !== false && subshots > 1) {
-    errors.push(`${label}有 ${subshots} 个子镜头；一个分镜只能一个机位/一个主体/一个连续动作，请拆成独立分镜。`)
+  if (input.checkSubshots !== false) {
+    if (input.forbidShotMarkers && subshots > 0) {
+      errors.push(`${label}description 出现了 ${subshots} 个【镜头N】编号；一个分镜就是一个连续镜头，请去掉编号直接写画面。`)
+    } else if (subshots > 1) {
+      errors.push(`${label}有 ${subshots} 个子镜头；一个分镜只能一个机位/一个主体/一个连续动作，请拆成独立分镜。`)
+    }
   }
   const sections = parsePromptSections(prompt)
   if (!sections.hasBlockingMarker || !sections.blocking.trim()) {

@@ -141,3 +141,31 @@ test('删除最后一条分镜后剧集时长为 0', async () => {
   const [episodeRow] = db.select().from(schema.episodes).where(eq(schema.episodes.id, ep)).all()
   assert.equal(episodeRow.duration, 0)
 })
+
+test('分镜更新可保存最终提示词覆盖，不改动 video_prompt', async () => {
+  const dramaId = await insertDrama()
+  const ep = await insertEpisode(dramaId, 1)
+  const sb = await insertStoryboard(ep, 1, 6)
+  const appRes = await app.request(`/api/v1/storyboards/${sb}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      video_prompt: '自动组装提示词',
+      final_prompt_override: '手动最终提示词',
+    }),
+  })
+  assert.equal(appRes.status, 200)
+  let row = db.select().from(schema.storyboards).where(eq(schema.storyboards.id, sb)).get()!
+  assert.equal(row.videoPrompt, '自动组装提示词')
+  assert.equal(row.finalPromptOverride, '手动最终提示词')
+
+  const clearRes = await app.request(`/api/v1/storyboards/${sb}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ final_prompt_override: '' }),
+  })
+  assert.equal(clearRes.status, 200)
+  row = db.select().from(schema.storyboards).where(eq(schema.storyboards.id, sb)).get()!
+  assert.equal(row.finalPromptOverride, '')
+  assert.equal(row.videoPrompt, '自动组装提示词')
+})

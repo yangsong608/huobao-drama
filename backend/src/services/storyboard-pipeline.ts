@@ -10,7 +10,7 @@ import { and, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import type { RequestContext } from '@mastra/core/request-context'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
-import { buildAgentRequestContext, type AgentRequestContextValues } from '../agents/context.js'
+import { buildAgentRequestContext, getContentLanguageFromRC, type AgentRequestContextValues } from '../agents/context.js'
 import { getEpisodeCoverage, getMaxSegmentSeconds, type EpisodeCoverage } from './breakdown-methods.js'
 import { splitScriptIntoChunks } from './storyboard-split-jobs.js'
 import { buildSceneBindingBlock, getCanonicalSceneGroups } from './scene-canonical.js'
@@ -31,6 +31,7 @@ import {
   type PipelineStepDefinition,
 } from './pipeline-chain.js'
 import { extractPlanSpeechSegments } from './storyboard-plan-contract.js'
+import { parseSoundSection, setSoundSection } from './storyboard-sound.js'
 import { logTaskError, logTaskProgress, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
 import { emitChange } from './sync-events.js'
 
@@ -162,6 +163,7 @@ export interface PipelineRunners {
 }
 
 const runningJobs = new Set<number>()
+const optimizingEpisodes = new Set<number>()
 
 function parseJsonObject(value: string | null | undefined): Record<string, unknown> {
   try {
@@ -687,7 +689,7 @@ function buildRepairMessage(input: RepairRunnerInput) {
     '',
     '### 修补要求（最高优先级）',
     '1. 计划层台词是唯一台词来源：计划有台词就逐字写进 description 和 video_prompt；计划没有台词就不得自行加台词。发声动作没有具体词时，只能在计划层补出原文依据后再使用，不能直接创作。',
-    '2. description 写一个连续镜头：谁 + 具体动作 + 肢体细节 + 表情 + 站位/视线；最多一个【镜头1】，禁止【镜头2】及以后。',
+    '2. description 直接写一个连续镜头：谁 + 具体动作 + 肢体细节 + 表情 + 站位/视线；不要写【镜头1】这类编号，禁止子镜头切镜。',
     '3. video_prompt 固定四区：信息头 → 画面调度（画面左/右、过肩、背景地标屏幕侧、轴线、动作起点/终点）→ 时间帧 → 负面约束。',
     '4. 时间帧从 0 连续写到 duration，每段 1-6 秒；台词按 4 字/秒 + 1 秒气口分配；台词逐字复制 description。',
     '5. 不写完整 BGM/环境声风格；声音由第四步统一设计。',
@@ -773,6 +775,7 @@ export async function createStoryboardPipelineJob(
   if (episode.dramaId !== dramaId) throw new Error('剧集不属于当前项目')
   const script = String(episode.scriptContent || episode.content || '').trim()
   if (!script) throw new Error('该集还没有剧本，无法拆分分镜')
+  if (optimizingEpisodes.has(episodeId)) throw new Error('该集正在优化单镜，请稍后再拆分')
 
   const active = db.select().from(schema.storyboardPipelineJobs)
     .where(and(
@@ -891,6 +894,7 @@ export async function resumeStoryboardPipelineJob(
 ): Promise<PipelineJobView> {
   const row = getJobRow(jobId)
   if (!row) throw new Error('分镜管线任务不存在')
+  if (optimizingEpisodes.has(row.episodeId)) throw new Error('该集正在优化单镜，请稍后再继续流水线')
   if (row.status === 'done') return toView(row)
   if (runningJobs.has(jobId)) return toView(row)
   const state = parseState(row)
@@ -948,6 +952,317 @@ export async function resumeStoryboardPipelineJob(
   return toView(getJobRow(jobId)!)
 }
 
+/** 只重跑第四步声音设计：不重新拆分、不重新修补，生成新版本声音计划并重写各镜声音行。 */
+export async function rerunStoryboardPipelineSound(
+  jobId: number,
+  options: { autorun?: boolean; runners?: PipelineRunners } = {},
+): Promise<PipelineJobView> {
+  const row = getJobRow(jobId)
+  if (!row) throw new Error('分镜管线任务不存在')
+  if (['pending', 'running'].includes(String(row.status || '')) || runningJobs.has(jobId)) {
+    throw new Error('任务正在进行中，不能重跑声音设计')
+  }
+  if (optimizingEpisodes.has(row.episodeId)) throw new Error('该集正在优化单镜，请稍后再重跑声音设计')
+  const skeletons = skeletonShots(jobId)
+  const unfinished = skeletons.filter(item => !['validated', 'skipped'].includes(String(item.status || '')))
+  if (unfinished.length) {
+    throw new Error(`还有 ${unfinished.length} 镜未通过校验，不能重跑声音设计`)
+  }
+  const ordinaryShots = liveStoryboards(row.episodeId).filter(item => !item.transitionKind)
+  if (!ordinaryShots.length) throw new Error('没有可设计声音的普通分镜')
+
+  const state = parseState(row)
+  state.soundPlanId = undefined
+  persistState(jobId, state, {
+    status: 'pending',
+    stage: 'sound',
+    soundStatus: 'none',
+    soundUnits: 0,
+    errorMsg: null,
+    finishedAt: null,
+    currentShotNumber: null,
+  })
+  db.update(schema.storyboardPipelineJobs)
+    .set({ pauseRequested: 0, runStartedAt: now(), updatedAt: now() })
+    .where(eq(schema.storyboardPipelineJobs.id, jobId))
+    .run()
+  logTaskProgress('StoryboardPipeline', 'sound-rerun', {
+    jobId,
+    episodeId: row.episodeId,
+    shots: ordinaryShots.length,
+  })
+  if (options.autorun !== false) {
+    void runStoryboardPipelineJob(jobId, options.runners).catch(error => {
+      logTaskError('StoryboardPipeline', 'sound-rerun-crashed', {
+        jobId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+  }
+  return toView(getJobRow(jobId)!)
+}
+
+export interface OptimizeStoryboardShotResult {
+  storyboard_id: number
+  shot_number: number
+  attempts: number
+  warnings: string[]
+}
+
+/**
+ * 单镜优化：对指定分镜重跑第二段逐镜修补 + 第三段逐镜校验。
+ * 不重新拆分、不清理其它分镜；沿用该集最近一次拆分的计划与边界。
+ */
+export async function optimizeStoryboardShot(
+  storyboardId: number,
+  options: { runners?: PipelineRunners } = {},
+): Promise<OptimizeStoryboardShotResult> {
+  const storyboard = db.select().from(schema.storyboards)
+    .where(eq(schema.storyboards.id, Number(storyboardId)))
+    .get()
+  if (!storyboard || storyboard.deletedAt) throw new Error('分镜不存在')
+  const episode = db.select().from(schema.episodes)
+    .where(eq(schema.episodes.id, storyboard.episodeId))
+    .get()
+  if (!episode) throw new Error('剧集不存在')
+  const row = db.select().from(schema.storyboardPipelineJobs)
+    .where(eq(schema.storyboardPipelineJobs.episodeId, episode.id))
+    .orderBy(desc(schema.storyboardPipelineJobs.id))
+    .limit(1)
+    .get()
+  if (!row) throw new Error('该集还没有分镜拆分记录，请先拆分分镜')
+  if (['pending', 'running'].includes(String(row.status || '')) || runningJobs.has(row.id)) {
+    throw new Error('流水线正在运行，请稍后再优化')
+  }
+  if (optimizingEpisodes.has(episode.id)) throw new Error('已有分镜正在优化，请稍后再试')
+  const initialSkeleton = skeletonShots(row.id)
+    .find(item => item.storyboardNumber === storyboard.storyboardNumber)
+  if (!initialSkeleton) throw new Error('该分镜没有拆分计划，请先重新拆分分镜')
+
+  const script = String(episode.scriptContent || episode.content || '')
+  const novelContent = String(episode.content || '')
+  const hasSeparateNovel = Boolean(novelContent.trim()) && novelContent.trim() !== script.trim()
+  const sceneText = findSceneTextForExcerpt(script, initialSkeleton.sourceExcerpt)
+  const novelSceneText = hasSeparateNovel
+    ? findNovelSceneText(novelContent, initialSkeleton.sourceExcerpt)
+    : ''
+  const params = runParameters(row)
+  const maxAttempts = Math.max(1, Number(params.shotMaxAttempts || 3))
+  const splitPresetKey = params.splitPresetKey && params.splitPresetKey !== 'inherit'
+    ? params.splitPresetKey
+    : (episode.breakdownMethod || null)
+  const previousSound = parseSoundSection(storyboard.videoPrompt)
+  const hasPreviousSound = Boolean(previousSound && [
+    previousSound.bgm, previousSound.ambience, previousSound.sfx, previousSound.silence,
+  ].some(Boolean))
+  let lastIssues: string[] = (() => {
+    try {
+      const parsed = JSON.parse(initialSkeleton.issuesJson || '[]')
+      return Array.isArray(parsed) ? parsed.map(String) : []
+    } catch {
+      return []
+    }
+  })()
+
+  optimizingEpisodes.add(episode.id)
+  logTaskProgress('StoryboardPipeline', 'shot-optimize-start', {
+    jobId: row.id,
+    episodeId: episode.id,
+    shot: storyboard.storyboardNumber,
+    storyboardId: storyboard.id,
+  })
+  try {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const current = db.select().from(schema.storyboardSkeletons)
+        .where(eq(schema.storyboardSkeletons.id, initialSkeleton.id))
+        .get()
+      if (!current) throw new Error('拆分计划已被删除，无法优化')
+      const previousShots = liveStoryboards(episode.id)
+        .filter(item => item.storyboardNumber < current.storyboardNumber)
+        .slice(-2)
+        .map(previousShotPayload)
+      const nextDrafts = skeletonShots(row.id)
+        .filter(item => item.storyboardNumber > current.storyboardNumber && item.status === 'draft')
+        .slice(0, 2)
+        .map(skeletonPayload)
+      const knowledgeIds = stepKnowledgeIds(row, 'shot-repair')
+      const requestContext = pipelineContext({
+        episodeId: episode.id,
+        dramaId: row.dramaId,
+        modelOverride: row.model || undefined,
+        textConfigId: row.configId || undefined,
+        pipelineJobId: row.id,
+        pipelineStage: 'repair',
+        pipelineStepKey: 'shot-repair',
+        ...(knowledgeIds.length ? { pipelineKnowledgeIds: knowledgeIds } : {}),
+        ...(splitPresetKey ? { pipelineBreakdownMethod: splitPresetKey } : {}),
+        pipelineShotNumber: current.storyboardNumber,
+        pipelineSkeleton: skeletonPayload(current),
+        pipelinePreviousShots: previousShots,
+        pipelineNextDrafts: nextDrafts,
+        pipelineSceneText: sceneText,
+        pipelineNovelSceneText: novelSceneText,
+        pipelineIssues: lastIssues,
+      })
+      const repairRunId = startStepRun(runStepInput(row, 'shot-repair', 'shot', `shot-${current.storyboardNumber}`, {
+        optimize: true,
+        storyboardId: storyboard.id,
+        attempt: attempt + 1,
+        maxAttempts,
+        issues: lastIssues,
+      }))
+      let runnerError: string | null = null
+      try {
+        await (options.runners?.repair || defaultRepairRunner)({
+          jobId: row.id,
+          episodeId: episode.id,
+          dramaId: row.dramaId,
+          skeleton: current,
+          previousShots,
+          nextDrafts,
+          sceneText,
+          novelSceneText,
+          issues: lastIssues,
+          attempt,
+          requestContext,
+        })
+      } catch (error) {
+        runnerError = `修补调用失败：${error instanceof Error ? error.message : String(error)}`
+        lastIssues = [runnerError]
+      }
+
+      const latestSkeleton = db.select().from(schema.storyboardSkeletons)
+        .where(eq(schema.storyboardSkeletons.id, current.id))
+        .get()
+      const saveAttempted = (latestSkeleton?.attempts || 0) > (current.attempts || 0)
+      if (!saveAttempted) {
+        lastIssues = [...lastIssues, `第 ${current.storyboardNumber} 镜本轮没有执行保存。`]
+        finishStepRun(repairRunId, { status: 'failed', issues: lastIssues })
+        db.update(schema.storyboardSkeletons).set({
+          attempts: attempt + 1,
+          issuesJson: JSON.stringify(lastIssues),
+          updatedAt: now(),
+        }).where(eq(schema.storyboardSkeletons.id, current.id)).run()
+        continue
+      }
+
+      const fresh = liveStoryboards(episode.id)
+        .find(item => item.storyboardNumber === current.storyboardNumber)
+      if (!fresh) {
+        lastIssues = [...lastIssues, `第 ${current.storyboardNumber} 镜没有保存成稿。`]
+        finishStepRun(repairRunId, { status: 'failed', issues: lastIssues })
+        continue
+      }
+      finishStepRun(repairRunId, {
+        status: 'passed',
+        issues: runnerError ? [runnerError] : [],
+        output: { optimize: true, storyboardId: fresh.id, attempt: attempt + 1 },
+      })
+
+      const previous = liveStoryboards(episode.id)
+        .filter(item => item.storyboardNumber < current.storyboardNumber)
+        .slice(-1)[0]
+      const validation = validateRepairedShot({
+        sourceExcerpt: current.sourceExcerpt,
+        planSpeechSegments: skeletonSpeechSegments(current),
+        description: fresh.description,
+        videoPrompt: fresh.videoPrompt,
+        characterIds: storyboardCharacterIds(fresh.id),
+        duration: fresh.duration,
+        sceneId: fresh.sceneId,
+        shotLabel: `第 ${current.storyboardNumber} 镜`,
+        previous: previous ? {
+          storyboardNumber: previous.storyboardNumber,
+          sceneId: previous.sceneId,
+          videoPrompt: previous.videoPrompt,
+          transition: previous.transition,
+          characterIds: storyboardCharacterIds(previous.id),
+        } : null,
+        transition: fresh.transition,
+      })
+      const validateRunId = startStepRun(runStepInput(row, 'shot-validate', 'shot', `shot-${current.storyboardNumber}`, {
+        optimize: true,
+        storyboardId: fresh.id,
+        attempt: attempt + 1,
+        duration: fresh.duration,
+      }))
+      if (!validation.errors.length) {
+        finishStepRun(validateRunId, {
+          status: 'passed',
+          issues: validation.warnings,
+          output: { optimize: true, warnings: validation.warnings.length, attempt: attempt + 1 },
+        })
+        if (hasPreviousSound && previousSound) {
+          const prompt = setSoundSection(
+            fresh.videoPrompt || '',
+            previousSound,
+            getContentLanguageFromRC(requestContext as RequestContext),
+          )
+          db.update(schema.storyboards).set({
+            videoPrompt: prompt,
+            updatedAt: now(),
+          }).where(eq(schema.storyboards.id, fresh.id)).run()
+        }
+        db.update(schema.storyboardSkeletons).set({
+          status: 'validated',
+          issuesJson: validation.warnings.length ? JSON.stringify(validation.warnings) : null,
+          updatedAt: now(),
+        }).where(eq(schema.storyboardSkeletons.id, current.id)).run()
+        syncJobShotCounts(row.id, String(row.status) === 'failed' && String(row.stage) === 'repair'
+          ? {
+              status: 'interrupted',
+              stage: 'repair',
+              currentShotNumber: null,
+              errorMsg: '该镜已优化，可继续拆分',
+              finishedAt: null,
+            }
+          : {})
+        logTaskSuccess('StoryboardPipeline', 'shot-optimize-done', {
+          jobId: row.id,
+          episodeId: episode.id,
+          shot: current.storyboardNumber,
+          storyboardId: fresh.id,
+          attempts: attempt + 1,
+        })
+        return {
+          storyboard_id: fresh.id,
+          shot_number: current.storyboardNumber,
+          attempts: attempt + 1,
+          warnings: validation.warnings,
+        }
+      }
+      finishStepRun(validateRunId, {
+        status: 'failed',
+        issues: validation.errors,
+        output: { optimize: true, errors: validation.errors.length, attempt: attempt + 1 },
+      })
+      lastIssues = validation.errors
+      db.update(schema.storyboardSkeletons).set({
+        status: 'manual',
+        attempts: attempt + 1,
+        issuesJson: JSON.stringify(lastIssues),
+        updatedAt: now(),
+      }).where(eq(schema.storyboardSkeletons.id, current.id)).run()
+    }
+    db.update(schema.storyboardSkeletons).set({
+      status: 'manual',
+      attempts: maxAttempts,
+      issuesJson: JSON.stringify(lastIssues),
+      updatedAt: now(),
+    }).where(eq(schema.storyboardSkeletons.id, initialSkeleton.id)).run()
+    syncJobShotCounts(row.id, {
+      status: 'failed',
+      stage: 'repair',
+      currentShotNumber: storyboard.storyboardNumber,
+      errorMsg: `第 ${storyboard.storyboardNumber} 镜优化未通过：${lastIssues.join('；')}`,
+      finishedAt: null,
+    })
+    throw new Error(`第 ${storyboard.storyboardNumber} 镜优化未通过：${lastIssues.join('；')}`)
+  } finally {
+    optimizingEpisodes.delete(episode.id)
+  }
+}
+
 /** 人工跳过当前失败镜：标记问题、记录原因，继续下一镜或进入声音设计。 */
 export async function skipStoryboardPipelineShot(
   jobId: number,
@@ -957,6 +1272,7 @@ export async function skipStoryboardPipelineShot(
 ): Promise<PipelineJobView> {
   const row = getJobRow(jobId)
   if (!row) throw new Error('分镜管线任务不存在')
+  if (optimizingEpisodes.has(row.episodeId)) throw new Error('该集正在优化单镜，请稍后再跳过镜头')
   if (row.status === 'done') throw new Error('任务已完成，不能再跳过镜头')
   const skeleton = db.select().from(schema.storyboardSkeletons)
     .where(and(
@@ -1588,6 +1904,18 @@ function markSkeletonSkipped(row: PipelineJobRow, skeleton: SkeletonRow, issues:
   emitChange({ method: 'POST', path: `/api/v1/episodes/${row.episodeId}`, source: 'pipeline' })
 }
 
+function syncJobShotCounts(jobId: number, patch: Partial<Pick<PipelineJobRow,
+  'status' | 'stage' | 'currentShotNumber' | 'errorMsg' | 'finishedAt'>> = {}) {
+  const updated = skeletonShots(jobId)
+  db.update(schema.storyboardPipelineJobs).set({
+    repairedShots: updated.filter(item => ['repaired', 'validated'].includes(String(item.status))).length,
+    validatedShots: updated.filter(item => item.status === 'validated').length,
+    failedShots: updated.some(item => item.status === 'manual') ? 1 : 0,
+    updatedAt: now(),
+    ...patch,
+  }).where(eq(schema.storyboardPipelineJobs.id, jobId)).run()
+}
+
 function markSkeletonValidated(row: PipelineJobRow, skeleton: SkeletonRow, warnings: string[]) {  const ts = now()
   db.update(schema.storyboardSkeletons).set({
     status: 'validated',
@@ -1741,6 +2069,9 @@ export async function runStoryboardPipelineJob(
   runners: PipelineRunners = {},
 ): Promise<void> {
   if (runningJobs.has(jobId)) return
+  const initialRow = getJobRow(jobId)
+  if (!initialRow || initialRow.status === 'done') return
+  if (optimizingEpisodes.has(initialRow.episodeId)) return
   runningJobs.add(jobId)
   try {
     let row = getJobRow(jobId)

@@ -229,7 +229,7 @@ test('扩展版预置方案覆盖开场、钩子节点、机位、台词与自�
   assert.equal(extended.sortOrder, 25)
   assert.ok(extended.description.includes('参考'))
   for (const word of [
-    '外力施压', '开场 0–3 秒', '段尾钩子', '6–12 秒', '2–3 个子镜头',
+    '外力施压', '开场 0–3 秒', '段尾钩子', '6–12 秒', '一个机位、一个主体、一个连续动作',
     'A 主镜', 'B 反打', 'C 特写', 'D 环境', '台词', '自检',
   ]) {
     assert.ok(extended.skill.includes(word), `扩展版 Skill 缺少 ${word}`)
@@ -722,7 +722,7 @@ test('基础分镜提示词与技能写明统一的 description / video_prompt �
   )
   for (const marker of [
     '一个分镜 = 一个机位',
-    '禁止在一个分镜里写【镜头2】',
+    '不写【镜头N】编号',
     '出场人物：@角色A、@角色B｜场景：@场景名',
     '画面调度：画面左',
     '动作起点',
@@ -737,7 +737,7 @@ test('基础分镜提示词与技能写明统一的 description / video_prompt �
     assert.ok(prompt.includes(marker), `基础提示词缺少 ${marker}`)
   }
   for (const marker of [
-    '【镜头1】',
+    '不写【镜头N】编号',
     '画面调度',
     '动作起点',
     '负面约束',

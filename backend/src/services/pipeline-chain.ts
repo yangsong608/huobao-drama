@@ -251,7 +251,7 @@ const RULE_PACK_SEEDS: PipelineRulePackDefinition[] = [
   {
     key: 'unit-contract', name: '分镜单位合同', version: '1',
     rules: [
-      { key: 'single-camera', name: '单机位/单主体/连续动作', severity: 'error', locked: true, scope: 'shot', description: '禁止【镜头2】及以后。' },
+      { key: 'single-camera', name: '单机位/单主体/连续动作', severity: 'error', locked: true, scope: 'shot', description: '不写任何【镜头N】编号；禁止子镜头切镜。' },
       { key: 'duration', name: '6–15 秒', severity: 'error', locked: true, scope: 'shot', description: '镜头时长必须在 6–15 秒之间。' },
       { key: 'time-frames', name: '时间帧连续', severity: 'error', locked: true, scope: 'shot', description: '时间帧 1–6 秒、连续覆盖 duration。' },
       { key: 'four-sections', name: '固定四区', severity: 'error', locked: true, scope: 'shot', description: '信息头、画面调度、时间帧、负面约束。' },
