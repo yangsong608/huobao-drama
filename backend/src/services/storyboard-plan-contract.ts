@@ -35,8 +35,16 @@ export interface PlanShot {
   landmarkSide: string | null
   /** 画内人物数量：单人或空镜不建立人物轴线 */
   characterCount?: number
-  /** 台词来源：excerpt=从摘录逐字提取；planner=拆分器切分的长台词片段 */
-  speechSource?: 'excerpt' | 'planner'
+  /** 台词来源：excerpt=摘录提取；planner=长台词片段；inferred=发声动作推导 */
+  speechSource?: 'excerpt' | 'planner' | 'inferred'
+  /** establishing / action / dialogue / reaction / insert / transition */
+  shotType?: string
+  subject?: string | null
+  subjects?: string[]
+  beatCount?: number
+  actionArc?: { initial: string; action: string; result: string } | null
+  /** 原文只有发声动作、没有具体台词时必须补的 inferred 台词要求 */
+  speechRequirement?: { speaker: string; basis: string } | null
 }
 
 /** 场景契约的最小只读视图；由 scene-contract 服务提供，避免服务间循环依赖 */
@@ -173,6 +181,8 @@ function issue(
 }
 
 const INTERNAL_ACTION_RE = /(心酸|失落|渐弱|愈发|自觉|无趣|吃味|得意|紧张|害怕|高兴|难过|愤怒|委屈|不甘|眼红)/
+const INTERNAL_ENDPOINT_ONLY_RE = /(自觉|愈发|渐弱|心里|心中|暗想|心想|盘算|寻思|琢磨|无趣|心酸|失落|不甘|眼红)/
+const VISIBLE_ACTION_RE = /(站|坐|躺|靠|走|跑|转|抬|低|伸|收|放|拿|端|推|拉|举|摔|捡|看|望|扫|瞥|盯|白|瞪|瞟|瞄|皱|撇|点|摇|笑|哭|骂|喊|说|问|答|回|进|出|起|落|停|冲|退|跪|蹲|扶|抱|握|擦|切|雕|刻|拍|摸|指|掀|揭|倒|盛|装|穿|脱|递|接|追|躲|藏|愣|颤|抖|开张|吃|喝|捧|吹)/
 const INDOOR_ACTION_RE = /((?:回|走进|走入|进了|进入)(?:了)?(?:店|屋|堂)(?:内|里)?)/
 const OUTDOOR_LOCATION_RE = /(街|市|广场|门外|巷|路)/
 
@@ -184,6 +194,7 @@ export function validatePlanSequence(plans: PlanShot[], options: {
   minDuration?: number
   maxDuration?: number
   sceneContracts?: Map<number, PlanSceneContract>
+  allowPendingInferredSpeech?: boolean
 } = {}): PlanGateResult {
   const minDuration = options.minDuration ?? 6
   const maxDuration = options.maxDuration ?? 15
@@ -238,8 +249,38 @@ export function validatePlanSequence(plans: PlanShot[], options: {
     if (sourceSegments.length && !plan.speechSegments.length) {
       issues.push(issue('plan_speech_missing', plan.shotNumber, `${label}原文含台词，但计划没有台词原子单元。`, sourceSegments.map(item => item.text).join('、')))
     }
-    if (!sourceSegments.length && plan.speechSegments.length && plan.speechSource !== 'planner') {
+    if (!sourceSegments.length && plan.speechSegments.length && plan.speechSource !== 'planner' && plan.speechSource !== 'inferred') {
       issues.push(issue('plan_speech_invented', plan.shotNumber, `${label}原文没有台词，计划却包含台词。`, plan.speechSegments.map(item => item.text).join('、')))
+    }
+    if (!options.allowPendingInferredSpeech && plan.speechRequirement && !plan.speechSegments.length) {
+      issues.push(issue(
+        'vocal_action_without_speech',
+        plan.shotNumber,
+        `${label}有“${plan.speechRequirement.basis}”发声动作，但没有具体台词；必须在计划层补 inferred 台词。`,
+        plan.sourceExcerpt.slice(0, 80),
+      ))
+    }
+    if (/^#{1,4}\s+/.test(String(plan.sourceExcerpt || '').trim())) {
+      issues.push(issue('doc_title_as_shot', plan.shotNumber, `${label}把文档标题当成了分镜正文。`, plan.sourceExcerpt.slice(0, 60)))
+    }
+    const subjects = [...new Set([
+      ...(plan.subjects || []),
+      ...(plan.subject ? [plan.subject] : []),
+    ].map(item => String(item || '').trim()).filter(Boolean))]
+    // 一个镜头只有一个焦点主体；允许最多一个到达/反应配角与台词同镜。
+    if (subjects.length > 3) {
+      issues.push(issue('multi_subject_shot', plan.shotNumber, `${label}包含多个动作主体（${subjects.join('、')}）；一个分镜只能一个焦点主体加最多两个配角。`, plan.sourceExcerpt.slice(0, 80)))
+    }
+    // 只有 v3 ShotPlan 才强制动作弧；旧计划/旧任务没有 shotType，不能因升级被误杀。
+    const endpointExempt = !plan.shotType || plan.shotType === 'establishing' || plan.shotType === 'insert'
+    if (!endpointExempt) {
+      const start = String(plan.actionStart || '').trim()
+      const end = String(plan.actionEnd || '').trim()
+      if (!start || !end) {
+        issues.push(issue('action_endpoint_missing', plan.shotNumber, `${label}缺少可见动作起点或终点。`, `${start || '空'} → ${end || '空'}`))
+      } else if (normalizeText(start) === normalizeText(end)) {
+        issues.push(issue('action_start_equals_end', plan.shotNumber, `${label}动作起点和终点相同，无法形成动作弧。`, start))
+      }
     }
     if (sourceSegments.length && plan.speechSegments.length) {
       const planned = plan.speechSegments.map(item => normalizeText(item.text)).join('')
@@ -272,7 +313,8 @@ export function validatePlanSequence(plans: PlanShot[], options: {
 
     for (const [field, value] of [['动作起点', plan.actionStart], ['动作终点', plan.actionEnd]] as const) {
       const text = String(value || '').trim()
-      if (text && INTERNAL_ACTION_RE.test(text)) {
+      const internalOnly = INTERNAL_ENDPOINT_ONLY_RE.test(text) || (INTERNAL_ACTION_RE.test(text) && !VISIBLE_ACTION_RE.test(text))
+      if (text && internalOnly) {
         issues.push(issue(
           'action_endpoint_internal',
           plan.shotNumber,

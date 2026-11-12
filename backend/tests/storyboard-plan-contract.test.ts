@@ -111,6 +111,40 @@ test('计划门禁：省略号台词逐字比对，不因 … 与 …… 差异�
   assert.equal(errors.some(item => item.code === 'plan_speech_incomplete'), false)
 })
 
+test('v3 计划门禁：起终点相同/缺失/文档标题/多主体被拒绝', () => {
+  const base = plan(1, { shotType: 'action', subject: '贾婆子', subjects: ['贾婆子'], actionArc: { initial: '站', action: '看', result: '看' } })
+  const same = planErrors([{ ...base, actionStart: '看向店门', actionEnd: '看向店门' }])
+  assert.ok(same.some(item => item.code === 'action_start_equals_end'))
+  const missing = planErrors([{ ...base, actionStart: null, actionEnd: '看向店门' }])
+  assert.ok(missing.some(item => item.code === 'action_endpoint_missing'))
+  const title = planErrors([{ ...base, sourceExcerpt: '# 唐记食铺' }])
+  assert.ok(title.some(item => item.code === 'doc_title_as_shot'))
+  const multi = planErrors([{ ...base, subjects: ['贾婆子', '六婶', '马老三', '众人'] }])
+  assert.ok(multi.some(item => item.code === 'multi_subject_shot'))
+})
+
+test('渲染门禁：提示词动作弧被改写时拒绝', () => {
+  const prompt = [
+    '出场人物：@张三｜场景：@大堂',
+    '画面调度：画面左：张三；画面右：无；无过肩；背景地标：门在右后；轴线无；动作起点：张三走向门口；动作终点：张三转身',
+    '0-6秒：张三走向门口，转身看向店内。',
+    '负面约束：只出现画内人物；不换脸/换装/加人；不生成字幕；不出现现代物品',
+  ].join('\n')
+  const result = validateRepairedShot({
+    sourceExcerpt: '张三站在门口，抬手看向店内。',
+    description: '张三站在门口，抬手看向店内。',
+    videoPrompt: prompt,
+    characters: [{ id: 1, name: '张三' }],
+    characterIds: [1],
+    duration: 6,
+    expectedShotType: 'action',
+    expectedActionStart: '张三站在门口',
+    expectedActionEnd: '张三抬手看向店内',
+  })
+  assert.ok(result.errors.some(item => item.includes('动作起点与计划不一致')))
+  assert.ok(result.errors.some(item => item.includes('动作终点与计划不一致')))
+})
+
 test('渲染门禁：description 左右与画面调度左右矛盾被拒绝，正反例不误报', () => {
   const chars = [{ id: 1, name: '贾婆子' }, { id: 2, name: '六婶' }]
   const prompt = (left, right) => [

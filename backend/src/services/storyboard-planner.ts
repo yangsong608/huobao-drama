@@ -14,6 +14,7 @@
 import { findQuotedSpans } from './dialogue-lines.js'
 import type { CanonicalSceneGroup } from './scene-canonical.js'
 import { canonicalSceneKey } from './scene-canonical.js'
+import { detectBeatSemantics, type BeatSemantics } from './storyboard-beat-plan.js'
 import { extractPlanSpeechSegments, type PlanSceneContract, type PlanShot, type PlanSpeechSegment } from './storyboard-plan-contract.js'
 
 export interface PlannerPreviousShot {
@@ -27,10 +28,17 @@ export interface PlannerPreviousShot {
   landmarkSide?: string | null
 }
 
+export interface PlannerEntity {
+  id?: number
+  name: string
+}
+
 export interface StoryboardPlannerInput {
   script: string
   shotStart: number
   sceneGroups?: CanonicalSceneGroup[]
+  characters?: PlannerEntity[]
+  props?: PlannerEntity[]
   previousShot?: PlannerPreviousShot | null
   sceneContracts?: Map<number, PlanSceneContract>
   minDuration?: number
@@ -48,6 +56,28 @@ export interface PlannedStoryboardShot extends PlanShot {
   segmentKind: 'dialogue' | 'action' | 'reaction'
   /** 本场第一个镜头且没有现成契约：由本镜建立画面常量 */
   establishesScene: boolean
+  shotType: 'establishing' | 'action' | 'dialogue' | 'reaction' | 'insert' | 'transition'
+  subject: string | null
+  subjects: string[]
+  beatCount: number
+  actionArc: { initial: string; action: string; result: string }
+  speechRequirement: { speaker: string; basis: string } | null
+  beats: PlannedBeat[]
+}
+
+export interface PlannedBeat {
+  index: number
+  kind: 'dialogue' | 'action'
+  sceneId: number | null
+  text: string
+  speaker: string
+  dialogueText: string
+  sourceQuote: string
+  sourceStart: number
+  sourceEnd: number
+  fragment: boolean
+  semantics: BeatSemantics
+  speechRequirement: string
 }
 
 export interface StoryboardPlanResult {
@@ -80,6 +110,7 @@ interface RawBeat {
   fragment: boolean
   paragraph: number
   scene: SceneBlock
+  semantics: BeatSemantics
 }
 
 interface DraftShot {
@@ -101,9 +132,12 @@ const SENTENCE_RE = /[^。！？!?…\n]+[。！？!?…]*/g
 const INTERNAL_ACTION_RE = /(心酸|失落|渐弱|愈发|自觉|无趣|吃味|得意|紧张|害怕|高兴|难过|愤怒|委屈|不甘|眼红|心里|心中|暗想|心想|盘算|寻思|琢磨)/
 const INNER_MONOLOGUE_SPEAKER_RE = /(?:心里|心中|暗想|心想|盘算|寻思|琢磨|内心|心声|独白)/
 const NARRATIVE_SPEAKER_RE = /[的了着这那他她它我你更也都就才又还却的是]/
-const SPEECH_LEAD_IN_BEAT_RE = /(?:唱喝|唱喏|吆喝|叫卖|揽客|说道|问道|答道|喊道|叫道|嚷道|吼道|骂道|开口道|开口|急道|笑道|叹道|继续道|接道|道|说|问|喊|叫)\s*[。！？!?…]*$/
+const SPEECH_LEAD_IN_BEAT_RE = /(?:唱喝|唱喏|吆喝|叫卖|揽客|说道|问道|答道|喊道?|叫道|嚷道?|吼道?|骂道?|开口道|开口|急道|笑道|叹道|继续道|接道|道|说|问|喊|叫|嚷|吼|骂|唱)\s*[。！？!?…]*$/
 const INDOOR_ENTRY_RE = /(?:回|走进|走入|进了|进入)(?:了)?(?:店|屋|堂|里间|厨房|后院)(?:内|里)?/
 const OUTDOOR_LOCATION_RE = /(街|市|广场|门外|巷|路)/
+const CONTINUATION_VERB_RE = /^(?:站|坐|躺|靠|走|跑|转|抬|低|伸|收|放|拿|端|推|拉|举|摔|捡|看|望|瞥|盯|白|瞪|瞟|瞄|皱|撇|点|摇|笑|哭|骂|喊|说|问|答|回|进|出|起|落|停|冲|退|跪|蹲|扶|抱|握|擦|切|雕|刻|拍|摸|指|掀|揭|倒|盛|装|穿|脱|递|接|追|躲|藏|愣|颤|抖|急|忙|连|又|便|就|才|却|仍|还|继续|随即|接着|然后)/
+const STATE_CLAUSE_RE = /^(?:神情|脸色|目光|眼神|声音|身子|眉头|嘴角|下巴|眼睛|嘴唇|双手|手里|身上|脸上|语气|表情)/
+const ADVERB_START_RE = /^(?:吃味|心酸|失落|得意|嫌弃|酸溜溜|热切|讪讪|冷笑|苦笑|皱眉|撇嘴|急|忙|怒|喜|悲|羞|慌|愣|又|便|就|才|却|仍|还|继续|随即|接着|然后)/
 
 function nonWsLength(value: string) {
   return String(value || '').replace(/\s+/g, '').length
@@ -119,6 +153,26 @@ function speechSeconds(value: string) {
 
 function actionSeconds(value: string) {
   return Math.max(1, Math.ceil(effectiveChars(value) * 0.12))
+}
+
+function emptySemantics(): BeatSemantics {
+  return { subject: '', target: '', emotion: '', prop: '', camera: '', vocalAction: '' }
+}
+
+function dialogueSemantics(speaker: string, text: string): BeatSemantics {
+  return {
+    ...emptySemantics(),
+    subject: speaker === '旁白' ? '' : speaker,
+    emotion: detectBeatSemantics(text).emotion,
+  }
+}
+
+function actionSemantics(text: string, input: StoryboardPlannerInput, previousSubject: string): BeatSemantics {
+  return detectBeatSemantics(text, {
+    subjectNames: (input.characters || []).map(item => item.name),
+    propNames: (input.props || []).map(item => item.name),
+    previousSubject,
+  })
 }
 
 /** 与计划门禁 normalizeText 对齐：去舞台提示和空白，保留省略号/破折号原样 */
@@ -137,6 +191,24 @@ function trimSpan(source: string, start: number, end: number): { start: number; 
   while (a < b && /\s/.test(source[a])) a += 1
   while (b > a && /\s/.test(source[b - 1])) b -= 1
   return { start: a, end: b, text: source.slice(a, b) }
+}
+
+function isSceneHeaderLine(line: string): boolean {
+  return HEADER_RE.test(String(line || '').trim())
+}
+
+/** 跳过正文前的文档标题/说明性 Markdown 标题，返回首个正文偏移。 */
+function skipLeadingDocumentTitles(script: string): number {
+  let offset = 0
+  for (const line of script.split('\n')) {
+    const lineStart = offset
+    offset += line.length + 1
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    if (/^#{1,4}\s+/.test(trimmed) && !isSceneHeaderLine(trimmed)) continue
+    return lineStart
+  }
+  return script.length
 }
 
 function parseHeader(line: string): { label: string; sceneType: string; location: string; time: string } | null {
@@ -197,29 +269,32 @@ function sceneBlocks(script: string, sceneGroups: CanonicalSceneGroup[], previou
     bodyEnd: script.length,
   } : null
   if (!headers.length) {
-    return previousScene ? [previousScene] : [{
+    const bodyStart = skipLeadingDocumentTitles(script)
+    if (previousScene) return [{ ...previousScene, bodyStart, bodyEnd: script.length }]
+    return [{
       label: '本段',
       sceneType: '',
       location: '',
       time: '',
       sceneId: null,
-      bodyStart: 0,
+      bodyStart,
       bodyEnd: script.length,
     }]
   }
   const blocks: SceneBlock[] = []
   const preambleEnd = headers[0].start
-  if (preambleEnd > 0 && script.slice(0, preambleEnd).trim()) {
+  const preambleStart = skipLeadingDocumentTitles(script.slice(0, preambleEnd))
+  if (preambleEnd > preambleStart && script.slice(preambleStart, preambleEnd).trim()) {
     // 分块可能从上一场中间开始：场次头之前的正文必须归入承接场景，不能丢。
     blocks.push(previousScene
-      ? { ...previousScene, bodyStart: 0, bodyEnd: preambleEnd }
+      ? { ...previousScene, bodyStart: preambleStart, bodyEnd: preambleEnd }
       : {
           label: '承接上一场',
           sceneType: '',
           location: '',
           time: '',
           sceneId: null,
-          bodyStart: 0,
+          bodyStart: preambleStart,
           bodyEnd: preambleEnd,
         })
   }
@@ -253,6 +328,7 @@ function makeBeat(input: {
   fragment: boolean
   paragraph: number
   scene: SceneBlock
+  semantics: BeatSemantics
 }): RawBeat {
   return input
 }
@@ -332,25 +408,28 @@ function dialogueBeats(input: {
       fragment: false,
       paragraph: input.paragraph,
       scene,
+      semantics: dialogueSemantics(speaker, dialogueText),
     })]
   }
   const pieces = splitDialogueContent(source, contentStart, contentEnd, input.maxSpeechChars)
   return pieces.map((piece, index) => {
     const start = index === 0 ? input.lineStart : piece.start
     const span = trimSpan(source, start, piece.end)
+    const dialogueText = normalizeDialogueText(piece.text)
     return makeBeat({
       start: span.start,
       end: span.end,
       text: span.text,
       kind: 'dialogue',
       speaker,
-      dialogueText: normalizeDialogueText(piece.text),
+      dialogueText,
       sourceQuote: piece.text,
       contentStart: piece.start,
       contentEnd: piece.end,
       fragment: true,
       paragraph: input.paragraph,
       scene,
+      semantics: dialogueSemantics(speaker, dialogueText),
     })
   }).filter(beat => effectiveChars(beat.dialogueText) > 0)
 }
@@ -363,6 +442,59 @@ function sentenceSpans(source: string, start: number, end: number): Array<{ star
     if (span.text) result.push(span)
   }
   return result
+}
+
+function clauseSpans(source: string, start: number, end: number): Array<{ start: number; end: number; text: string }> {
+  const result: Array<{ start: number; end: number; text: string }> = []
+  const text = source.slice(start, end)
+  for (const match of text.matchAll(CLAUSE_RE)) {
+    const span = trimSpan(source, start + (match.index ?? 0), start + (match.index ?? 0) + match[0].length)
+    if (span.text) result.push(span)
+  }
+  return result
+}
+
+interface BeatBuildContext {
+  input: StoryboardPlannerInput
+  subject: string
+}
+
+function actionBeatsFromSpan(
+  source: string,
+  span: { start: number; end: number; text: string },
+  paragraph: number,
+  scene: SceneBlock,
+  context: BeatBuildContext,
+): RawBeat[] {
+  const beats: RawBeat[] = []
+  for (const clause of clauseSpans(source, span.start, span.end)) {
+    const semantics = actionSemantics(clause.text, context.input, context.subject)
+    const continuation = CONTINUATION_VERB_RE.test(clause.text.trim())
+      || STATE_CLAUSE_RE.test(clause.text.trim())
+      || ADVERB_START_RE.test(clause.text.trim())
+    if (!semantics.subject && context.subject && continuation && !/[她他它]/.test(clause.text)) {
+      semantics.subject = context.subject
+    }
+    const previous = context.subject
+    beats.push(makeBeat({
+      start: clause.start,
+      end: clause.end,
+      text: clause.text,
+      kind: 'action',
+      speaker: '',
+      dialogueText: '',
+      sourceQuote: '',
+      contentStart: clause.start,
+      contentEnd: clause.end,
+      fragment: false,
+      paragraph,
+      scene,
+      semantics,
+    }))
+    if (semantics.subject) context.subject = semantics.subject
+    else if (!previous) context.subject = ''
+  }
+  return beats
 }
 
 function speakerBefore(text: string): { speaker: string; spoken: boolean } {
@@ -383,7 +515,7 @@ function inlineBeats(input: {
   paragraph: number
   scene: SceneBlock
   maxSpeechChars: number
-}): RawBeat[] {
+}, context: BeatBuildContext): RawBeat[] {
   const { source, span } = input
   const quotes = findQuotedSpans(span.text).filter(quote => {
     const before = span.text.slice(0, quote.start)
@@ -396,40 +528,14 @@ function inlineBeats(input: {
     return inner.replace(/\s/g, '').length >= 3 && /[。！？!?…，,；;]/.test(inner)
   })
   if (!quotes.length) {
-    return [makeBeat({
-      start: span.start,
-      end: span.end,
-      text: span.text,
-      kind: 'action',
-      speaker: '',
-      dialogueText: '',
-      sourceQuote: '',
-      contentStart: span.start,
-      contentEnd: span.end,
-      fragment: false,
-      paragraph: input.paragraph,
-      scene: input.scene,
-    })]
+    return actionBeatsFromSpan(source, span, input.paragraph, input.scene, context)
   }
   const beats: RawBeat[] = []
   let cursor = 0
   for (const quote of quotes) {
     const prefix = trimSpan(source, span.start + cursor, span.start + quote.start)
     if (prefix.text) {
-      beats.push(makeBeat({
-        start: prefix.start,
-        end: prefix.end,
-        text: prefix.text,
-        kind: 'action',
-        speaker: '',
-        dialogueText: '',
-        sourceQuote: '',
-        contentStart: prefix.start,
-        contentEnd: prefix.end,
-        fragment: false,
-        paragraph: input.paragraph,
-        scene: input.scene,
-      }))
+      beats.push(...actionBeatsFromSpan(source, prefix, input.paragraph, input.scene, context))
     }
     const before = span.text.slice(0, quote.start)
     const tail = before.slice(-40)
@@ -437,7 +543,7 @@ function inlineBeats(input: {
     const speaker = NARRATION_RE.test(tail) ? '旁白' : spoken.speaker
     const innerStart = span.start + quote.start + 1
     const innerEnd = span.start + quote.end - 1
-    beats.push(...dialogueBeats({
+    const dialogue = dialogueBeats({
       source,
       lineStart: span.start + quote.start,
       textStart: span.start + quote.start,
@@ -448,32 +554,22 @@ function inlineBeats(input: {
       paragraph: input.paragraph,
       scene: input.scene,
       maxSpeechChars: input.maxSpeechChars,
-    }))
+    })
+    beats.push(...dialogue)
+    if (speaker && speaker !== '旁白') context.subject = speaker
     cursor = quote.end
   }
   const suffix = trimSpan(source, span.start + cursor, span.end)
   if (suffix.text) {
-    beats.push(makeBeat({
-      start: suffix.start,
-      end: suffix.end,
-      text: suffix.text,
-      kind: 'action',
-      speaker: '',
-      dialogueText: '',
-      sourceQuote: '',
-      contentStart: suffix.start,
-      contentEnd: suffix.end,
-      fragment: false,
-      paragraph: input.paragraph,
-      scene: input.scene,
-    }))
+    beats.push(...actionBeatsFromSpan(source, suffix, input.paragraph, input.scene, context))
   }
   return beats
 }
 
-function parseSceneBeats(script: string, scene: SceneBlock, maxSpeechChars: number): RawBeat[] {
+function parseSceneBeats(script: string, scene: SceneBlock, maxSpeechChars: number, input: StoryboardPlannerInput): RawBeat[] {
   const beats: RawBeat[] = []
   let paragraph = 0
+  const context: BeatBuildContext = { input, subject: '' }
   const body = script.slice(scene.bodyStart, scene.bodyEnd)
   for (const lineMatch of body.matchAll(/^.*$/gm)) {
     const line = lineMatch[0]
@@ -492,6 +588,7 @@ function parseSceneBeats(script: string, scene: SceneBlock, maxSpeechChars: numb
       } else {
         const contentStart = lineStart + line.lastIndexOf(content)
         const contentEnd = contentStart + content.length
+        const effectiveSpeaker = INNER_MONOLOGUE_SPEAKER_RE.test(speaker) || NARRATION_RE.test(speaker) ? '旁白' : speaker
         beats.push(...dialogueBeats({
           source: script,
           lineStart,
@@ -499,17 +596,18 @@ function parseSceneBeats(script: string, scene: SceneBlock, maxSpeechChars: numb
           textEnd: lineStart + line.length,
           contentStart,
           contentEnd,
-          speaker: INNER_MONOLOGUE_SPEAKER_RE.test(speaker) || NARRATION_RE.test(speaker) ? '旁白' : speaker,
+          speaker: effectiveSpeaker,
           paragraph,
           scene,
           maxSpeechChars,
         }))
+        if (effectiveSpeaker !== '旁白') context.subject = effectiveSpeaker
         paragraph += 1
         continue
       }
     }
     for (const span of sentenceSpans(script, lineStart, lineStart + line.length)) {
-      beats.push(...inlineBeats({ source: script, span, paragraph, scene, maxSpeechChars }))
+      beats.push(...inlineBeats({ source: script, span, paragraph, scene, maxSpeechChars }, context))
     }
     paragraph += 1
   }
@@ -540,14 +638,75 @@ function dialogueSpeakers(beats: RawBeat[]): string[] {
   return [...new Set(beats.filter(beat => beat.kind === 'dialogue').map(beat => beat.speaker))]
 }
 
+function groupSubject(beat: RawBeat): string {
+  if (beat.kind === 'dialogue') return beat.speaker || '旁白'
+  return beat.semantics.subject || ''
+}
+
+function groupSemantics(beat: RawBeat): BeatSemantics {
+  return beat.kind === 'dialogue'
+    ? { ...beat.semantics, subject: groupSubject(beat), target: '', camera: '' }
+    : beat.semantics
+}
+
+function bucketOf(beats: RawBeat[]): BeatSemantics {
+  const result = emptySemantics()
+  for (const beat of beats) {
+    const sem = groupSemantics(beat)
+    if (!result.subject && sem.subject) result.subject = sem.subject
+    if (sem.target) result.target = sem.target
+    if (sem.camera) result.camera = sem.camera
+    if (sem.emotion) result.emotion = sem.emotion
+    if (sem.prop) result.prop = sem.prop
+  }
+  return result
+}
+
+function lastDialogueSpeaker(beats: RawBeat[]): string {
+  const dialogue = [...beats].reverse().find(beat => beat.kind === 'dialogue')
+  return dialogue?.speaker || ''
+}
+
+function lastActionBeat(beats: RawBeat[]): RawBeat | null {
+  return [...beats].reverse().find(beat => beat.kind === 'action') || null
+}
+
+function boundaryBetween(previous: RawBeat[], next: RawBeat): string | null {
+  const prev = bucketOf(previous)
+  const sem = groupSemantics(next)
+  const prevSpeaker = lastDialogueSpeaker(previous)
+  const nextSpeaker = next.kind === 'dialogue' ? next.speaker : ''
+  // 空镜只能建立场景；不能与人物动作混在一起。
+  if (!prev.subject && sem.subject) return 'subject_set'
+  // 人物镜可以带环境状态作背景；场景描述仍属于同一空间。
+  if (prev.subject && !sem.subject) return null
+  // 说话人变化是硬边界；一个镜头只能一个说话人。
+  if (prevSpeaker && nextSpeaker && prevSpeaker !== nextSpeaker) return 'speaker'
+  if (!prevSpeaker && nextSpeaker && prev.subject && prev.subject !== nextSpeaker) {
+    const action = lastActionBeat(previous)
+    // 短到达/反应可以作开口引子与台词同镜；长动作或带目标动作必须另起。
+    if (!action || effectiveChars(action.text) > 20 || action.semantics.target) return 'actor_to_speaker'
+  }
+  if (prevSpeaker && !nextSpeaker && sem.subject && sem.subject !== prevSpeaker) {
+    const shortReaction = next.kind === 'action' && effectiveChars(next.text) <= 14 && !next.semantics.target
+    if (!shortReaction) return 'speaker_to_other'
+  }
+  if (!prevSpeaker && !nextSpeaker && prev.subject && sem.subject && prev.subject !== sem.subject) {
+    // 同一空间里的短动作/反应可以共享一镜；带目标的长动作另起。
+    if (effectiveChars(next.text) > 20 || next.semantics.target) return 'subject'
+  }
+  if (prev.camera && sem.camera && prev.camera !== sem.camera) return 'camera'
+  const subjects = new Set(previous.map(groupSubject).filter(Boolean))
+  if (sem.subject) subjects.add(sem.subject)
+  if (subjects.size > 3) return 'subject_limit'
+  return null
+}
+
 function canMergeShots(left: DraftShot, right: DraftShot, maxDuration: number): boolean {
   if (left.scene !== right.scene) return false
   if (shotWeight([...left.beats, ...right.beats]) > maxDuration) return false
-  const leftSpeakers = dialogueSpeakers(left.beats)
-  const rightSpeakers = dialogueSpeakers(right.beats)
-  if (!leftSpeakers.length || !rightSpeakers.length) return true
-  if (leftSpeakers.length > 1 || rightSpeakers.length > 1) return false
-  return leftSpeakers[0] === rightSpeakers[0]
+  if (boundaryBetween(left.beats, right.beats[0])) return false
+  return true
 }
 
 function groupShots(beats: RawBeat[], maxDuration: number): DraftShot[] {
@@ -598,50 +757,26 @@ function groupShots(beats: RawBeat[], maxDuration: number): DraftShot[] {
       currentScene = beat.scene
       continue
     }
-    const sceneChanged = currentScene !== beat.scene
-    const projected = shotWeight([...current, beat])
-    const speakers = dialogueSpeakers(current)
-    if (sceneChanged) {
+    if (currentScene !== beat.scene) {
       flush()
       current = [beat]
       currentScene = beat.scene
       continue
     }
-    if (beat.kind === 'action') {
-      const actionCount = current.filter(item => item.kind === 'action').length
-      const limit = current.some(item => item.kind === 'dialogue') ? 2 : 3
-      if (actionCount >= limit) {
-        flush()
-        current = [beat]
-        currentScene = beat.scene
-        continue
-      }
+    const semanticBreak = boundaryBetween(current, beat)
+    if (semanticBreak) {
+      startNewShot(beat)
+      continue
     }
-    if (beat.kind === 'dialogue' && speakers.length) {
-      const tail = current[current.length - 1]
-      const carrySpeechCue = tail?.kind === 'action'
-        && current.some(item => item.kind === 'dialogue')
-        && isSpeechCueText(tail.text)
-      const sameSpeaker = speakers.length === 1 && beat.speaker && speakers[0] === beat.speaker
-      if (carrySpeechCue || !sameSpeaker) {
-        startNewShot(beat)
-        continue
-      }
-    }
-    if (projected > maxDuration) {
-      if (beat.kind === 'dialogue') startNewShot(beat)
-      else {
-        flush()
-        current = [beat]
-        currentScene = beat.scene
-      }
+    if (shotWeight([...current, beat]) > maxDuration) {
+      startNewShot(beat)
       continue
     }
     current.push(beat)
   }
   flush()
 
-  // 短镜优先和相邻同场、同说话人的镜头合并；不跨说话人。
+  // 只有语义兼容的相邻镜头才允许合并过短镜头；语义边界不能靠时长抹平。
   let changed = true
   while (changed) {
     changed = false
@@ -659,22 +794,106 @@ function groupShots(beats: RawBeat[], maxDuration: number): DraftShot[] {
   return shots
 }
 
+const VISIBLE_ACTION_RE = /(站|坐|躺|靠|走|跑|转|抬|低|伸|收|放|拿|端|推|拉|举|摔|捡|看|望|扫|瞥|盯|白|瞪|瞟|瞄|皱|撇|点|摇|笑|哭|骂|喊|说|问|答|回|进|出|起|落|停|冲|退|跪|蹲|扶|抱|握|擦|切|雕|刻|拍|摸|指|掀|揭|倒|盛|装|穿|脱|递|接|追|躲|藏|愣|颤|抖|开张|吃|喝|捧|吹)/
+const INTERNAL_ENDPOINT_ONLY_RE = /(自觉|愈发|渐弱|心里|心中|暗想|心想|盘算|寻思|琢磨|无趣|心酸|失落|不甘|眼红)/
+
 function visibleAction(value: string): string | null {
   const text = String(value || '').trim()
-  if (!text || INTERNAL_ACTION_RE.test(text)) return null
+  if (!text) return null
+  if (INTERNAL_ENDPOINT_ONLY_RE.test(text)) return null
+  if (INTERNAL_ACTION_RE.test(text) && !VISIBLE_ACTION_RE.test(text)) return null
   return text.length > 80 ? `${text.slice(0, 80)}…` : text
 }
 
-function actionEndpoint(beats: RawBeat[], from: 'start' | 'end'): string | null {
-  const actions = beats.filter(beat => beat.kind === 'action')
-  if (!actions.length) return null
-  // 台词前的动作用起点，台词后的动作用终点；只有一侧时两边共用。
-  const ordered = from === 'start' ? actions : [...actions].reverse()
-  for (const beat of ordered) {
-    const value = visibleAction(beat.text)
-    if (value) return value
+const ACTION_VERB_SPLIT_RE = /(?:站在|坐在|躺在|靠在|抬头|低头|转身|伸手|抬手|放下|拿起|端起|走向|看向|望向|瞥向|撇嘴|皱眉|点头|摇头|开口|说道|喊道|问道|答道|笑|哭|骂|说|喊|问|答|走|跑|看|望|拿|放|推|拉|举|递|接|拍|摸|指|擦|切|雕|刻|端|收|起|坐|站)/
+
+function splitInitialState(text: string, subject: string): string {
+  const source = String(text || '').trim()
+  const index = source.search(ACTION_VERB_SPLIT_RE)
+  if (index > 0) {
+    const prefix = source.slice(0, index).trim()
+    if (effectiveChars(prefix) >= 2) return prefix
   }
-  return null
+  return subject ? `${subject}保持上一镜末姿态` : '画面保持上一镜末状态'
+}
+
+function uniqueBeatSubjects(beats: RawBeat[]): string[] {
+  return [...new Set(beats
+    .map(beat => beat.kind === 'dialogue' ? (beat.speaker === '旁白' ? '' : beat.speaker) : beat.semantics.subject)
+    .map(value => String(value || '').trim())
+    .filter(Boolean))]
+}
+
+function determineShotType(beats: RawBeat[], speech: PlanSpeechSegment[]): PlannedStoryboardShot['shotType'] {
+  if (speech.length) return 'dialogue'
+  const actions = beats.filter(beat => beat.kind === 'action')
+  const subjects = uniqueBeatSubjects(beats)
+  if (!subjects.length && actions.some(beat => beat.semantics.prop)) return 'insert'
+  if (!subjects.length) return 'establishing'
+  if (actions.length <= 1 && actions.some(beat => beat.semantics.emotion) && !actions.some(beat => beat.semantics.target)) return 'reaction'
+  return 'action'
+}
+
+function deriveActionArc(
+  beats: RawBeat[],
+  speech: PlanSpeechSegment[],
+  shotType: PlannedStoryboardShot['shotType'],
+  subject: string | null,
+): { initial: string; action: string; result: string } {
+  const actions = beats.filter(beat => beat.kind === 'action')
+  const actionTexts = actions.map(beat => visibleAction(beat.text)).filter((value): value is string => Boolean(value))
+  const action = actionTexts.join('；') || speech.map(item => item.text).join('；') || '无'
+  if (shotType === 'establishing' || shotType === 'insert') {
+    if (actionTexts.length >= 2) {
+      return { initial: actionTexts[0], action, result: actionTexts[actionTexts.length - 1] }
+    }
+    return { initial: '无', action, result: '无' }
+  }
+  if (!actionTexts.length && speech.length) {
+    const speaker = speech[0].speaker || subject || '人物'
+    return {
+      initial: `${speaker}面向对方，嘴唇闭合`,
+      action,
+      result: `${speaker}说完，嘴唇闭合`,
+    }
+  }
+  if (actionTexts.length >= 2) {
+    return { initial: actionTexts[0], action, result: actionTexts[actionTexts.length - 1] }
+  }
+  const only = actionTexts[0] || action
+  const initial = splitInitialState(only, subject || '')
+  return {
+    initial: initial === only ? `${subject || '人物'}处于动作前状态` : initial,
+    action: only,
+    result: only,
+  }
+}
+
+function speechRequirementOf(beats: RawBeat[], speech: PlanSpeechSegment[], subject: string | null): { speaker: string; basis: string } | null {
+  if (speech.length) return null
+  const vocal = beats.find(beat => beat.kind === 'action' && beat.semantics.vocalAction)
+  if (!vocal) return null
+  return {
+    speaker: vocal.semantics.subject || subject || '',
+    basis: vocal.semantics.vocalAction,
+  }
+}
+
+function plannedBeatsOf(beats: RawBeat[]): PlannedBeat[] {
+  return beats.map((beat, index) => ({
+    index: index + 1,
+    kind: beat.kind,
+    sceneId: beat.scene.sceneId,
+    text: beat.text,
+    speaker: beat.speaker,
+    dialogueText: beat.dialogueText,
+    sourceQuote: beat.sourceQuote,
+    sourceStart: beat.start,
+    sourceEnd: beat.end,
+    fragment: beat.fragment,
+    semantics: beat.semantics,
+    speechRequirement: beat.kind === 'action' && beat.semantics.vocalAction ? beat.semantics.vocalAction : '',
+  }))
 }
 
 function speechSegmentsOf(beats: RawBeat[]): PlanSpeechSegment[] {
@@ -700,20 +919,25 @@ function sidesForScene(scene: SceneBlock, contracts?: Map<number, PlanSceneContr
   }
 }
 
-function titleOf(shot: DraftShot, speech: PlanSpeechSegment[]): string {
+function titleOf(shot: DraftShot, speech: PlanSpeechSegment[], requirement: { speaker: string; basis: string } | null): string {
   if (speech.length) {
     const first = speech[0]
     return `${first.speaker || '对白'}：${first.text.slice(0, 14)}`
   }
+  if (requirement) return `${requirement.speaker || '角色'}${requirement.basis}`
   const action = shot.beats.find(beat => beat.kind === 'action')?.text || ''
   return action.replace(/\s+/g, ' ').slice(0, 18) || `第 ${shot.scene.label} 场`
 }
 
-function summaryOf(shot: DraftShot, speech: PlanSpeechSegment[]): string {
+function summaryOf(shot: DraftShot, speech: PlanSpeechSegment[], requirement: { speaker: string; basis: string } | null): string {
   if (speech.length) {
     const speaker = speech[0].speaker || '角色'
     const action = shot.beats.find(beat => beat.kind === 'action')?.text || ''
     return `${speaker}说话${action ? `；${action.replace(/\s+/g, ' ').slice(0, 28)}` : ''}`
+  }
+  if (requirement) {
+    const action = shot.beats.find(beat => beat.kind === 'action')?.text || ''
+    return `${requirement.speaker || '角色'}${requirement.basis}${action ? `；${action.replace(/\s+/g, ' ').slice(0, 24)}` : ''}`
   }
   return shot.beats.map(beat => beat.text).join(' ').replace(/\s+/g, ' ').slice(0, 40)
 }
@@ -726,7 +950,7 @@ export function planStoryboardShots(input: StoryboardPlannerInput): StoryboardPl
   const maxSpeechChars = Math.max(8, (maxDuration - 1) * 4)
   const scenes = sceneBlocks(script, input.sceneGroups || [], input.previousShot)
   const beats: RawBeat[] = []
-  for (const scene of scenes) beats.push(...parseSceneBeats(script, scene, maxSpeechChars))
+  for (const scene of scenes) beats.push(...parseSceneBeats(script, scene, maxSpeechChars, input))
   if (!beats.length) return { shots: [], coverage: 0, sceneCount: scenes.length, sourceChars: nonWsLength(script) }
   const drafts = groupShots(beats, maxDuration)
   const shots: PlannedStoryboardShot[] = []
@@ -771,10 +995,16 @@ export function planStoryboardShots(input: StoryboardPlannerInput): StoryboardPl
     } else {
       speech = []
     }
-    const speaker = speech.length ? [...new Set(speech.map(item => item.speaker).filter(Boolean))][0] || null : null
+    const speechSpeaker = speech.length ? [...new Set(speech.map(item => item.speaker).filter(Boolean))][0] || null : null
+    const shotType = determineShotType(draft.beats, speech)
+    const subjects = uniqueBeatSubjects(draft.beats)
+    const subject = speechSpeaker || subjects[0] || null
+    const speechRequirement = speechRequirementOf(draft.beats, speech, subject)
+    const speaker = speechSpeaker || speechRequirement?.speaker || null
     const weight = shotWeight(draft.beats)
     const speechWeight = speech.reduce((sum, item) => sum + speechSeconds(item.text) + 1, 0)
-    const duration = Math.min(maxDuration, Math.max(minDuration, Math.ceil(Math.max(weight, speechWeight))))
+    const duration = Math.min(maxDuration, Math.max(minDuration, Math.ceil(Math.max(weight, speechWeight, speechRequirement ? 6 : 0))))
+    const actionArc = deriveActionArc(draft.beats, speech, shotType, subject)
     const sceneSides = sidesForScene(draft.scene, input.sceneContracts)
     const sameScene = draft.scene.sceneId != null
       ? draft.scene.sceneId === previousSceneId
@@ -799,21 +1029,28 @@ export function planStoryboardShots(input: StoryboardPlannerInput): StoryboardPl
       time: draft.scene.time || null,
       sourceExcerpt: excerpt.text,
       duration,
-      actionStart: actionEndpoint(draft.beats, 'start'),
-      actionEnd: actionEndpoint(draft.beats, 'end'),
-      coverageType: speech.length ? 'dialogue' : 'action',
+      actionStart: actionArc.initial,
+      actionEnd: actionArc.result,
+      coverageType: shotType,
       speechSegments: speech,
       ...(fragment ? { speechSource: 'planner' as const } : {}),
-      boundaryType: speech.length ? 'speech' : 'action',
+      boundaryType: speech.length ? 'speech' : (shotType === 'establishing' ? 'scene' : 'action'),
       boundaryWord: null,
       ...sides,
       sceneLabel: draft.scene.label,
-      titleHint: titleOf(draft, speech),
-      summaryHint: summaryOf(draft, speech),
+      titleHint: titleOf(draft, speech, speechRequirement),
+      summaryHint: summaryOf(draft, speech, speechRequirement),
       transition: 'cut',
       speaker,
-      segmentKind: speech.length ? 'dialogue' : 'action',
+      segmentKind: speech.length ? 'dialogue' : (shotType === 'reaction' ? 'reaction' : 'action'),
       establishesScene,
+      shotType,
+      subject,
+      subjects,
+      beatCount: draft.beats.length,
+      actionArc,
+      speechRequirement,
+      beats: plannedBeatsOf(draft.beats),
     })
     cursorShot += 1
   }
@@ -832,7 +1069,8 @@ export function buildPlannedShotsBlock(shots: PlannedStoryboardShot[]): string {
   const lines = [
     '### 系统预拆分结果（拆分主算法已锁定，必须逐条落地）',
     `本段固定 ${shots.length} 个骨架：下面每一行对应一个骨架，必须按原顺序调用 save_storyboard_skeletons 保存同样数量；禁止增删、合并、拆分或改边界。`,
-    'source_excerpt、duration、台词由系统锁定；scene_id 已给出时必须沿用，显示“场景待绑定”的由模型补绑 canonical 场景；模型只补 action_summary、character_ids、prop_ids、title、transition、continuity、action_start/action_end 和画面常量。',
+    'source_excerpt、duration、台词、动作起点/终点、shot_type 由系统锁定；scene_id 已给出时必须沿用，显示“场景待绑定”的由模型补绑 canonical 场景。',
+    '模型只补 action_summary、character_ids、prop_ids、title、transition、continuity 和画面常量；有“发声要求”的镜头必须填写 inferred_dialogue（由发声动作推导的具体台词）和 inferred_speaker。',
   ]
   for (const shot of shots) {
     const speech = shot.speechSegments.length
@@ -844,9 +1082,12 @@ export function buildPlannedShotsBlock(shots: PlannedStoryboardShot[]): string {
           ? '建立镜：本镜必须补全画面左/右、轴线、地标，后续镜头逐字沿用'
           : '沿用本场建立镜：可留空，服务端按场景契约补齐；不得自行改写或翻转')
     lines.push([
-      `- 第 ${shot.storyboardNumber} 镜｜${shot.sceneLabel}｜${shot.location || '场景待绑定'} / ${shot.time || '时间未写'}｜${shot.duration} 秒｜说话人：${shot.speaker || '无'}`,
+      `- 第 ${shot.storyboardNumber} 镜｜${shot.sceneLabel}｜${shot.location || '场景待绑定'} / ${shot.time || '时间未写'}｜${shot.duration} 秒｜${shot.shotType}｜主体：${shot.subject || '场景'}｜说话人：${shot.speaker || '无'}`,
       `  锁定摘录：${shot.sourceExcerpt.replace(/\s+/g, ' ').slice(0, 220)}`,
       `  锁定台词：${speech}`,
+      `  锁定动作弧：${shot.actionArc.initial} → ${shot.actionArc.result}`,
+      `  节拍：${shot.beats.map(beat => `${beat.kind === 'dialogue' ? `台词(${beat.speaker || '旁白'})` : (beat.semantics.subject || '场景')}：${beat.text.replace(/\s+/g, ' ').slice(0, 60)}`).join('；')}`,
+      ...(shot.speechRequirement ? [`  发声要求：${shot.speechRequirement.speaker || '角色'}「${shot.speechRequirement.basis}」→ 必须补 inferred_dialogue`] : []),
       `  画面常量：${sidesLine}`,
     ].join('\n'))
   }

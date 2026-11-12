@@ -174,6 +174,77 @@ test('planner splits an outdoor shot when an action enters the shop', () => {
   assert.ok(result.shots.some(shot => shot.location === '室内（待绑定）'))
 })
 
+test('document title is never treated as a shot', () => {
+  const script = `# 唐记食铺
+
+## S01 | 外景 · 邓州西市街 | 清晨
+
+卯时未过，朝阳初升，街面已人声鼎沸。
+
+贾婆子站在自家店前揽客。`
+  const result = planStoryboardShots({ script, shotStart: 1, maxDuration: 15 })
+  assert.ok(result.shots.length > 0)
+  assert.ok(result.shots.every(shot => !/^#{1,4}\s+/.test(shot.sourceExcerpt.trim())))
+  assert.match(result.shots[0].sourceExcerpt, /卯时未过/)
+  assert.ok(result.shots.every(shot => shot.shotType))
+})
+
+test('establishing scene and character action stay in separate shots', () => {
+  const script = `## S01 | 外景 · 邓州西市街 | 清晨
+
+卯时未过，街面人声鼎沸，商铺林立。
+
+贾婆子站在自家店前扯着嗓子揽客。`
+  const result = planStoryboardShots({
+    script,
+    shotStart: 1,
+    characters: [{ name: '贾婆子' }],
+    maxDuration: 15,
+  })
+  const establishing = result.shots.find(shot => shot.shotType === 'establishing')
+  const action = result.shots.find(shot => shot.subject === '贾婆子')
+  assert.ok(establishing)
+  assert.ok(action)
+  assert.notEqual(establishing!.storyboardNumber, action!.storyboardNumber)
+})
+
+test('vocal action becomes an inferred speech requirement and title block exposes it', () => {
+  const script = `## S01 | 外景 · 邓州西市街 | 清晨
+
+贾婆子刚起了一锅白面炊饼，站在自家店前扯着嗓子揽客。`
+  const result = planStoryboardShots({
+    script,
+    shotStart: 1,
+    characters: [{ name: '贾婆子' }],
+    maxDuration: 15,
+  })
+  const shot = result.shots.find(item => item.speechRequirement)
+  assert.ok(shot)
+  assert.equal(shot!.speechRequirement!.speaker, '贾婆子')
+  assert.equal(shot!.speechRequirement!.basis, '揽客')
+  assert.ok(shot!.actionArc.initial)
+  assert.ok(shot!.actionArc.result)
+  assert.notEqual(shot!.actionArc.initial, shot!.actionArc.result)
+  const block = buildPlannedShotsBlock(result.shots)
+  assert.match(block, /发声要求/)
+  assert.match(block, /inferred_dialogue/)
+})
+
+test('v3 shots always carry distinct visible action endpoints', () => {
+  const script = `## S01 | 内景 · 唐记食铺 | 清晨
+
+贾婆子站在柜台后。她抬头看向店门，抬手招呼客人。`
+  const result = planStoryboardShots({ script, shotStart: 1, characters: [{ name: '贾婆子' }], maxDuration: 15 })
+  for (const shot of result.shots) {
+    assert.ok(shot.shotType)
+    if (shot.shotType !== 'establishing' && shot.shotType !== 'insert') {
+      assert.ok(shot.actionStart)
+      assert.ok(shot.actionEnd)
+      assert.notEqual(shot.actionStart, shot.actionEnd)
+    }
+  }
+})
+
 test('planned shot block locks count, excerpts and durations for the model', () => {
   const result = planStoryboardShots({ script: SAMPLE, shotStart: 1, sceneGroups: SCENE_GROUPS, maxDuration: 15 })
   const block = buildPlannedShotsBlock(result.shots)

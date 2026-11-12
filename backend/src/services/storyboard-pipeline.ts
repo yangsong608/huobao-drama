@@ -554,6 +554,14 @@ function skeletonPayload(skeleton: SkeletonRow) {
     action_start: skeleton.actionStart || '',
     action_end: skeleton.actionEnd || '',
     coverage_type: skeleton.coverageType || '',
+    shot_type: skeleton.shotType || '',
+    subject: skeleton.subject || '',
+    action_arc: (() => {
+      try { return JSON.parse(skeleton.actionArcJson || 'null') } catch { return null }
+    })(),
+    speech_requirement: (() => {
+      try { return JSON.parse(skeleton.speechRequirementJson || 'null') } catch { return null }
+    })(),
     speech_segments: skeletonSpeechSegments(skeleton),
     boundary_type: skeleton.boundaryType || '',
     boundary_word: skeleton.boundaryWord || '',
@@ -605,8 +613,9 @@ function buildSkeletonMessage(input: SkeletonRunnerInput, sceneBindingBlock: str
     '### 本段任务',
     `- 拆分主算法已经按「台词→场景→说话人→节拍→分镜」完成预拆分，本段固定 ${plannedCount} 个骨架；你的任务不是重新拆分，而是逐条补全语义字段后保存。`,
     '- 必须严格按上面清单的顺序和数量调用 save_storyboard_skeletons；禁止增删、合并、拆分、改镜头号或改摘录边界。',
-    '- source_excerpt、duration、台词由系统锁定；scene_id 已给出的必须沿用，显示“场景待绑定”的由你补绑；即使你传了不同摘录/时长，服务端也会按锁定量覆盖。',
-    '- 需要你补全：action_summary（谁做什么）、character_ids、prop_ids、title、transition、continuity、action_start、action_end、coverage_type、boundary_type、boundary_word、screen_left/right、axis_side、landmark_side。',
+    '- source_excerpt、duration、台词、动作起点/终点、shot_type 由系统锁定；scene_id 已给出的必须沿用，显示“场景待绑定”的由你补绑；即使你传了不同摘录/时长，服务端也会按锁定量覆盖。',
+    '- 需要你补全：action_summary（谁做什么）、character_ids、prop_ids、title、transition、continuity、coverage_type、boundary_type、boundary_word、screen_left/right、axis_side、landmark_side。',
+    '- 有“发声要求”的镜头（原文只有揽客/吆喝/唱喝等动作，没有具体词）必须补 inferred_speaker 和 inferred_dialogue；台词要符合人物和动作语境，不得与原文其他信息冲突。',
     '- 不写最终台词，不写 video_prompt，不写 BGM/环境声；这些留给逐镜修补和声音设计。',
     '- action_summary 只写谁做什么、动作起点和终点，一句话；不要写台词原文。',
     '- 同一场第一镜必须补全画面左/右、轴线、地标侧，作为场景地理契约的建立镜；后续镜头逐字沿用，不得因为说话人变化交换左右。',
@@ -662,8 +671,11 @@ function buildRepairMessage(input: RepairRunnerInput) {
     `- 道具 ID：${skeleton.prop_ids.join(',') || '无'}`,
     `- 时长：${skeleton.duration} 秒`,
     `- 动作摘要：${skeleton.action_summary}`,
+    `- 镜头类型：${skeleton.shot_type || '未写'}；主体：${skeleton.subject || '场景'}`,
     `- 动作起点：${skeleton.action_start || '未写'}`,
     `- 动作终点：${skeleton.action_end || '未写'}`,
+    ...(skeleton.action_arc ? [`- 动作弧：${skeleton.action_arc.initial} → ${skeleton.action_arc.result}`] : []),
+    ...(skeleton.speech_requirement ? [`- 发声要求：${skeleton.speech_requirement.speaker || '角色'}「${skeleton.speech_requirement.basis}」`] : []),
     `- 覆盖类型：${skeleton.coverage_type || '未写'}`,
     `- 计划台词（只能逐字使用这些，不得新增/删除/改写）：\n${speechBlock}`,
     `- 边界类型：${skeleton.boundary_type || '未写'}；过渡词：${skeleton.boundary_word || '无'}`,
@@ -1193,6 +1205,9 @@ export async function optimizeStoryboardShot(
       const validation = validateRepairedShot({
         sourceExcerpt: current.sourceExcerpt,
         planSpeechSegments: skeletonSpeechSegments(current),
+        expectedActionStart: current.actionStart,
+        expectedActionEnd: current.actionEnd,
+        expectedShotType: current.shotType,
         description: fresh.description,
         videoPrompt: fresh.videoPrompt,
         characterIds: storyboardCharacterIds(fresh.id),
@@ -1404,10 +1419,20 @@ async function runSkeletonStage(
     const previousSkeleton = allHistory[allHistory.length - 1]
     const sceneGroups = await getCanonicalSceneGroups(row.dramaId)
     const sceneContracts = await getSceneContractMap(row.dramaId)
+    const characters = db.select({ id: schema.characters.id, name: schema.characters.name })
+      .from(schema.characters)
+      .where(and(eq(schema.characters.dramaId, row.dramaId), isNull(schema.characters.deletedAt)))
+      .all()
+    const props = db.select({ id: schema.props.id, name: schema.props.name })
+      .from(schema.props)
+      .where(and(eq(schema.props.dramaId, row.dramaId), isNull(schema.props.deletedAt)))
+      .all()
     const planned = planStoryboardShots({
       script: chunk.script,
       shotStart,
       sceneGroups,
+      characters,
+      props,
       previousShot: previousSkeleton ? {
         shotNumber: previousSkeleton.storyboardNumber,
         sceneId: previousSkeleton.sceneId,
@@ -1689,6 +1714,9 @@ async function runRepairStage(
         const validation = validateRepairedShot({
           sourceExcerpt: skeleton.sourceExcerpt,
           planSpeechSegments: skeletonSpeechSegments(skeleton),
+          expectedActionStart: skeleton.actionStart,
+          expectedActionEnd: skeleton.actionEnd,
+          expectedShotType: skeleton.shotType,
           description: existing.description,
           videoPrompt: existing.videoPrompt,
           characterIds: storyboardCharacterIds(existing.id),
@@ -1836,6 +1864,9 @@ async function runRepairStage(
         const validation = validateRepairedShot({
           sourceExcerpt: skeleton.sourceExcerpt,
           planSpeechSegments: skeletonSpeechSegments(skeleton),
+          expectedActionStart: skeleton.actionStart,
+          expectedActionEnd: skeleton.actionEnd,
+          expectedShotType: skeleton.shotType,
           description: storyboard.description,
           videoPrompt: storyboard.videoPrompt,
           characterIds: storyboardCharacterIds(storyboard.id),

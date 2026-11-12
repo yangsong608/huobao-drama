@@ -211,6 +211,9 @@ function getPipelineRuntime(context: ToolContext): StoryboardPipelineRuntime {
     duration: rawSkeleton.duration ?? 0,
     transition: rawSkeleton.transition ?? 'cut',
     continuity: rawSkeleton.continuity ?? '',
+    actionStart: rawSkeleton.actionStart ?? rawSkeleton.action_start ?? '',
+    actionEnd: rawSkeleton.actionEnd ?? rawSkeleton.action_end ?? '',
+    shotType: rawSkeleton.shotType ?? rawSkeleton.shot_type ?? '',
     sourceExcerpt: rawSkeleton.sourceExcerpt ?? rawSkeleton.source_excerpt ?? '',
     attempts: rawSkeleton.attempts ?? 0,
   } : undefined
@@ -1199,6 +1202,8 @@ const skeletonFields = z.object({
   continuity: z.string().optional(),
   action_summary: z.string(),
   source_excerpt: z.string(),
+  inferred_speaker: z.string().optional(),
+  inferred_dialogue: z.string().optional(),
   action_start: z.string().optional(),
   action_end: z.string().optional(),
   coverage_type: z.string().optional(),
@@ -1263,7 +1268,22 @@ const saveStoryboardSkeletons = createTool({
         sourceQuote: item.sourceQuote,
         order: order + 1,
       })) || []
-      const speechSegments = plannedSpeech.length ? plannedSpeech : extractPlanSpeechSegments(excerpt)
+      const inferredDialogue = String(skeleton.inferred_dialogue || '').trim()
+      if (planned?.speechRequirement && !plannedSpeech.length && !inferredDialogue) {
+        errors.push(`${label}原文只有“${planned.speechRequirement.basis}”发声动作，缺少 inferred_dialogue；必须补一句具体台词。`)
+      }
+      const inferredSpeech = !plannedSpeech.length && inferredDialogue
+        ? [{
+            speaker: String(skeleton.inferred_speaker || planned?.speechRequirement?.speaker || '').trim(),
+            text: inferredDialogue,
+            sourceQuote: '',
+            order: 1,
+          }]
+        : []
+      const speechSegments = plannedSpeech.length
+        ? plannedSpeech
+        : (inferredSpeech.length ? inferredSpeech : extractPlanSpeechSegments(excerpt))
+      const speechSource = inferredSpeech.length ? 'inferred' as const : planned?.speechSource
       const duration = Number(planned?.duration || skeleton.duration || 0)
       if (duration < 6 || duration > 15) errors.push(`${label}时长 ${duration} 秒，必须在 6-15 秒之间。`)
       if (excerpt) {
@@ -1324,11 +1344,16 @@ const saveStoryboardSkeletons = createTool({
         actionStart,
         actionEnd,
         coverageType,
+        shotType: planned?.shotType || null,
+        subject: planned?.subject || null,
+        beatPlanJson: planned?.beats ? JSON.stringify(planned.beats) : null,
+        actionArcJson: planned?.actionArc ? JSON.stringify(planned.actionArc) : null,
+        speechRequirementJson: planned?.speechRequirement ? JSON.stringify(planned.speechRequirement) : null,
         speechSegmentsJson: JSON.stringify(speechSegments),
         boundaryType,
         boundaryWord: planned?.boundaryWord || skeleton.boundary_word?.trim() || null,
         ...sides,
-        planVersion: planned ? 2 : 1,
+        planVersion: planned ? 3 : 1,
         actionSummary: applyAssetAliases(summary, aliasMap),
         sourceExcerpt: excerpt,
         status: 'draft',
@@ -1347,7 +1372,13 @@ const saveStoryboardSkeletons = createTool({
         coverageType,
         speechSegments,
         characterCount,
-        ...(planned?.speechSource ? { speechSource: planned.speechSource } : {}),
+        ...(speechSource ? { speechSource } : {}),
+        shotType: planned?.shotType,
+        subject: planned?.subject,
+        subjects: planned?.subjects,
+        beatCount: planned?.beatCount,
+        actionArc: planned?.actionArc,
+        speechRequirement: planned?.speechRequirement,
         boundaryType,
         boundaryWord: planned?.boundaryWord || skeleton.boundary_word?.trim() || null,
         ...sides,
@@ -1375,6 +1406,27 @@ const saveStoryboardSkeletons = createTool({
           actionStart: item.actionStart,
           actionEnd: item.actionEnd,
           coverageType: item.coverageType,
+          shotType: item.shotType || undefined,
+          subject: item.subject || null,
+          actionArc: (() => {
+            try { return JSON.parse(item.actionArcJson || 'null') } catch { return null }
+          })(),
+          speechRequirement: (() => {
+            try { return JSON.parse(item.speechRequirementJson || 'null') } catch { return null }
+          })(),
+          beatCount: (() => {
+            try {
+              const parsed = JSON.parse(item.beatPlanJson || '[]')
+              return Array.isArray(parsed) ? parsed.length : undefined
+            } catch { return undefined }
+          })(),
+          subjects: (() => {
+            try {
+              const parsed = JSON.parse(item.beatPlanJson || '[]')
+              if (!Array.isArray(parsed)) return []
+              return [...new Set(parsed.map((beat: any) => String(beat?.semantics?.subject || '')).filter(Boolean))]
+            } catch { return [] }
+          })(),
           speechSegments: (() => {
             try {
               const parsed = JSON.parse(item.speechSegmentsJson || '[]')
@@ -1628,6 +1680,9 @@ const saveRepairedStoryboard = createTool({
     const validation = validateRepairedShot({
       sourceExcerpt: skeleton.sourceExcerpt,
       planSpeechSegments,
+      expectedActionStart: skeleton.actionStart,
+      expectedActionEnd: skeleton.actionEnd,
+      expectedShotType: skeleton.shotType,
       description,
       videoPrompt,
       characterIds,

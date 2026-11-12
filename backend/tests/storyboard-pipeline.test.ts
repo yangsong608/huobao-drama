@@ -18,6 +18,7 @@ const svc = await import('../src/services/storyboard-pipeline.ts')
 const { validateRepairedShot } = await import('../src/services/storyboard-shot-validation.ts')
 const { buildShotSoundDelta } = await import('../src/services/storyboard-sound.ts')
 const { storyboardDirectorTools, storyboardTools } = await import('../src/agents/tools/storyboard-tools.ts')
+const { planStoryboardShots } = await import('../src/services/storyboard-planner.ts')
 const { RequestContext } = await import('@mastra/core/request-context')
 const { Hono } = await import('hono')
 const storyboardRoutes = await import('../src/routes/storyboards.ts')
@@ -661,4 +662,46 @@ test('四段式管线：人工修好 manual 镜头后可续跑并进入声音设
   assert.equal(job.validated_shots, 2)
   assert.equal(job.failed_shots, 0)
   assert.equal(liveStoryboards(fixture.episodeId).length, 2)
+})
+
+
+test('预拆 v3：发声动作没有 inferred 台词时拒绝，补台词后锁定节拍与动作弧', async () => {
+  const script = `## S01 | 内景 · 大堂 | 清晨
+
+贾婆子刚起了一锅白面炊饼，站在自家店前扯着嗓子揽客。`
+  const episodeId = newEpisode(script)
+  newScene('大堂')
+  const plan = planStoryboardShots({
+    script,
+    shotStart: 1,
+    characters: [{ name: '贾婆子' }],
+    maxDuration: 15,
+  })
+  assert.ok(plan.shots.length >= 1)
+  assert.ok(plan.shots.some(shot => shot.speechRequirement))
+  const state: any = { replaced: false, nextShot: 1, saved: 0, plannedShots: plan.shots }
+  const rc = pipelineContext({
+    episodeId,
+    stage: 'skeleton',
+    jobId: 1200,
+    chunk: { script, index: 0, total: 1, shotStart: 1, state },
+  })
+  const base = plan.shots.map(shot => ({
+    title: shot.titleHint,
+    location: shot.location || '大堂',
+    duration: shot.duration,
+    action_summary: shot.summaryHint,
+    source_excerpt: shot.sourceExcerpt,
+  }))
+  await assert.rejects(() => saveSkeletons(rc, base), /inferred_dialogue/)
+  const saved = await saveSkeletons(rc, base.map((item, index) => (
+    plan.shots[index].speechRequirement ? { ...item, inferred_speaker: '贾婆子', inferred_dialogue: '刚出锅的大白炊饼，热乎着咧！' } : item
+  )))
+  assert.ok(saved.count >= 1)
+  const rows = skeletonRows(1200)
+  const vocal = rows.find(row => JSON.parse(row.speechSegmentsJson || '[]').length > 0)
+  assert.ok(vocal)
+  assert.equal(vocal.shotType, 'action')
+  assert.ok(vocal.actionArcJson)
+  assert.ok((JSON.parse(vocal.speechSegmentsJson || '[]') as any[]).some(item => item.text.includes('大白炊饼')))
 })

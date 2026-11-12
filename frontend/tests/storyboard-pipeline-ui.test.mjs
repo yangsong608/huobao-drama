@@ -114,8 +114,8 @@ test('尾帧链：上一镜末帧自动作为本镜首帧，Wan 3.0 降级为参
   assert.match(episode, /const autoTail = !explicitFirst && previous\?\.url \? previous\.url : ''/)
   assert.match(episode, /const firstFrameImage = isWan3Video\.value \? '' : \(explicitFirst \|\| autoTail\)/)
   assert.match(episode, /params\.first_frame_url = firstFrameImage/)
-  assert.match(episode, /let referenceImages = getPromptReferenceEntries\(sb\)\.map/)
-  assert.match(episode, /firstFrameContinuation/)
+  assert.match(episode, /const pictureEntries = getPromptReferenceEntries\(sb\)/)
+  assert.match(episode, /isLocalH3Video/)
   assert.match(episode, /t\('episode\.frameAssets\.autoFirstFrame'\)/)
   for (const [lang, data] of locales) {
     assert.ok(data.episode?.frameAssets?.autoFirstFrame, `${lang} 缺少自动首帧文案`)
@@ -264,11 +264,14 @@ test('视频提示词分区自动保存：文字防抖、失焦立即存、分�
   }
 })
 
-test('首帧/尾帧 guide 不占 Picture 编号，参考图按实际发送列表编号', () => {
+test('本地 H3 首帧占 Picture1，场景复用首帧，人物参考从 Picture2 起', () => {
   assert.match(episode, /function getPromptReferenceEntries\(sb\)/)
   assert.match(episode, /function getFirstFrameImageForGeneration\(sb\)/)
-  assert.match(episode, /getPromptReferenceEntries\(sb\)\.forEach/)
-  assert.match(episode, /let referenceImages = getPromptReferenceEntries\(sb\)\.map/)
+  assert.match(episode, /const isLocalH3Video = computed/)
+  assert.match(episode, /entries\.unshift\(\{ name: sceneName \|\| '首帧', url: firstFrame \}\)/)
+  assert.match(episode, /entries = entries\.filter\(entry => entry\.name !== sceneName && entry\.url !== sceneImage\)/)
+  assert.match(episode, /const pictureEntries = getPromptReferenceEntries\(sb\)/)
+  assert.match(episode, /const pictureLimit = referenceImages\.length \+ \(isLocalH3Video\.value && firstFrameImage \? 1 : 0\)/)
   assert.match(episode, /badPictureRefs/)
   assert.match(episode, /firstFrameContinuation/)
   assert.match(episode, /prompt = prompt\.split\(`@\$\{previous\.token\}`\)\.join\(''\)/)

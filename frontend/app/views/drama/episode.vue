@@ -4952,6 +4952,10 @@ const videoLocalShim = computed(() => isLocalH3Config(selectedVideoConfig.value)
 const videoCapabilityOpts = computed(() => ({ localShim: videoLocalShim.value }))
 const isWan3Video = computed(() => selectedVideoConfig.value?.provider === 'aliyun'
   || bareModelName(videoModel.value).startsWith('wan3.0-video'))
+// 本地 H3 的 fl2v 链路把首帧当作 Picture 1；参考图必须从 Picture 2 起编号。
+const isLocalH3Video = computed(() => Boolean(videoLocalShim.value)
+  && (selectedVideoConfig.value?.provider === 'minimax'
+    || bareModelName(videoModel.value).startsWith('MiniMax-H3')))
 
 // 切换视频模型后旧分辨率可能超出新模型能力（如 H3 的 1080p → H3-Highspeed 仅 768P）：
 // 自动降到新模型支持的档位并持久化，避免提交任务时才被适配器拒绝。
@@ -7027,7 +7031,7 @@ function getShotReferenceImages(sb) {
   return getShotReferenceEntries(sb).map(entry => entry.url)
 }
 
-// 首帧/尾帧是 guide，不参与 H3 的 <Picture N> 编号；提示词索引只基于实际发送的普通参考图
+// 首帧是本地 H3 fl2v 的 Picture 1；尾帧不参与图片编号。
 function getFirstFrameImageForGeneration(sb) {
   const explicitFirst = sb?.first_frame_image || sb?.firstFrameImage || ''
   const previous = getPreviousShotFrameRef(sb)
@@ -7037,7 +7041,16 @@ function getFirstFrameImageForGeneration(sb) {
 
 function getPromptReferenceEntries(sb) {
   const firstFrame = getFirstFrameImageForGeneration(sb)
-  const entries = getShotReferenceEntries(sb).filter(entry => entry.url !== firstFrame)
+  let entries = getShotReferenceEntries(sb).filter(entry => entry.url !== firstFrame)
+  if (isLocalH3Video.value && firstFrame) {
+    const scene = getStoryboardScene(sb)
+    const sceneName = scene?.location || ''
+    const sceneImage = scene?.image_url || scene?.imageUrl || ''
+    // 首帧已经提供场景；不要再送场景参考占用人物槽位。场景名复用首帧编号。
+    entries = entries.filter(entry => entry.name !== sceneName && entry.url !== sceneImage)
+    entries.unshift({ name: sceneName || '首帧', url: firstFrame })
+    return entries
+  }
   const explicitFirst = sb?.first_frame_image || sb?.firstFrameImage || ''
   if (isWan3Video.value && explicitFirst && !entries.some(entry => entry.url === explicitFirst)) {
     // Wan3 的首帧会降级为普通参考图，必须参与同样的编号空间
@@ -7355,7 +7368,7 @@ const mentionOptions = computed(() => {
   ]
 })
 
-// 只有实际发送的普通参考图参与 @图片N 编号；首帧/尾帧 guide 不占编号
+// 本地 H3 首帧占 @图片1；普通参考图从 @图片2 起编号
 function getShotReferenceIndexMap(sb) {
   const nameToIndex = {}
   getPromptReferenceEntries(sb).forEach((entry, i) => {
@@ -7364,7 +7377,7 @@ function getShotReferenceIndexMap(sb) {
   return nameToIndex
 }
 
-// 上一镜末帧：作为首帧时只写承接说明，不占 @图片N；作为普通参考图时才写 @镜头N末帧
+// 上一镜末帧：作为首帧时只写承接说明；作为普通参考图时才写 @镜头N末帧
 function appendPreviousFramePrompt(sb, prompt) {
   const previous = getPreviousShotFrameRef(sb)
   if (!previous) return prompt
@@ -7384,7 +7397,7 @@ function resolveVideoPromptRefs(sb) {
   const previous = getPreviousShotFrameRef(sb)
   let prompt = appendPreviousFramePrompt(sb, sb.video_prompt || sb.videoPrompt || '')
   if (previous && getFirstFrameImageForGeneration(sb) === previous.url) {
-    // 旧提示词可能把上一镜末帧写成 @镜头N末帧；作为 guide 后它不再占 Picture 编号，必须移除
+    // 旧提示词可能把上一镜末帧写成 @镜头N末帧；首帧只通过承接说明和 Picture 1 引用，必须移除旧 token
     prompt = prompt.split(`@${previous.token}`).join('')
   }
   const map = getShotReferenceIndexMap(sb)
@@ -7593,13 +7606,17 @@ function buildVideoGenerationParams(sb) {
   // Wan 3.0 首帧不能和参考图混用：降级为参考图；其他模型优先用显式首帧，否则接上一镜末帧。
   const autoTail = !explicitFirst && previous?.url ? previous.url : ''
   const firstFrameImage = isWan3Video.value ? '' : (explicitFirst || autoTail)
-  let referenceImages = getPromptReferenceEntries(sb).map(entry => entry.url)
+  const pictureEntries = getPromptReferenceEntries(sb)
+  let referenceImages = pictureEntries
+    .filter(entry => !(isLocalH3Video.value && firstFrameImage && entry.url === firstFrameImage))
+    .map(entry => entry.url)
+  const pictureLimit = referenceImages.length + (isLocalH3Video.value && firstFrameImage ? 1 : 0)
   const generationPrompt = finalGenerationPrompt(sb)
   const badPictureRefs = [...generationPrompt.matchAll(/@图片(\d+)/g)]
     .map(match => Number(match[1]))
-    .filter(index => index > referenceImages.length)
+    .filter(index => index > pictureLimit)
   if (badPictureRefs.length) {
-    throw new Error(`最终提示词引用了不存在的参考图 @图片${badPictureRefs[0]}；当前只有 ${referenceImages.length} 张普通参考图，首帧和尾帧不参与图片编号。`)
+    throw new Error(`最终提示词引用了不存在的参考图 @图片${badPictureRefs[0]}；当前只有 ${pictureLimit} 个图片位（首帧${isLocalH3Video.value && firstFrameImage ? '占 1 位' : '不占位'}）。`)
   }
   const params = {
     storyboard_id: sb.id,

@@ -585,6 +585,15 @@ export const storyboardSkeletons = sqliteTable('storyboard_skeletons', {
   actionStart: text('action_start'),
   actionEnd: text('action_end'),
   coverageType: text('coverage_type'),
+  /** establishing / action / dialogue / reaction / insert / transition */
+  shotType: text('shot_type'),
+  subject: text('subject'),
+  /** JSON：本镜包含的语义节拍 */
+  beatPlanJson: text('beat_plan_json'),
+  /** JSON：{ initial, action, result } */
+  actionArcJson: text('action_arc_json'),
+  /** JSON：{ speaker, basis }；原文发声动作推导台词要求 */
+  speechRequirementJson: text('speech_requirement_json'),
   /** JSON：[{ speaker, text, sourceQuote, order }] */
   speechSegmentsJson: text('speech_segments_json'),
   /** speech / action / reaction / scene / time */

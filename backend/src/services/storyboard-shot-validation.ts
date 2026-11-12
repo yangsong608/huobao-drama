@@ -88,6 +88,9 @@ export interface RepairedShotInput {
   shotLabel?: string
   /** 计划层台词原子单元；渲染只能逐字使用，不能新增或删除 */
   planSpeechSegments?: Array<{ speaker?: string; text: string }>
+  expectedActionStart?: string | null
+  expectedActionEnd?: string | null
+  expectedShotType?: string | null
   previous?: {
     storyboardNumber: number
     sceneId: number | null
@@ -200,6 +203,22 @@ export function validateRepairedShot(input: RepairedShotInput): RepairedShotVali
   }
 
   const parsedContract = parseContractFromPrompt(prompt, input.characters || [], input.characterIds || [])
+  const normalizePoint = (value: string | null | undefined) => String(value || '')
+    .replace(/^@/, '')
+    .replace(/\s+/g, '')
+    .replace(/[；;。，,]+$/g, '')
+  if (input.expectedShotType && !['establishing', 'insert'].includes(input.expectedShotType)) {
+    const checks: Array<[string, string | null | undefined, string | null]> = [
+      ['动作起点', input.expectedActionStart, parsedContract.actionStart],
+      ['动作终点', input.expectedActionEnd, parsedContract.actionEnd],
+    ]
+    for (const [labelText, expected, actual] of checks) {
+      if (!expected) continue
+      if (normalizePoint(expected) !== normalizePoint(actual)) {
+        errors.push(`${label}video_prompt 的${labelText}与计划不一致：计划「${expected}」，提示词「${actual || '空'}」。请按计划逐字写入，不要改写动作弧。`)
+      }
+    }
+  }
   if (parsedContract.contractVersion > 0) {
     const candidateNames = [...new Set([
       ...parsedContract.screenLeft,
