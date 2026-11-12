@@ -4,7 +4,6 @@ import assert from 'node:assert/strict'
 
 const episode = readFileSync(new URL('../app/views/drama/episode.vue', import.meta.url), 'utf8')
 const editor = readFileSync(new URL('../app/components/PromptSectionEditor.vue', import.meta.url), 'utf8')
-const badge = readFileSync(new URL('../app/components/AuditStateBadge.vue', import.meta.url), 'utf8')
 const api = readFileSync(new URL('../app/composables/useApi.ts', import.meta.url), 'utf8')
 const locales = ['zh', 'en', 'ja', 'ko'].map(lang => [
   lang,
@@ -18,7 +17,7 @@ test('视频制作页使用独立的拆分进度面板，不再用 banner + 空�
   assert.match(episode, /class="video-split-chunk-list"/)
   assert.match(episode, /@click="pauseSplit"/)
   assert.match(episode, /splitPausing/)
-  assert.match(api, /pause: \(jobId: number\) => api\.post\(`\/agent\/storyboard_breaker\/split-jobs\/\$\{jobId\}\/pause`\)/)
+  assert.match(api, /pause: \(runId: number\) => api\.post\(`\/pipelines\/runs\/\$\{runId\}\/pause`/)
   // 模板里不应再出现旧的 banner 进度条
   const workbenchAt = episode.indexOf('class="video-task-workbench has-player"')
   const workbenchTail = episode.slice(workbenchAt)
@@ -46,14 +45,12 @@ test('总时长由分段自动计算，右下角不再手动输入 duration', ()
   assert.match(episode, /<span class="video-param-value">\{\{ Number\(selectedSb\.duration\) \|\| 10 \}\}s<\/span>/)
 })
 
-test('校验图标使用状态组件，并通过派生状态处理 pass/stale/rule_only', () => {
-  assert.match(episode, /<AuditStateBadge/)
-  assert.match(badge, /state !== 'pass'/)
-  assert.match(badge, /audit-state-stale/)
-  assert.match(badge, /rule_only/)
-  assert.match(episode, /function auditShotDisplay\(sb\)/)
-  assert.match(episode, /state: 'pass'/)
-  assert.match(episode, /state: 'stale'/)
+test('旧检验图标已移除，失败镜通过人工处理区块操作', () => {
+  assert.doesNotMatch(episode, /<AuditStateBadge/)
+  assert.match(episode, /video-split-manual/)
+  assert.match(episode, /focusPipelineShotNumber/)
+  assert.match(episode, /episode\.sb\.manualEdit/)
+  assert.match(episode, /episode\.sb\.manualContinue/)
 })
 
 test('四语言补齐拆分暂停与时长自动计算文案', () => {
@@ -74,7 +71,6 @@ test('覆盖板按场景分组，显示覆盖类型/缺口/轴线信息并可打
   assert.match(coverageBoard, /v-for="group in groups"/)
   assert.match(coverageBoard, /class="coverage-chip"/)
   assert.match(coverageBoard, /open-geography/)
-  assert.match(coverageBoard, /AuditStateBadge/)
   assert.match(coverageBoard, /inferCoverageType/)
   assert.match(coverageBoard, /screenLeft/)
   assert.match(coverageBoard, /planningAPI\.deriveCoveragePlan/)

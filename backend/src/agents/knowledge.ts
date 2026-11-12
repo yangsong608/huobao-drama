@@ -46,9 +46,9 @@ const DEFAULT_INDEX: KnowledgeIndex = {
   items: [
     { id: 'novel-to-short-drama', name: '小说改编短剧', description: '小说叙事转短剧剧本。', agents: ['script_rewriter'], required: true, enabled: true },
     { id: 'asset-extraction', name: '角色场景道具提取', description: '资产提取边界与去重。', agents: ['extractor'], required: true, enabled: true },
-    { id: 'short-drama-grammar', name: '短剧叙事与节奏', description: '结构、节拍、时长、对白容量。', agents: ['storyboard_breaker'], required: true, enabled: true },
-    { id: 'storyboard-direction', name: '分镜与导演语法', description: '景别、轴线、正反打、场景地理。', agents: ['storyboard_breaker'], required: true, enabled: true },
-    { id: 'continuity-and-transitions', name: '前后镜连贯与过渡分镜', description: '成对合同、尾帧/首帧、过渡空镜。', agents: ['storyboard_breaker', 'storyboard_auditor', 'prompt_generator'], required: true, enabled: true },
+    { id: 'short-drama-grammar', name: '短剧叙事与节奏', description: '结构、节拍、时长、对白容量。', agents: ['storyboard_breaker', 'storyboard_director'], required: true, enabled: true },
+    { id: 'storyboard-direction', name: '分镜与导演语法', description: '景别、轴线、正反打、场景地理。', agents: ['storyboard_breaker', 'storyboard_director'], required: true, enabled: true },
+    { id: 'continuity-and-transitions', name: '前后镜连贯与过渡分镜', description: '成对合同、尾帧/首帧、过渡空镜。', agents: ['storyboard_breaker', 'storyboard_director', 'storyboard_auditor', 'prompt_generator'], required: true, enabled: true },
     { id: 'storyboard-validation', name: '分镜校验清单', description: '三层校验、门禁、证据、修复。', agents: ['storyboard_auditor'], required: true, enabled: true },
     { id: 'video-prompt-consistency', name: '视频提示词一致性', description: '提示词结构、画内人物、首尾帧、声音。', agents: ['prompt_generator'], required: true, enabled: true },
     { id: 'voice-and-narration', name: '声音与旁白设计', description: '音色档案、四型声音、跨集一致性。', agents: ['voice_designer'], required: true, enabled: true },
@@ -132,10 +132,10 @@ async function readKnowledgeContent(id: string, lang?: string | null): Promise<{
 }
 
 /** 读取指定 Agent 分配的知识库；每次重新读文件，设置保存后下一次调用生效 */
-const CRITICAL_AGENTS = new Set(['storyboard_breaker', 'storyboard_auditor', 'prompt_generator'])
+const CRITICAL_AGENTS = new Set(['storyboard_breaker', 'storyboard_director', 'storyboard_auditor', 'prompt_generator'])
+const DIRECTOR_DEFAULT_KNOWLEDGE = ['short-drama-grammar', 'storyboard-direction', 'continuity-and-transitions']
 
-export async function loadAssignedKnowledge(agentType: string, lang?: string | null): Promise<LoadedKnowledge> {
-  const index = await loadKnowledgeIndex()
+export async function loadAssignedKnowledge(agentType: string, lang?: string | null): Promise<LoadedKnowledge> {  const index = await loadKnowledgeIndex()
   const assigned = index.items.filter(item => item.enabled && item.agents.includes(agentType))
   if (CRITICAL_AGENTS.has(agentType) && assigned.length && !assigned.some(item => item.required)) {
     throw new Error(`关键 Agent（${agentType}）没有必读知识库。请在设置 → Agent 配置 → 知识库至少保留一个必读知识。`)
@@ -176,6 +176,62 @@ export async function loadAssignedKnowledge(agentType: string, lang?: string | n
   ].join('\n')
   logKnowledgeLoadedOnce(agentType, version, ids)
   return { text, ids, version, missing }
+}
+
+/**
+ * 按显式 id 列表加载知识（链式流水线的步骤级绑定）。
+ * 与 Agent 默认分配不同：这里不读取 agents 字段，只按 id 取正文；缺失直接阻断。
+ */
+export async function loadKnowledgeByIds(ids: string[], lang?: string | null): Promise<LoadedKnowledge> {
+  const unique = [...new Set((ids || []).map(id => String(id || '').trim()).filter(Boolean))]
+  if (!unique.length) return { text: '', ids: [], version: '', missing: [] }
+  const index = await loadKnowledgeIndex()
+  const byId = new Map(index.items.map(item => [item.id, item]))
+  const unknown = unique.filter(id => !byId.has(id))
+  if (unknown.length) throw new Error(`步骤绑定的知识库不存在：${unknown.join('、')}`)
+  const sections: string[] = []
+  const loadedIds: string[] = []
+  const missing: string[] = []
+  const hashes: string[] = []
+  for (const id of unique) {
+    const loaded = await readKnowledgeContent(id, lang)
+    if (!loaded) {
+      missing.push(id)
+      continue
+    }
+    loadedIds.push(id)
+    hashes.push(`${id}:${loaded.hash}`)
+    sections.push(`### 知识库：${byId.get(id)?.name || id}（${id}）\n${loaded.content}`)
+  }
+  if (missing.length) throw new Error(`步骤绑定的知识库缺失：${missing.join('、')}。请先在设置 → Agent 配置 → 知识库补全。`)
+  const version = createHash('sha256').update(hashes.sort().join('|')).digest('hex').slice(0, 12)
+  const text = [
+    '## 专用知识库（本步骤必须预读）',
+    '以下知识库由当前流水线步骤显式绑定。开始任务前先按这些规范执行；与用户明确要求冲突时，以用户要求为准。',
+    '',
+    sections.join('\n\n'),
+  ].join('\n')
+  return { text, ids: loadedIds, version, missing: [] }
+}
+
+/**
+ * 存量 workspace 的知识索引是 copy-once 的；4.0.38 新增导演 Agent 后，
+ * 老索引里没有 storyboard_director。这里做一次幂等追加：只在导演完全没有分配时补默认知识。
+ */
+export async function ensureDirectorKnowledgeAssignment(): Promise<void> {
+  const index = await loadKnowledgeIndex()
+  if (index.items.some(item => item.agents.includes('storyboard_director'))) return
+  let changed = false
+  const items = index.items.map(item => {
+    if (!DIRECTOR_DEFAULT_KNOWLEDGE.includes(item.id)) return item
+    changed = true
+    return { ...item, agents: [...item.agents, 'storyboard_director'] }
+  })
+  if (!changed) return
+  await writeIndex({ ...index, items })
+  logTaskProgress('Knowledge', 'director-assignment-added', {
+    ids: items.filter(item => item.agents.includes('storyboard_director')).map(item => item.id),
+  })
 }
 
 const logged = new Set<string>()

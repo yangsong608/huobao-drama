@@ -54,7 +54,7 @@ const LOCALES = ['zh', 'en', 'ja', 'ko'].map((locale) => ({
   data: JSON.parse(readSource(`locales/${locale}.json`)),
 }))
 
-const TAB_IDS = ['ai', 'dubbing', 'novel', 'general', 'remote', 'styles', 'rules', 'breakdown', 'audit', 'agents', 'queue', 'storage', 'mcp', 'about']
+const TAB_IDS = ['ai', 'dubbing', 'novel', 'general', 'remote', 'styles', 'rules', 'breakdown', 'pipeline', 'agents', 'queue', 'storage', 'mcp', 'about']
 const GUEST_HIDDEN = ['ai', 'storage', 'mcp', 'agents', 'remote']
 
 function panel(source, id) {

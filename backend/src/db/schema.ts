@@ -263,6 +263,8 @@ export const breakdownMethods = sqliteTable('breakdown_methods', {
   description: text('description').notNull().default(''),
   prompt: text('prompt').notNull().default(''),
   skill: text('skill').notNull().default(''),
+  /** 覆盖下限使用的单段最长秒数；自定义方案按 15 秒兜底 */
+  maxDurationSeconds: integer('max_duration_seconds').notNull().default(15),
   builtin: integer('builtin').notNull().default(0),
   sortOrder: integer('sort_order').notNull().default(0),
   createdAt: text('created_at').notNull(),
@@ -525,6 +527,14 @@ export const storyboardPipelineJobs = sqliteTable('storyboard_pipeline_jobs', {
   status: text('status').default('pending'),
   /** skeleton / repair / sound / done */
   stage: text('stage').default('skeleton'),
+  /** 链式流水线：链 key/版本、生效参数与运行快照 */
+  chainKey: text('chain_key').notNull().default('standard-four-stage'),
+  chainVersion: text('chain_version').default('1'),
+  parametersJson: text('parameters_json'),
+  snapshotJson: text('snapshot_json'),
+  currentStepKey: text('current_step_key'),
+  /** 本轮实际开始时间；续跑时重置，用于墙钟预算 */
+  runStartedAt: text('run_started_at'),
   message: text('message').notNull(),
   model: text('model'),
   configId: integer('config_id'),
@@ -573,6 +583,81 @@ export const storyboardSkeletons = sqliteTable('storyboard_skeletons', {
   attempts: integer('attempts').notNull().default(0),
   issuesJson: text('issues_json'),
   repairLogJson: text('repair_log_json'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+// 链式分镜流水线：链定义、步骤插件、规则包、项目/剧集覆盖与步骤级运行记录
+export const pipelineChains = sqliteTable('pipeline_chains', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  key: text('key').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  version: text('version').notNull().default('1'),
+  definitionJson: text('definition_json').notNull(),
+  builtin: integer('builtin').notNull().default(1),
+  enabled: integer('enabled').notNull().default(1),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const pipelinePlugins = sqliteTable('pipeline_plugins', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  key: text('key').notNull(),
+  name: text('name').notNull(),
+  version: text('version').notNull().default('1'),
+  kind: text('kind').notNull(),
+  manifestJson: text('manifest_json').notNull(),
+  builtin: integer('builtin').notNull().default(1),
+  enabled: integer('enabled').notNull().default(1),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const pipelineRulePacks = sqliteTable('pipeline_rule_packs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  key: text('key').notNull(),
+  name: text('name').notNull(),
+  version: text('version').notNull().default('1'),
+  rulesJson: text('rules_json').notNull(),
+  builtin: integer('builtin').notNull().default(1),
+  enabled: integer('enabled').notNull().default(1),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const pipelineChainOverrides = sqliteTable('pipeline_chain_overrides', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  /** global / project / episode */
+  scopeType: text('scope_type').notNull().default('global'),
+  scopeId: integer('scope_id').notNull().default(0),
+  chainKey: text('chain_key').notNull(),
+  overridesJson: text('overrides_json').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const pipelineStepRuns = sqliteTable('pipeline_step_runs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  jobId: integer('job_id').notNull(),
+  stepKey: text('step_key').notNull(),
+  stepVersion: text('step_version'),
+  /** episode / chunk / shot */
+  scope: text('scope').notNull(),
+  /** chunk-0 / shot-12 / episode */
+  itemKey: text('item_key').notNull().default('episode'),
+  /** pending / running / passed / failed / skipped / manual */
+  status: text('status').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  issuesJson: text('issues_json'),
+  inputJson: text('input_json'),
+  outputJson: text('output_json'),
+  promptHash: text('prompt_hash'),
+  knowledgeHash: text('knowledge_hash'),
+  rulePackHash: text('rule_pack_hash'),
+  model: text('model'),
+  startedAt: text('started_at'),
+  finishedAt: text('finished_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })

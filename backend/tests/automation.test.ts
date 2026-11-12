@@ -187,18 +187,16 @@ async function waitAuditJob(episodeId: number, timeoutMs = 10000): Promise<any> 
   return auditSvc.getLatestStoryboardAuditJob(episodeId)
 }
 
-test('自动化检验步骤创建 automation 任务并等待完成，无模型时只做规则检验', async () => {
+test('自动化检验阶段跳过旧批量检验，只写进度', async () => {
   const [shot] = db.select().from(schema.storyboards).all()
   assert.ok(shot, '前序用例应已写入分镜')
   const episodeId = shot.episodeId
+  const before = auditSvc.getLatestStoryboardAuditJob(episodeId)
 
   await stepStoryboardAudit(episodeId, 1, {})
 
-  const job = await waitAuditJob(episodeId)
-  assert.ok(job, '应创建动作检验任务')
-  assert.equal(job.trigger, 'automation')
-  assert.equal(job.status, 'done')
-  assert.equal(job.semantic_status, 'skipped_no_model')
+  const after = auditSvc.getLatestStoryboardAuditJob(episodeId)
+  assert.equal(after?.id ?? null, before?.id ?? null, '不应再创建旧批量检验任务')
 
   const state = await getAutomationState(episodeId)
   assert.equal(state?.stage, 'storyboard_audit')
@@ -206,7 +204,7 @@ test('自动化检验步骤创建 automation 任务并等待完成，无模型�
   assert.equal(state?.progress, 73)
 })
 
-test('自动化检验任务无法创建时只记录错误，不抛出中断流水线', async () => {
+test('自动化检验阶段对未知剧集不抛错', async () => {
   await stepStoryboardAudit(999999, 1, {})
 })
 

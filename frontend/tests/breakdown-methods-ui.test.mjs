@@ -17,7 +17,7 @@ const BREAKDOWN_KEYS = [
 ]
 
 test('设置页新增分镜拆分页签，位于规则与智能体之间', () => {
-  assert.match(settings, /const SETTINGS_TABS = \[[^\]]*'rules', 'breakdown', 'audit', 'agents'/)
+  assert.match(settings, /const SETTINGS_TABS = \[[^\]]*'rules', 'breakdown', 'pipeline', 'agents'/)
   assert.match(settings, /id: 'breakdown', label: t\('settings\.tabs\.breakdown'\), icon: Layers/)
   assert.match(settings, /import \{[^}]*Layers[^}]*\} from 'lucide-vue-next'/)
   assert.match(settings, /v-if="tab === 'breakdown'"/)

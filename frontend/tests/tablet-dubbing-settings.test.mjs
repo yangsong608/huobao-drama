@@ -60,7 +60,7 @@ const LOCALES = ['zh', 'en', 'ja', 'ko'].map((locale) => ({
   data: JSON.parse(readSource(`locales/${locale}.json`)),
 }))
 
-const TAB_IDS = ['general', 'remote', 'ai', 'dubbing', 'novel', 'styles', 'rules', 'breakdown', 'audit', 'agents', 'queue', 'storage', 'mcp', 'about']
+const TAB_IDS = ['general', 'remote', 'ai', 'dubbing', 'novel', 'styles', 'rules', 'breakdown', 'pipeline', 'agents', 'queue', 'storage', 'mcp', 'about']
 
 test('配音检查器不再隐藏：1100 块删除，混音台最小高度原文保留', () => {
   assert.doesNotMatch(stage, /@media \(max-width: 1100px\)/)
@@ -255,7 +255,7 @@ test('设置导航语义：tablist / tab / roving tabindex / 方向键', () => {
   assert.match(settings, /watch\(tab, scrollActiveTabIntoView, \{ immediate: true \}\)/)
 })
 
-test('14 个常驻 tabpanel：v-else-if 全部拆成 v-if，id/aria/hidden 精确', () => {
+test('14 个常驻 tabpanel（新增流水线，旧检验面板已删除）：v-else-if 全部拆成 v-if，id/aria/hidden 精确', () => {
   assert.equal((settings.match(/class="settings-tabpanel"/g) || []).length, 14)
   for (const id of TAB_IDS) {
     assert.match(settings, new RegExp(`id="settings-panel-${id}"`), `settings-panel-${id}`)
@@ -268,11 +268,11 @@ test('14 个常驻 tabpanel：v-else-if 全部拆成 v-if，id/aria/hidden 精�
   assert.equal((settings.match(/class="settings-tabpanel"[^>]*tabindex="0"/g) || []).length, 14)
   assert.doesNotMatch(settings, /class="settings-tabpanel"[^>]*:tabindex=/)
   // 顺序与 router 同步全部保留
-  assert.match(settings, /const SETTINGS_TABS = \['ai', 'dubbing', 'novel', 'general', 'remote', 'styles', 'rules', 'breakdown', 'audit', 'agents', 'queue', 'storage', 'mcp', 'about'\]/)
+  assert.match(settings, /const SETTINGS_TABS = \['ai', 'dubbing', 'novel', 'general', 'remote', 'styles', 'rules', 'breakdown', 'pipeline', 'agents', 'queue', 'storage', 'mcp', 'about'\]/)
   assert.match(settings, /id: 'breakdown', label: t\('settings\.tabs\.breakdown'\), icon: Layers/)
-  assert.match(settings, /id: 'audit', label: t\('settings\.tabs\.audit'\), icon: ShieldCheck/)
+  assert.match(settings, /id: 'pipeline', label: t\('settings\.tabs\.pipeline'\), icon: ShieldCheck/)
   assert.match(settings, /if \(t === 'breakdown'\) loadBreakdownMethods\(\)/)
-  assert.match(settings, /if \(t === 'audit'\) loadAuditPolicy\(\)/)
+  assert.match(settings, /<PipelineChainSettings \/>/)
   // 页签内部懒挂载 v-if 保留
   assert.match(settings, /<template v-if="novelSettings">/)
   assert.match(settings, /<div v-if="agentPane === 'prompt'" class="card agent-card">/)

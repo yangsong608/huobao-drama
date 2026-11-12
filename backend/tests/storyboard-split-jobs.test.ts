@@ -249,7 +249,7 @@ test('启动恢复把运行中的拆分任务标记为 interrupted', async () =>
   assert.match(view!.error || '', /中断/)
 })
 
-test('拆分任务路由返回最近任务并校验剧集', async () => {
+test('旧分块拆分路由已下线，创建/查询统一返回 410', async () => {
   const episodeId = newEpisode(makeScript())
   const created = await svc.createStoryboardSplitJob(
     { episodeId, dramaId: 1, message: '请拆分本集分镜' },
@@ -258,20 +258,19 @@ test('拆分任务路由返回最近任务并校验剧集', async () => {
 
   let res = await api.request(`/agent/storyboard_breaker/split-jobs/latest/${episodeId}`)
   let json = await res.json() as any
-  assert.equal(res.status, 200)
-  assert.equal(json.data.job.id, created.job.id)
+  assert.equal(res.status, 410)
+  assert.match(json.error.message, /已下线/)
 
   res = await api.request(`/agent/storyboard_breaker/split-jobs/${created.job.id}`)
   json = await res.json() as any
-  assert.equal(res.status, 200)
-  assert.equal(json.data.job.status, 'pending')
+  assert.equal(res.status, 410)
 
   res = await api.request('/agent/storyboard_breaker/split-jobs', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ episode_id: 999999, drama_id: 1, message: 'x' }),
   })
-  assert.equal(res.status, 400)
+  assert.equal(res.status, 410)
 })
 
 function seedShot(episodeId: number) {

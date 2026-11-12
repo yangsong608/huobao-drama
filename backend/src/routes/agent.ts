@@ -55,7 +55,13 @@ function splitJobTypeGuard(c: any) {
   if (agentType !== 'storyboard_breaker') {
     return badRequest(c, `该 Agent 不支持分块拆分：${agentType}`)
   }
-  return null
+  return c.json({
+    success: false,
+    error: {
+      code: 'GONE',
+      message: '旧分块拆分已下线，请使用「分镜流水线」运行链式拆分。',
+    },
+  }, 410)
 }
 
 // POST /agent/:type/split-jobs — 创建并启动分块拆分任务
@@ -148,6 +154,10 @@ app.post('/:type/pipeline-jobs', async (c) => {
       message: body.message,
       model: body.model || undefined,
       configId: body.config_id || undefined,
+      chainKey: body.chain_key ? String(body.chain_key) : undefined,
+      parameters: body.parameters && typeof body.parameters === 'object' && !Array.isArray(body.parameters)
+        ? body.parameters
+        : undefined,
     })
     return success(c, { job: result.job, already_running: result.alreadyRunning })
   } catch (err: any) {
@@ -192,12 +202,19 @@ app.post('/:type/pipeline-jobs/:id/resume', async (c) => {
 // ===== 分镜动作检验任务 =====
 const AUDIT_TRIGGERS = ['manual', 'split', 'automation'] as const
 
-function auditJobTypeGuard(c: any) {
+function auditJobTypeGuard(c: any, readOnly = false) {
   const agentType = c.req.param('type')
   if (agentType !== 'storyboard_auditor') {
     return badRequest(c, `该 Agent 不支持动作检验：${agentType}`)
   }
-  return null
+  if (readOnly) return null
+  return c.json({
+    success: false,
+    error: {
+      code: 'GONE',
+      message: '旧批量动作检验已下线；请在分镜流水线中使用逐镜校验，严格模板将接入语义复检。',
+    },
+  }, 410)
 }
 
 // POST /agent/:type/audit-jobs — 创建并启动动作检验
@@ -230,7 +247,7 @@ app.post('/:type/audit-jobs', async (c) => {
 
 // GET /agent/:type/audit-jobs/latest/:episodeId — 某集最近一次动作检验（必须注册在 /:id 之前）
 app.get('/:type/audit-jobs/latest/:episodeId', async (c) => {
-  const guard = auditJobTypeGuard(c)
+  const guard = auditJobTypeGuard(c, true)
   if (guard) return guard
   const job = getLatestStoryboardAuditJob(Number(c.req.param('episodeId')))
   return success(c, { job })
@@ -238,7 +255,7 @@ app.get('/:type/audit-jobs/latest/:episodeId', async (c) => {
 
 // GET /agent/:type/audit-jobs/:id — 按 ID 查询检验进度
 app.get('/:type/audit-jobs/:id', async (c) => {
-  const guard = auditJobTypeGuard(c)
+  const guard = auditJobTypeGuard(c, true)
   if (guard) return guard
   const job = getStoryboardAuditJob(Number(c.req.param('id')))
   if (!job) return notFound(c, '检验任务不存在')

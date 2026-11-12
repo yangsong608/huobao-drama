@@ -51,6 +51,7 @@ import films from './routes/films.js'
 import remoteRoutes from './routes/remote.js'
 import syncRoutes from './routes/sync.js'
 import presenceRoutes from './routes/presence.js'
+import pipelines from './routes/pipelines.js'
 import { createRemoteBridgePipeline } from './services/remote-bridge-pipeline.js'
 import { authenticateRemoteDevice, startRemoteDeviceCleanup, touchRemoteDevice } from './services/remote-devices.js'
 import { startPresenceCleanup } from './services/presence.js'
@@ -72,7 +73,8 @@ import { markInterruptedAudioJobs } from './services/audio-job-recovery.js'
 import { markInterruptedMerges } from './services/ffmpeg-merge.js'
 import { migrateUploadedVoices } from './services/voice-profile.js'
 import { ensureBreakdownMethodsSeeded } from './services/breakdown-methods.js'
-import { ensureKnowledgeIndex } from './agents/knowledge.js'
+import { ensureKnowledgeIndex, ensureDirectorKnowledgeAssignment } from './agents/knowledge.js'
+import { ensurePipelineSeeds } from './services/pipeline-chain.js'
 import { startQueueWorker } from './services/queue-worker.js'
 import { resumeVideoBatches, setVideoBatchApp, startVideoBatchWorker } from './services/video-batch.js'
 import { logTaskWarn } from './utils/task-logger.js'
@@ -160,6 +162,8 @@ api.route('/novels', novels)
 api.route('/novel-jobs', novelJobs)
 // 成片中心：/episodes/:id/films、/films/:id、/episodes/:id/exports/:exportId/project-film
 api.route('/', films)
+// 链式分镜流水线：模板、步骤、规则包、运行与 trace
+api.route('/pipelines', pipelines)
 // 远程接力：本机管理、公开配对与会话
 api.route('/remote', remoteRoutes)
 // 跨端同步：SSE 事件流与轮询降级
@@ -228,6 +232,18 @@ try {
   await ensureKnowledgeIndex()
 } catch (error) {
   logTaskWarn('Knowledge', '知识库索引初始化失败', { error: String(error) })
+}
+// 4.0.38 新增导演 Agent；存量 workspace 的索引是 copy-once，补一次默认知识分配
+try {
+  await ensureDirectorKnowledgeAssignment()
+} catch (error) {
+  logTaskWarn('Knowledge', '导演知识分配迁移失败', { error: String(error) })
+}
+// 链式分镜流水线：内置链/插件/规则包按 key 幂等播种
+try {
+  await ensurePipelineSeeds()
+} catch (error) {
+  logTaskWarn('PipelineChain', '内置链播种失败', { error: String(error) })
 }
 
 // 应用设置中的自定义 FFmpeg 目录（db 已注入读取器），启动即生效

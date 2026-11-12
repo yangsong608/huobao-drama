@@ -17,6 +17,19 @@ import { buildSceneBindingBlock, getCanonicalSceneGroups } from './scene-canonic
 import { interruptStoryboardAuditForEpisode } from './storyboard-audit-jobs.js'
 import { validateRepairedShot } from './storyboard-shot-validation.js'
 import { cleanupFrameAssetsForEpisode } from './storyboard-frame-assets.js'
+import {
+  buildRunSnapshot,
+  finishStepRun,
+  listPipelinePlugins,
+  listStepRuns,
+  resolveChainForRun,
+  resolvePipelineParameters,
+  setCurrentStep,
+  startStepRun,
+  validatePipelineOverrides,
+  type PipelineRunParameters,
+  type PipelineStepDefinition,
+} from './pipeline-chain.js'
 import { logTaskError, logTaskProgress, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
 import { emitChange } from './sync-events.js'
 
@@ -60,6 +73,11 @@ export interface PipelineJobView {
   drama_id: number
   status: StoryboardPipelineStatus
   stage: StoryboardPipelineStage
+  chain_key: string
+  chain_version: string
+  current_step_key: string | null
+  parameters: Record<string, unknown> | null
+  snapshot: Record<string, unknown> | null
   total_shots: number
   repaired_shots: number
   validated_shots: number
@@ -88,6 +106,8 @@ export interface CreatePipelineInput {
   model?: string
   configId?: number
   budgetChars?: number
+  chainKey?: string
+  parameters?: Record<string, unknown>
 }
 
 export interface SkeletonRunnerInput {
@@ -136,7 +156,95 @@ export interface PipelineRunners {
 }
 
 const runningJobs = new Set<number>()
-const MAX_REPAIR_ATTEMPTS = 2
+
+function parseJsonObject(value: string | null | undefined): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value || '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
+/** 链参数：优先取任务快照里的生效值，缺失时按链/覆盖重新解析。 */
+function runParameters(row: PipelineJobRow): PipelineRunParameters {
+  const fallback = resolveChainForRun(row.chainKey || 'standard-four-stage', row.dramaId, row.episodeId).parameters
+  return { ...fallback, ...parseJsonObject(row.parametersJson) } as PipelineRunParameters
+}
+
+function budgetMessage(params: PipelineRunParameters): string {
+  return `本次运行已超过 ${params.maxWallClockMinutes} 分钟墙钟预算，已暂停；可提高上限后继续，或重新运行。`
+}
+
+function wallClockExceeded(row: PipelineJobRow, params: PipelineRunParameters): boolean {
+  const limit = Number(params.maxWallClockMinutes)
+  if (!Number.isFinite(limit) || limit <= 0) return false
+  const started = Date.parse(row.runStartedAt || row.createdAt || '')
+  return Number.isFinite(started) && Date.now() - started > limit * 60_000
+}
+
+function stepDefinition(stepKey: string): PipelineStepDefinition | null {
+  return listPipelinePlugins().find(step => step.key === stepKey) || null
+}
+
+function stepKnowledgeIds(row: PipelineJobRow, stepKey: string): string[] {
+  const definition = stepDefinition(stepKey)
+  const overrides = resolveChainForRun(row.chainKey || 'standard-four-stage', row.dramaId, row.episodeId).overrides
+  const override = overrides.knowledgeRefs?.[stepKey]
+  return Array.isArray(override) && override.length ? override : (definition?.knowledgeRefs || [])
+}
+
+function stepVersion(stepKey: string): string {
+  return stepDefinition(stepKey)?.version || '1'
+}
+
+function runStepInput(row: PipelineJobRow, stepKey: string, scope: 'episode' | 'chunk' | 'shot', itemKey: string, input?: unknown) {
+  return {
+    jobId: row.id,
+    stepKey,
+    stepVersion: stepVersion(stepKey),
+    scope,
+    itemKey,
+    input,
+    model: row.model || null,
+  } as const
+}
+
+async function ensureRunSnapshot(row: PipelineJobRow): Promise<void> {
+  if (row.snapshotJson) return
+  try {
+    const { chain, overrides } = resolveChainForRun(row.chainKey || 'standard-four-stage', row.dramaId, row.episodeId)
+    const parameters = runParameters(row)
+    const snapshot = await buildRunSnapshot({
+      chain,
+      parameters,
+      overrides,
+      model: row.model,
+      configId: row.configId,
+    })
+    db.update(schema.storyboardPipelineJobs).set({
+      snapshotJson: JSON.stringify(snapshot),
+      updatedAt: now(),
+    }).where(eq(schema.storyboardPipelineJobs.id, row.id)).run()
+  } catch (error) {
+    logTaskWarn('StoryboardPipeline', 'snapshot-failed', {
+      jobId: row.id,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+function failRunningStepRuns(jobId: number, message: string): void {
+  db.update(schema.pipelineStepRuns).set({
+    status: 'failed',
+    issuesJson: JSON.stringify([message]),
+    finishedAt: now(),
+    updatedAt: now(),
+  }).where(and(
+    eq(schema.pipelineStepRuns.jobId, jobId),
+    eq(schema.pipelineStepRuns.status, 'running'),
+  )).run()
+}
 
 function nonWsLength(value: string) {
   return value.replace(/\s+/g, '').length
@@ -232,6 +340,11 @@ function toView(row: PipelineJobRow): PipelineJobView {
     drama_id: row.dramaId,
     status: (row.status || 'pending') as StoryboardPipelineStatus,
     stage: (row.stage || 'skeleton') as StoryboardPipelineStage,
+    chain_key: row.chainKey || 'standard-four-stage',
+    chain_version: row.chainVersion || '1',
+    current_step_key: row.currentStepKey || null,
+    parameters: Object.keys(parseJsonObject(row.parametersJson)).length ? parseJsonObject(row.parametersJson) : null,
+    snapshot: Object.keys(parseJsonObject(row.snapshotJson)).length ? parseJsonObject(row.snapshotJson) : null,
     total_shots: row.totalShots || skeletons.length,
     repaired_shots: row.repairedShots || 0,
     validated_shots: row.validatedShots || 0,
@@ -267,7 +380,14 @@ function toView(row: PipelineJobRow): PipelineJobView {
     completed_chunks: state.chunks.filter(chunk => chunk.status === 'done').length,
     total_chunks: state.chunks.length,
     shot_count: skeletons.length,
-    coverage: getEpisodeCoverage(row.episodeId),
+    coverage: (() => {
+      const parameters = parseJsonObject(row.parametersJson)
+      const method = typeof parameters.splitPresetKey === 'string' && parameters.splitPresetKey !== 'inherit'
+        ? parameters.splitPresetKey
+        : null
+      const ratio = Number(parameters.coverageFloorRatio)
+      return getEpisodeCoverage(row.episodeId, Number.isFinite(ratio) && ratio > 0 ? ratio : 0.9, undefined, method)
+    })(),
     created_at: row.createdAt,
     updated_at: row.updatedAt,
     finished_at: row.finishedAt || null,
@@ -289,8 +409,45 @@ export function getLatestStoryboardPipelineJob(episodeId: number): PipelineJobVi
   return row ? toView(row) : null
 }
 
-export function hasActiveStoryboardPipeline(episodeId: number): boolean {
-  const row = db.select().from(schema.storyboardPipelineJobs)
+export function getStoryboardPipelineTrace(jobId: number): {
+  job: PipelineJobView
+  steps: Array<Record<string, unknown>>
+} | null {
+  const job = getStoryboardPipelineJob(jobId)
+  if (!job) return null
+  return {
+    job,
+    steps: listStepRuns(jobId).map(run => ({
+      id: run.id,
+      step_key: run.stepKey,
+      step_version: run.stepVersion,
+      scope: run.scope,
+      item_key: run.itemKey,
+      status: run.status,
+      attempts: run.attempts,
+      issues: parseJsonObjectArray(run.issuesJson),
+      output: parseJsonObject(run.outputJson),
+      input: parseJsonObject(run.inputJson),
+      prompt_hash: run.promptHash,
+      knowledge_hash: run.knowledgeHash,
+      rule_pack_hash: run.rulePackHash,
+      model: run.model,
+      started_at: run.startedAt,
+      finished_at: run.finishedAt,
+    })),
+  }
+}
+
+function parseJsonObjectArray(value: string | null | undefined): unknown[] {
+  try {
+    const parsed = JSON.parse(value || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+export function hasActiveStoryboardPipeline(episodeId: number): boolean {  const row = db.select().from(schema.storyboardPipelineJobs)
     .where(and(
       eq(schema.storyboardPipelineJobs.episodeId, episodeId),
       inArray(schema.storyboardPipelineJobs.status, ['pending', 'running']),
@@ -564,6 +721,30 @@ export async function createStoryboardPipelineJob(
     .get()
   if (active) return { job: toView(active), alreadyRunning: true }
 
+  const chainKey = String(input.chainKey || 'standard-four-stage')
+  const chainResolution = resolveChainForRun(chainKey, dramaId, episodeId)
+  const mergedOverrides = validatePipelineOverrides({
+    parameters: {
+      ...(chainResolution.overrides.parameters || {}),
+      ...(input.parameters || {}),
+    },
+    stepToggles: chainResolution.overrides.stepToggles,
+    knowledgeRefs: chainResolution.overrides.knowledgeRefs,
+  })
+  const parameters = resolvePipelineParameters(chainResolution.chain, mergedOverrides)
+  const snapshot = await buildRunSnapshot({
+    chain: chainResolution.chain,
+    parameters,
+    overrides: mergedOverrides,
+    model: input.model || null,
+    configId: input.configId || null,
+  }).catch(error => {
+    logTaskWarn('StoryboardPipeline', 'snapshot-failed', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
+  })
+
   await interruptStoryboardAuditForEpisode(episodeId, '重新拆分，检验作废')
 
   const parts = splitScriptIntoChunks(script, input.budgetChars)
@@ -581,6 +762,12 @@ export async function createStoryboardPipelineJob(
     dramaId,
     status: 'pending',
     stage: 'skeleton',
+    chainKey: chainResolution.chain.key,
+    chainVersion: chainResolution.chain.version,
+    parametersJson: JSON.stringify(parameters),
+    snapshotJson: snapshot ? JSON.stringify(snapshot) : null,
+    currentStepKey: 'prepare',
+    runStartedAt: ts,
     message: String(input.message || '').trim() || '请按四段式管线拆分本集分镜',
     model: input.model || null,
     configId: input.configId || null,
@@ -591,11 +778,27 @@ export async function createStoryboardPipelineJob(
     updatedAt: ts,
   }).returning().get()
 
+  const prepareRun = startStepRun({
+    jobId: row.id,
+    stepKey: 'prepare',
+    stepVersion: stepVersion('prepare'),
+    scope: 'episode',
+    itemKey: 'episode',
+    input: { episodeId, dramaId, chunks: chunks.length, chain: chainResolution.chain.key },
+  })
+  finishStepRun(prepareRun, {
+    status: 'passed',
+    output: { chunks: chunks.length, scriptChars: nonWsLength(script) },
+  })
+  setCurrentStep(row.id, 'skeleton-split')
+
   logTaskProgress('StoryboardPipeline', 'created', {
     jobId: row.id,
     episodeId,
     chunks: chunks.length,
     scriptChars: nonWsLength(script),
+    chain: chainResolution.chain.key,
+    parameters,
   })
   if (options.autorun !== false) {
     void runStoryboardPipelineJob(row.id, options.runners).catch(error => {
@@ -663,7 +866,7 @@ export async function resumeStoryboardPipelineJob(
     currentShotNumber: null,
   })
   db.update(schema.storyboardPipelineJobs)
-    .set({ pauseRequested: 0, updatedAt: now() })
+    .set({ pauseRequested: 0, runStartedAt: now(), updatedAt: now() })
     .where(eq(schema.storyboardPipelineJobs.id, jobId))
     .run()
   logTaskProgress('StoryboardPipeline', 'resume', {
@@ -700,7 +903,11 @@ async function runSkeletonStage(
   const episode = db.select().from(schema.episodes)
     .where(eq(schema.episodes.id, row.episodeId))
     .get()
-  const maxSegmentSeconds = getMaxSegmentSeconds(episode?.breakdownMethod)
+  const params = runParameters(row)
+  const splitPresetKey = params.splitPresetKey && params.splitPresetKey !== 'inherit'
+    ? params.splitPresetKey
+    : (episode?.breakdownMethod || null)
+  const maxSegmentSeconds = getMaxSegmentSeconds(splitPresetKey)
   // 第一次进入预拆：清掉本任务旧骨架；续拆时保留已完成块
   if (!state.skeletonsInitialized) {
     db.delete(schema.storyboardSkeletons).where(eq(schema.storyboardSkeletons.jobId, row.id)).run()
@@ -719,6 +926,10 @@ async function runSkeletonStage(
       persistState(row.id, state, { status: 'interrupted', errorMsg: '已暂停，可继续', finishedAt: null })
       return false
     }
+    if (wallClockExceeded(row, params)) {
+      persistState(row.id, state, { status: 'interrupted', errorMsg: budgetMessage(params), finishedAt: null })
+      return false
+    }
     chunk.status = 'running'
     chunk.startedAt = now()
     chunk.error = undefined
@@ -729,85 +940,138 @@ async function runSkeletonStage(
       .filter(item => item.storyboardNumber < shotStart)
       .slice(-2)
       .map(skeletonPayload)
-    const chunkState = { replaced: false, nextShot: shotStart, saved: 0, excerptCursor: 0 }
-    const requestContext = pipelineContext({
-      episodeId: row.episodeId,
-      dramaId: row.dramaId,
-      modelOverride: row.model || undefined,
-      textConfigId: row.configId || undefined,
-      pipelineJobId: row.id,
-      pipelineStage: 'skeleton',
-      pipelineChunkScript: chunk.script,
-      pipelineChunkIndex: chunk.index,
-      pipelineChunkTotal: state.chunks.length,
-      pipelineChunkLabel: chunk.label,
-      pipelineChunkShotStart: shotStart,
-      pipelineChunkState: chunkState,
-      pipelinePreviousShots: previousDrafts,
-    })
-    try {
-      logTaskProgress('StoryboardPipeline', 'skeleton-chunk-start', {
-        jobId: row.id,
-        chunk: `${chunk.index + 1}/${state.chunks.length}`,
-        label: chunk.label,
-        shotStart,
-      })
-      await runners.skeleton({
-        jobId: row.id,
+    let chunkDone = false
+    let lastError = ''
+    for (let blockAttempt = 1; blockAttempt <= params.blockMaxAttempts; blockAttempt += 1) {
+      if (wallClockExceeded(row, params)) {
+        persistState(row.id, state, { status: 'interrupted', errorMsg: budgetMessage(params), finishedAt: null })
+        return false
+      }
+      const chunkState = { replaced: false, nextShot: shotStart, saved: 0, excerptCursor: 0 }
+      const knowledgeIds = stepKnowledgeIds(row, 'skeleton-split')
+      const requestContext = pipelineContext({
         episodeId: row.episodeId,
         dramaId: row.dramaId,
-        chunk,
-        totalChunks: state.chunks.length,
+        modelOverride: row.model || undefined,
+        textConfigId: row.configId || undefined,
+        pipelineJobId: row.id,
+        pipelineStage: 'skeleton',
+        pipelineStepKey: 'skeleton-split',
+        ...(knowledgeIds.length ? { pipelineKnowledgeIds: knowledgeIds } : {}),
+        ...(splitPresetKey ? { pipelineBreakdownMethod: splitPresetKey } : {}),
+        pipelineChunkScript: chunk.script,
+        pipelineChunkIndex: chunk.index,
+        pipelineChunkTotal: state.chunks.length,
+        pipelineChunkLabel: chunk.label,
+        pipelineChunkShotStart: shotStart,
+        pipelineChunkState: chunkState,
+        pipelinePreviousShots: previousDrafts,
+      })
+      const splitRunId = startStepRun(runStepInput(row, 'skeleton-split', 'chunk', `chunk-${chunk.index}`, {
+        label: chunk.label,
+        chars: nonWsLength(chunk.script),
         shotStart,
-        baseMessage: row.message,
+        attempt: blockAttempt,
         maxSegmentSeconds,
-        previousDrafts,
-        requestContext,
-      })
-      if (chunkState.saved <= 0) throw new Error('本段没有保存任何分镜骨架（模型可能只回复了文字）')
-      const chunkSkeletons = skeletonShots(row.id)
-        .filter(item => item.chunkIndex === chunk.index)
-      const excerptChars = chunkSkeletons.reduce((sum, item) => sum + nonWsLength(item.sourceExcerpt), 0)
-      const coverage = nonWsLength(chunk.script) ? excerptChars / nonWsLength(chunk.script) : 1
-      if (coverage < 0.25) {
-        throw new Error(`本段骨架只覆盖了约 ${(coverage * 100).toFixed(0)}% 的原文，明显漏场/漏台词；请补全骨架后重试。`)
-      }
-      if (coverage < 0.6) {
-        logTaskWarn('StoryboardPipeline', 'skeleton-coverage-low', {
+      }))
+      try {
+        logTaskProgress('StoryboardPipeline', 'skeleton-chunk-start', {
           jobId: row.id,
-          chunk: chunk.index + 1,
-          coverage: Number(coverage.toFixed(3)),
+          chunk: `${chunk.index + 1}/${state.chunks.length}`,
+          label: chunk.label,
+          shotStart,
+          attempt: blockAttempt,
         })
+        await runners.skeleton({
+          jobId: row.id,
+          episodeId: row.episodeId,
+          dramaId: row.dramaId,
+          chunk,
+          totalChunks: state.chunks.length,
+          shotStart,
+          baseMessage: row.message,
+          maxSegmentSeconds,
+          previousDrafts,
+          requestContext,
+        })
+        if (chunkState.saved <= 0) throw new Error('本段没有保存任何分镜骨架（模型可能只回复了文字）')
+        const chunkSkeletons = skeletonShots(row.id)
+          .filter(item => item.chunkIndex === chunk.index)
+        const excerptChars = chunkSkeletons.reduce((sum, item) => sum + nonWsLength(item.sourceExcerpt), 0)
+        const coverage = nonWsLength(chunk.script) ? excerptChars / nonWsLength(chunk.script) : 1
+        const gateRunId = startStepRun(runStepInput(row, 'skeleton-gate', 'chunk', `chunk-${chunk.index}`, {
+          coverage,
+          shotStart,
+          excerptRejectRatio: params.excerptRejectRatio,
+          excerptWarnRatio: params.excerptWarnRatio,
+        }))
+        if (coverage < params.excerptRejectRatio) {
+          const issue = `本段骨架只覆盖了约 ${(coverage * 100).toFixed(0)}% 的原文，低于拒收阈值 ${(params.excerptRejectRatio * 100).toFixed(0)}%。`
+          finishStepRun(gateRunId, { status: 'failed', issues: [issue] })
+          throw new Error(issue)
+        }
+        const gateIssues = coverage < params.excerptWarnRatio
+          ? [`本段摘录覆盖率 ${(coverage * 100).toFixed(0)}%，低于警告阈值 ${(params.excerptWarnRatio * 100).toFixed(0)}%。`]
+          : []
+        finishStepRun(gateRunId, { status: 'passed', issues: gateIssues, output: { coverage } })
+        finishStepRun(splitRunId, {
+          status: 'passed',
+          output: { shots: chunkState.saved, coverage, attempt: blockAttempt },
+        })
+        chunk.shots = chunkState.saved
+        chunk.status = 'done'
+        chunk.finishedAt = now()
+        const totalShots = skeletonShots(row.id).length
+        persistState(row.id, state, {
+          status: 'running',
+          totalShots,
+          errorMsg: null,
+        })
+        logTaskSuccess('StoryboardPipeline', 'skeleton-chunk-done', {
+          jobId: row.id,
+          chunk: `${chunk.index + 1}/${state.chunks.length}`,
+          shots: chunk.shots,
+          totalShots,
+          attempt: blockAttempt,
+        })
+        chunkDone = true
+        break
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error)
+        finishStepRun(splitRunId, { status: 'failed', issues: [lastError] })
+        db.delete(schema.storyboardSkeletons)
+          .where(and(
+            eq(schema.storyboardSkeletons.jobId, row.id),
+            eq(schema.storyboardSkeletons.chunkIndex, chunk.index),
+          ))
+          .run()
+        chunk.shots = 0
+        if (blockAttempt < params.blockMaxAttempts) {
+          logTaskWarn('StoryboardPipeline', 'skeleton-chunk-retry', {
+            jobId: row.id,
+            chunk: chunk.index + 1,
+            attempt: blockAttempt,
+            maxAttempts: params.blockMaxAttempts,
+            error: lastError,
+          })
+          continue
+        }
+        break
       }
-      chunk.shots = chunkState.saved
-      chunk.status = 'done'
-      chunk.finishedAt = now()
-      const totalShots = skeletonShots(row.id).length
-      persistState(row.id, state, {
-        status: 'running',
-        totalShots,
-        errorMsg: null,
-      })
-      logTaskSuccess('StoryboardPipeline', 'skeleton-chunk-done', {
-        jobId: row.id,
-        chunk: `${chunk.index + 1}/${state.chunks.length}`,
-        shots: chunk.shots,
-        totalShots,
-      })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+    }
+    if (!chunkDone) {
       chunk.status = 'failed'
-      chunk.error = message
+      chunk.error = lastError
       chunk.finishedAt = now()
-      chunk.shots = chunkState.saved
+      chunk.shots = 0
       persistState(row.id, state, {
         status: 'failed',
-        errorMsg: `第 ${chunk.index + 1}/${state.chunks.length} 段预拆失败：${message}`,
+        errorMsg: `第 ${chunk.index + 1}/${state.chunks.length} 段预拆失败：${lastError}`,
       })
       logTaskError('StoryboardPipeline', 'skeleton-chunk-failed', {
         jobId: row.id,
         chunk: `${chunk.index + 1}/${state.chunks.length}`,
-        error: message,
+        error: lastError,
       })
       emitChange({ method: 'POST', path: `/api/v1/episodes/${row.episodeId}`, source: 'pipeline' })
       return false
@@ -818,6 +1082,31 @@ async function runSkeletonStage(
     persistState(row.id, state, { status: 'failed', errorMsg: '预拆没有产出任何分镜骨架' })
     return false
   }
+  const coverage = getEpisodeCoverage(row.episodeId, params.coverageFloorRatio, skeletons.length, splitPresetKey)
+  const coverageGateRun = startStepRun(runStepInput(row, 'skeleton-gate', 'episode', 'episode', {
+    coverage,
+    coverageGateEnabled: params.coverageGateEnabled,
+    coverageFloorRatio: params.coverageFloorRatio,
+  }))
+  if (params.coverageGateEnabled && coverage && coverage.floor > 0 && !coverage.ok) {
+    const issue = `整集只有 ${coverage.actual} 个分镜，低于方案下限 ${coverage.floor} 个（单段最长 ${coverage.maxSegmentSeconds} 秒，覆盖比例 ${params.coverageFloorRatio}）。`
+    logTaskError('StoryboardPipeline', 'coverage-gate-failed', {
+      jobId: row.id,
+      episodeId: row.episodeId,
+      coverage,
+      coverageFloorRatio: params.coverageFloorRatio,
+    })
+    finishStepRun(coverageGateRun, { status: 'failed', issues: [issue], output: { coverage } })
+    persistState(row.id, state, {
+      status: 'failed',
+      stage: 'skeleton',
+      errorMsg: issue,
+    })
+    emitChange({ method: 'POST', path: `/api/v1/episodes/${row.episodeId}`, source: 'pipeline' })
+    return false
+  }
+  finishStepRun(coverageGateRun, { status: 'passed', output: { coverage } })
+  setCurrentStep(row.id, 'shot-repair')
   persistState(row.id, state, {
     status: 'running',
     stage: 'repair',
@@ -829,6 +1118,7 @@ async function runSkeletonStage(
   logTaskSuccess('StoryboardPipeline', 'skeleton-stage-done', {
     jobId: row.id,
     shots: skeletons.length,
+    coverage: coverage ? { actual: coverage.actual, floor: coverage.floor, ok: coverage.ok } : null,
   })
   return true
 }
@@ -845,6 +1135,11 @@ async function runRepairStage(
   const script = String(episode.scriptContent || episode.content || '')
   const novelContent = String(episode.content || '')
   const hasSeparateNovel = Boolean(novelContent.trim()) && novelContent.trim() !== script.trim()
+  const params = runParameters(row)
+  const maxAttempts = params.shotMaxAttempts
+  const splitPresetKey = params.splitPresetKey && params.splitPresetKey !== 'inherit'
+    ? params.splitPresetKey
+    : (episode.breakdownMethod || null)
   if (!state.storyboardsCleared) {
     clearEpisodeStoryboards(row.episodeId)
     state.storyboardsCleared = true
@@ -858,6 +1153,10 @@ async function runRepairStage(
     const fresh = getJobRow(row.id)
     if (fresh?.pauseRequested) {
       persistState(row.id, state, { status: 'interrupted', errorMsg: '已暂停，可继续', finishedAt: null })
+      return false
+    }
+    if (wallClockExceeded(row, params)) {
+      persistState(row.id, state, { status: 'interrupted', errorMsg: budgetMessage(params), finishedAt: null })
       return false
     }
     persistState(row.id, state, {
@@ -898,10 +1197,16 @@ async function runRepairStage(
           } : null,
           transition: existing.transition,
         })
+        const manualValidateRun = startStepRun(runStepInput(row, 'shot-validate', 'shot', `shot-${skeleton.storyboardNumber}`, {
+          manual: true,
+          attempt: 0,
+        }))
         if (!validation.errors.length) {
+          finishStepRun(manualValidateRun, { status: 'passed', issues: validation.warnings, output: { manual: true } })
           markSkeletonValidated(row, skeleton, validation.warnings)
           passed = true
         } else {
+          finishStepRun(manualValidateRun, { status: 'failed', issues: validation.errors, output: { manual: true } })
           lastIssues = validation.errors
           attempt = 0
           db.update(schema.storyboardSkeletons).set({
@@ -914,7 +1219,11 @@ async function runRepairStage(
       }
     }
 
-    while (!passed && attempt <= MAX_REPAIR_ATTEMPTS) {
+    while (!passed && attempt < maxAttempts) {
+      if (wallClockExceeded(row, params)) {
+        persistState(row.id, state, { status: 'interrupted', errorMsg: budgetMessage(params), finishedAt: null })
+        return false
+      }
       const current = db.select().from(schema.storyboardSkeletons)
         .where(eq(schema.storyboardSkeletons.id, skeleton.id))
         .get()!
@@ -926,6 +1235,7 @@ async function runRepairStage(
         .filter(item => item.storyboardNumber > skeleton.storyboardNumber && item.status === 'draft')
         .slice(0, 2)
         .map(skeletonPayload)
+      const knowledgeIds = stepKnowledgeIds(row, 'shot-repair')
       const requestContext = pipelineContext({
         episodeId: row.episodeId,
         dramaId: row.dramaId,
@@ -933,6 +1243,9 @@ async function runRepairStage(
         textConfigId: row.configId || undefined,
         pipelineJobId: row.id,
         pipelineStage: 'repair',
+        pipelineStepKey: 'shot-repair',
+        ...(knowledgeIds.length ? { pipelineKnowledgeIds: knowledgeIds } : {}),
+        ...(splitPresetKey ? { pipelineBreakdownMethod: splitPresetKey } : {}),
         pipelineShotNumber: skeleton.storyboardNumber,
         pipelineSkeleton: skeletonPayload(current),
         pipelinePreviousShots: previousShots,
@@ -941,6 +1254,14 @@ async function runRepairStage(
         pipelineNovelSceneText: novelSceneText,
         pipelineIssues: lastIssues,
       })
+      const repairRunId = startStepRun(runStepInput(row, 'shot-repair', 'shot', `shot-${skeleton.storyboardNumber}`, {
+        attempt: attempt + 1,
+        maxAttempts,
+        issues: lastIssues,
+        sceneTextChars: nonWsLength(sceneText),
+        previousShots: previousShots.length,
+        nextDrafts: nextDrafts.length,
+      }))
       let runnerError: string | null = null
       try {
         logTaskProgress('StoryboardPipeline', 'shot-repair-start', {
@@ -965,6 +1286,7 @@ async function runRepairStage(
       } catch (error) {
         runnerError = `修补调用失败：${error instanceof Error ? error.message : String(error)}`
         lastIssues = [runnerError]
+        finishStepRun(repairRunId, { status: 'failed', issues: [runnerError] })
       }
 
       const latestSkeleton = db.select().from(schema.storyboardSkeletons)
@@ -973,13 +1295,14 @@ async function runRepairStage(
       const saveAttempted = (latestSkeleton?.attempts || 0) > (current.attempts || 0)
       if (!saveAttempted) {
         lastIssues = [...lastIssues, `第 ${skeleton.storyboardNumber} 镜本轮没有执行保存。`]
+        finishStepRun(repairRunId, { status: 'failed', issues: lastIssues })
         attempt += 1
         db.update(schema.storyboardSkeletons).set({
           attempts: attempt,
           issuesJson: JSON.stringify(lastIssues),
           updatedAt: now(),
         }).where(eq(schema.storyboardSkeletons.id, skeleton.id)).run()
-        if (attempt <= MAX_REPAIR_ATTEMPTS) {
+        if (attempt < maxAttempts) {
           logTaskWarn('StoryboardPipeline', 'shot-repair-retry', {
             jobId: row.id,
             shot: skeleton.storyboardNumber,
@@ -992,6 +1315,11 @@ async function runRepairStage(
 
       const storyboard = liveStoryboards(row.episodeId)
         .find(item => item.storyboardNumber === skeleton.storyboardNumber)
+      finishStepRun(repairRunId, {
+        status: storyboard ? 'passed' : 'failed',
+        issues: storyboard ? [] : lastIssues,
+        output: { saved: Boolean(storyboard), attempt: attempt + 1 },
+      })
       if (!storyboard) {
         lastIssues = [...lastIssues, `第 ${skeleton.storyboardNumber} 镜没有保存成稿。`]
       } else {
@@ -1015,11 +1343,25 @@ async function runRepairStage(
           } : null,
           transition: storyboard.transition,
         })
+        const validateRunId = startStepRun(runStepInput(row, 'shot-validate', 'shot', `shot-${skeleton.storyboardNumber}`, {
+          attempt: attempt + 1,
+          duration: storyboard.duration,
+        }))
         if (!validation.errors.length) {
+          finishStepRun(validateRunId, {
+            status: 'passed',
+            issues: validation.warnings,
+            output: { warnings: validation.warnings.length, attempt: attempt + 1 },
+          })
           markSkeletonValidated(row, skeleton, validation.warnings)
           passed = true
           break
         }
+        finishStepRun(validateRunId, {
+          status: 'failed',
+          issues: validation.errors,
+          output: { errors: validation.errors.length, attempt: attempt + 1 },
+        })
         lastIssues = validation.errors
         db.update(schema.storyboardSkeletons).set({
           status: 'repairing',
@@ -1032,7 +1374,7 @@ async function runRepairStage(
         attempts: attempt,
         updatedAt: now(),
       }).where(eq(schema.storyboardSkeletons.id, skeleton.id)).run()
-      if (attempt <= MAX_REPAIR_ATTEMPTS) {
+      if (attempt < maxAttempts) {
         logTaskWarn('StoryboardPipeline', 'shot-repair-retry', {
           jobId: row.id,
           shot: skeleton.storyboardNumber,
@@ -1052,7 +1394,7 @@ async function runRepairStage(
         status: 'failed',
         failedShots: 1,
         currentShotNumber: skeleton.storyboardNumber,
-        errorMsg: `第 ${skeleton.storyboardNumber} 镜连续 ${MAX_REPAIR_ATTEMPTS + 1} 次修补仍未通过，已停下等待人工。${lastIssues.join('；')}`,
+        errorMsg: `第 ${skeleton.storyboardNumber} 镜连续 ${maxAttempts} 次修补仍未通过，已停下等待人工。${lastIssues.join('；')}`,
       })
       logTaskError('StoryboardPipeline', 'shot-manual', {
         jobId: row.id,
@@ -1112,6 +1454,13 @@ async function runSoundStage(
 ) {
   const shots = liveStoryboards(row.episodeId).filter(item => !item.transitionKind)
   if (!shots.length) throw new Error('没有可设计声音的普通分镜')
+  const params = runParameters(row)
+  const episode = db.select().from(schema.episodes)
+    .where(eq(schema.episodes.id, row.episodeId))
+    .get()
+  const splitPresetKey = params.splitPresetKey && params.splitPresetKey !== 'inherit'
+    ? params.splitPresetKey
+    : (episode?.breakdownMethod || null)
   const shotsPayload = shots.map(shot => ({
     shot_number: shot.storyboardNumber,
     storyboard_id: shot.id,
@@ -1124,6 +1473,7 @@ async function runSoundStage(
     has_dialogue: Boolean(String(shot.description || '').match(/「[^」]+」/)),
     sound_effect: shot.soundEffect || '',
   }))
+  const knowledgeIds = stepKnowledgeIds(row, 'sound-design')
   const requestContext = pipelineContext({
     episodeId: row.episodeId,
     dramaId: row.dramaId,
@@ -1131,43 +1481,98 @@ async function runSoundStage(
     textConfigId: row.configId || undefined,
     pipelineJobId: row.id,
     pipelineStage: 'sound',
+    pipelineStepKey: 'sound-design',
+    ...(knowledgeIds.length ? { pipelineKnowledgeIds: knowledgeIds } : {}),
+    ...(splitPresetKey ? { pipelineBreakdownMethod: splitPresetKey } : {}),
   })
-  await runners.sound({
-    jobId: row.id,
-    episodeId: row.episodeId,
-    dramaId: row.dramaId,
-    shots: shotsPayload,
-    requestContext,
-  })
-  const plans = db.select().from(schema.soundPlans)
-    .where(eq(schema.soundPlans.episodeId, row.episodeId))
-    .orderBy(desc(schema.soundPlans.id))
-    .limit(1)
-    .get()
-  const plan = plans
-  if (!plan) throw new Error('声音设计没有保存任何声音计划')
-  const cues = db.select().from(schema.soundCues)
-    .where(eq(schema.soundCues.planId, plan.id))
-    .all()
-  if (!cues.length) throw new Error('声音计划没有声音线索')
-  const units = new Set(cues.map(cue => cue.unitKey)).size
-  state.soundPlanId = plan.id
-  persistState(row.id, state, {
-    status: 'done',
-    stage: 'sound',
-    soundStatus: 'done',
-    soundUnits: units,
-    errorMsg: null,
-    finishedAt: now(),
-  })
-  logTaskSuccess('StoryboardPipeline', 'done', {
-    jobId: row.id,
-    episodeId: row.episodeId,
-    shots: shots.length,
-    soundUnits: units,
-    cues: cues.length,
-  })
-  emitChange({ method: 'POST', path: `/api/v1/episodes/${row.episodeId}`, source: 'pipeline' })
+  setCurrentStep(row.id, 'sound-design')
+  let lastError = ''
+  for (let attempt = 1; attempt <= params.soundMaxAttempts; attempt += 1) {
+    if (wallClockExceeded(row, params)) throw new Error(budgetMessage(params))
+    const soundRunId = startStepRun(runStepInput(row, 'sound-design', 'episode', 'episode', {
+      shots: shots.length,
+      attempt,
+      maxAttempts: params.soundMaxAttempts,
+    }))
+    let validateRunId = 0
+    try {
+      await runners.sound({
+        jobId: row.id,
+        episodeId: row.episodeId,
+        dramaId: row.dramaId,
+        shots: shotsPayload,
+        requestContext,
+      })
+      const plan = db.select().from(schema.soundPlans)
+        .where(eq(schema.soundPlans.episodeId, row.episodeId))
+        .orderBy(desc(schema.soundPlans.id))
+        .limit(1)
+        .get()
+      if (!plan) throw new Error('声音设计没有保存任何声音计划')
+      const cues = db.select().from(schema.soundCues)
+        .where(eq(schema.soundCues.planId, plan.id))
+        .all()
+      if (!cues.length) throw new Error('声音计划没有声音线索')
+      const units = new Set(cues.map(cue => cue.unitKey)).size
+      validateRunId = startStepRun(runStepInput(row, 'sound-validate', 'episode', 'episode', {
+        planId: plan.id,
+        cues: cues.length,
+        units,
+        attempt,
+      }))
+      finishStepRun(validateRunId, {
+        status: 'passed',
+        output: { planId: plan.id, cues: cues.length, units, attempt },
+      })
+      finishStepRun(soundRunId, {
+        status: 'passed',
+        output: { planId: plan.id, cues: cues.length, units, attempt },
+      })
+      state.soundPlanId = plan.id
+      persistState(row.id, state, {
+        status: 'done',
+        stage: 'sound',
+        soundStatus: 'done',
+        soundUnits: units,
+        errorMsg: null,
+        finishedAt: now(),
+      })
+      const finalizeRunId = startStepRun(runStepInput(row, 'finalize', 'episode', 'episode', {
+        planId: plan.id,
+        soundUnits: units,
+        cues: cues.length,
+      }))
+      finishStepRun(finalizeRunId, {
+        status: 'passed',
+        output: { planId: plan.id, soundUnits: units, shots: shots.length },
+      })
+      setCurrentStep(row.id, null)
+      logTaskSuccess('StoryboardPipeline', 'done', {
+        jobId: row.id,
+        episodeId: row.episodeId,
+        shots: shots.length,
+        soundUnits: units,
+        cues: cues.length,
+        attempt,
+      })
+      emitChange({ method: 'POST', path: `/api/v1/episodes/${row.episodeId}`, source: 'pipeline' })
+      return
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error)
+      finishStepRun(soundRunId, { status: 'failed', issues: [lastError] })
+      if (validateRunId) finishStepRun(validateRunId, { status: 'failed', issues: [lastError] })
+      if (attempt < params.soundMaxAttempts) {
+        logTaskWarn('StoryboardPipeline', 'sound-retry', {
+          jobId: row.id,
+          attempt,
+          maxAttempts: params.soundMaxAttempts,
+          error: lastError,
+        })
+        continue
+      }
+      throw error
+    }
+  }
 }
 
 export async function runStoryboardPipelineJob(
@@ -1179,6 +1584,8 @@ export async function runStoryboardPipelineJob(
   try {
     let row = getJobRow(jobId)
     if (!row || row.status === 'done') return
+    await ensureRunSnapshot(row)
+    row = getJobRow(jobId)!
     const state = parseState(row)
     const resolved: PipelineRunners = {
       skeleton: runners.skeleton || defaultSkeletonRunner,
@@ -1189,6 +1596,7 @@ export async function runStoryboardPipelineJob(
 
     let stage = (row.stage || 'skeleton') as StoryboardPipelineStage
     if (stage === 'skeleton') {
+      setCurrentStep(jobId, 'skeleton-split')
       const ok = await runSkeletonStage(row, state, resolved as any)
       if (!ok) return
       stage = 'repair'
@@ -1197,6 +1605,7 @@ export async function runStoryboardPipelineJob(
       row = next
     }
     if (stage === 'repair') {
+      setCurrentStep(jobId, 'shot-repair')
       const ok = await runRepairStage(row, state, resolved as any)
       if (!ok) return
       stage = 'sound'
@@ -1206,6 +1615,7 @@ export async function runStoryboardPipelineJob(
     }
     if (stage === 'sound') {
       try {
+        setCurrentStep(jobId, 'sound-design')
         persistState(jobId, state, { status: 'running', stage: 'sound', soundStatus: 'running', errorMsg: null })
         await runSoundStage(row, state, resolved as any)
       } catch (error) {
@@ -1221,14 +1631,16 @@ export async function runStoryboardPipelineJob(
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    const budgetExceeded = message.includes('墙钟预算')
     const latest = getJobRow(jobId)
     if (latest && latest.status !== 'done') {
       db.update(schema.storyboardPipelineJobs).set({
-        status: 'failed',
-        errorMsg: `分镜管线异常终止：${message}`,
+        status: budgetExceeded ? 'interrupted' : 'failed',
+        errorMsg: budgetExceeded ? message : `分镜管线异常终止：${message}`,
         updatedAt: now(),
       }).where(eq(schema.storyboardPipelineJobs.id, jobId)).run()
     }
+    failRunningStepRuns(jobId, message)
     logTaskError('StoryboardPipeline', 'job-crashed', { jobId, error: message })
   } finally {
     runningJobs.delete(jobId)
@@ -1237,10 +1649,17 @@ export async function runStoryboardPipelineJob(
 
 /** 启动恢复：上次进程退出时未完成的管线标记为中断，可继续 */
 export function markInterruptedStoryboardPipelines(): number {
+  const ts = now()
+  db.update(schema.pipelineStepRuns).set({
+    status: 'failed',
+    issuesJson: JSON.stringify(['应用退出导致步骤中断']),
+    finishedAt: ts,
+    updatedAt: ts,
+  }).where(eq(schema.pipelineStepRuns.status, 'running')).run()
   const result = db.update(schema.storyboardPipelineJobs).set({
     status: 'interrupted',
     errorMsg: '应用退出导致分镜管线中断，可继续',
-    updatedAt: now(),
+    updatedAt: ts,
   }).where(inArray(schema.storyboardPipelineJobs.status, ['pending', 'running'])).run()
   return Number(result.changes || 0)
 }

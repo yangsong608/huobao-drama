@@ -583,32 +583,41 @@
                 </select>
                 <span class="video-method-hint">{{ t('episode.sb.methodHint') }}</span>
               </label>
+              <label class="video-method-pick">
+                <span class="dim">{{ t('settings.tabs.pipeline') }}</span>
+                <select
+                  v-model="selectedChainKey"
+                  class="input video-method-select"
+                  :disabled="rn || splitRunning || splitStarting"
+                  :title="selectedChainName"
+                >
+                  <option v-for="chain in chainTemplates" :key="chain.key" :value="chain.key">{{ chain.name }}</option>
+                </select>
+              </label>
               <span class="dim" style="font-size:12px">{{ t('episode.prod.videos') }}</span>
               <span class="tag mono">{{ t('episode.sb.segmentStat', { n: sbs.length, dur: totalDuration }) }}</span>
               <span class="tag mono" :title="t('episode.vid.aspectRatio')">{{ dramaAspectRatio }}</span>
               <div class="ml-auto flex gap-1">
-                <button class="btn btn-sm" :disabled="rn || methodSaving || splitRunning || splitStarting || auditRunning" :title="currentBreakdownMethodName" @click="doBreakdown">
+                <button class="btn btn-sm" :disabled="rn || methodSaving || splitRunning || splitStarting" :title="currentBreakdownMethodName" @click="doBreakdown">
                   <Loader2 v-if="splitRunning || splitStarting" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                   {{ splitRunning ? t('episode.sb.title') : (sbs.length ? t('episode.sb.rebreak') : t('episode.sb.startBreak')) }}
                 </button>
-                <button v-if="canResumeSplit" class="btn btn-sm video-split-resume" :disabled="splitStarting || auditRunning" :title="splitJob?.error || resumeSplitLabel" @click="resumeSplit">
+                <button v-if="canResumeSplit" class="btn btn-sm video-split-resume" :disabled="splitStarting" :title="splitJob?.error || resumeSplitLabel" @click="resumeSplit">
                   <Loader2 v-if="splitStarting" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   {{ resumeSplitLabel }}
                 </button>
-                <button class="btn btn-sm" :disabled="videoPromptBatch.running || !sbs.length || auditRunning" @click="batchVideoPrompts">
+                <button class="btn btn-sm" :disabled="videoPromptBatch.running || !sbs.length" @click="batchVideoPrompts">
                   <Loader2 v-if="videoPromptBatch.running" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                   {{ videoPromptBatch.running ? t('episode.sb.promptProgress', { done: videoPromptBatch.completed, total: videoPromptBatch.total }) : (videoSelectMode && selectedVideoSbIds.length ? t('episode.sb.promptSelected', { n: selectedVideoSbIds.length }) : t('episode.sb.batchPrompts')) }}
                 </button>
-                <button class="btn btn-sm episode-audit-btn" :disabled="!sbs.length || splitRunning || splitStarting || auditBusy || auditRunning" :title="auditStatusText" @click="runStoryboardAudit()">
-                  <Loader2 v-if="auditBusy || auditRunning" :size="11" class="animate-spin" />
-                  <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
-                  {{ auditButtonLabel }}
+                <button v-if="splitJob" class="btn btn-sm" :title="selectedChainName" @click="openPipelineTrace">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
+                  {{ t('settings.pipeline.trace', '步骤追踪') }}
                 </button>
-                <button v-if="auditJob" type="button" class="episode-audit-status" :title="auditStatusText" @click="openAuditPanel()">{{ auditStatusText }}</button>
-                <button v-if="sbs.length" class="btn btn-sm" :title="t('episode.soundPanel.title')" @click="openSoundPlan">
+                <button v-if="sbs.length" class="btn btn-sm" :title="t('episode.soundPanel.buttonHint')" @click="openSoundPlan">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
                   {{ t('episode.soundPanel.button') }}
                 </button>
@@ -628,7 +637,7 @@
             <div v-if="splitRunning || (canResumeSplit && splitJob)" class="video-split-panel">
               <div class="video-split-panel-head">
                 <div class="video-split-panel-copy">
-                  <div class="video-split-panel-title">{{ t('episode.sb.title') }} · {{ pipelineStageLabel }}</div>
+                  <div class="video-split-panel-title">{{ t('episode.sb.title') }} · {{ pipelineStageLabel }} · {{ selectedChainName }}</div>
                   <div class="video-split-panel-sub">{{ splitProgressText }}</div>
                   <div v-if="splitRunning" class="video-split-panel-elapsed">{{ t('episode.sb.breakingElapsed', { s: breakdownElapsed }) }}</div>
                   <div v-else-if="splitJob?.error" class="video-split-panel-error">{{ splitJob.error }}</div>
@@ -638,7 +647,7 @@
                     <Loader2 v-if="splitPausing" :size="11" class="animate-spin" />
                     {{ t('episode.sb.splitPause') }}
                   </button>
-                  <button v-if="canResumeSplit" type="button" class="btn btn-primary btn-sm" :disabled="splitStarting || auditRunning" @click="resumeSplit">
+                  <button v-if="canResumeSplit" type="button" class="btn btn-primary btn-sm" :disabled="splitStarting" @click="resumeSplit">
                     <Loader2 v-if="splitStarting" :size="11" class="animate-spin" />
                     {{ resumeSplitLabel }}
                   </button>
@@ -663,12 +672,33 @@
                 <div
                   v-for="shot in splitJob?.shots || []"
                   :key="shot.number"
-                  :class="['video-split-chunk', 'is-' + pipelineShotClass(shot.status)]"
-                  :title="(shot.issues || []).join('；') || shot.status"
+                  :class="['video-split-chunk', 'is-shot', 'is-' + pipelineShotClass(shot.status)]"
+                  :title="((shot.issues || []).join('；') || shot.status) + ' · ' + t('episode.sb.manualLocateHint')"
+                  role="button"
+                  tabindex="0"
+                  @click="focusPipelineShot(shot)"
+                  @keydown.enter.prevent="focusPipelineShot(shot)"
+                  @keydown.space.prevent="focusPipelineShot(shot)"
                 >
                   <span class="video-split-chunk-dot" />
                   <span class="video-split-chunk-label">#{{ shot.number }} {{ shot.title }}</span>
                   <span class="video-split-chunk-shots">{{ shot.status === 'validated' ? '✓' : (shot.attempts || 0) }}</span>
+                </div>
+              </div>
+              <div v-if="splitJob?.status === 'failed' && splitJob?.current_shot_number" class="video-split-manual" role="alert">
+                <div class="video-split-manual-head">
+                  <strong>{{ t('episode.sb.manualTitle', { n: splitJob.current_shot_number }) }}</strong>
+                  <span class="tag">{{ t('episode.sb.manualLocateHint') }}</span>
+                </div>
+                <div class="video-split-manual-desc">{{ t('episode.sb.manualDesc') }}</div>
+                <div v-if="splitJob.error" class="video-split-panel-error">{{ splitJob.error }}</div>
+                <div class="video-split-manual-actions">
+                  <button type="button" class="btn btn-primary btn-sm" @click="focusPipelineShotNumber(splitJob.current_shot_number)">
+                    {{ t('episode.sb.manualEdit') }}
+                  </button>
+                  <button v-if="canResumeSplit" type="button" class="btn btn-sm" @click="resumeSplit">
+                    {{ t('episode.sb.manualContinue') }}
+                  </button>
                 </div>
               </div>
             </div>
@@ -680,7 +710,7 @@
               <div class="empty-desc">{{ t('episode.sb.emptyDesc') }}</div>
               <div class="empty-desc">{{ t('episode.sb.methodCurrent', { method: currentBreakdownMethodName }) }}</div>
               <div class="locked-config-banner">{{ t('episode.vid.lockedModel') }}{{ effectiveVideoModelLabel }}</div>
-              <button class="btn btn-primary" :disabled="rn || methodSaving || splitStarting || auditRunning || remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : currentBreakdownMethodName" @click="doBreakdown">
+              <button class="btn btn-primary" :disabled="rn || methodSaving || splitStarting || remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : currentBreakdownMethodName" @click="doBreakdown">
                 <Loader2 v-if="splitStarting" :size="13" class="animate-spin" />
                 <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 {{ t('episode.sb.startBreak') }}
@@ -691,7 +721,7 @@
                 {{ t('episode.vid.addShotHint') }}
               </button>
             </div>
-            <div v-else class="video-task-workbench has-player" ref="videoWorkbenchEl" :data-pane="tabletPane" :style="{ '--vleft': videoLeftW + 'px', '--vright': videoRightW + 'px' }">
+            <div v-if="sbs.length" class="video-task-workbench has-player" ref="videoWorkbenchEl" :data-pane="tabletPane" :style="{ '--vleft': videoLeftW + 'px', '--vright': videoRightW + 'px' }">
               <div v-if="isCompact && !isComfyVideoMode" class="video-tablet-bar">
                 <div class="video-tablet-tabs" role="tablist">
                   <button
@@ -862,14 +892,6 @@
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
                     </button>
-                    <AuditStateBadge
-                      v-if="auditShotMarkerVisible(task.storyboard)"
-                      :state="auditShotDisplay(task.storyboard).state"
-                      :severity="auditShotDisplay(task.storyboard).severity"
-                      :count="auditShotDisplay(task.storyboard).count"
-                      :title="auditShotDisplay(task.storyboard).title"
-                      @open="openAuditPanel(task.storyboard.id)"
-                    />
                     <button
                       v-if="!videoSelectMode"
                       type="button"
@@ -902,7 +924,6 @@
                   :scenes="scenes"
                   :characters="chars"
                   :selected-id="selectedSb?.id || null"
-                  :audit-for="coverageAuditFor"
                   @select="onCoverageSelect"
                   @open-geography="openSceneGeography"
                 />
@@ -1841,115 +1862,30 @@
       </div>
 
       <!-- ===== STORYBOARD AUDIT DRAWER ===== -->
-      <div v-if="auditPanel.open" class="task-drawer-overlay" @click.self="closeAuditPanel">
-        <aside class="task-drawer audit-drawer" role="dialog" aria-modal="true" :aria-label="t('episode.audit.panel.title')">
-        <header class="task-drawer-head">
-          <div>
-            <div class="video-task-title">{{ t('episode.audit.panel.title') }}</div>
-            <div class="video-task-meta">
-              {{ auditStatusText }}
-              <template v-if="auditJob"> · {{ t('episode.audit.panel.trigger') }}: {{ t(`episode.audit.trigger.${auditJob.trigger || 'manual'}`) }}</template>
+      <div v-if="pipelineTrace.open" class="task-drawer-overlay" @click.self="pipelineTrace.open = false">
+        <aside class="task-drawer" role="dialog" aria-modal="true" :aria-label="t('settings.pipeline.trace', '步骤追踪')">
+          <div class="task-drawer-head">
+            <div>
+              <div class="video-task-title">{{ t('settings.pipeline.trace', '步骤追踪') }}</div>
+              <div class="video-task-meta">{{ selectedChainName }} · #{{ splitJob?.id }} · {{ splitJob?.status }}</div>
             </div>
+            <button class="btn btn-ghost btn-icon" :aria-label="t('common.close')" @click="pipelineTrace.open = false"><X :size="14" /></button>
           </div>
-          <div class="task-drawer-head-actions">
-            <button class="btn btn-sm" :disabled="auditBusy || auditRunning || !sbs.length" @click="runStoryboardAudit()">
-              <Loader2 v-if="auditBusy || auditRunning" :size="11" class="animate-spin" />
-              {{ auditRunning ? t('episode.audit.shotStatus.running') : (auditJob ? t('episode.audit.rerun') : t('episode.audit.button')) }}
-            </button>
-            <button class="btn btn-ghost btn-icon" :aria-label="t('episode.audit.panel.close')" @click="closeAuditPanel"><X :size="14" /></button>
-          </div>
-        </header>
-        <div v-if="auditRunning" class="audit-progress">
-          <div class="audit-progress-bar"><span :style="{ width: auditProgressPercent + '%' }" /></div>
-          <span class="video-task-meta">{{ t('episode.audit.panel.progress', { done: auditJob?.completed_windows || 0, total: auditJob?.total_windows || 0 }) }}</span>
-        </div>
-        <div class="video-task-metrics task-drawer-metrics">
-          <span class="video-task-metric is-failed">{{ t('episode.audit.filter.error') }} {{ auditJob?.error_count || 0 }}</span>
-          <span class="video-task-metric is-pending">{{ t('episode.audit.filter.warning') }} {{ auditJob?.warning_count || 0 }}</span>
-          <span class="video-task-metric is-done">{{ t('episode.audit.filter.info') }} {{ auditJob?.info_count || 0 }}</span>
-        </div>
-        <div v-if="auditSemanticNote" class="audit-semantic-note">{{ auditSemanticNote }}</div>
-        <div v-if="auditJob?.stale" class="audit-stale-note">{{ t('episode.audit.empty.stale') }}</div>
-        <div v-if="auditJob?.status === 'failed'" class="audit-error-note">
-          {{ t('episode.audit.panel.jobError', { message: auditJob.error_msg || '' }) }}
-        </div>
-        <div v-if="auditPanel.shotId" class="audit-shot-scope">
-          <span>{{ t('episode.audit.panel.shotOnly', { n: storyboardNumberOf(auditPanelShot) || auditPanel.shotId }) }}</span>
-          <button class="btn btn-sm" @click="auditPanel = { ...auditPanel, shotId: null }">{{ t('episode.audit.panel.showAllShots') }}</button>
-        </div>
-        <div class="audit-filter-row">
-          <button
-            v-for="option in auditFilterOptions"
-            :key="option.key"
-            type="button"
-            :class="['audit-filter-chip', { on: auditPanelFilter === option.key }]"
-            @click="auditPanelFilter = option.key"
-          >{{ t(`episode.audit.filter.${option.key}`) }}</button>
-          <span class="audit-filter-count">{{ auditPanelIssues.length }}</span>
-        </div>
-        <div v-if="!auditPanelIssues.length" class="step-empty task-drawer-empty">
-          <div class="empty-visual">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
-          </div>
-          <div class="empty-title">
-            {{ auditPanel.shotId ? t('episode.audit.panel.noIssuesForShot') : (auditJob ? t('episode.audit.empty.clean') : t('episode.audit.cleanTitle')) }}
-          </div>
-          <div class="empty-desc">
-            <template v-if="auditJob?.semantic_status === 'skipped_no_model'">{{ t('episode.audit.empty.ruleOnly') }}</template>
-            <template v-else-if="auditJob?.semantic_status === 'disabled'">{{ t('episode.audit.empty.semanticDisabled') }}</template>
-            <template v-else-if="!auditJob">{{ t('episode.audit.empty.none') }}</template>
-            <template v-else>{{ auditStatusText }}</template>
-          </div>
-        </div>
-        <div v-else class="task-drawer-body audit-issue-list">
-          <section v-for="group in auditCheckGroups" :key="group.check" class="audit-group">
-            <div class="audit-group-head">
-              <span class="audit-group-title">{{ t(`episode.audit.check.${group.check}`) }}</span>
-              <span class="audit-group-count">{{ group.issues.length }}</span>
-            </div>
-            <article v-for="issue in group.issues" :key="issue.id" :class="['audit-issue', `is-${issue.severity}`]">
-              <div class="audit-issue-head">
-                <span class="audit-issue-severity">{{ t(`episode.audit.severity.${issue.severity}`) }}</span>
-                <span v-if="issue.storyboardNumber" class="audit-issue-shot">S{{ issue.storyboardNumber }}</span>
-                <span v-if="issue.fixed" class="audit-issue-fixed">{{ t('episode.audit.filter.fixed') }}</span>
-                <span v-else-if="issue.manual" class="audit-issue-manual">{{ t('episode.audit.filter.manual') }}</span>
+          <div v-if="pipelineTrace.loading" class="task-drawer-empty">{{ t('common.loading') }}</div>
+          <div v-else class="pipeline-trace-list">
+            <div v-for="step in pipelineTrace.steps" :key="step.id" class="pipeline-trace-step">
+              <div class="pipeline-trace-head">
+                <span class="tag">{{ step.status }}</span>
+                <strong>{{ step.step_key }}</strong>
+                <span class="dim">{{ step.scope }} · {{ step.item_key }}</span>
+                <span v-if="step.attempts > 1" class="tag">×{{ step.attempts }}</span>
               </div>
-              <p class="audit-issue-text">{{ auditIssueText(issue) }}</p>
-              <p v-if="issue.evidence" class="audit-issue-evidence">{{ issue.evidence }}</p>
-              <p v-if="issue.suggestion" class="audit-issue-suggestion">{{ issue.suggestion }}</p>
-              <div class="audit-issue-actions">
-                <button v-if="issue.storyboardId" class="btn btn-sm" :title="t('episode.audit.panel.locateShot')" @click="locateAuditShot(issue)">
-                  {{ t('episode.audit.panel.locateShot') }}
-                </button>
-                <button v-if="issue.check === 2 && issue.suggestedTransition" class="btn btn-sm btn-primary" @click="openTransitionCreateFromIssue(issue)">
-                  {{ t('episode.audit.transition.title') }}
-                </button>
-                <button v-if="issue.check === 5" class="btn btn-sm" @click="gotoAssetPage()">
-                  {{ t('episode.prod.assets') }}
-                </button>
+              <div v-if="step.issues?.length" class="pipeline-trace-issues">
+                <div v-for="(issue, idx) in step.issues" :key="idx">{{ issue }}</div>
               </div>
-            </article>
-          </section>
-        </div>
-        <div class="audit-repair-log">
-          <div class="audit-group-head">
-            <span class="audit-group-title">{{ t('episode.audit.panel.repairLog') }}</span>
-            <span v-if="auditJob?.fixed_count" class="audit-group-count">{{ auditJob.fixed_count }}</span>
-          </div>
-          <div v-if="auditJob?.repair_log?.length" class="audit-repair-list">
-            <div v-for="(entry, i) in auditJob.repair_log" :key="i" class="audit-repair-item">
-              <span v-if="entry?.storyboardNumber" class="audit-issue-shot">S{{ entry.storyboardNumber }}</span>
-              <span>{{ entry?.message || entry?.summary || entry?.action || entry?.code || entry }}</span>
             </div>
+            <div v-if="!pipelineTrace.steps.length" class="task-drawer-empty">{{ t('episode.audit.empty.title') }}</div>
           </div>
-          <p v-else class="dim audit-repair-empty">{{ t('episode.audit.panel.repairEmpty') }}</p>
-        </div>
-        <footer class="audit-drawer-foot">
-          <button v-if="auditJob?.can_undo" class="btn" :disabled="auditBusy || auditRunning" :title="t('episode.audit.panel.undoTitle')" @click="undoAuditRepair()">
-            {{ auditBusy ? t('episode.audit.panel.running') : t('episode.audit.undo') }}
-          </button>
-          <button class="btn" style="margin-left:auto" @click="closeAuditPanel">{{ t('episode.audit.panel.close') }}</button>
-        </footer>
         </aside>
       </div>
 
@@ -2998,7 +2934,7 @@ import {
   Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors, Ellipsis,
   Share2, AlertCircle,
 } from 'lucide-vue-next'
-import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, storyboardPipelineAPI, storyboardAuditAPI, planningAPI } from '~/composables/useApi'
+import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, planningAPI, pipelineChainAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
 import { useAgent, coverageShortfall } from '~/composables/useAgent'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
@@ -3021,7 +2957,6 @@ import EpisodeDeliveryDialog from '~/components/EpisodeDeliveryDialog.vue'
 import RemoteChangeNotice from '~/components/RemoteChangeNotice.vue'
 import RemoteStatusBadge from '~/components/RemoteStatusBadge.vue'
 import ContextMenu from '~/components/ContextMenu.vue'
-import AuditStateBadge from '~/components/AuditStateBadge.vue'
 import PromptSectionEditor from '~/components/PromptSectionEditor.vue'
 import CoverageBoard from '~/components/CoverageBoard.vue'
 import SceneGeographyDialog from '~/components/SceneGeographyDialog.vue'
@@ -3169,7 +3104,7 @@ async function pauseSplit() {
   if (!job?.id || !splitRunning.value || splitPausing.value) return
   splitPausing.value = true
   try {
-    const result = await storyboardPipelineAPI.pause(job.id)
+    const result = await pipelineChainAPI.pause(job.id)
     if (result?.job) applySplitJob(result.job, { silent: true })
     toast.success(t('episode.sb.splitPauseRequested'))
   } catch (e) {
@@ -3183,9 +3118,6 @@ async function pauseSplit() {
 const coverageMode = ref(false)
 const geoDialog = ref({ open: false, scene: null, geography: null })
 
-function coverageAuditFor(sb) {
-  return auditShotDisplay(sb)
-}
 
 function onCoverageSelect(sb) {
   if (!sb) return
@@ -3222,6 +3154,7 @@ function applySplitJob(job, options = {}) {
   const prevStatus = splitJob.value?.status
   const prevStage = splitJob.value?.stage
   splitJob.value = job
+  if (job.chain_key) selectedChainKey.value = job.chain_key
   if (prevStage !== job.stage) splitLastCompleted.value = 0
   const completed = (job.stage || 'skeleton') === 'skeleton'
     ? Number(job.completed_chunks || 0)
@@ -3268,7 +3201,7 @@ const splitPoll = useVisibilityPolling(async () => {
   const jobId = splitJob.value?.id
   if (!jobId || !splitRunning.value) return
   try {
-    const result = await storyboardPipelineAPI.get(jobId)
+    const result = await pipelineChainAPI.run(jobId)
     if (result?.job) applySplitJob(result.job)
   } catch {
     // 网络抖动：保持轮询，等下一次
@@ -3284,7 +3217,7 @@ function startSplitPolling() {
 async function restoreSplitJob() {
   if (!epId.value) return
   try {
-    const result = await storyboardPipelineAPI.latest(epId.value)
+    const result = await pipelineChainAPI.latestRun(epId.value)
     const job = result?.job
     if (!job) return
     applySplitJob(job, { silent: true })
@@ -3310,6 +3243,9 @@ watch(splitRunning, (value) => {
 const standardBreakdownMethod = () => ({ key: 'standard', name: t('episode.sb.methodStandard'), builtin: true, customized: false })
 const breakdownMethods = ref([standardBreakdownMethod()])
 const breakdownMethodKey = ref('standard')
+const chainTemplates = ref([])
+const selectedChainKey = ref('standard-four-stage')
+const pipelineTrace = reactive({ open: false, loading: false, steps: [], job: null })
 const methodSaving = ref(false)
 let breakdownMethodsLoaded = false
 
@@ -3317,6 +3253,60 @@ const currentBreakdownMethodName = computed(() => {
   const selected = breakdownMethods.value.find(method => method.key === breakdownMethodKey.value)
   return selected?.name || t('episode.sb.methodStandard')
 })
+
+const selectedChainName = computed(() => {
+  const selected = chainTemplates.value.find(chain => chain.key === selectedChainKey.value)
+  return selected?.name || selectedChainKey.value
+})
+
+async function loadChainTemplates() {
+  try {
+    const result = await pipelineChainAPI.chains('global', 0)
+    const list = Array.isArray(result?.list) ? result.list : []
+    chainTemplates.value = list
+    if (!list.some(chain => chain.key === selectedChainKey.value)) {
+      selectedChainKey.value = list[0]?.key || 'standard-four-stage'
+    }
+  } catch {
+    chainTemplates.value = [{ key: 'standard-four-stage', name: '标准四段式', version: '1', description: '', steps: [] }]
+  }
+}
+
+async function openPipelineTrace() {
+  const jobId = Number(splitJob.value?.id)
+  if (!jobId) return
+  pipelineTrace.open = true
+  pipelineTrace.loading = true
+  try {
+    const data = await pipelineChainAPI.trace(jobId)
+    pipelineTrace.steps = Array.isArray(data?.steps) ? data.steps : []
+    pipelineTrace.job = data?.job || splitJob.value
+  } catch (e) {
+    toastError(e, { fallback: 'episode.sb.splitStartFailed' })
+  } finally {
+    pipelineTrace.loading = false
+  }
+}
+
+function focusPipelineShotNumber(number) {
+  const n = Number(number)
+  if (!Number.isFinite(n) || n <= 0) return
+  const sb = sbs.value.find(item => Number(item.storyboard_number ?? item.storyboardNumber) === n)
+  if (!sb) {
+    toast.warning(t('episode.sb.manualMissing', { n }))
+    return
+  }
+  selectedSb.value = sb
+  if (isCompact.value && !isComfyVideoMode.value) setTabletPane('edit')
+  void nextTick(() => {
+    document.querySelector(`[data-sb-id="${sb.id}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    sbDescriptionInput.value?.focus()
+  })
+}
+
+function focusPipelineShot(shot) {
+  focusPipelineShotNumber(shot?.number)
+}
 
 function syncBreakdownMethodKey() {
   if (methodSaving.value) return
@@ -3643,272 +3633,6 @@ function openTaskDrawer() {
 function closeTaskDrawer() {
   taskDrawer.value = false
 }
-// ===== 整集动作检验：最新任务轮询 + 逐镜状态 + 问题面板 =====
-const ACTIVE_AUDIT_STATUSES = ['pending', 'preparing', 'auditing', 'repairing', 'rechecking']
-const AUDIT_CHECKS = [1, 2, 3, 4, 5]
-const auditState = ref({ loading: false, job: null, loaded: false })
-const auditPanel = ref({ open: false, shotId: null, filter: 'all' })
-const auditBusy = ref(false)
-let auditRequestSeq = 0
-let auditToastJob = ''
-const auditJob = computed(() => auditState.value.job || null)
-const auditRunning = computed(() =>
-  ACTIVE_AUDIT_STATUSES.includes(String(auditJob.value?.status || '')))
-const auditIssueTotal = computed(() => {
-  const job = auditJob.value
-  return Number(job?.issue_count ?? job?.issueCount ?? 0) || 0
-})
-const auditStatusText = computed(() => {
-  if (auditRunning.value) return t('episode.audit.shotStatus.running')
-  if (!auditJob.value) return t('episode.audit.shotStatus.pending')
-  if (auditJob.value.status === 'failed') return t('episode.audit.shotStatus.failed')
-  return t('episode.audit.issuesTitle', { n: auditIssueTotal.value })
-})
-const auditButtonLabel = computed(() =>
-  auditJob.value ? t('episode.audit.rerun') : t('episode.audit.button'))
-const auditProgressPercent = computed(() => {
-  const total = Number(auditJob.value?.total_windows ?? auditJob.value?.totalWindows ?? 0) || 0
-  const done = Number(auditJob.value?.completed_windows ?? auditJob.value?.completedWindows ?? 0) || 0
-  if (!total) return 0
-  return Math.min(100, Math.round(done / total * 100))
-})
-const auditSemanticNote = computed(() => {
-  const status = String(auditJob.value?.semantic_status || '')
-  if (status === 'disabled') return t('episode.audit.empty.semanticDisabled')
-  if (status === 'skipped_no_model') return t('episode.audit.empty.ruleOnly')
-  if (status === 'partial') return t('episode.audit.empty.semanticPartial')
-  if (status === 'failed') return t('episode.audit.empty.semanticFailed')
-  if (status === 'truncated') return t('episode.audit.empty.semanticTruncated')
-  return ''
-})
-function auditInsertedTransitionCount(job) {
-  const log = job?.repair_log || job?.repairLog || []
-  if (!Array.isArray(log)) return 0
-  return log.filter(entry => (
-    entry?.action === 'insert_transition_shot'
-    && entry?.result === 'applied'
-    && entry?.insertedStoryboardId
-  )).length
-}
-const auditPoll = useVisibilityPolling(async () => {
-  await loadStoryboardAudit({ silent: true })
-}, 3000)
-function applyAuditData(data, { notify = false } = {}) {
-  const job = data?.job || data || null
-  auditState.value = { loading: false, job, loaded: true }
-  if (!job?.id) return
-  const totalShots = Number(job.total_shots ?? job.totalShots ?? 0) || 0
-  if (job.status === 'done' && totalShots > 0 && totalShots !== sbs.value.length) {
-    void resyncStoryboards()
-  }
-  if (!notify) return
-  const id = String(job.id)
-  if (auditToastJob === id) return
-  if (job.status === 'done') {
-    auditToastJob = id
-    toast.success(t('episode.audit.runDone', { n: Number(job.fixed_count ?? job.fixedCount ?? 0) || 0 }))
-    const inserted = auditInsertedTransitionCount(job)
-    if (inserted > 0) toast.info(t('episode.audit.insertedDone', { n: inserted }))
-    const manual = Number(job.manual_count ?? job.manualCount ?? 0) || 0
-    if (manual > 0) toast.info(t('episode.audit.manualDone', { n: manual }))
-    const repaired = job.repair_status === 'done'
-      || job.repair_status === 'partial'
-      || Number(job.fixed_count ?? job.fixedCount ?? 0) > 0
-    if (repaired || inserted > 0 || job.rollback) void resyncStoryboards()
-  } else if (job.status === 'failed') {
-    auditToastJob = id
-    toast.error(t('episode.audit.panel.jobError', { message: job.error_msg || job.errorMsg || '' }))
-    if (job.rollback) void resyncStoryboards()
-  }
-}
-async function loadStoryboardAudit({ silent = false } = {}) {
-  if (!epId.value) return
-  const seq = ++auditRequestSeq
-  const previousStatus = String(auditState.value.job?.status || '')
-  if (!silent) auditState.value = { ...auditState.value, loading: true }
-  try {
-    const data = await storyboardAuditAPI.latest(epId.value)
-    if (seq !== auditRequestSeq) return
-    applyAuditData(data, { notify: ACTIVE_AUDIT_STATUSES.includes(previousStatus) })
-    scheduleAuditPoll()
-  } catch (e) {
-    if (seq !== auditRequestSeq) return
-    auditState.value = { ...auditState.value, loading: false }
-    if (!silent) toastError(e, { fallback: 'episode.audit.loadFailed' })
-  }
-}
-function scheduleAuditPoll() {
-  if (!auditRunning.value) {
-    auditPoll.stop()
-    return
-  }
-  auditPoll.start()
-}
-async function loadStoryboardAuditAfterSplit() {
-  const previousId = auditState.value.job?.id ?? null
-  for (let i = 0; i < 3; i++) {
-    if (i) await sleep(800)
-    if (!epId.value) return
-    try {
-      const data = await storyboardAuditAPI.latest(epId.value)
-      const job = data?.job || data || null
-      applyAuditData(data, { notify: !!job?.id && job.id !== previousId })
-      if (job?.id && job.id !== previousId) break
-    } catch { /* 下一轮继续 */ }
-  }
-  scheduleAuditPoll()
-}
-async function runStoryboardAudit() {
-  if (auditBusy.value || auditRunning.value || !epId.value) return
-  auditBusy.value = true
-  try {
-    const data = await storyboardAuditAPI.create({
-      episode_id: epId.value,
-      drama_id: dramaId,
-      trigger: 'manual',
-      model: chatModelOverride() || undefined,
-      config_id: chatConfigId() || undefined,
-    })
-    applyAuditData(data)
-    scheduleAuditPoll()
-  } catch (e) {
-    toastError(e, { fallback: 'episode.audit.loadFailed' })
-  } finally {
-    auditBusy.value = false
-  }
-}
-async function undoAuditRepair() {
-  const id = Number(auditJob.value?.id)
-  if (!id || auditBusy.value) return
-  auditBusy.value = true
-  try {
-    const data = await storyboardAuditAPI.undo(id)
-    applyAuditData(data)
-    await refresh()
-    const restored = Number(data?.restored ?? data?.job?.fixed_count ?? 0) || 0
-    toast.success(t('episode.audit.undoDone', { n: restored }))
-  } catch (e) {
-    toastError(e, { fallback: 'episode.audit.loadFailed' })
-  } finally {
-    auditBusy.value = false
-  }
-}
-function openAuditPanel(shotId = null) {
-  auditPanel.value = { open: true, shotId, filter: 'all' }
-  if (!auditState.value.loaded) loadStoryboardAudit({ silent: true })
-  scheduleAuditPoll()
-}
-function closeAuditPanel() {
-  auditPanel.value = { open: false, shotId: null, filter: 'all' }
-}
-function normalizeAuditIssue(issue, index) {
-  const storyboardId = issue?.storyboardId ?? issue?.storyboard_id ?? null
-  const status = String(issue?.status || 'open')
-  const repairable = !!(issue?.repairable ?? issue?.canRepair)
-  return {
-    ...issue,
-    id: issue?.id ?? `${storyboardId || 'x'}-${issue?.code || 'issue'}-${index}`,
-    check: Number(issue?.check) || 1,
-    storyboardId,
-    storyboardNumber: issue?.storyboardNumber ?? issue?.storyboard_number ?? null,
-    lineId: issue?.lineId ?? issue?.line_id ?? null,
-    severity: String(issue?.severity || 'warning'),
-    code: String(issue?.code || ''),
-    message: issue?.message || '',
-    evidence: issue?.evidence || '',
-    suggestion: issue?.suggestion || '',
-    repairable,
-    repairAction: issue?.repairAction ?? issue?.repair_action ?? null,
-    suggestedTransition: issue?.suggestedTransition ?? issue?.suggested_transition ?? null,
-    relatedStoryboardIds: issue?.relatedStoryboardIds ?? issue?.related_storyboard_ids ?? [],
-    status,
-    windowIndex: issue?.windowIndex ?? issue?.window_index ?? null,
-    manual: status === 'manual' || (status === 'open' && !repairable),
-    fixed: status === 'fixed' || status === 'repaired' || status === 'resolved',
-  }
-}
-function auditIssueVisible(issue) {
-  const filter = auditPanel.value.filter
-  if (filter === 'manual' && !issue.manual) return false
-  if (filter === 'fixed' && !issue.fixed) return false
-  if (!['all', 'manual', 'fixed'].includes(filter) && issue.severity !== filter) return false
-  if (auditPanel.value.shotId) return issue.storyboardId === auditPanel.value.shotId
-  return true
-}
-const auditPanelIssues = computed(() => {
-  const raw = auditJob.value?.issues || []
-  return raw.map((issue, index) => normalizeAuditIssue(issue, index)).filter(auditIssueVisible)
-})
-const auditFilterOptions = [
-  { key: 'all' }, { key: 'error' }, { key: 'warning' }, { key: 'info' }, { key: 'manual' }, { key: 'fixed' },
-]
-const auditPanelFilter = computed({
-  get: () => auditPanel.value.filter,
-  set: value => { auditPanel.value = { ...auditPanel.value, filter: value } },
-})
-const auditCheckGroups = computed(() => AUDIT_CHECKS.map(check => ({
-  check,
-  issues: auditPanelIssues.value.filter(issue => issue.check === check),
-})).filter(group => group.issues.length))
-function auditIssueText(issue) {
-  const key = `episode.audit.code.${issue?.code}`
-  if (issue?.code && te(key)) return t(key)
-  return issue?.message || issue?.suggestion || issue?.code || ''
-}
-function auditShotState(sb) {
-  const empty = {
-    status: 'pending', stale: false, ruleOnly: false, errorCount: 0, warningCount: 0, infoCount: 0,
-  }
-  const job = auditJob.value
-  if (!job) return empty
-  const map = job.shot_status || job.shotStatus || {}
-  const entry = map?.[sb?.id] ?? map?.[String(sb?.id)] ?? null
-  if (!entry) return empty
-  const raw = String(entry.status || '')
-  const status = ['pending', 'running', 'done', 'failed', 'ruleOnly'].includes(raw) ? raw : 'pending'
-  return {
-    status,
-    stale: !!(entry.stale ?? entry.isStale),
-    ruleOnly: status === 'ruleOnly' || !!(entry.ruleOnly ?? entry.rule_only),
-    errorCount: Number(entry.errorCount ?? entry.error_count ?? 0) || 0,
-    warningCount: Number(entry.warningCount ?? entry.warning_count ?? 0) || 0,
-    infoCount: Number(entry.infoCount ?? entry.info_count ?? 0) || 0,
-  }
-}
-function auditShotDisplay(sb) {
-  const shot = auditShotState(sb)
-  const total = shot.errorCount + shot.warningCount + shot.infoCount
-  const severity = shot.errorCount > 0 ? 'error' : shot.warningCount > 0 ? 'warning' : shot.infoCount > 0 ? 'info' : ''
-  const count = shot.errorCount + shot.warningCount
-  if (shot.stale) {
-    return {
-      state: 'stale',
-      severity,
-      count,
-      title: `${t('episode.audit.shotStatus.stale')}${total ? ` · ${t('episode.audit.issuesTitle', { n: total })}` : ''}`,
-    }
-  }
-  if (shot.status === 'running') return { state: 'running', severity: '', count: 0, title: t('episode.audit.shotStatus.running') }
-  if (shot.status === 'failed') return { state: 'failed', severity: '', count: 0, title: t('episode.audit.shotStatus.failed') }
-  if (shot.errorCount > 0) {
-    return { state: 'error', severity: 'error', count, title: `${t('episode.audit.severity.error')} · ${t('episode.audit.issuesTitle', { n: total })}` }
-  }
-  if (shot.warningCount > 0) {
-    return { state: 'warning', severity: 'warning', count, title: `${t('episode.audit.severity.warning')} · ${t('episode.audit.issuesTitle', { n: total })}` }
-  }
-  if (shot.infoCount > 0) {
-    return { state: 'warning', severity: 'info', count: 0, title: `${t('episode.audit.severity.info')} · ${t('episode.audit.issuesTitle', { n: total })}` }
-  }
-  if (shot.ruleOnly) return { state: 'rule_only', severity: '', count: 0, title: t('episode.audit.shotStatus.ruleOnly') }
-  if (shot.status === 'done') return { state: 'pass', severity: '', count: 0, title: t('episode.audit.cleanTitle') }
-  return { state: 'pending', severity: '', count: 0, title: t('episode.audit.shotStatus.pending') }
-}
-// 已拍板 D12：通过的镜头干净就隐藏；只显示待检/排队/进行中/警告/错误/过期/失败/仅规则。
-function auditShotMarkerVisible(sb) {
-  if (!auditJob.value) return false
-  const view = auditShotDisplay(sb)
-  return view.state !== 'pass' && view.state !== 'none'
-}
 function storyboardTransitionKind(sb) {
   const kind = String(sb?.transition_kind || sb?.transitionKind || '')
   return ['empty', 'scene', 'text'].includes(kind) ? kind : ''
@@ -3918,26 +3642,6 @@ function storyboardTransitionLabel(sb) {
   if (!kind) return ''
   return `${t('episode.audit.transition.badge')} · ${t(`episode.audit.transition.kind.${kind}`)}`
 }
-const auditPanelShot = computed(() =>
-  sbs.value.find(sb => sb.id === auditPanel.value.shotId) || null)
-function locateAuditShot(issue) {
-  const storyboardId = issue?.storyboardId
-  if (!storyboardId) return
-  videoListFilter.value = ''
-  const sb = sbs.value.find(item => item.id === storyboardId)
-  if (!sb) return
-  selectedSb.value = sb
-  auditPanel.value = { open: false, shotId: null, filter: 'all' }
-  void nextTick(() => {
-    document.querySelector(`[data-sb-id="${storyboardId}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  })
-}
-function gotoAssetPage() {
-  panel.value = 'production'
-  prodTab.value = 'assets'
-  closeAuditPanel()
-}
-
 // ===== 自定义过渡镜头：转场 / 空镜 / 场景 / 文字视频 =====
 const TRANSITION_CUSTOM_DURATIONS = [2, 2.5, 3, 3.5, 4, 4.5, 5]
 const FADE_STYLE_VALUES = ['dissolve', 'dip-black', 'dip-white', 'wipe-left', 'slide-left', 'circle-open']
@@ -4019,25 +3723,6 @@ function openTransitionCreate(boundary = null) {
 function openTransitionCreateForBoundary(boundary) {
   openTransitionCreate(boundary)
 }
-function openTransitionCreateFromIssue(issue) {
-  const primaryId = Number(issue?.storyboardId ?? issue?.storyboard_id ?? 0) || 0
-  const relatedIds = issue?.relatedStoryboardIds ?? issue?.related_storyboard_ids ?? []
-  const ids = new Set()
-  if (primaryId) ids.add(primaryId)
-  for (const id of (Array.isArray(relatedIds) ? relatedIds : [])) {
-    const value = Number(id)
-    if (value) ids.add(value)
-  }
-  const pair = transitionCreatePairs.value.find(item => ids.has(item.fromId) && ids.has(item.toId))
-    || (primaryId
-      ? transitionCreatePairs.value.find(item => item.fromId === primaryId || item.toId === primaryId)
-      : null)
-  openTransitionCreate(pair ? { from_storyboard_id: pair.fromId, to_storyboard_id: pair.toId } : null)
-  const kind = String(issue?.suggestedTransition ?? issue?.suggested_transition ?? '')
-  if (['empty', 'scene', 'text'].includes(kind)) {
-    transitionCreate.value.kind = kind
-  }
-}
 function transitionCreatePairLabel() {
   const from = sbs.value.find(sb => sb.id === transitionCreate.value.fromId)
   const to = sbs.value.find(sb => sb.id === transitionCreate.value.toId)
@@ -4049,10 +3734,6 @@ function closeTransitionCreate() {
 }
 async function transitionCreateSubmit() {
   if (transitionCreate.value.submitting) return
-  if (auditRunning.value) {
-    toast.warning(t('episode.audit.runningBlocked'))
-    return
-  }
   let fromId = Number(transitionCreate.value.fromId)
   let toId = Number(transitionCreate.value.toId)
   if (!fromId || !toId) {
@@ -4097,7 +3778,6 @@ async function transitionCreateSubmit() {
     toast.success(t('episode.audit.transition.submitted'))
     closeTransitionCreate()
     await loadTransitions()
-    loadStoryboardAudit({ silent: true })
   } catch (e) {
     transitionCreate.value.submitting = false
     toastError(e, { fallback: 'episode.audit.transition.failed' })
@@ -4566,7 +4246,6 @@ onBeforeUnmount(() => {
   stopGenTasksPolling()
   stopTransitionPolling()
   stopMergePolling()
-  auditPoll.stop()
   breakdownPoll.stop()
   videoBatchPoll.stop()
   comfyPollSeq++
@@ -6477,7 +6156,7 @@ async function refresh() {
   try { mergeData.value = await mergeAPI.status(epId.value) } catch {}
   // 刷新后若合并仍在进行，恢复轮询，保证状态卡最终收敛
   if (mergeData.value?.status === 'pending' || mergeData.value?.status === 'processing') startMergePolling()
-  await Promise.all([loadGenTasks(), loadExportMerges(), loadFrameAssets(), loadStoryboardAudit({ silent: true })])
+  await Promise.all([loadGenTasks(), loadExportMerges(), loadFrameAssets()])
 }
 
 const { remoteChange, applyRemoteChange, keepLocalChanges } = useSyncedRefresh({
@@ -6630,7 +6309,6 @@ function selectMissingVideos() {
 }
 
 async function batchVideoPrompts() {
-  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   if (videoPromptBatch.value.running || !epId.value) return
   if (!sbs.value.length) { toast.warning(t('episode.sb.breakFirst')); return }
   // 选择模式下有勾选 → 仅补齐所选；否则全量补齐缺失
@@ -6678,7 +6356,6 @@ function pollVideoPromptBatch(attempts = 240) {
   setTimeout(() => tick(attempts), 2500)
 }
 async function doBreakdown() {
-  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   if (rn.value || methodSaving.value || splitStarting.value || splitRunning.value) return
   if (sbs.value.length > 0) {
     const confirmed = window.confirm(t('episode.sb.rebreakConfirm', { n: sbs.value.length, method: currentBreakdownMethodName.value }))
@@ -6702,12 +6379,13 @@ async function doBreakdown() {
   // 分块拆分在后端逐段调用并即时保存；旧分镜替换、跨段镜头编号都由系统处理，无需在指令里声明
   splitStarting.value = true
   try {
-    const result = await storyboardPipelineAPI.create({
+    const result = await pipelineChainAPI.createRun({
       episode_id: epId.value,
       drama_id: dramaId,
       message: rule,
       model: chatModelOverride(),
       config_id: chatConfigId(),
+      chain_key: selectedChainKey.value,
     })
     if (!result?.job) {
       toast.error(t('episode.sb.splitStartFailed'))
@@ -6726,12 +6404,11 @@ async function doBreakdown() {
 
 /** 从断点继续拆分：后端跳过已完成分段，只重跑未完成分段 */
 async function resumeSplit() {
-  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   const job = splitJob.value
   if (!job?.id || splitStarting.value || splitRunning.value) return
   splitStarting.value = true
   try {
-    const result = await storyboardPipelineAPI.resume(job.id)
+    const result = await pipelineChainAPI.resume(job.id)
     if (result?.job) {
       applySplitJob(result.job, { silent: true })
       if (splitRunning.value) startSplitPolling()
@@ -6747,14 +6424,12 @@ async function resumeSplit() {
 /** 拆分完成后刷新并自动补齐缺失的视频提示词（兜住 Agent 漏写/截断） */
 async function onBreakdownDone() {
   await refresh()
-  void loadStoryboardAuditAfterSplit()
   const missing = sbs.value.filter(sb => !(sb.video_prompt || sb.videoPrompt || '').trim())
   if (missing.length) batchVideoPrompts()
 }
 
 // 按需为单个分镜生成视频提示词：由 prompt_generator 读取分镜字段生成并保存到 video_prompt
 async function genVideoPrompt(sb) {
-  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   if (!sb || videoPromptGeneratingIds.value.includes(sb.id)) return
   const idx = sbs.value.indexOf(sb) + 1
   const cfg = selectedVideoConfig.value
@@ -7624,7 +7299,6 @@ async function ensureGenerationGate(sb, opts = {}) {
 }
 
 async function genVid(sb, opts = {}) {
-  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   if (!opts.skipGate && !(await ensureGenerationGate(sb, opts))) return
   if (isComfyVideoMode.value) {
     if (!opts.silent) toast.warning(t('episode.comfy.nativeOnly'))
@@ -7940,7 +7614,6 @@ function transitionTargetCount(ids, boundaries = null) {
     .length
 }
 async function prepareTransitionsFor(ids, options = {}) {
-  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   if (transitionPreparing.value || !epId.value) return
   if (!transitionSupported.value) {
     toast.error(t('episode.export.aiTransition.unsupported'))
@@ -7989,7 +7662,6 @@ async function generateMissingTransitions() {
   })
 }
 async function retryTransitionItem(boundary) {
-  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   if (!boundary?.id || transitionPreparing.value) return
   transitionPreparing.value = true
   try {
@@ -8134,7 +7806,6 @@ async function saveTransitionPromptItem(boundary) {
   }
 }
 async function regenerateTransitionWithPrompt(boundary) {
-  if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
   const key = transitionPromptKey(boundary)
   if (!boundary?.id || transitionPromptBusy.value[key]) return
   const prompt = transitionPromptDraftOf(boundary)
@@ -8383,6 +8054,7 @@ watch(panel, (current) => {
 
 onMounted(async () => {
   void loadBreakdownMethods()
+  void loadChainTemplates()
   await refresh()
   // 恢复本集最近一次分块拆分任务（运行中继续显示进度，失败/中断显示续拆入口）
   void restoreSplitJob()
@@ -9334,6 +9006,21 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 .video-split-chunk.is-failed { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 .video-split-chunk-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .video-split-chunk-shots { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.video-split-chunk.is-shot { cursor: pointer; }
+.video-split-chunk.is-shot:hover { border-color: var(--border-strong); background: var(--fill-1); }
+.video-split-manual {
+  margin-top: 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+}
+.video-split-manual-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.video-split-manual-desc { color: var(--text-3); font-size: 12px; line-height: 1.6; }
+.video-split-manual-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 @keyframes split-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 
 /* ComfyUI 监控舞台：右侧嵌入官方工作流页面，网关校验路径票据 */
@@ -10431,58 +10118,6 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .video-task-row:hover .video-task-delete,
 .video-task-delete:focus-visible { opacity: 1; }
 .video-task-delete:hover { color: var(--error); }
-.video-task-audit {
-  justify-self: end;
-  align-self: center;
-  min-width: 28px;
-  min-height: 28px;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  position: relative;
-}
-.audit-shot-pending { color: var(--text-3); }
-.audit-shot-running { color: var(--accent-text); }
-.audit-shot-done { color: var(--success); }
-.audit-shot-failed { color: var(--warning); }
-.audit-shot-ruleOnly { color: var(--accent-text); }
-.audit-shot-stale { color: var(--warning); }
-.video-task-audit-badge {
-  position: absolute;
-  top: -3px;
-  right: -5px;
-  min-width: 13px;
-  height: 13px;
-  padding: 0 3px;
-  border-radius: 999px;
-  background: var(--warning);
-  color: #fff;
-  font-size: 8px;
-  line-height: 13px;
-  font-weight: 700;
-  text-align: center;
-}
-.video-task-audit-stale {
-  position: absolute;
-  bottom: 1px;
-  right: 1px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--warning);
-}
-.episode-audit-btn { white-space: nowrap; }
-.episode-audit-status {
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-raised);
-  color: var(--text-2);
-  font-size: 11px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.episode-audit-status:hover { border-color: var(--border-strong); color: var(--text-1); }
 .video-task-more {
   justify-self: end;
   align-self: center;
@@ -11688,6 +11323,31 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   flex: 1;
   justify-content: center;
 }
+.pipeline-trace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  overflow: auto;
+}
+.pipeline-trace-step {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.pipeline-trace-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.pipeline-trace-issues {
+  margin-top: 4px;
+  color: var(--danger, #d9534f);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .audit-progress {
   display: flex;
   align-items: center;
@@ -11723,16 +11383,6 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   padding: 8px 16px;
   border-bottom: 1px solid var(--surface-outline);
   font-size: 11px;
-  color: var(--text-2);
-}
-.audit-shot-scope {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--surface-outline);
-  font-size: 12px;
   color: var(--text-2);
 }
 .audit-filter-row {

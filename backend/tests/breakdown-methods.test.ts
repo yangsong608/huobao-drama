@@ -537,7 +537,7 @@ test('分镜 Agent（拆分/导演）读取方案块，拼接顺序固定', () =
   assert.equal([...source.matchAll(/getEpisodeBreakdownBlock\(/g)].length, 1)
   assert.match(
     source,
-    /\['storyboard_breaker', 'storyboard_director'\][\s\S]{0,160}getEpisodeBreakdownBlock\(getEpisodeId\(requestContext\)\)/,
+    /\['storyboard_breaker', 'storyboard_director'\][\s\S]{0,200}getEpisodeBreakdownBlock\(\s*getEpisodeId\(requestContext\),[\s\S]{0,160}pipelineBreakdownMethod/,
   )
   assert.match(source, /base: baseInstructions,\s*knowledge: knowledge\.text,\s*skills: skillInstructions,\s*breakdown,/)
   assert.match(source, /breakdown,\s*unit: \['storyboard_breaker', 'storyboard_director'\][\s\S]{0,80}voice: voiceInstructions,\s*language: languageDirective,/)

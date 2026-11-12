@@ -83,9 +83,9 @@ test('路由类型守卫只接受 storyboard_auditor', async () => {
   assert.match(((await latest.json()) as any).message, /该 Agent 不支持动作检验/)
 })
 
-test('创建检验返回任务，按 ID 与最近一次均可读取，规则结果带逐镜状态', async () => {
+test('旧批量动作检验停止写入，历史任务仍可只读查询', async () => {
   const episodeId = createEpisode()
-  const shotId = createShot(episodeId)
+  createShot(episodeId)
 
   const created = await api.request('/agent/storyboard_auditor/audit-jobs', {
     method: 'POST',
@@ -93,70 +93,18 @@ test('创建检验返回任务，按 ID 与最近一次均可读取，规则结�
     body: JSON.stringify({ episode_id: episodeId, drama_id: DRAMA_ID, trigger: 'manual' }),
   })
   const createdBody = await created.json() as any
-  assert.equal(created.status, 200, JSON.stringify(createdBody))
-  assert.equal(createdBody.data.already_running, false)
-  assert.equal(createdBody.data.job.episode_id, episodeId)
-  assert.equal(createdBody.data.job.trigger, 'manual')
-
-  const view = await waitJob(createdBody.data.job.id)
-  assert.equal(view.status, 'done')
-  assert.equal(view.semantic_status, 'skipped_no_model')
-  assert.equal(view.shot_status[String(shotId)].status, 'done')
-  assert.equal(view.shot_status[String(shotId)].ruleOnly, true)
-
-  const byId = await api.request(`/agent/storyboard_auditor/audit-jobs/${view.id}`)
-  const byIdBody = await byId.json() as any
-  assert.equal(byId.status, 200)
-  assert.equal(byIdBody.data.job.id, view.id)
+  assert.equal(created.status, 410)
+  assert.match(createdBody.error.message, /已下线/)
 
   const latest = await api.request(`/agent/storyboard_auditor/audit-jobs/latest/${episodeId}`)
-  const latestBody = await latest.json() as any
   assert.equal(latest.status, 200)
-  assert.equal(latestBody.data.job.id, view.id)
+  assert.equal(((await latest.json()) as any).data.job, null)
 
-  const unknownEpisode = await api.request('/agent/storyboard_auditor/audit-jobs/latest/999999')
-  assert.equal(unknownEpisode.status, 200)
-  assert.equal(((await unknownEpisode.json()) as any).data.job, null)
+  const byId = await api.request('/agent/storyboard_auditor/audit-jobs/1')
+  assert.equal(byId.status, 404)
 
-  const unknownJob = await api.request('/agent/storyboard_auditor/audit-jobs/999999')
-  assert.equal(unknownJob.status, 404)
-})
-
-test('已有进行中的检验时创建接口返回原任务并标记 already_running', async () => {
-  const episodeId = createEpisode()
-  createShot(episodeId)
-  const existing = await svc.createStoryboardAuditJob(
-    { episodeId, dramaId: DRAMA_ID },
-    { autorun: false },
-  )
-
-  const res = await api.request('/agent/storyboard_auditor/audit-jobs', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ episode_id: episodeId, drama_id: DRAMA_ID }),
-  })
-  const body = await res.json() as any
-  assert.equal(res.status, 200)
-  assert.equal(body.data.already_running, true)
-  assert.equal(body.data.job.id, existing.job.id)
-})
-
-test('撤销接口在没有修复快照时返回明确错误，未知任务同样拒绝', async () => {
-  const episodeId = createEpisode()
-  createShot(episodeId)
-  const { job } = await svc.createStoryboardAuditJob({ episodeId, dramaId: DRAMA_ID }, { autorun: false })
-  await svc.runStoryboardAuditJob(job.id)
-
-  const done = svc.getStoryboardAuditJob(job.id)!
-  assert.equal(done.status, 'done')
-
-  const undo = await api.request(`/agent/storyboard_auditor/audit-jobs/${job.id}/undo`, { method: 'POST' })
-  assert.equal(undo.status, 400)
-  assert.match(((await undo.json()) as any).message, /没有可撤销的修复/)
-
-  const missing = await api.request('/agent/storyboard_auditor/audit-jobs/999999/undo', { method: 'POST' })
-  assert.equal(missing.status, 400)
-  assert.match(((await missing.json()) as any).message, /检验任务不存在/)
+  const undo = await api.request('/agent/storyboard_auditor/audit-jobs/1/undo', { method: 'POST' })
+  assert.equal(undo.status, 410)
 })
 
 test('启动恢复原因与设计文案一致，并清理残留 processing 任务', async () => {

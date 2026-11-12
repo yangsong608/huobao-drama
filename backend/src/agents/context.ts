@@ -31,6 +31,11 @@ export interface AgentRequestContextValues {
   /** 四段式管线：阶段（skeleton / repair / sound）与当前任务 */
   pipelineJobId?: number
   pipelineStage?: 'skeleton' | 'repair' | 'sound'
+  /** 链式流水线：当前步骤与步骤级知识绑定；设置后优先于 Agent 默认知识 */
+  pipelineStepKey?: string
+  pipelineKnowledgeIds?: string[]
+  /** 链式流水线：本次运行覆盖的拆分方案 key；inherit/空表示跟随剧集 */
+  pipelineBreakdownMethod?: string
   /** 预拆：当前块剧本、块序号与起始镜号 */
   pipelineChunkScript?: string
   pipelineChunkIndex?: number
@@ -66,6 +71,9 @@ export function buildAgentRequestContext(values: AgentRequestContextValues): Req
   if (values.auditPairKey) rc.set('auditPairKey', values.auditPairKey)
   if (typeof values.pipelineJobId === 'number') rc.set('pipelineJobId', values.pipelineJobId)
   if (values.pipelineStage) rc.set('pipelineStage', values.pipelineStage)
+  if (values.pipelineStepKey) rc.set('pipelineStepKey', values.pipelineStepKey)
+  if (values.pipelineKnowledgeIds) rc.set('pipelineKnowledgeIds', values.pipelineKnowledgeIds)
+  if (values.pipelineBreakdownMethod) rc.set('pipelineBreakdownMethod', values.pipelineBreakdownMethod)
   if (values.pipelineChunkScript) rc.set('pipelineChunkScript', values.pipelineChunkScript)
   if (typeof values.pipelineChunkIndex === 'number') rc.set('pipelineChunkIndex', values.pipelineChunkIndex)
   if (typeof values.pipelineChunkTotal === 'number') rc.set('pipelineChunkTotal', values.pipelineChunkTotal)

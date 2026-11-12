@@ -18,7 +18,7 @@ import { createVoiceProfileTools } from './tools/voice-profile-tools.js'
 import { storyboardAuditTools } from './tools/storyboard-audit-tools.js'
 import { loadAgentSkills, skillWorkspaces } from './skills.js'
 import { loadAgentPromptFile, loadBasePromptFile } from './prompts.js'
-import { loadAssignedKnowledge } from './knowledge.js'
+import { loadAssignedKnowledge, loadKnowledgeByIds } from './knowledge.js'
 import { buildLanguageDirective } from './language.js'
 import { getContentLanguageFromRC, getEpisodeId } from './context.js'
 import { getVoiceReferenceInstructions } from './voice-reference-instructions.js'
@@ -472,10 +472,16 @@ function buildInstructions(type: string) {
     const lang = getContentLanguageFromRC(requestContext)
     const promptFile = await loadAgentPromptFile(type, lang)
     const baseInstructions = promptFile?.instructions || defaults.instructions
-    const knowledge = await loadAssignedKnowledge(type, lang)
+    const stepKnowledgeIds = requestContext?.get('pipelineKnowledgeIds' as never) as string[] | undefined
+    const knowledge = Array.isArray(stepKnowledgeIds) && stepKnowledgeIds.length
+      ? await loadKnowledgeByIds(stepKnowledgeIds, lang)
+      : await loadAssignedKnowledge(type, lang)
     const skillInstructions = await loadAgentSkills(type, lang)
     const breakdown = ['storyboard_breaker', 'storyboard_director'].includes(type)
-      ? getEpisodeBreakdownBlock(getEpisodeId(requestContext))
+      ? getEpisodeBreakdownBlock(
+          getEpisodeId(requestContext),
+          requestContext?.get('pipelineBreakdownMethod' as never) as string | undefined,
+        )
       : null
     const languageDirective = buildLanguageDirective(lang)
     const voiceInstructions = getVoiceReferenceInstructions(type, lang)

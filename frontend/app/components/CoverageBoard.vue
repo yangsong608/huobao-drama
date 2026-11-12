@@ -66,11 +66,6 @@
               左 {{ shot.screenLeft.join('、') || '—' }} · 右 {{ shot.screenRight.join('、') || '—' }}
             </div>
           </div>
-          <AuditStateBadge
-            v-if="auditFor"
-            v-bind="auditFor(shot)"
-            @open="$emit('select', shot)"
-          />
         </div>
       </div>
     </section>
@@ -83,7 +78,6 @@ import { Loader2 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { toastError } from '~/composables/useToast'
 import { planningAPI, storyboardAPI } from '~/composables/useApi'
-import AuditStateBadge from '~/components/AuditStateBadge.vue'
 
 const props = defineProps({
   episodeId: { type: Number, default: 0 },
@@ -91,7 +85,6 @@ const props = defineProps({
   scenes: { type: Array, default: () => [] },
   characters: { type: Array, default: () => [] },
   selectedId: { type: Number, default: null },
-  auditFor: { type: Function, default: null },
 })
 defineEmits(['select', 'open-geography'])
 

@@ -12,6 +12,7 @@
     "test:structure": "node --test tests/*.test.mjs",
     "drift": "node scripts/drift-check.mjs",
     "backfill-artwork": "tsx scripts/backfill-artwork.ts",
+    "archive:legacy-pipeline": "tsx scripts/archive-legacy-pipeline-jobs.ts",
     "preflight": "tsx scripts/preflight.ts",
     "verify:schema": "tsx scripts/verify-schema.ts",
     "dialogue:preview": "tsx scripts/dialogue-preview.ts",

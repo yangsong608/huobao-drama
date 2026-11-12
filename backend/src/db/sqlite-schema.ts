@@ -193,6 +193,7 @@ export const sqliteSchemaStatements = [
     description TEXT NOT NULL DEFAULT '',
     prompt TEXT NOT NULL DEFAULT '',
     skill TEXT NOT NULL DEFAULT '',
+    max_duration_seconds INTEGER NOT NULL DEFAULT 15,
     builtin INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -459,6 +460,12 @@ export const sqliteSchemaStatements = [
     drama_id INTEGER NOT NULL,
     status TEXT DEFAULT 'pending',
     stage TEXT DEFAULT 'skeleton',
+    chain_key TEXT NOT NULL DEFAULT 'standard-four-stage',
+    chain_version TEXT DEFAULT '1',
+    parameters_json TEXT,
+    snapshot_json TEXT,
+    current_step_key TEXT,
+    run_started_at TEXT,
     message TEXT NOT NULL,
     model TEXT,
     config_id INTEGER,
@@ -506,6 +513,79 @@ export const sqliteSchemaStatements = [
     updated_at TEXT NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_storyboard_skeletons_job ON storyboard_skeletons (job_id, storyboard_number)`,
+
+  `CREATE TABLE IF NOT EXISTS pipeline_chains (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT,
+    version TEXT NOT NULL DEFAULT '1',
+    definition_json TEXT NOT NULL,
+    builtin INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS pipeline_plugins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL DEFAULT '1',
+    kind TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    builtin INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS pipeline_rule_packs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL DEFAULT '1',
+    rules_json TEXT NOT NULL,
+    builtin INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS pipeline_chain_overrides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_type TEXT NOT NULL DEFAULT 'global',
+    scope_id INTEGER NOT NULL DEFAULT 0,
+    chain_key TEXT NOT NULL,
+    overrides_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_pipeline_chain_overrides_scope ON pipeline_chain_overrides (scope_type, scope_id, chain_key)`,
+
+  `CREATE TABLE IF NOT EXISTS pipeline_step_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL,
+    step_key TEXT NOT NULL,
+    step_version TEXT,
+    scope TEXT NOT NULL,
+    item_key TEXT NOT NULL DEFAULT 'episode',
+    status TEXT NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    issues_json TEXT,
+    input_json TEXT,
+    output_json TEXT,
+    prompt_hash TEXT,
+    knowledge_hash TEXT,
+    rule_pack_hash TEXT,
+    model TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_pipeline_step_runs_job ON pipeline_step_runs (job_id, step_key, item_key)`,
+  `CREATE INDEX IF NOT EXISTS idx_pipeline_step_runs_status ON pipeline_step_runs (job_id, status)`,
 
   `CREATE TABLE IF NOT EXISTS sound_plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1595,6 +1675,12 @@ export function initSqliteSchema(sqlite: Database.Database) {
   }
   // 分镜拆分方案：旧库补可空列，历史集为空等同 standard。
   if (!episodeColumns.has('breakdown_method')) sqlite.exec('ALTER TABLE episodes ADD COLUMN breakdown_method TEXT')
+  const breakdownColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(breakdown_methods)').all() as { name: string }[]).map(row => row.name),
+  )
+  if (!breakdownColumns.has('max_duration_seconds')) {
+    sqlite.exec('ALTER TABLE breakdown_methods ADD COLUMN max_duration_seconds INTEGER NOT NULL DEFAULT 15')
+  }
 
   // ===== V2 列扩展：只加列，不改旧列，历史数据保持原样 =====
   // 配音状态、字幕与单集 BGM/原声策略
@@ -1697,6 +1783,22 @@ export function initSqliteSchema(sqlite: Database.Database) {
     (sqlite.prepare('PRAGMA table_info(storyboard_audit_jobs)').all() as { name: string }[]).map(row => row.name),
   )
   if (!auditJobColumns.has('policy_json')) sqlite.exec('ALTER TABLE storyboard_audit_jobs ADD COLUMN policy_json TEXT')
+
+  // 链式分镜流水线：旧库补齐链 key/版本、生效参数、运行快照与当前步骤。
+  const pipelineJobColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(storyboard_pipeline_jobs)').all() as { name: string }[]).map(row => row.name),
+  )
+  const pipelineRunColumns: Record<string, string> = {
+    chain_key: "TEXT NOT NULL DEFAULT 'standard-four-stage'",
+    chain_version: "TEXT DEFAULT '1'",
+    parameters_json: 'TEXT',
+    snapshot_json: 'TEXT',
+    current_step_key: 'TEXT',
+    run_started_at: 'TEXT',
+  }
+  for (const [name, type] of Object.entries(pipelineRunColumns)) {
+    if (!pipelineJobColumns.has(name)) sqlite.exec(`ALTER TABLE storyboard_pipeline_jobs ADD COLUMN ${name} ${type}`)
+  }
   // 台词时间段覆盖：旧库补列；为空时仍按分镜时长自动排布。
   const lineColumns = new Set((sqlite.prepare('PRAGMA table_info(storyboard_lines)').all() as { name: string }[]).map(c => c.name))
   if (!lineColumns.has('voice_start_ms')) sqlite.exec('ALTER TABLE storyboard_lines ADD COLUMN voice_start_ms INTEGER')

@@ -21,7 +21,7 @@
       "id": "short-drama-grammar",
       "name": "短剧叙事与节奏",
       "description": "短剧结构、节拍、时长预算、对白容量、竖屏/横屏差异和常见失败模式。",
-      "agents": ["storyboard_breaker"],
+      "agents": ["storyboard_breaker", "storyboard_director"],
       "required": true,
       "enabled": true
     },
@@ -29,7 +29,7 @@
       "id": "storyboard-direction",
       "name": "分镜与导演语法",
       "description": "景别、角度、运镜、构图、轴线、正反打、过肩、反应、动作匹配、场景地理和覆盖模板。",
-      "agents": ["storyboard_breaker"],
+      "agents": ["storyboard_breaker", "storyboard_director"],
       "required": true,
       "enabled": true
     },
@@ -37,7 +37,7 @@
       "id": "continuity-and-transitions",
       "name": "前后镜连贯与过渡分镜",
       "description": "成对合同、尾帧/首帧、六条连贯规则，以及时间/场景/人物过渡空镜的用法。",
-      "agents": ["storyboard_breaker", "storyboard_auditor", "prompt_generator"],
+      "agents": ["storyboard_breaker", "storyboard_director", "storyboard_auditor", "prompt_generator"],
       "required": true,
       "enabled": true
     },

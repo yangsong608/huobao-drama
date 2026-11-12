@@ -91,6 +91,7 @@ export function ensureBreakdownMethodsSeeded(force = false): Promise<void> {
             description: seed.description,
             prompt: seed.prompt,
             skill: seed.skill,
+            maxDurationSeconds: seed.maxSegmentSeconds,
             builtin: 1,
             sortOrder: seed.sortOrder,
             createdAt: timestamp,
@@ -103,6 +104,7 @@ export function ensureBreakdownMethodsSeeded(force = false): Promise<void> {
           || existing.description !== seed.description
           || existing.prompt !== seed.prompt
           || existing.skill !== seed.skill
+          || Number(existing.maxDurationSeconds || 0) !== seed.maxSegmentSeconds
         if (!untouched || !outdated) continue
         tx.update(schema.breakdownMethods)
           .set({
@@ -110,6 +112,7 @@ export function ensureBreakdownMethodsSeeded(force = false): Promise<void> {
             description: seed.description,
             prompt: seed.prompt,
             skill: seed.skill,
+            maxDurationSeconds: seed.maxSegmentSeconds,
             sortOrder: seed.sortOrder,
           })
           .where(eq(schema.breakdownMethods.key, seed.key))
@@ -179,16 +182,30 @@ export interface EpisodeCoverage {
   ok: boolean
 }
 
-/** 当前方案的单段最长秒数；空值/自定义缺失按标准方案 15 秒 */
+/** 当前方案的单段最长秒数；空值/自定义缺失按 15 秒 */
 export function getMaxSegmentSeconds(breakdownMethod?: string | null): number {
-  const seed = breakdownMethod
-    ? DEFAULT_BREAKDOWN_METHODS.find(item => item.key === breakdownMethod)
-    : null
+  if (!breakdownMethod) return 15
+  try {
+    const row = db
+      .select({ maxDurationSeconds: schema.breakdownMethods.maxDurationSeconds })
+      .from(schema.breakdownMethods)
+      .where(eq(schema.breakdownMethods.key, breakdownMethod))
+      .get()
+    if (row && Number(row.maxDurationSeconds) > 0) return Number(row.maxDurationSeconds)
+  } catch {
+    // 未初始化/只读环境回退静态种子
+  }
+  const seed = DEFAULT_BREAKDOWN_METHODS.find(item => item.key === breakdownMethod)
   return seed?.maxSegmentSeconds ?? 15
 }
 
 /** 按剧本字数与方案单段上限计算段落数下限，用于判定本次拆分是否覆盖全剧 */
-export function getEpisodeCoverage(episodeId?: number | null): EpisodeCoverage | null {
+export function getEpisodeCoverage(
+  episodeId?: number | null,
+  floorRatio = 0.9,
+  actualOverride?: number,
+  breakdownMethodOverride?: string | null,
+): EpisodeCoverage | null {
   if (!episodeId) return null
   const episode = db
     .select({
@@ -204,9 +221,12 @@ export function getEpisodeCoverage(episodeId?: number | null): EpisodeCoverage |
 
   const script = (episode.scriptContent || episode.content || '').replace(/\s+/g, '')
   const scriptChars = [...script].length
-  const maxSegmentSeconds = getMaxSegmentSeconds(episode.breakdownMethod)
+  const methodKey = breakdownMethodOverride && breakdownMethodOverride !== 'inherit'
+    ? breakdownMethodOverride
+    : episode.breakdownMethod
+  const maxSegmentSeconds = getMaxSegmentSeconds(methodKey)
   const targetSeconds = Math.round(scriptChars * 0.12)
-  const floor = targetSeconds > 0 ? Math.ceil((targetSeconds / maxSegmentSeconds) * 0.9) : 0
+  const floor = targetSeconds > 0 ? Math.ceil((targetSeconds / maxSegmentSeconds) * floorRatio) : 0
   const row = db
     .select({ total: count() })
     .from(schema.storyboards)
@@ -215,7 +235,7 @@ export function getEpisodeCoverage(episodeId?: number | null): EpisodeCoverage |
       isNull(schema.storyboards.deletedAt),
     ))
     .get()
-  const actual = Number(row?.total ?? 0)
+  const actual = typeof actualOverride === 'number' ? actualOverride : Number(row?.total ?? 0)
 
   return {
     episodeId,
@@ -241,6 +261,7 @@ export function createBreakdownMethod(input: BreakdownMethodInput): BreakdownMet
     description,
     prompt,
     skill,
+    maxDurationSeconds: 15,
     builtin: 0,
     sortOrder: nextSortOrder(),
     createdAt: timestamp,
@@ -292,6 +313,7 @@ export function resetBreakdownMethod(key: string): BreakdownMethodRow {
     description: seed.description,
     prompt: seed.prompt,
     skill: seed.skill,
+    maxDurationSeconds: seed.maxSegmentSeconds,
     updatedAt: now(),
   }).where(eq(schema.breakdownMethods.key, key)).run()
   return getBreakdownMethod(key)!
@@ -308,6 +330,7 @@ export function duplicateBreakdownMethod(key: string): BreakdownMethodRow {
     description: source.description,
     prompt: source.prompt,
     skill: source.skill,
+    maxDurationSeconds: source.maxDurationSeconds || 15,
     builtin: 0,
     sortOrder: nextSortOrder(),
     createdAt: timestamp,
@@ -355,7 +378,7 @@ export function buildBreakdownMethodBlock(
   return sections.join('\n\n')
 }
 
-export function getEpisodeBreakdownBlock(episodeId?: number | null): string | null {
+export function getEpisodeBreakdownBlock(episodeId?: number | null, overrideKey?: string | null): string | null {
   if (!episodeId) return null
   try {
     const episode = db
@@ -363,13 +386,14 @@ export function getEpisodeBreakdownBlock(episodeId?: number | null): string | nu
       .from(schema.episodes)
       .where(eq(schema.episodes.id, Number(episodeId)))
       .get()
-    if (!episode?.breakdownMethod) return null
+    const methodKey = overrideKey && overrideKey !== 'inherit' ? overrideKey : episode?.breakdownMethod
+    if (!methodKey) return null
 
-    const method = getBreakdownMethod(episode.breakdownMethod)
+    const method = getBreakdownMethod(methodKey)
     if (!method) {
       logTaskWarn('BreakdownMethod', '剧集引用的拆分方案不存在，回退为标准规范', {
         episodeId,
-        key: episode.breakdownMethod,
+        key: methodKey,
       })
       return null
     }

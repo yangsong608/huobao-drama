@@ -121,22 +121,45 @@ export const episodeAPI = {
 }
 
 // 分镜分块拆分：整集按场次切成多段逐段调用模型并即时保存，失败后可从断点续拆
-export const storyboardSplitAPI = {
-  create: (payload: { episode_id: number; drama_id: number; message: string; model?: string; config_id?: number }) =>
-    api.post('/agent/storyboard_breaker/split-jobs', payload),
-  latest: (episodeId: number) => api.get(`/agent/storyboard_breaker/split-jobs/latest/${episodeId}`),
-  get: (jobId: number) => api.get(`/agent/storyboard_breaker/split-jobs/${jobId}`),
-  pause: (jobId: number) => api.post(`/agent/storyboard_breaker/split-jobs/${jobId}/pause`),
-  resume: (jobId: number) => api.post(`/agent/storyboard_breaker/split-jobs/${jobId}/resume`),
+
+
+function pipelineScopeQuery(scopeType?: string, scopeId?: number) {
+  const params = new URLSearchParams()
+  if (scopeType) params.set('scope_type', scopeType)
+  if (scopeId) params.set('scope_id', String(scopeId))
+  const query = params.toString()
+  return query ? `?${query}` : ''
 }
 
-export const storyboardPipelineAPI = {
-  create: (payload: { episode_id: number; drama_id: number; message: string; model?: string; config_id?: number }) =>
-    api.post('/agent/storyboard_director/pipeline-jobs', payload),
-  latest: (episodeId: number) => api.get(`/agent/storyboard_director/pipeline-jobs/latest/${episodeId}`),
-  get: (jobId: number) => api.get(`/agent/storyboard_director/pipeline-jobs/${jobId}`),
-  pause: (jobId: number) => api.post(`/agent/storyboard_director/pipeline-jobs/${jobId}/pause`, {}),
-  resume: (jobId: number) => api.post(`/agent/storyboard_director/pipeline-jobs/${jobId}/resume`, {}),
+export const pipelineChainAPI = {
+  chains: (scopeType?: string, scopeId?: number) => api.get(`/pipelines/chains${pipelineScopeQuery(scopeType, scopeId)}`),
+  chain: (key: string, scopeType?: string, scopeId?: number) => api.get(`/pipelines/chains/${key}${pipelineScopeQuery(scopeType, scopeId)}`),
+  saveOverrides: (key: string, payload: {
+    scope_type?: string
+    scope_id?: number
+    parameters?: Record<string, any>
+    step_toggles?: Record<string, boolean>
+    knowledge_refs?: Record<string, string[]>
+  }) => api.put(`/pipelines/chains/${key}/overrides`, payload),
+  resetOverrides: (key: string, scopeType?: string, scopeId?: number) =>
+    api.del(`/pipelines/chains/${key}/overrides${pipelineScopeQuery(scopeType, scopeId)}`),
+  plugins: () => api.get('/pipelines/plugins'),
+  rulePacks: () => api.get('/pipelines/rule-packs'),
+  createRun: (payload: {
+    episode_id: number
+    drama_id: number
+    message: string
+    model?: string
+    config_id?: number
+    chain_key?: string
+    parameters?: Record<string, any>
+  }) => api.post('/pipelines/runs', payload),
+  latestRun: (episodeId: number) => api.get(`/pipelines/runs/latest/${episodeId}`),
+  run: (runId: number) => api.get(`/pipelines/runs/${runId}`),
+  trace: (runId: number) => api.get(`/pipelines/runs/${runId}/trace`),
+  pause: (runId: number) => api.post(`/pipelines/runs/${runId}/pause`, {}),
+  resume: (runId: number) => api.post(`/pipelines/runs/${runId}/resume`, {}),
+  continueRun: (runId: number) => api.post(`/pipelines/runs/${runId}/continue`, {}),
 }
 
 export const frameAssetAPI = {
@@ -1542,11 +1565,6 @@ export const transitionAPI = {
   skip: (id: number) => api.post<any>(`/merge/transitions/${id}/skip`, {}),
   del: (id: number) => api.del(`/merge/transitions/${id}`),
 }
-export const storyboardAuditAPI = {
-  latest: (episodeId: number) => api.get<any>(`/agent/storyboard_auditor/audit-jobs/latest/${episodeId}`),
-  create: (payload: Record<string, any>) => api.post<any>('/agent/storyboard_auditor/audit-jobs', payload),
-  undo: (id: number) => api.post<any>(`/agent/storyboard_auditor/audit-jobs/${id}/undo`, {}),
-}
 export const aiConfigAPI = {
   list: (t?: string) => api.get(`/ai-configs${t ? `?service_type=${t}` : ''}`),
   create: (d: any) => api.post('/ai-configs', d),
@@ -1609,39 +1627,6 @@ export const storageAPI = {
   info: () => api.get('/storage'),
 }
 
-export interface StoryboardAuditPolicy {
-  checks: {
-    shot: boolean
-    continuity: boolean
-    silent: boolean
-    lineDuration: boolean
-    assets: boolean
-  }
-  thresholds: {
-    charsPerSecond: number
-    lineBreathSeconds: number
-    lineRequiredMaxSeconds: number
-    silentCharacterWarnSeconds: number
-    silentCharacterErrorSeconds: number
-    emptyShotWarnSeconds: number
-    promptSegmentMaxChars: number
-  }
-  semantic: {
-    enabled: boolean
-    windowSize: number
-    windowStep: number
-    maxWindows: number
-  }
-  autoRepair: {
-    enabled: boolean
-    semanticFix: boolean
-    maxActions: number
-    maxActionsPerShot: number
-    autoInsertTransition: boolean
-    maxInsertedTransitions: number
-  }
-}
-
 export const settingsAPI = {
   contentLanguage: () => api.get<{ language: string }>('/settings/content-language'),
   setContentLanguage: (language: string) => api.put('/settings/content-language', { language }),
@@ -1651,8 +1636,6 @@ export const settingsAPI = {
   saveNovel: (patch: Partial<NovelSettings>) => api.put<{ settings: NovelSettings }>('/settings/novel', patch),
   media: () => api.get<MediaSettingsPayload>('/settings/media'),
   saveMedia: (ffmpegDir: string) => api.put<MediaSettingsPayload>('/settings/media', { ffmpegDir }),
-  storyboardAudit: () => api.get<{ policy: StoryboardAuditPolicy }>('/settings/storyboard-audit'),
-  saveStoryboardAudit: (policy: StoryboardAuditPolicy) => api.put<{ policy: StoryboardAuditPolicy }>('/settings/storyboard-audit', policy),
 }
 
 // MCP 服务：开关、端口、访问 token

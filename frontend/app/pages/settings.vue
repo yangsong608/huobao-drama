@@ -999,8 +999,7 @@
 
         <!-- ===== 分镜拆分方案 ===== -->
         <div class="settings-tabpanel" role="tabpanel" id="settings-panel-breakdown" aria-labelledby="settings-tab-breakdown" tabindex="0" :hidden="tab !== 'breakdown'">
-        <div v-if="tab === 'breakdown'" class="settings-scroll">
-          <div class="settings-head">
+        <div v-if="tab === 'breakdown'" class="settings-scroll">          <div class="settings-head">
             <h2 class="settings-title">{{ t('settings.breakdown.title') }}</h2>
             <p class="settings-desc">{{ t('settings.breakdown.subtitle') }}</p>
           </div>
@@ -1088,203 +1087,12 @@
         </div>
 
         <!-- ===== 分镜检验 ===== -->
-        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-audit" aria-labelledby="settings-tab-audit" tabindex="0" :hidden="tab !== 'audit'">
-        <div v-if="tab === 'audit'" class="settings-scroll">
-          <div class="settings-head">
-            <h2 class="settings-title">{{ t('settings.audit.title') }}</h2>
-            <p class="settings-desc">{{ t('settings.audit.subtitle') }}</p>
-          </div>
-
-          <p v-if="auditPolicyLoading && !auditPolicy" class="config-empty">{{ t('common.loading') }}</p>
-          <p v-else-if="auditPolicyLoadFailed" class="config-empty">{{ t('settings.audit.loadFailed') }}</p>
-          <template v-else-if="auditPolicy">
-            <section class="card svc-group">
-              <div class="svc-group-head">
-                <div class="svc-group-heading">
-                  <span class="svc-group-title">{{ t('settings.audit.checks') }}</span>
-                  <div class="svc-group-sub">{{ t('settings.audit.checksHint') }}</div>
-                </div>
-              </div>
-              <div class="config-row">
-                <div class="config-main">
-                  <div class="config-line"><span class="config-name">{{ t('settings.audit.check.shot') }}</span></div>
-                </div>
-                <label class="config-switch">
-                  <input v-model="auditPolicy.checks.shot" type="checkbox" class="sr-only">
-                  <span class="switch" :class="{ on: auditPolicy.checks.shot }"></span>
-                </label>
-              </div>
-              <div class="config-row">
-                <div class="config-main">
-                  <div class="config-line"><span class="config-name">{{ t('settings.audit.check.continuity') }}</span></div>
-                </div>
-                <label class="config-switch">
-                  <input v-model="auditPolicy.checks.continuity" type="checkbox" class="sr-only">
-                  <span class="switch" :class="{ on: auditPolicy.checks.continuity }"></span>
-                </label>
-              </div>
-              <div class="config-row">
-                <div class="config-main">
-                  <div class="config-line"><span class="config-name">{{ t('settings.audit.check.silent') }}</span></div>
-                </div>
-                <label class="config-switch">
-                  <input v-model="auditPolicy.checks.silent" type="checkbox" class="sr-only">
-                  <span class="switch" :class="{ on: auditPolicy.checks.silent }"></span>
-                </label>
-              </div>
-              <div class="config-row">
-                <div class="config-main">
-                  <div class="config-line"><span class="config-name">{{ t('settings.audit.check.lineDuration') }}</span></div>
-                </div>
-                <label class="config-switch">
-                  <input v-model="auditPolicy.checks.lineDuration" type="checkbox" class="sr-only">
-                  <span class="switch" :class="{ on: auditPolicy.checks.lineDuration }"></span>
-                </label>
-              </div>
-              <div class="config-row">
-                <div class="config-main">
-                  <div class="config-line"><span class="config-name">{{ t('settings.audit.check.assets') }}</span></div>
-                </div>
-                <label class="config-switch">
-                  <input v-model="auditPolicy.checks.assets" type="checkbox" class="sr-only">
-                  <span class="switch" :class="{ on: auditPolicy.checks.assets }"></span>
-                </label>
-              </div>
-            </section>
-
-            <section class="card svc-group">
-              <div class="svc-group-head">
-                <div class="svc-group-heading">
-                  <span class="svc-group-title">{{ t('settings.audit.thresholds') }}</span>
-                  <div class="svc-group-sub">{{ t('settings.audit.thresholdHint') }}</div>
-                </div>
-              </div>
-              <div class="field-row">
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.threshold.charsPerSecond') }}</span>
-                  <input v-model.number="auditPolicy.thresholds.charsPerSecond" class="input" type="number" min="1" max="12" step="0.5">
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.threshold.lineBreathSeconds') }}</span>
-                  <input v-model.number="auditPolicy.thresholds.lineBreathSeconds" class="input" type="number" min="0" max="3" step="0.5">
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.threshold.lineRequiredMaxSeconds') }}</span>
-                  <input v-model.number="auditPolicy.thresholds.lineRequiredMaxSeconds" class="input" type="number" min="3" max="30" step="1">
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.threshold.silentCharacterWarnSeconds') }}</span>
-                  <input v-model.number="auditPolicy.thresholds.silentCharacterWarnSeconds" class="input" type="number" min="2" max="120" step="1">
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.threshold.silentCharacterErrorSeconds') }}</span>
-                  <input v-model.number="auditPolicy.thresholds.silentCharacterErrorSeconds" class="input" type="number" min="2" max="120" step="1">
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.threshold.emptyShotWarnSeconds') }}</span>
-                  <input v-model.number="auditPolicy.thresholds.emptyShotWarnSeconds" class="input" type="number" min="1" max="120" step="1">
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.threshold.promptSegmentMaxChars') }}</span>
-                  <input v-model.number="auditPolicy.thresholds.promptSegmentMaxChars" class="input" type="number" min="4" max="40" step="1">
-                </label>
-              </div>
-            </section>
-
-            <section class="card svc-group">
-              <div class="svc-group-head">
-                <div class="svc-group-heading">
-                  <span class="svc-group-title">{{ t('settings.audit.semantic') }}</span>
-                  <div class="svc-group-sub">{{ t('settings.audit.semanticHint') }}</div>
-                </div>
-                <label class="config-switch">
-                  <input v-model="auditPolicy.semantic.enabled" type="checkbox" class="sr-only">
-                  <span class="switch" :class="{ on: auditPolicy.semantic.enabled }"></span>
-                </label>
-              </div>
-              <div class="field-row">
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.semanticLabel.windowSize') }}</span>
-                  <input v-model.number="auditPolicy.semantic.windowSize" class="input" type="number" min="4" max="40" step="1">
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.semanticLabel.windowStep') }}</span>
-                  <input v-model.number="auditPolicy.semantic.windowStep" class="input" type="number" min="1" max="40" step="1">
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.semanticLabel.maxWindows') }}</span>
-                  <input v-model.number="auditPolicy.semantic.maxWindows" class="input" type="number" min="1" max="60" step="1">
-                </label>
-              </div>
-            </section>
-
-            <section class="card svc-group">
-              <div class="svc-group-head">
-                <div class="svc-group-heading">
-                  <span class="svc-group-title">{{ t('settings.audit.autoRepair') }}</span>
-                  <div class="svc-group-sub">{{ t('settings.audit.autoRepairHint') }}</div>
-                </div>
-                <label class="config-switch">
-                  <input v-model="auditPolicy.autoRepair.enabled" type="checkbox" class="sr-only">
-                  <span class="switch" :class="{ on: auditPolicy.autoRepair.enabled }"></span>
-                </label>
-              </div>
-              <div class="config-row">
-                <div class="config-main">
-                  <div class="config-line"><span class="config-name">{{ t('settings.audit.repairLabel.semanticFix') }}</span></div>
-                </div>
-                <label class="config-switch">
-                  <input v-model="auditPolicy.autoRepair.semanticFix" type="checkbox" class="sr-only">
-                  <span class="switch" :class="{ on: auditPolicy.autoRepair.semanticFix }"></span>
-                </label>
-              </div>
-              <div class="config-row">
-                <div class="config-main">
-                  <div class="config-line"><span class="config-name">{{ t('settings.audit.repairLabel.autoInsertTransition') }}</span></div>
-                </div>
-                <label class="config-switch">
-                  <input v-model="auditPolicy.autoRepair.autoInsertTransition" type="checkbox" class="sr-only">
-                  <span class="switch" :class="{ on: auditPolicy.autoRepair.autoInsertTransition }"></span>
-                </label>
-              </div>
-              <div class="field-row">
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.repairLabel.maxInsertedTransitions') }}</span>
-                  <input v-model.number="auditPolicy.autoRepair.maxInsertedTransitions" class="input" type="number" min="1" max="10" step="1">
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.repairLabel.maxActions') }}</span>
-                  <input v-model.number="auditPolicy.autoRepair.maxActions" class="input" type="number" min="1" max="100" step="1">
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('settings.audit.repairLabel.maxActionsPerShot') }}</span>
-                  <input v-model.number="auditPolicy.autoRepair.maxActionsPerShot" class="input" type="number" min="1" max="10" step="1">
-                </label>
-              </div>
-            </section>
-
-            <section class="card svc-group">
-              <div class="svc-group-head">
-                <div class="svc-group-heading">
-                  <span class="svc-group-title">{{ t('settings.audit.promptTitle') }}</span>
-                  <div class="svc-group-sub">{{ t('settings.audit.promptDesc') }}</div>
-                </div>
-                <button class="btn btn-sm ml-auto" @click="openAuditorAgent">{{ t('settings.audit.promptOpen') }}</button>
-              </div>
-            </section>
-
-            <div class="breakdown-actions">
-              <button class="btn btn-primary" :disabled="auditPolicySaving" @click="saveAuditPolicy">
-                <Loader2 v-if="auditPolicySaving" :size="13" class="animate-spin" />
-                {{ auditPolicySaving ? t('settings.audit.saving') : t('settings.audit.save') }}
-              </button>
-              <span v-if="auditPolicySaved" class="tag tag-success"><Check :size="10" /> {{ t('common.saved') }}</span>
-            </div>
-          </template>
+        <div class="settings-tabpanel" role="tabpanel" id="settings-panel-pipeline" aria-labelledby="settings-tab-pipeline" tabindex="0" :hidden="tab !== 'pipeline'">
+        <div v-if="tab === 'pipeline'" class="settings-scroll">
+          <PipelineChainSettings />
         </div>
         </div>
 
-        <!-- ===== 任务队列 ===== -->
         <div class="settings-tabpanel" role="tabpanel" id="settings-panel-queue" aria-labelledby="settings-tab-queue" tabindex="0" :hidden="tab !== 'queue'">
         <div v-if="tab === 'queue'" class="settings-scroll">
           <div class="settings-head">
@@ -2362,6 +2170,7 @@
 import { Plus, Pencil, Trash2, FileText, ChevronDown, Check, Loader2, Bot, Cpu, Sparkles, Palette, ExternalLink, Star, HardDrive, Database, RefreshCw, Download, Languages, SunMoon, X, Plug, KeyRound, Copy, ListOrdered, Mic, Music, BookOpen, Layers, ShieldCheck, MonitorSmartphone, TriangleAlert } from 'lucide-vue-next'
 import BaseSelect from '~/components/BaseSelect.vue'
 import QueuePanel from '~/components/QueuePanel.vue'
+import PipelineChainSettings from '~/components/PipelineChainSettings.vue'
 import RemoteAccessDialog from '~/components/RemoteAccessDialog.vue'
 import RemoteDeviceList from '~/components/RemoteDeviceList.vue'
 import { toast } from 'vue-sonner'
@@ -2390,7 +2199,7 @@ const isGuest = computed(() => remoteRole.role === 'guest')
 const remoteReadonly = computed(() => remoteRole.role === 'guest' && remoteRole.readonly)
 const GUEST_HIDDEN_TABS = new Set(['ai', 'storage', 'mcp', 'agents', 'remote'])
 
-const SETTINGS_TABS = ['ai', 'dubbing', 'novel', 'general', 'remote', 'styles', 'rules', 'breakdown', 'audit', 'agents', 'queue', 'storage', 'mcp', 'about']
+const SETTINGS_TABS = ['ai', 'dubbing', 'novel', 'general', 'remote', 'styles', 'rules', 'breakdown', 'pipeline', 'agents', 'queue', 'storage', 'mcp', 'about']
 const requestedTab = typeof route.query.tab === 'string' ? route.query.tab : ''
 const showBrandImage = ref(true)
 function initialTab() {
@@ -2415,7 +2224,7 @@ const baseTabs = computed(() => {
     { id: 'styles', label: t('settings.tabs.styles'), icon: Palette },
     { id: 'rules', label: t('settings.tabs.rules'), icon: FileText },
     { id: 'breakdown', label: t('settings.tabs.breakdown'), icon: Layers },
-    { id: 'audit', label: t('settings.tabs.audit'), icon: ShieldCheck },
+    { id: 'pipeline', label: t('settings.tabs.pipeline'), icon: ShieldCheck },
     { id: 'agents', label: t('settings.tabs.agents'), icon: Bot },
     { id: 'queue', label: t('settings.tabs.queue'), icon: ListOrdered },
     { id: 'storage', label: t('settings.tabs.storage'), icon: HardDrive },
@@ -3159,7 +2968,7 @@ const agentForm = reactive({ system_prompt: '' })
 const agentDefs = computed(() => [
   { type: 'script_rewriter', label: t('settings.agents.scriptRewriter'), icon: '📝' },
   { type: 'extractor', label: t('settings.agents.extractor'), icon: '🔍' },
-  { type: 'storyboard_breaker', label: t('settings.agents.storyboardBreaker'), icon: '🎬' },
+  { type: 'storyboard_director', label: t('settings.agents.storyboardDirector'), icon: '🎬' },
   { type: 'prompt_generator', label: t('settings.agents.promptGenerator'), icon: '🖼' },
   { type: 'storyboard_auditor', label: t('settings.agents.storyboardAuditor'), icon: '🛡' },
   { type: 'voice_designer', label: t('settings.agents.voiceDesigner'), icon: '🎙' },
@@ -3659,7 +3468,7 @@ async function assignKnowledge(item) {
   } catch (e) { toastError(e) }
 }
 
-const CRITICAL_KNOWLEDGE_AGENTS = new Set(['storyboard_breaker', 'storyboard_auditor', 'prompt_generator'])
+const CRITICAL_KNOWLEDGE_AGENTS = new Set(['storyboard_director', 'storyboard_auditor', 'prompt_generator'])
 
 async function unassignKnowledge(item) {
   const remainingRequired = currentKnowledge.value.filter(entry => entry.required && entry.id !== item.id).length
@@ -4033,64 +3842,12 @@ async function confirmDeleteBreakdownMethod() {
   }
 }
 
-// ===== 分镜检验策略 =====
-const auditPolicy = ref(null)
-const auditPolicyLoading = ref(false)
-const auditPolicySaving = ref(false)
-const auditPolicySaved = ref(false)
-const auditPolicyLoadFailed = ref(false)
-let auditSavedTimer = null
-
-function applyAuditPolicy(policy) {
-  auditPolicy.value = JSON.parse(JSON.stringify(policy))
-}
-
-async function loadAuditPolicy() {
-  if (auditPolicyLoading.value) return
-  auditPolicyLoading.value = true
-  auditPolicyLoadFailed.value = false
-  try {
-    const res = await settingsAPI.storyboardAudit()
-    if (res?.policy) applyAuditPolicy(res.policy)
-  } catch (e) {
-    auditPolicyLoadFailed.value = true
-    toastError(e)
-  } finally {
-    auditPolicyLoading.value = false
-  }
-}
-
-async function saveAuditPolicy() {
-  if (!auditPolicy.value || auditPolicySaving.value) return
-  auditPolicySaving.value = true
-  auditPolicySaved.value = false
-  try {
-    const res = await settingsAPI.saveStoryboardAudit(auditPolicy.value)
-    if (res?.policy) applyAuditPolicy(res.policy)
-    auditPolicySaved.value = true
-    toast.success(t('settings.audit.saved'))
-    if (auditSavedTimer) clearTimeout(auditSavedTimer)
-    auditSavedTimer = setTimeout(() => { auditPolicySaved.value = false }, 3000)
-  } catch (e) {
-    toastError(e)
-  } finally {
-    auditPolicySaving.value = false
-  }
-}
-
-function openAuditorAgent() {
-  agentPane.value = 'prompt'
-  tab.value = 'agents'
-  void selectAgent('storyboard_auditor')
-}
-
 onMounted(() => {
   loadStylePresets()
   loadPipelineRules()
   if (tab.value === 'dubbing') loadDubbing()
   if (tab.value === 'novel') loadNovel()
   if (tab.value === 'breakdown') loadBreakdownMethods()
-  if (tab.value === 'audit') loadAuditPolicy()
 })
 
 // 主机级设置等角色明确后再加载；访客不发起这些请求
@@ -4338,7 +4095,6 @@ watch(tab, (t) => {
   if (t === 'about' && remoteRole.ready && !isGuest.value) refreshUpdateState()
   if (t === 'rules') loadPipelineRules()
   if (t === 'breakdown') loadBreakdownMethods()
-  if (t === 'audit') loadAuditPolicy()
   // 进入 Agent 页总是按当前内容语言重载（幂等）：兜住「先切语言、后进 Agent」的时序
   if (t === 'agents' && remoteRole.ready && !isGuest.value) {
     loadAgentPrompt(selectedAgent.value)
