@@ -5083,6 +5083,7 @@ async function confirmBatchVideos() {
   const failedCount = targets.filter(sb => latestVideoTask(sb.id)?.status === 'failed').length
   if (failedCount && !window.confirm(t('episode.vid.batchFailedConfirm', { n: failedCount }))) return
 
+  await ensureAutoFrameAssets(targets)
   const gateResults = await Promise.all(targets.map(async sb => ({ sb, gate: await fetchGenerationGate(sb) })))
   const blocked = gateResults.filter(item => item.gate && item.gate.allowed === false)
   if (blocked.length) {
@@ -6998,13 +6999,61 @@ function getPreviousShotFrameRef(sb) {
   const prevShot = sbs.value[index - 1]
   const asset = frameAssets.value.find(item =>
     Number(item?.storyboard_id ?? item?.storyboardId) === Number(prevShot.id))
-  const url = asset?.url || ''
+  const url = asset?.url || prevShot.last_frame_image || prevShot.lastFrameImage || ''
   if (!url) return null
   const shotNumber = storyboardNumberOf(prevShot) || index
   return { asset, url, token: `镜头${shotNumber}末帧`, shotNumber }
 }
 
-// 生成参考图顺序：上一镜末帧置顶（保证占位），随后场景、角色、道具
+function getPreviousStoryboard(sb) {
+  const index = sbs.value.findIndex(item => Number(item.id) === Number(sb?.id))
+  return index > 0 ? sbs.value[index - 1] : null
+}
+
+function shotHasVideo(sb) {
+  return Boolean(sb?.video_url || sb?.videoUrl || sb?.composed_video_url || sb?.composedVideoUrl)
+}
+
+/** 未显式设首帧且上一镜已有视频：把上一镜末帧作为普通参考图，而不是首帧。 */
+function getAutoFrameReference(sb) {
+  if (sb?.first_frame_image || sb?.firstFrameImage) return null
+  const previous = getPreviousStoryboard(sb)
+  if (!previous || !shotHasVideo(previous)) return null
+  const frame = getPreviousShotFrameRef(sb)
+  if (!frame?.url) return null
+  return { token: `@${frame.token}`, number: frame.shotNumber, shot: previous, url: frame.url }
+}
+
+function injectFrameReferenceIntoBlocking(prompt, token) {
+  const text = String(prompt || '')
+  if (!token || text.includes(token)) return text
+  const lineRe = /^画面调度\s*[：:].*$/m
+  if (lineRe.test(text)) {
+    return text.replace(lineRe, line => `${line.replace(/[；;，,]\s*$/, '')}；分镜首帧：${token}`)
+  }
+  return text.trim() ? `分镜首帧：${token}\n${text}` : `分镜首帧：${token}`
+}
+
+function getPromptReferencedFrameEntries(sb) {
+  const prompt = `${sb?.video_prompt || sb?.videoPrompt || ''}\n${finalPromptOverrideValue(sb)}`
+  const numbers = [...new Set([...prompt.matchAll(/@镜头(\d+)末帧/g)].map(match => Number(match[1])))]
+    .filter(Boolean)
+  const entries = []
+  const previous = getPreviousShotFrameRef(sb)
+  for (const number of numbers) {
+    const shot = sbs.value.find(item => Number(storyboardNumberOf(item)) === number)
+    const asset = frameAssets.value.find(item => Number(frameAssetShotNumber(item)) === number)
+    const url = asset?.url
+      || shot?.last_frame_image
+      || shot?.lastFrameImage
+      || (previous && previous.shotNumber === number ? previous.url : '')
+      || ''
+    if (url) entries.push({ name: `镜头${number}末帧`, url })
+  }
+  return entries
+}
+
+// 生成参考图顺序：场景、角色、道具，最后放用户显式引用 @镜头N末帧 的帧
 function getShotReferenceEntries(sb) {
   const entries = []
   const seen = new Set()
@@ -7014,7 +7063,7 @@ function getShotReferenceEntries(sb) {
     entries.push({ name, url })
   }
   const previous = getPreviousShotFrameRef(sb)
-  // 本地 H3 的首帧/尾帧是硬引导；未显式设首帧时，上一镜末帧也不再塞进普通参考图。
+  const autoFrame = getAutoFrameReference(sb)
   if (previous && !isLocalH3Video.value) push(previous.token, previous.url)
   const scene = getStoryboardScene(sb)
   push(scene?.location || '', scene?.image_url || scene?.imageUrl)
@@ -7024,6 +7073,12 @@ function getShotReferenceEntries(sb) {
   for (const prop of getStoryboardProps(sb)) {
     push(prop.name || '', prop?.image_url || prop?.imageUrl)
   }
+  // 只有提示词显式写了 @镜头N末帧，才把该帧作为普通参考图；不自动添加。
+  for (const entry of getPromptReferencedFrameEntries(sb)) {
+    push(entry.name, entry.url)
+  }
+  // 本地 H3 未设首帧且上一镜有视频：把上一镜末帧放在人物之后，作为普通参考图。
+  if (previous && isLocalH3Video.value && autoFrame) push(previous.token, previous.url)
   return entries
 }
 
@@ -7396,7 +7451,12 @@ function appendPreviousFramePrompt(sb, prompt) {
 // 将视频提示词里的 @名字 替换为 @图片N名字（N 为实际普通参考图序号，1 起），生成时使用
 function resolveVideoPromptRefs(sb) {
   const previous = getPreviousShotFrameRef(sb)
-  let prompt = appendPreviousFramePrompt(sb, sb.video_prompt || sb.videoPrompt || '')
+  let prompt = sb.video_prompt || sb.videoPrompt || ''
+  const autoFrame = getAutoFrameReference(sb)
+  if (autoFrame && !getFirstFrameImageForGeneration(sb)) {
+    prompt = injectFrameReferenceIntoBlocking(prompt, autoFrame.token)
+  }
+  prompt = appendPreviousFramePrompt(sb, prompt)
   if (previous && getFirstFrameImageForGeneration(sb) === previous.url) {
     // 旧提示词可能把上一镜末帧写成 @镜头N末帧；首帧只通过承接说明和 Picture 1 引用，必须移除旧 token
     prompt = prompt.split(`@${previous.token}`).join('')
@@ -7656,6 +7716,26 @@ async function ensureGenerationGate(sb, opts = {}) {
   return true
 }
 
+async function ensureAutoFrameAssets(targets) {
+  const pending = new Map()
+  for (const sb of targets) {
+    if (sb?.first_frame_image || sb?.firstFrameImage) continue
+    const previous = getPreviousStoryboard(sb)
+    if (!previous || !shotHasVideo(previous)) continue
+    if (getPreviousShotFrameRef(sb)?.url) continue
+    pending.set(previous.id, previous)
+  }
+  if (!pending.size) return
+  for (const shot of pending.values()) {
+    try {
+      await frameAssetAPI.extractLast(shot.id)
+    } catch (error) {
+      console.warn('auto frame extract failed', shot.id, error)
+    }
+  }
+  await loadFrameAssets()
+}
+
 async function genVid(sb, opts = {}) {
   if (!opts.skipGate && !(await ensureGenerationGate(sb, opts))) return
   if (isComfyVideoMode.value) {
@@ -7666,6 +7746,7 @@ async function genVid(sb, opts = {}) {
   const latest = latestVideoTask(sb.id)
   const forceNew = opts.forceNew || latest?.status === 'failed'
   if (forceNew && !window.confirm(t('episode.recovery.confirmNew'))) return
+  await ensureAutoFrameAssets([sb])
   const params = buildVideoGenerationParams(sb)
   if (!params.prompt && !params.reference_image_urls.length) {
     toast.error(t('episode.vid.needRefOrPrompt'))

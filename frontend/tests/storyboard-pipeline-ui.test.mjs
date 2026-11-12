@@ -122,6 +122,20 @@ test('首帧只在显式设置时使用；未设置时不再自动使用上一�
   assert.match(episode, /isLocalH3Video/)
 })
 
+test('提示词显式引用 @镜头N末帧 时作为普通参考图，不自动变首帧', () => {
+  assert.match(episode, /function getPromptReferencedFrameEntries\(sb\)/)
+  assert.match(episode, /@镜头\(\\d\+\)末帧/g)
+  assert.match(episode, /frameAssets\.value\.find\(item => Number\(frameAssetShotNumber\(item\)\) === number\)/)
+  assert.match(episode, /for \(const entry of getPromptReferencedFrameEntries\(sb\)\) \{\s*push\(entry\.name, entry\.url\)/)
+  assert.match(episode, /function injectFrameReferenceIntoBlocking\(prompt, token\)/)
+  assert.match(episode, /分镜首帧：\$\{token\}/)
+  assert.match(episode, /function getAutoFrameReference\(sb\)/)
+  assert.match(episode, /async function ensureAutoFrameAssets\(targets\)/)
+  assert.match(episode, /getFirstFrameImageForGeneration\(sb\)/)
+  assert.match(episode, /await ensureAutoFrameAssets\(\[sb\]\)/)
+  assert.match(episode, /await ensureAutoFrameAssets\(targets\)/)
+})
+
 test('覆盖板刷新计划后同步镜头合同，旧分镜也能参与成对校验', () => {
   assert.match(api, /syncContracts: \(episodeId: number\) => api\.post\('\/storyboards\/contracts\/sync', \{ episode_id: episodeId \}\)/)
   assert.match(coverageBoard, /storyboardAPI\.syncContracts\(props\.episodeId\)/)
