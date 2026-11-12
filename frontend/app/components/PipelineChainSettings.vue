@@ -88,6 +88,7 @@
 
       <section v-if="selectedChain" class="chain-section">
         <div class="chain-section-title">{{ t('settings.pipeline.parameters', '参数') }}</div>
+        <p class="chain-hint">{{ t('settings.pipeline.parametersHint', '只显示会被本次运行读取的参数；未实现的预留项已隐藏。') }}</p>
         <div class="chain-param-grid">
           <label v-for="param in selectedChain.parameters" :key="param.key" class="chain-param">
             <span class="field-label">{{ param.label }}</span>
@@ -108,6 +109,7 @@
               <input v-model.number="params[param.key]" class="input" type="number" :min="param.min" :max="param.max" :step="param.step || 1" :disabled="param.locked">
             </template>
             <span v-if="param.description" class="chain-param-desc">{{ param.description }}</span>
+            <span class="chain-param-desc">{{ t('settings.pipeline.consumer', '用于') }}：{{ param.stepKey || '—' }}</span>
             <span v-if="param.min !== undefined || param.max !== undefined" class="chain-param-range">
               {{ param.min }}–{{ param.max }}
             </span>

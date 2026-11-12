@@ -483,6 +483,11 @@ test('四段式管线：预拆→逐镜修补→逐镜校验→声音设计，�
   assert.equal(JSON.parse(rows[0].soundCue || '{}').unit_key, 'unit-1')
   assert.ok((rows[0].soundUnitKey || '').startsWith('unit-1'))
 
+  const shot1View = job.shots.find(shot => shot.number === 1)!
+  assert.equal(shot1View.source_excerpt, '张三站在门口喊道：「快走！」')
+  assert.deepEqual(shot1View.speech_segments.map(item => item.text), ['快走！'])
+  assert.equal(job.shots.find(shot => shot.number === 2)?.source_excerpt, '李四从柜台后抬头，朝门口喊道。')
+
   const res = await api.request(`/storyboards/sound-plan/${fixture.episodeId}`)
   const json = await res.json() as any
   assert.equal(res.status, 200)

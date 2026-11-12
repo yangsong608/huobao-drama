@@ -30,6 +30,7 @@ import {
   type PipelineRunParameters,
   type PipelineStepDefinition,
 } from './pipeline-chain.js'
+import { extractPlanSpeechSegments } from './storyboard-plan-contract.js'
 import { logTaskError, logTaskProgress, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
 import { emitChange } from './sync-events.js'
 
@@ -61,10 +62,13 @@ export interface PipelineShotView {
   number: number
   title: string
   scene_id: number | null
+  storyboard_id: number | null
   duration: number
   status: string
   attempts: number
   issues: string[]
+  source_excerpt: string
+  speech_segments: Array<{ speaker: string; text: string }>
 }
 
 export interface PipelineJobView {
@@ -85,6 +89,8 @@ export interface PipelineJobView {
   current_shot_number: number | null
   sound_units: number
   sound_status: string
+  skipped_shots: number
+  skipped_shot_numbers: number[]
   error: string | null
   pause_requested: boolean
   chunks: Array<{ index: number; label: string; status: string; shots: number; error: string | null }>
@@ -196,6 +202,18 @@ function stepKnowledgeIds(row: PipelineJobRow, stepKey: string): string[] {
 
 function stepVersion(stepKey: string): string {
   return stepDefinition(stepKey)?.version || '1'
+}
+
+function skeletonSpeechSegments(skeleton: SkeletonRow): Array<{ speaker?: string; text: string }> {
+  try {
+    const parsed = JSON.parse(skeleton.speechSegmentsJson || '[]')
+    if (Array.isArray(parsed) && parsed.length) {
+      return parsed.filter(item => item && typeof item.text === 'string')
+    }
+  } catch {
+    // 旧骨架没有计划台词字段，从原文摘录补算
+  }
+  return extractPlanSpeechSegments(skeleton.sourceExcerpt).map(item => ({ speaker: item.speaker, text: item.text }))
 }
 
 function runStepInput(row: PipelineJobRow, stepKey: string, scope: 'episode' | 'chunk' | 'shot', itemKey: string, input?: unknown) {
@@ -352,6 +370,8 @@ function toView(row: PipelineJobRow): PipelineJobView {
     current_shot_number: row.currentShotNumber ?? null,
     sound_units: row.soundUnits || 0,
     sound_status: row.soundStatus || 'none',
+    skipped_shots: skeletons.filter(item => item.status === 'skipped').length,
+    skipped_shot_numbers: skeletons.filter(item => item.status === 'skipped').map(item => item.storyboardNumber),
     error: row.errorMsg || null,
     pause_requested: Boolean(row.pauseRequested),
     chunks: state.chunks.map(chunk => ({
@@ -365,6 +385,7 @@ function toView(row: PipelineJobRow): PipelineJobView {
       number: skeleton.storyboardNumber,
       title: skeleton.title || '',
       scene_id: skeleton.sceneId,
+      storyboard_id: skeleton.storyboardId ?? null,
       duration: skeleton.duration || 0,
       status: skeleton.status,
       attempts: skeleton.attempts || 0,
@@ -376,6 +397,11 @@ function toView(row: PipelineJobRow): PipelineJobView {
           return []
         }
       })(),
+      source_excerpt: skeleton.sourceExcerpt || '',
+      speech_segments: skeletonSpeechSegments(skeleton).map(item => ({
+        speaker: String(item.speaker || ''),
+        text: String(item.text || ''),
+      })),
     })),
     completed_chunks: state.chunks.filter(chunk => chunk.status === 'done').length,
     total_chunks: state.chunks.length,
@@ -519,6 +545,20 @@ function skeletonPayload(skeleton: SkeletonRow) {
     transition: skeleton.transition || 'cut',
     continuity: skeleton.continuity || '',
     action_summary: skeleton.actionSummary,
+    action_start: skeleton.actionStart || '',
+    action_end: skeleton.actionEnd || '',
+    coverage_type: skeleton.coverageType || '',
+    speech_segments: skeletonSpeechSegments(skeleton),
+    boundary_type: skeleton.boundaryType || '',
+    boundary_word: skeleton.boundaryWord || '',
+    boundary_out: (() => {
+      try { return JSON.parse(skeleton.boundaryOutJson || '{}') } catch { return {} }
+    })(),
+    screen_left: skeleton.screenLeft || '',
+    screen_right: skeleton.screenRight || '',
+    axis_side: skeleton.axisSide || '',
+    landmark_side: skeleton.landmarkSide || '',
+    plan_version: skeleton.planVersion || 1,
     source_excerpt: skeleton.sourceExcerpt,
     status: skeleton.status,
     attempts: skeleton.attempts || 0,
@@ -556,12 +596,16 @@ function buildSkeletonMessage(input: SkeletonRunnerInput, sceneBindingBlock: str
     '### 本段任务',
     '- 只拆分下面给出的剧本片段，不要拆分或改写其它场次，不要读取旧分镜当参考。',
     '- 先把本段按场次/节拍拆成骨架；每个骨架 = 一个机位 + 一个主体 + 一个连续动作，6-15 秒，禁止子镜头切镜。',
-    '- 骨架只写：scene_id/location、character_ids、prop_ids、duration、action_summary、source_excerpt、transition、continuity、title、time。',
+    '- 骨架只写：scene_id/location、character_ids、prop_ids、duration、action_summary、source_excerpt、transition、continuity、title、time、action_start、action_end、coverage_type、boundary_type、boundary_word、screen_left、screen_right、axis_side、landmark_side。',
     '- 不写最终台词，不写 video_prompt，不写 BGM/环境声；这些留给逐镜修补和声音设计。',
     '- source_excerpt 必须从本段剧本逐字截取（可去掉空白），按剧情顺序、互不重复；覆盖本段每一场、每一句台词和关键动作。',
-    '- 原文里的「喊/叫卖/揽客/吆喝」等发声动作必须保留在摘录里，修补阶段会补具体台词；不要把发声动作改写成别的动作。',
-    '- 对话密集时按说话人/反应拆成多个骨架，不要把整场塞进一个骨架。',
+    '- 原文里的「喊/叫卖/揽客/吆喝/唱喝」等发声动作必须保留在摘录里，修补阶段会补具体台词；不要把发声动作改写成别的动作。',
+    '- 说话提示（角色：/高声唱喝：）必须和后面的台词放在同一个骨架；如果本镜只拍到开口前的动作，摘录必须停在说话提示之前。禁止把提示留在上一镜、台词放到下一镜。',
+    '- 过渡词只能出现一次：可以放在上一镜末尾引出，或放在下一镜开头承接；下一镜必须从上一镜尾状态继续，不能重复上一镜开头。',
+    '- 同一场第一镜确定画面左/右、轴线、地标侧；后续骨架必须沿用，不得因为说话人变化交换左右；换场才允许重置。',
+    '- 对话密集时按说话人/反应拆成多个骨架，不要把整场塞进一个骨架；但不要把同一句台词拆到两镜。',
     '- action_summary 只写谁做什么、动作起点和终点，一句话；不要写台词原文。',
+    '- boundary_type 取 speech/action/reaction/scene/time；boundary_word 只在确有过渡词时填写。',
     '- 每个骨架必须绑定 canonical 场景；同名场景只选主场景，不要用别名。',
     '- 直接调用 save_storyboard_skeletons 保存本段全部骨架；全部保存完成前不要结束。',
     '',
@@ -587,6 +631,15 @@ function buildRepairMessage(input: RepairRunnerInput) {
         `video_prompt：\n${shot.video_prompt || ''}`,
       ].join('\n')).join('\n\n')
     : '（本镜是第一镜，没有前镜）'
+  const previousDispatch = input.previousShots.length
+    ? String(input.previousShots[input.previousShots.length - 1]?.video_prompt || '')
+        .split('\n')
+        .find(line => /画面调度\s*[：:]/.test(line)) || ''
+    : ''
+  const speechBlock = Array.isArray(skeleton.speech_segments) && skeleton.speech_segments.length
+    ? skeleton.speech_segments.map((item: any, index: number) => `${index + 1}. ${item.speaker || '角色'}：「${item.text || ''}」`).join('\n')
+    : '（计划层没有台词；本镜不得自行加台词）'
+  const boundary = skeleton.boundary_out && typeof skeleton.boundary_out === 'object' ? skeleton.boundary_out : {}
   const nextBlock = input.nextDrafts.length
     ? input.nextDrafts.map(draft => `- 第 ${draft.storyboard_number} 镜草稿：${draft.action_summary || ''}（场景 ${draft.scene_id ?? '未绑定'}，${draft.duration || 0} 秒）`).join('\n')
     : '（本镜是最后一镜）'
@@ -597,7 +650,7 @@ function buildRepairMessage(input: RepairRunnerInput) {
     `## 四段式管线 · 第二段：逐镜修补（第 ${skeleton.storyboard_number} 镜，第 ${input.attempt + 1} 次）`,
     '先调用 read_storyboard_pipeline_context 读取完整上下文，再逐字理解原文，最后只保存这一镜。',
     '',
-    '### 目标骨架',
+    '### 目标骨架（计划层，边界已定）',
     `- 骨架 ID：${skeleton.id}（保存时必须回传 skeleton_id=${skeleton.id}）`,
     `- 镜头号：${skeleton.storyboard_number}`,
     `- 标题：${skeleton.title || ''}`,
@@ -606,6 +659,14 @@ function buildRepairMessage(input: RepairRunnerInput) {
     `- 道具 ID：${skeleton.prop_ids.join(',') || '无'}`,
     `- 时长：${skeleton.duration} 秒`,
     `- 动作摘要：${skeleton.action_summary}`,
+    `- 动作起点：${skeleton.action_start || '未写'}`,
+    `- 动作终点：${skeleton.action_end || '未写'}`,
+    `- 覆盖类型：${skeleton.coverage_type || '未写'}`,
+    `- 计划台词（只能逐字使用这些，不得新增/删除/改写）：\n${speechBlock}`,
+    `- 边界类型：${skeleton.boundary_type || '未写'}；过渡词：${skeleton.boundary_word || '无'}`,
+    `- 上一镜尾状态：${boundary.fromEndState || '未写'}`,
+    `- 本镜起状态：${boundary.toStartState || '未写'}`,
+    `- 同场画面常量：画面左 ${skeleton.screen_left || '未写'}；画面右 ${skeleton.screen_right || '未写'}；轴线 ${skeleton.axis_side || '未写'}；地标侧 ${skeleton.landmark_side || '未写'}`,
     `- 原文摘录：\n${skeleton.source_excerpt}`,
     '',
     '### 完整场次原文（补台词、动作、调度的依据）',
@@ -618,20 +679,22 @@ function buildRepairMessage(input: RepairRunnerInput) {
     '',
     '### 前镜成稿（承接尾动作、视线、站位、轴线、屏幕左右）',
     previousBlock,
+    ...(previousDispatch ? ['', '### 上一镜画面调度（本镜必须逐字沿用）', previousDispatch] : []),
     '',
     '### 后镜草稿（只用于判断本镜动作终点，不要提前写后镜）',
     nextBlock,
     issueBlock,
     '',
     '### 修补要求（最高优先级）',
-    '1. 遵循小说原意：原剧本有引号台词/旁白，逐字保留（含标点和语气词）；只有「喊/叫卖/揽客/吆喝/招呼/骂」等发声动作没有具体词时，必须补一句符合人物身份和场景的具体台词，不能改成拍围裙/翻炊饼/抬手张望等非语言动作；原文没有任何发声动作时不要凭空加台词。',
+    '1. 计划层台词是唯一台词来源：计划有台词就逐字写进 description 和 video_prompt；计划没有台词就不得自行加台词。发声动作没有具体词时，只能在计划层补出原文依据后再使用，不能直接创作。',
     '2. description 写一个连续镜头：谁 + 具体动作 + 肢体细节 + 表情 + 站位/视线；最多一个【镜头1】，禁止【镜头2】及以后。',
     '3. video_prompt 固定四区：信息头 → 画面调度（画面左/右、过肩、背景地标屏幕侧、轴线、动作起点/终点）→ 时间帧 → 负面约束。',
     '4. 时间帧从 0 连续写到 duration，每段 1-6 秒；台词按 4 字/秒 + 1 秒气口分配；台词逐字复制 description。',
     '5. 不写完整 BGM/环境声风格；声音由第四步统一设计。',
-    '6. 同一场戏沿用前镜的屏幕左右、轴线和地标侧；需要换边/越轴时先插中性镜头，不要在本镜硬翻。',
-    '7. 只调用 save_repaired_storyboard 保存这一镜；不要批量保存、不要修改其它镜头。',
-    '8. 服务端拒绝时按错误清单修同一镜后重试，最多 2 次；不要跳过。',
+    '6. 不得改变计划层的边界：上一镜尾状态和本镜起状态必须接上；过渡词只允许出现一次，不能在本镜和上一镜重复。',
+    '7. 同一场戏必须逐字沿用上一镜的画面左/右、地标侧、轴线；不得因为说话人变化交换左右；需要换边/越轴时先插中性镜头，不要在本镜硬翻。',
+    '8. 只调用 save_repaired_storyboard 保存这一镜；不要批量保存、不要修改其它镜头。',
+    '9. 服务端拒绝时按错误清单修同一镜后重试，最多 2 次；不要跳过。',
   ].join('\n')
 }
 
@@ -873,6 +936,62 @@ export async function resumeStoryboardPipelineJob(
     jobId,
     episodeId: row.episodeId,
     stage: row.stage,
+  })
+  if (options.autorun !== false) {
+    void runStoryboardPipelineJob(jobId, options.runners).catch(error => {
+      logTaskError('StoryboardPipeline', 'run-crashed', {
+        jobId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+  }
+  return toView(getJobRow(jobId)!)
+}
+
+/** 人工跳过当前失败镜：标记问题、记录原因，继续下一镜或进入声音设计。 */
+export async function skipStoryboardPipelineShot(
+  jobId: number,
+  shotNumber: number,
+  reason?: string,
+  options: { autorun?: boolean; runners?: PipelineRunners } = {},
+): Promise<PipelineJobView> {
+  const row = getJobRow(jobId)
+  if (!row) throw new Error('分镜管线任务不存在')
+  if (row.status === 'done') throw new Error('任务已完成，不能再跳过镜头')
+  const skeleton = db.select().from(schema.storyboardSkeletons)
+    .where(and(
+      eq(schema.storyboardSkeletons.jobId, jobId),
+      eq(schema.storyboardSkeletons.storyboardNumber, Number(shotNumber)),
+    ))
+    .get()
+  if (!skeleton) throw new Error(`第 ${shotNumber} 镜不存在`)
+  if (skeleton.status === 'validated') throw new Error(`第 ${shotNumber} 镜已通过，不需要跳过`)
+  if (skeleton.status === 'skipped') return toView(row)
+
+  let issues: string[] = []
+  try {
+    const parsed = JSON.parse(skeleton.issuesJson || '[]')
+    issues = Array.isArray(parsed) ? parsed.map(String) : []
+  } catch { /* 旧记录没有结构化问题 */ }
+  markSkeletonSkipped(row, skeleton, issues, String(reason || '').trim() || '人工跳过并标记问题')
+
+  const state = parseState(row)
+  persistState(jobId, state, {
+    status: 'running',
+    stage: 'repair',
+    currentShotNumber: null,
+    errorMsg: null,
+    finishedAt: null,
+  })
+  db.update(schema.storyboardPipelineJobs)
+    .set({ pauseRequested: 0, runStartedAt: now(), updatedAt: now() })
+    .where(eq(schema.storyboardPipelineJobs.id, jobId))
+    .run()
+  setCurrentStep(jobId, 'shot-repair')
+  logTaskProgress('StoryboardPipeline', 'shot-skip-requested', {
+    jobId,
+    shotNumber,
+    reason: reason || '',
   })
   if (options.autorun !== false) {
     void runStoryboardPipelineJob(jobId, options.runners).catch(error => {
@@ -1136,7 +1255,10 @@ async function runRepairStage(
   const novelContent = String(episode.content || '')
   const hasSeparateNovel = Boolean(novelContent.trim()) && novelContent.trim() !== script.trim()
   const params = runParameters(row)
-  const maxAttempts = params.shotMaxAttempts
+  const autoSkipAfter = Math.max(0, Number(params.autoSkipAfterAttempts || 0))
+  const maxAttempts = autoSkipAfter > 0
+    ? Math.min(params.shotMaxAttempts, autoSkipAfter)
+    : params.shotMaxAttempts
   const splitPresetKey = params.splitPresetKey && params.splitPresetKey !== 'inherit'
     ? params.splitPresetKey
     : (episode.breakdownMethod || null)
@@ -1149,7 +1271,7 @@ async function runRepairStage(
 
   const skeletons = skeletonShots(row.id)
   for (const skeleton of skeletons) {
-    if (skeleton.status === 'validated') continue
+    if (['validated', 'skipped'].includes(skeleton.status)) continue
     const fresh = getJobRow(row.id)
     if (fresh?.pauseRequested) {
       persistState(row.id, state, { status: 'interrupted', errorMsg: '已暂停，可继续', finishedAt: null })
@@ -1182,6 +1304,7 @@ async function runRepairStage(
           .slice(-1)[0]
         const validation = validateRepairedShot({
           sourceExcerpt: skeleton.sourceExcerpt,
+          planSpeechSegments: skeletonSpeechSegments(skeleton),
           description: existing.description,
           videoPrompt: existing.videoPrompt,
           characterIds: storyboardCharacterIds(existing.id),
@@ -1328,6 +1451,7 @@ async function runRepairStage(
           .slice(-1)[0]
         const validation = validateRepairedShot({
           sourceExcerpt: skeleton.sourceExcerpt,
+          planSpeechSegments: skeletonSpeechSegments(skeleton),
           description: storyboard.description,
           videoPrompt: storyboard.videoPrompt,
           characterIds: storyboardCharacterIds(storyboard.id),
@@ -1385,6 +1509,22 @@ async function runRepairStage(
     }
 
     if (!passed) {
+      if (autoSkipAfter > 0) {
+        markSkeletonSkipped(
+          row,
+          skeleton,
+          lastIssues,
+          `自动跳过：连续 ${maxAttempts} 次修补未通过（阈值 ${autoSkipAfter} 次）。`,
+        )
+        persistState(row.id, state, {
+          status: 'running',
+          stage: 'repair',
+          failedShots: 0,
+          currentShotNumber: null,
+          errorMsg: null,
+        })
+        continue
+      }
       db.update(schema.storyboardSkeletons).set({
         status: 'manual',
         issuesJson: JSON.stringify(lastIssues),
@@ -1426,8 +1566,29 @@ async function runRepairStage(
   return true
 }
 
-function markSkeletonValidated(row: PipelineJobRow, skeleton: SkeletonRow, warnings: string[]) {
+function markSkeletonSkipped(row: PipelineJobRow, skeleton: SkeletonRow, issues: string[], reason: string) {
   const ts = now()
+  const allIssues = [...new Set([reason, ...issues.filter(Boolean)])]
+  db.update(schema.storyboardSkeletons).set({
+    status: 'skipped',
+    issuesJson: JSON.stringify(allIssues),
+    updatedAt: ts,
+  }).where(eq(schema.storyboardSkeletons.id, skeleton.id)).run()
+  const stepRun = startStepRun(runStepInput(row, 'shot-validate', 'shot', `shot-${skeleton.storyboardNumber}`, {
+    skipped: true,
+    reason,
+  }))
+  finishStepRun(stepRun, { status: 'skipped', issues: allIssues })
+  logTaskWarn('StoryboardPipeline', 'shot-skipped', {
+    jobId: row.id,
+    shot: skeleton.storyboardNumber,
+    reason,
+    issues: allIssues.join('；'),
+  })
+  emitChange({ method: 'POST', path: `/api/v1/episodes/${row.episodeId}`, source: 'pipeline' })
+}
+
+function markSkeletonValidated(row: PipelineJobRow, skeleton: SkeletonRow, warnings: string[]) {  const ts = now()
   db.update(schema.storyboardSkeletons).set({
     status: 'validated',
     issuesJson: warnings.length ? JSON.stringify(warnings) : null,

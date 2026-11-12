@@ -73,6 +73,12 @@ function isCustomized(row: BreakdownMethodRow) {
   )
 }
 
+const ARCHIVED_FALLBACK: Record<string, string> = {
+  'hook-beat': 'hook-beat-extended',
+  'director-board': 'standard',
+  'trailer-cut': 'h3-compact',
+}
+
 /** 启动时按 key 补齐内置方案；未编辑过的内置方案（createdAt === updatedAt）随版本升级文本，编辑过的行一律保留 */
 export function ensureBreakdownMethodsSeeded(force = false): Promise<void> {
   const run = () => {
@@ -92,6 +98,9 @@ export function ensureBreakdownMethodsSeeded(force = false): Promise<void> {
             prompt: seed.prompt,
             skill: seed.skill,
             maxDurationSeconds: seed.maxSegmentSeconds,
+            minDurationSeconds: seed.minSegmentSeconds,
+            policyJson: seed.policyJson,
+            archived: seed.archived,
             builtin: 1,
             sortOrder: seed.sortOrder,
             createdAt: timestamp,
@@ -105,6 +114,9 @@ export function ensureBreakdownMethodsSeeded(force = false): Promise<void> {
           || existing.prompt !== seed.prompt
           || existing.skill !== seed.skill
           || Number(existing.maxDurationSeconds || 0) !== seed.maxSegmentSeconds
+          || Number(existing.minDurationSeconds || 0) !== seed.minSegmentSeconds
+          || existing.policyJson !== seed.policyJson
+          || Number(existing.archived || 0) !== seed.archived
         if (!untouched || !outdated) continue
         tx.update(schema.breakdownMethods)
           .set({
@@ -113,9 +125,19 @@ export function ensureBreakdownMethodsSeeded(force = false): Promise<void> {
             prompt: seed.prompt,
             skill: seed.skill,
             maxDurationSeconds: seed.maxSegmentSeconds,
+            minDurationSeconds: seed.minSegmentSeconds,
+            policyJson: seed.policyJson,
+            archived: seed.archived,
             sortOrder: seed.sortOrder,
           })
           .where(eq(schema.breakdownMethods.key, seed.key))
+          .run()
+      }
+      // 已归档方案迁移到最近的主力方案，避免老剧集继续使用旧多子镜头预设
+      for (const [from, to] of Object.entries(ARCHIVED_FALLBACK)) {
+        tx.update(schema.episodes)
+          .set({ breakdownMethod: to, updatedAt: timestamp })
+          .where(eq(schema.episodes.breakdownMethod, from))
           .run()
       }
     })
@@ -137,12 +159,13 @@ export function ensureBreakdownMethodsSeeded(force = false): Promise<void> {
   return seedPromise
 }
 
-export function listBreakdownMethods(): BreakdownMethodListItem[] {
+export function listBreakdownMethods(includeArchived = false): BreakdownMethodListItem[] {
   const rows = db
     .select()
     .from(schema.breakdownMethods)
     .orderBy(asc(schema.breakdownMethods.sortOrder), asc(schema.breakdownMethods.id))
     .all()
+    .filter(row => includeArchived || Number(row.archived || 0) === 0)
 
   const usageRows = db
     .select({ key: schema.episodes.breakdownMethod, total: count() })
@@ -187,10 +210,19 @@ export function getMaxSegmentSeconds(breakdownMethod?: string | null): number {
   if (!breakdownMethod) return 15
   try {
     const row = db
-      .select({ maxDurationSeconds: schema.breakdownMethods.maxDurationSeconds })
+      .select({ maxDurationSeconds: schema.breakdownMethods.maxDurationSeconds, archived: schema.breakdownMethods.archived })
       .from(schema.breakdownMethods)
       .where(eq(schema.breakdownMethods.key, breakdownMethod))
       .get()
+    if (row && Number(row.archived || 0) !== 0) {
+      const fallback = ARCHIVED_FALLBACK[breakdownMethod] || 'standard'
+      const active = db
+        .select({ maxDurationSeconds: schema.breakdownMethods.maxDurationSeconds })
+        .from(schema.breakdownMethods)
+        .where(eq(schema.breakdownMethods.key, fallback))
+        .get()
+      if (active && Number(active.maxDurationSeconds) > 0) return Number(active.maxDurationSeconds)
+    }
     if (row && Number(row.maxDurationSeconds) > 0) return Number(row.maxDurationSeconds)
   } catch {
     // 未初始化/只读环境回退静态种子
@@ -262,6 +294,9 @@ export function createBreakdownMethod(input: BreakdownMethodInput): BreakdownMet
     prompt,
     skill,
     maxDurationSeconds: 15,
+    minDurationSeconds: 6,
+    policyJson: '{"speechAtomic":true,"boundary":"single_side","minDuration":6,"maxDuration":15}',
+    archived: 0,
     builtin: 0,
     sortOrder: nextSortOrder(),
     createdAt: timestamp,
@@ -314,6 +349,9 @@ export function resetBreakdownMethod(key: string): BreakdownMethodRow {
     prompt: seed.prompt,
     skill: seed.skill,
     maxDurationSeconds: seed.maxSegmentSeconds,
+    minDurationSeconds: seed.minSegmentSeconds,
+    policyJson: seed.policyJson,
+    archived: seed.archived,
     updatedAt: now(),
   }).where(eq(schema.breakdownMethods.key, key)).run()
   return getBreakdownMethod(key)!
@@ -331,6 +369,9 @@ export function duplicateBreakdownMethod(key: string): BreakdownMethodRow {
     prompt: source.prompt,
     skill: source.skill,
     maxDurationSeconds: source.maxDurationSeconds || 15,
+    minDurationSeconds: source.minDurationSeconds || 6,
+    policyJson: source.policyJson,
+    archived: 0,
     builtin: 0,
     sortOrder: nextSortOrder(),
     createdAt: timestamp,
@@ -396,6 +437,10 @@ export function getEpisodeBreakdownBlock(episodeId?: number | null, overrideKey?
         key: methodKey,
       })
       return null
+    }
+    if (Number(method.archived || 0) !== 0) {
+      const fallback = getBreakdownMethod(ARCHIVED_FALLBACK[methodKey] || 'standard')
+      if (fallback) return buildBreakdownMethodBlock(fallback)
     }
     return buildBreakdownMethodBlock(method)
   } catch (error) {

@@ -10,6 +10,11 @@ export interface BreakdownMethodSeed {
   skill: string
   /** 覆盖率下限使用的单段最长秒数；自定义方案按 15 秒兜底 */
   maxSegmentSeconds: number
+  minSegmentSeconds: number
+  /** 结构化 SplitPolicy：台词原子、边界策略、钩子/节奏偏好 */
+  policyJson: string
+  /** 归档方案保留历史，不出现在新选择列表 */
+  archived: number
   sortOrder: number
 }
 
@@ -17,10 +22,13 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
   {
     key: 'standard',
     name: '标准短剧段落',
-    description: '沿用现有系统规范，按 8–15 秒段落与 2–4 个子镜头拆分，适合作为默认方案。',
+    description: '6–15 秒单机位、台词原子、边界承接；适合作为默认生产方案。',
     prompt: '',
     skill: '',
     maxSegmentSeconds: 15,
+    minSegmentSeconds: 6,
+    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 6, "maxDuration": 15, "style": "standard"}',
+    archived: 0,
     sortOrder: 10,
   },
   {
@@ -46,6 +54,9 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
 - 钩子只能加在已有剧情上，不能替代或挤掉场次；过场戏可以压缩子镜头，但不得删场。
 - 保存前逐场核对剧本场次与分镜段落：缺场、缺台词、缺关键动作时先补拆，再检查钩子。`,
     maxSegmentSeconds: 12,
+    minSegmentSeconds: 6,
+    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 6, "maxDuration": 12, "hook": "strong", "style": "hook"}',
+    archived: 1,
     sortOrder: 20,
   },
   {
@@ -153,6 +164,9 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
   8) 角色/道具/场景 ID 是否全部来自上下文？
 - 自检不通过时先改分镜，不要靠加旁白或加解释兜底；缺场缺戏只能补拆，不能删减。`,
     maxSegmentSeconds: 12,
+    minSegmentSeconds: 6,
+    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 6, "maxDuration": 12, "hook": "strong", "style": "hook"}',
+    archived: 0,
     sortOrder: 25,
   },
   {
@@ -176,6 +190,9 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
 - 段落数下限 = ceil(剧本字数 × 0.12 ÷ 10 × 0.9)；3000 字剧本至少 33 段；低于下限必须补拆，不允许用长镜头压掉场次。
 - 保存前逐场核对剧本场次、台词与关键动作是否全部落在分镜里，缺失先补拆再调机位。`,
     maxSegmentSeconds: 10,
+    minSegmentSeconds: 6,
+    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 6, "maxDuration": 10, "style": "director-board"}',
+    archived: 1,
     sortOrder: 30,
   },
   {
@@ -199,6 +216,9 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
 - 段落数下限 = ceil(剧本字数 × 0.12 ÷ 8 × 0.9)；3000 字剧本至少 41 段；动作可以拆细，但不得跳过剧情。
 - 单场戏超过 8 秒时按动作节点拆成多段，不压缩场次；保存前逐场核对场次、台词与关键动作是否齐全。`,
     maxSegmentSeconds: 8,
+    minSegmentSeconds: 6,
+    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 6, "maxDuration": 8, "style": "h3"}',
+    archived: 0,
     sortOrder: 40,
   },
   {
@@ -222,6 +242,9 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
 - 段落数下限 = ceil(剧本字数 × 0.12 ÷ 6 × 0.9)；3000 字剧本至少 54 段；低于下限说明剧情被略过，必须补拆。
 - 保存前逐场核对剧本场次是否都有对应段落与关键画面；跳切可以跨时间，但不能跳过剧情。`,
     maxSegmentSeconds: 6,
+    minSegmentSeconds: 6,
+    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 6, "maxDuration": 6, "style": "trailer"}',
+    archived: 1,
     sortOrder: 50,
   },
 ]

@@ -19,6 +19,7 @@ import {
   getStoryboardPipelineTrace,
   pauseStoryboardPipelineJob,
   resumeStoryboardPipelineJob,
+  skipStoryboardPipelineShot,
 } from '../services/storyboard-pipeline.js'
 
 const app = new Hono()
@@ -151,6 +152,21 @@ app.post('/runs/:id/resume', async (c) => {
 app.post('/runs/:id/continue', async (c) => {
   try {
     return success(c, { job: await resumeStoryboardPipelineJob(Number(c.req.param('id'))) })
+  } catch (error) {
+    return badRequest(c, errorMessage(error))
+  }
+})
+
+app.post('/runs/:id/skip-shot', async (c) => {
+  const body = await c.req.json().catch(() => ({} as Record<string, unknown>))
+  try {
+    return success(c, {
+      job: await skipStoryboardPipelineShot(
+        Number(c.req.param('id')),
+        Number(body.shot_number),
+        body.reason ? String(body.reason) : undefined,
+      ),
+    })
   } catch (error) {
     return badRequest(c, errorMessage(error))
   }

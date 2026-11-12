@@ -22,6 +22,13 @@ import { getCanonicalSceneGroups, resolveCanonicalSceneByName, resolveCanonicalS
 import { evaluateContractPairIssues } from '../../services/storyboard-contract-audit.js'
 import { createSceneSidePlan, normalizeSceneSides } from '../../services/storyboard-scene-sides.js'
 import {
+  extractPlanSpeechSegments,
+  planIssuesText,
+  validatePlanSequence,
+  type PlanShot,
+} from '../../services/storyboard-plan-contract.js'
+import { getMaxSegmentSeconds } from '../../services/breakdown-methods.js'
+import {
   formatDialogueIntegrityIssue,
   inspectDialogueIntegrity,
 } from '../../services/dialogue-integrity.js'
@@ -1170,6 +1177,15 @@ const skeletonFields = z.object({
   continuity: z.string().optional(),
   action_summary: z.string(),
   source_excerpt: z.string(),
+  action_start: z.string().optional(),
+  action_end: z.string().optional(),
+  coverage_type: z.string().optional(),
+  boundary_type: z.enum(['speech', 'action', 'reaction', 'scene', 'time']).optional(),
+  boundary_word: z.string().optional(),
+  screen_left: z.string().optional(),
+  screen_right: z.string().optional(),
+  axis_side: z.string().optional(),
+  landmark_side: z.string().optional(),
 })
 
 function normalizeExcerptText(text: string) {
@@ -1203,12 +1219,15 @@ const saveStoryboardSkeletons = createTool({
     }
 
     const rows: Array<typeof schema.storyboardSkeletons.$inferInsert> = []
+    const planShots: PlanShot[] = []
     for (const [index, skeleton] of skeletons.entries()) {
       const excerpt = String(skeleton.source_excerpt || '').trim()
       const summary = String(skeleton.action_summary || '').trim()
+      const storyboardNumber = state.nextShot + index
       const label = `本块第 ${index + 1} 个骨架`
       if (!summary) errors.push(`${label}缺少动作摘要。`)
       if (!excerpt) errors.push(`${label}缺少原文摘录。`)
+      const speechSegments = extractPlanSpeechSegments(excerpt)
       const duration = Number(skeleton.duration || 0)
       if (duration < 6 || duration > 15) errors.push(`${label}时长 ${duration} 秒，必须在 6-15 秒之间。`)
       if (excerpt) {
@@ -1241,7 +1260,7 @@ const saveStoryboardSkeletons = createTool({
         episodeId,
         dramaId,
         chunkIndex: runtime.chunk.index ?? null,
-        storyboardNumber: state.nextShot + index,
+        storyboardNumber,
         sceneId,
         title: skeleton.title ? applyAssetAliases(skeleton.title, aliasMap) : null,
         location: location || scene?.name || null,
@@ -1251,12 +1270,89 @@ const saveStoryboardSkeletons = createTool({
         duration,
         transition: skeleton.transition || 'cut',
         continuity: skeleton.continuity || null,
+        actionStart: skeleton.action_start?.trim() || null,
+        actionEnd: skeleton.action_end?.trim() || null,
+        coverageType: skeleton.coverage_type?.trim() || null,
+        speechSegmentsJson: JSON.stringify(speechSegments),
+        boundaryType: skeleton.boundary_type || (speechSegments.length ? 'speech' : 'action'),
+        boundaryWord: skeleton.boundary_word?.trim() || null,
+        screenLeft: skeleton.screen_left?.trim() || null,
+        screenRight: skeleton.screen_right?.trim() || null,
+        axisSide: skeleton.axis_side?.trim() || null,
+        landmarkSide: skeleton.landmark_side?.trim() || null,
+        planVersion: 1,
         actionSummary: applyAssetAliases(summary, aliasMap),
         sourceExcerpt: excerpt,
         status: 'draft',
         createdAt: now(),
         updatedAt: now(),
       })
+      planShots.push({
+        shotNumber: storyboardNumber,
+        sceneId,
+        sourceExcerpt: excerpt,
+        duration,
+        actionStart: skeleton.action_start?.trim() || null,
+        actionEnd: skeleton.action_end?.trim() || null,
+        coverageType: skeleton.coverage_type?.trim() || null,
+        speechSegments,
+        boundaryType: skeleton.boundary_type || (speechSegments.length ? 'speech' : 'action'),
+        boundaryWord: skeleton.boundary_word?.trim() || null,
+        screenLeft: skeleton.screen_left?.trim() || null,
+        screenRight: skeleton.screen_right?.trim() || null,
+        axisSide: skeleton.axis_side?.trim() || null,
+        landmarkSide: skeleton.landmark_side?.trim() || null,
+      })
+    }
+    if (!errors.length && planShots.length) {
+      const episode = db.select({ breakdownMethod: schema.episodes.breakdownMethod })
+        .from(schema.episodes)
+        .where(eq(schema.episodes.id, episodeId))
+        .get()
+      const previous = db.select().from(schema.storyboardSkeletons)
+        .where(eq(schema.storyboardSkeletons.jobId, runtime.jobId!))
+        .orderBy(desc(schema.storyboardSkeletons.storyboardNumber))
+        .limit(1)
+        .get()
+      const previousPlan: PlanShot | null = previous ? {
+        shotNumber: previous.storyboardNumber,
+        sceneId: previous.sceneId,
+        sourceExcerpt: previous.sourceExcerpt,
+        duration: previous.duration || 0,
+        actionStart: previous.actionStart,
+        actionEnd: previous.actionEnd,
+        coverageType: previous.coverageType,
+        speechSegments: extractPlanSpeechSegments(previous.sourceExcerpt),
+        boundaryType: previous.boundaryType,
+        boundaryWord: previous.boundaryWord,
+        screenLeft: previous.screenLeft,
+        screenRight: previous.screenRight,
+        axisSide: previous.axisSide,
+        landmarkSide: previous.landmarkSide,
+      } : null
+      const planGate = validatePlanSequence(
+        [...(previousPlan ? [previousPlan] : []), ...planShots],
+        { minDuration: 6, maxDuration: getMaxSegmentSeconds(episode?.breakdownMethod) },
+      )
+      if (planGate.issues.some(item => item.severity === 'error')) {
+        const messages = planGate.issues.filter(item => item.severity === 'error').map(item => item.message)
+        logTaskWarn('StoryboardPipeline', 'plan-gate-rejected', { episodeId, errors: messages.join('；') })
+        throw new Error(`拒绝保存骨架：${planIssuesText(planGate.issues.filter(item => item.severity === 'error'))}。请合并被拆开的说话提示与台词，或把上一镜截到提示之前。`)
+      }
+      for (const boundary of planGate.boundaries) {
+        const row = rows.find(item => item.storyboardNumber === boundary.fromShotNumber)
+        if (row) {
+          row.boundaryOutJson = JSON.stringify(boundary)
+        } else {
+          db.update(schema.storyboardSkeletons)
+            .set({ boundaryOutJson: JSON.stringify(boundary), updatedAt: now() })
+            .where(and(
+              eq(schema.storyboardSkeletons.jobId, runtime.jobId!),
+              eq(schema.storyboardSkeletons.storyboardNumber, boundary.fromShotNumber),
+            ))
+            .run()
+        }
+      }
     }
     if (errors.length) {
       logTaskWarn('StoryboardPipeline', 'skeleton-rejected', { episodeId, errors: errors.join('；') })
@@ -1410,8 +1506,20 @@ const saveRepairedStoryboard = createTool({
       return storyboardId!
     }
 
+    const planSpeechSegments = (() => {
+      try {
+        const parsed = JSON.parse(skeleton.speechSegmentsJson || '[]')
+        if (Array.isArray(parsed) && parsed.length) {
+          return parsed.filter(item => item && typeof item.text === 'string')
+        }
+      } catch {
+        // 旧骨架没有计划台词字段，从原文摘录补算
+      }
+      return extractPlanSpeechSegments(skeleton.sourceExcerpt).map(item => ({ speaker: item.speaker, text: item.text }))
+    })()
     const validation = validateRepairedShot({
       sourceExcerpt: skeleton.sourceExcerpt,
+      planSpeechSegments,
       description,
       videoPrompt,
       characterIds,

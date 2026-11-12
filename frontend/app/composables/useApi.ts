@@ -160,6 +160,8 @@ export const pipelineChainAPI = {
   pause: (runId: number) => api.post(`/pipelines/runs/${runId}/pause`, {}),
   resume: (runId: number) => api.post(`/pipelines/runs/${runId}/resume`, {}),
   continueRun: (runId: number) => api.post(`/pipelines/runs/${runId}/continue`, {}),
+  skipShot: (runId: number, shotNumber: number, reason?: string) =>
+    api.post(`/pipelines/runs/${runId}/skip-shot`, { shot_number: shotNumber, reason }),
 }
 
 export const frameAssetAPI = {

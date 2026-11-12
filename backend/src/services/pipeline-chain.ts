@@ -6,7 +6,7 @@
  * - 运行前固化快照；步骤执行写 pipeline_step_runs，便于 trace 与复现。
  * - 现有四段式拆分逻辑作为内置插件执行器，不在本文件重写业务规则。
  */
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, notInArray } from 'drizzle-orm'
 import { createHash } from 'node:crypto'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
@@ -84,13 +84,11 @@ export interface PipelineRunParameters {
   excerptWarnRatio: number
   coverageFloorRatio: number
   coverageGateEnabled: boolean
-  semanticReviewEnabled: boolean
-  autoRepairEnabled: boolean
   soundMaxAttempts: number
   maxWallClockMinutes: number
-  maxLlmCalls: number
   splitPresetKey: string
-  manualPassEnabled: boolean
+  /** 0 = 关闭；连续失败达到次数后自动跳过并标记 */
+  autoSkipAfterAttempts: number
 }
 
 export interface PipelineOverrides {
@@ -119,8 +117,6 @@ export const BASE_STEP_KEYS = [
   'skeleton-gate',
   'shot-repair',
   'shot-validate',
-  'semantic-review',
-  'auto-repair',
   'sound-design',
   'sound-validate',
   'finalize',
@@ -144,29 +140,24 @@ const DEFAULT_PARAMETERS: PipelineRunParameters = {
   excerptWarnRatio: 0.6,
   coverageFloorRatio: 0.9,
   coverageGateEnabled: true,
-  semanticReviewEnabled: false,
-  autoRepairEnabled: false,
   soundMaxAttempts: 2,
   maxWallClockMinutes: 60,
-  maxLlmCalls: 120,
   splitPresetKey: 'inherit',
-  manualPassEnabled: false,
+  autoSkipAfterAttempts: 0,
 }
 
 const PARAMETER_DEFS: PipelineParameterDefinition[] = [
   { key: 'shotMaxAttempts', label: '逐镜最大尝试', type: 'number', default: 3, min: 2, max: 5, step: 1, stepKey: 'shot-repair', description: '初始 + 重试的总次数；用完进入人工队列。' },
+
+  { key: 'autoSkipAfterAttempts', label: '连续失败自动跳过', type: 'number', default: 0, min: 0, max: 10, step: 1, stepKey: 'shot-repair', description: '0=关闭；连续失败达到次数后自动跳过并标记，继续下一镜。' },
   { key: 'blockMaxAttempts', label: '块级最大尝试', type: 'number', default: 2, min: 1, max: 3, step: 1, stepKey: 'skeleton-split', description: '单块骨架覆盖率不足或调用失败时的重拆次数。' },
   { key: 'excerptRejectRatio', label: '摘录拒收阈值', type: 'number', default: 0.25, min: 0.2, max: 0.35, step: 0.01, stepKey: 'skeleton-gate', description: '单块摘录覆盖率低于此值判失败。' },
   { key: 'excerptWarnRatio', label: '摘录警告阈值', type: 'number', default: 0.6, min: 0.5, max: 0.8, step: 0.01, stepKey: 'skeleton-gate', description: '低于此值记录警告但继续。' },
   { key: 'coverageFloorRatio', label: '覆盖下限比例', type: 'number', default: 0.9, min: 0.85, max: 1, step: 0.01, stepKey: 'skeleton-gate', description: '整集分镜数低于方案下限的折算比例时阻断。' },
   { key: 'coverageGateEnabled', label: '整集覆盖门禁', type: 'boolean', default: true, stepKey: 'skeleton-gate', description: '关闭后只提示覆盖不足，不阻断完成。' },
-  { key: 'semanticReviewEnabled', label: '语义复检', type: 'boolean', default: false, stepKey: 'semantic-review', description: '预留：下一批接入逐镜语义复检。' },
-  { key: 'autoRepairEnabled', label: '自动修复', type: 'boolean', default: false, stepKey: 'auto-repair', description: '预留：下一批接入白名单自动修复。' },
   { key: 'soundMaxAttempts', label: '声音设计尝试', type: 'number', default: 2, min: 1, max: 3, step: 1, stepKey: 'sound-design', description: '声音计划保存或校验失败时的重试次数。' },
   { key: 'maxWallClockMinutes', label: '单集墙钟上限', type: 'number', default: 60, min: 10, max: 240, step: 5, stepKey: 'finalize', description: '超过后暂停运行，等待人工处理。' },
-  { key: 'maxLlmCalls', label: '单集调用上限', type: 'number', default: 120, min: 10, max: 500, step: 5, stepKey: 'finalize', description: '预留：用于成本保护。' },
-  { key: 'splitPresetKey', label: '拆分预设', type: 'string', default: 'inherit', options: ['inherit', 'standard', 'hook-beat', 'hook-beat-extended', 'director-board', 'h3-compact', 'trailer-cut'], stepKey: 'skeleton-split', description: '默认跟随剧集选择；也可为本次运行覆盖。方案只影响风格与节奏，不覆盖 6–15 秒/单机位硬约束。' },
-  { key: 'manualPassEnabled', label: '允许人工通过', type: 'boolean', default: false, stepKey: 'shot-validate', description: '预留：允许人工标记通过并记录原因。' },
+  { key: 'splitPresetKey', label: '拆分预设', type: 'string', default: 'inherit', options: ['inherit', 'standard', 'hook-beat-extended', 'h3-compact'], stepKey: 'skeleton-split', description: '默认跟随剧集选择；也可为本次运行覆盖。方案只影响风格与节奏，不覆盖 6–15 秒/单机位硬约束。' },
 ]
 
 const PLUGIN_SEEDS: PipelineStepDefinition[] = [
@@ -203,26 +194,6 @@ const PLUGIN_SEEDS: PipelineStepDefinition[] = [
     rulePacks: ['unit-contract', 'dialogue-integrity', 'dialogue-capacity', 'pair-continuity'],
   },
   {
-    key: 'semantic-review', name: '语义复检', version: '1', kind: 'llm', scope: 'shot',
-    description: '逐镜检查动作衔接、台词归属、反应镜头与时间跳跃合理性。', required: false, defaultEnabled: false, available: false,
-    note: '预留：下一批接入 storyboard_auditor 逐镜语义复检。',
-    agent: 'storyboard_auditor', promptRef: 'prompts/storyboard_auditor.md',
-    skillRefs: ['skills/storyboard-auditor/SKILL.md'],
-    knowledgeRefs: ['storyboard-validation', 'continuity-and-transitions'],
-    toolRefs: ['read_storyboard_context'],
-    rulePacks: ['semantic-review'],
-  },
-  {
-    key: 'auto-repair', name: '自动修复', version: '1', kind: 'llm', scope: 'shot',
-    description: '只修复白名单语义问题；修复前快照，复查变差时回滚。', required: false, defaultEnabled: false, available: false,
-    note: '预留：下一批接入自动修复与回滚。',
-    agent: 'storyboard_director', promptRef: 'prompts/storyboard_director.md',
-    skillRefs: ['skills/storyboard-director/SKILL.md'],
-    knowledgeRefs: ['storyboard-validation', 'storyboard-direction'],
-    toolRefs: ['read_storyboard_pipeline_context', 'save_repaired_storyboard'],
-    rulePacks: ['semantic-review', 'unit-contract'],
-  },
-  {
     key: 'sound-design', name: '声音设计', version: '1', kind: 'llm', scope: 'episode',
     description: '按场景/剧情声音单元设计 BGM、环境声、音效、静默；单镜只写增量。', required: true, defaultEnabled: true, available: true,
     agent: 'storyboard_director', promptRef: 'prompts/storyboard_director.md',
@@ -245,22 +216,20 @@ const PLUGIN_SEEDS: PipelineStepDefinition[] = [
 const CHAIN_SEEDS: PipelineChainDefinition[] = [
   {
     key: 'standard-four-stage', name: '标准四段式', version: '1',
-    description: '默认生产链：预拆 → 逐镜修补/校验 → 声音设计；语义复检与自动修复关闭。',
+    description: '默认生产链：预拆 → 逐镜修补/校验 → 声音设计。',
     stepKeys: [...BASE_STEP_KEYS],
     defaultParameters: { ...DEFAULT_PARAMETERS },
     parameters: PARAMETER_DEFS,
   },
   {
     key: 'strict-four-stage', name: '严格四段式', version: '1',
-    description: '关键集使用：逐镜重试更多、覆盖下限更严；语义复检与自动修复为预留步骤。',
+    description: '关键集使用：逐镜重试更多、覆盖下限更严；边界契约与人工停点不变。',
     stepKeys: [...BASE_STEP_KEYS],
     defaultParameters: {
       ...DEFAULT_PARAMETERS,
       shotMaxAttempts: 4,
       blockMaxAttempts: 3,
       coverageFloorRatio: 0.95,
-      semanticReviewEnabled: false,
-      autoRepairEnabled: false,
     },
     parameters: PARAMETER_DEFS,
   },
@@ -332,15 +301,6 @@ const RULE_PACK_SEEDS: PipelineRulePackDefinition[] = [
       { key: 'no-restart', name: '不逐镜重启', severity: 'error', locked: true, scope: 'episode', description: '同单元后续镜头延续 BGM，不重新起。' },
       { key: 'no-cross-scene-ambience', name: '环境声不跨场景', severity: 'error', locked: true, scope: 'episode', description: '环境声不能跨不同场景。' },
       { key: 'delivery', name: 'native/post 不混用', severity: 'error', locked: true, scope: 'episode', description: '一集只能选一种交付方式。' },
-    ],
-  },
-  {
-    key: 'semantic-review', name: '语义复检（预留）', version: '1',
-    rules: [
-      { key: 'action-continuity', name: '动作是否接得上', severity: 'warning', locked: false, scope: 'shot', description: '前一镜尾动作与后一镜起动作是否合理。' },
-      { key: 'line-attribution', name: '台词是否符合人物', severity: 'warning', locked: false, scope: 'shot', description: '台词归属、语气与人物身份是否一致。' },
-      { key: 'reaction-coverage', name: '反应镜头是否缺失', severity: 'info', locked: false, scope: 'shot', description: '对话场是否有听者反应。' },
-      { key: 'time-jump', name: '时间跳跃/回忆是否合理', severity: 'warning', locked: false, scope: 'shot', description: '跨时间/回忆需要明确转场。' },
     ],
   },
 ]
@@ -502,6 +462,19 @@ export async function ensurePipelineSeeds(): Promise<void> {
       db.insert(schema.pipelineRulePacks).values({ ...values, createdAt: ts }).run()
     }
   }
+  // 清理已下线的内置步骤/规则包（旧版本播种过），避免设置页继续显示无效项
+  db.delete(schema.pipelinePlugins)
+    .where(and(
+      eq(schema.pipelinePlugins.builtin, 1),
+      notInArray(schema.pipelinePlugins.key, PLUGIN_SEEDS.map(item => item.key)),
+    ))
+    .run()
+  db.delete(schema.pipelineRulePacks)
+    .where(and(
+      eq(schema.pipelineRulePacks.builtin, 1),
+      notInArray(schema.pipelineRulePacks.key, RULE_PACK_SEEDS.map(item => item.key)),
+    ))
+    .run()
 }
 
 function chainFromRow(row: typeof schema.pipelineChains.$inferSelect): PipelineChainDefinition {

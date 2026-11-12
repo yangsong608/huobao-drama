@@ -194,6 +194,9 @@ export const sqliteSchemaStatements = [
     prompt TEXT NOT NULL DEFAULT '',
     skill TEXT NOT NULL DEFAULT '',
     max_duration_seconds INTEGER NOT NULL DEFAULT 15,
+    min_duration_seconds INTEGER NOT NULL DEFAULT 6,
+    policy_json TEXT,
+    archived INTEGER NOT NULL DEFAULT 0,
     builtin INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -502,6 +505,18 @@ export const sqliteSchemaStatements = [
     duration INTEGER DEFAULT 0,
     transition TEXT DEFAULT 'cut',
     continuity TEXT,
+    action_start TEXT,
+    action_end TEXT,
+    coverage_type TEXT,
+    speech_segments_json TEXT,
+    boundary_type TEXT,
+    boundary_word TEXT,
+    boundary_out_json TEXT,
+    screen_left TEXT,
+    screen_right TEXT,
+    axis_side TEXT,
+    landmark_side TEXT,
+    plan_version INTEGER NOT NULL DEFAULT 1,
     action_summary TEXT NOT NULL,
     source_excerpt TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'draft',
@@ -1680,6 +1695,34 @@ export function initSqliteSchema(sqlite: Database.Database) {
   )
   if (!breakdownColumns.has('max_duration_seconds')) {
     sqlite.exec('ALTER TABLE breakdown_methods ADD COLUMN max_duration_seconds INTEGER NOT NULL DEFAULT 15')
+  }
+  for (const [name, type] of Object.entries({
+    min_duration_seconds: 'INTEGER NOT NULL DEFAULT 6',
+    policy_json: 'TEXT',
+    archived: 'INTEGER NOT NULL DEFAULT 0',
+  })) {
+    if (!breakdownColumns.has(name)) sqlite.exec(`ALTER TABLE breakdown_methods ADD COLUMN ${name} ${type}`)
+  }
+
+  // 分镜计划层契约：旧库补列，历史骨架按旧字段继续可读。
+  const skeletonColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(storyboard_skeletons)').all() as { name: string }[]).map(row => row.name),
+  )
+  for (const [name, type] of Object.entries({
+    action_start: 'TEXT',
+    action_end: 'TEXT',
+    coverage_type: 'TEXT',
+    speech_segments_json: 'TEXT',
+    boundary_type: 'TEXT',
+    boundary_word: 'TEXT',
+    boundary_out_json: 'TEXT',
+    screen_left: 'TEXT',
+    screen_right: 'TEXT',
+    axis_side: 'TEXT',
+    landmark_side: 'TEXT',
+    plan_version: 'INTEGER NOT NULL DEFAULT 1',
+  })) {
+    if (!skeletonColumns.has(name)) sqlite.exec(`ALTER TABLE storyboard_skeletons ADD COLUMN ${name} ${type}`)
   }
 
   // ===== V2 列扩展：只加列，不改旧列，历史数据保持原样 =====

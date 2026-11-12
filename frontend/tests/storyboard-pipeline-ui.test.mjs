@@ -12,7 +12,7 @@ const locales = ['zh', 'en', 'ja', 'ko'].map(lang => [
 
 test('视频制作页使用独立的拆分进度面板，不再用 banner + 空状态重复进度', () => {
   assert.match(episode, /class="video-split-panel"/)
-  assert.match(episode, /v-if="splitRunning \|\| \(canResumeSplit && splitJob\)"/)
+  assert.match(episode, /v-if="splitRunning \|\| \(canResumeSplit && splitJob\) \|\| \(splitJob\?\.status === 'done' && splitJob\?\.skipped_shots > 0\)"/)
   assert.match(episode, /class="video-split-progress-track"/)
   assert.match(episode, /class="video-split-chunk-list"/)
   assert.match(episode, /@click="pauseSplit"/)
@@ -131,4 +131,23 @@ test('覆盖板可直接修改覆盖类型并保存本场计划', () => {
   assert.match(coverageBoard, /changeCoverageType\(group, shot, \$event\.target\.value\)/)
   assert.match(coverageBoard, /planningAPI\.saveCoveragePlan\(props\.episodeId, group\.sceneId/)
   assert.match(coverageBoard, /function summarizeUnits\(units\)/)
+})
+
+test('视频页显示原剧本摘录与计划台词，衔接转场移出折叠区', () => {
+  assert.match(episode, /class="video-inspector-section video-script-source"/)
+  assert.match(episode, /selectedSourceExcerpt/)
+  assert.match(episode, /selectedPlanSpeech/)
+  assert.match(episode, /episode\.sb\.sourceExcerpt/)
+  assert.match(episode, /episode\.sb\.planSpeech/)
+  const transitionAt = episode.indexOf("t('episode.sb.transition')")
+  const detailsAt = episode.indexOf('class="video-legacy-fields"')
+  assert.ok(transitionAt > 0 && transitionAt < detailsAt, '衔接转场必须在折叠区之前直接可见')
+  assert.match(episode, /episode\.sb\.descAiHint/)
+  assert.match(episode, /episode\.sb\.advancedFields/)
+  for (const [lang, bundle] of locales) {
+    const sb = bundle.episode?.sb || {}
+    for (const key of ['sourceExcerpt', 'sourceExcerptTag', 'sourceExcerptHint', 'planSpeech', 'descAiHint', 'transitionHint', 'advancedFields']) {
+      assert.equal(typeof sb[key], 'string', `${lang} 缺少 episode.sb.${key}`)
+    }
+  }
 })

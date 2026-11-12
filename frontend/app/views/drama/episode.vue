@@ -634,7 +634,7 @@
                 </button>
               </div>
             </div>
-            <div v-if="splitRunning || (canResumeSplit && splitJob)" class="video-split-panel">
+            <div v-if="splitRunning || (canResumeSplit && splitJob) || (splitJob?.status === 'done' && splitJob?.skipped_shots > 0)" class="video-split-panel">
               <div class="video-split-panel-head">
                 <div class="video-split-panel-copy">
                   <div class="video-split-panel-title">{{ t('episode.sb.title') }} · {{ pipelineStageLabel }} · {{ selectedChainName }}</div>
@@ -682,7 +682,7 @@
                 >
                   <span class="video-split-chunk-dot" />
                   <span class="video-split-chunk-label">#{{ shot.number }} {{ shot.title }}</span>
-                  <span class="video-split-chunk-shots">{{ shot.status === 'validated' ? '✓' : (shot.attempts || 0) }}</span>
+                  <span class="video-split-chunk-shots">{{ shot.status === 'validated' ? '✓' : (shot.status === 'skipped' ? t('episode.sb.skippedShort') : (shot.attempts || 0)) }}</span>
                 </div>
               </div>
               <div v-if="splitJob?.status === 'failed' && splitJob?.current_shot_number" class="video-split-manual" role="alert">
@@ -692,12 +692,38 @@
                 </div>
                 <div class="video-split-manual-desc">{{ t('episode.sb.manualDesc') }}</div>
                 <div v-if="splitJob.error" class="video-split-panel-error">{{ splitJob.error }}</div>
+                <input
+                  v-model="skipReason"
+                  class="input"
+                  maxlength="200"
+                  :disabled="skipStarting"
+                  :placeholder="t('episode.sb.manualSkipReason')"
+                />
                 <div class="video-split-manual-actions">
                   <button type="button" class="btn btn-primary btn-sm" @click="focusPipelineShotNumber(splitJob.current_shot_number)">
                     {{ t('episode.sb.manualEdit') }}
                   </button>
                   <button v-if="canResumeSplit" type="button" class="btn btn-sm" @click="resumeSplit">
                     {{ t('episode.sb.manualContinue') }}
+                  </button>
+                  <button type="button" class="btn btn-sm" :disabled="skipStarting" @click="skipPipelineShot">
+                    <Loader2 v-if="skipStarting" :size="11" class="animate-spin" />
+                    {{ t('episode.sb.manualSkip') }}
+                  </button>
+                </div>
+              </div>
+              <div v-if="splitJob?.status === 'done' && splitJob?.skipped_shots > 0" class="video-split-manual" role="status">
+                <div class="video-split-manual-head">
+                  <strong>{{ t('episode.sb.skippedSummary', { n: splitJob.skipped_shots }) }}</strong>
+                  <span class="tag">{{ t('episode.sb.skippedTag') }}</span>
+                </div>
+                <div class="video-split-manual-desc">
+                  {{ t('episode.sb.skippedNumbers', { numbers: (splitJob.skipped_shot_numbers || []).join('、') }) }}
+                </div>
+                <div class="video-split-manual-desc">{{ t('episode.sb.skippedHint') }}</div>
+                <div class="video-split-manual-actions">
+                  <button type="button" class="btn btn-sm" @click="focusPipelineShotNumber(firstSkippedShotNumber)">
+                    {{ t('episode.sb.skippedView') }}
                   </button>
                 </div>
               </div>
@@ -860,6 +886,7 @@
                   <div class="video-task-main">
                     <div class="video-task-line">
                       <strong class="video-task-name">{{ task.title }}</strong>
+                      <span v-if="isSkippedShot(task.storyboard)" class="tag">{{ t('episode.sb.skippedTag') }}</span>
                       <span v-if="task.transitionKind" class="video-task-transition-tag">{{ task.transitionLabel }}</span>
                     </div>
                     <div class="video-task-meta-line">
@@ -1022,18 +1049,22 @@
               </button>
               <div class="video-main-col" v-show="!isCompact || tabletPane === 'edit'">
               <div class="video-main-scroll">
+                <section v-if="selectedSourceExcerpt || selectedPlanSpeech.length" class="video-inspector-section video-script-source">
+                  <div class="video-inspector-prompt-head">
+                    <span class="video-inspector-label">{{ t('episode.sb.sourceExcerpt') }}</span>
+                    <span class="tag mono">{{ t('episode.sb.sourceExcerptTag', { n: storyboardNumberOf(selectedSb) || '?' }) }}</span>
+                  </div>
+                  <p class="video-script-source-text">{{ selectedSourceExcerpt || t('episode.sb.sourceExcerptEmpty') }}</p>
+                  <div v-if="selectedPlanSpeech.length" class="video-script-speech">
+                    <span class="video-script-speech-label">{{ t('episode.sb.planSpeech') }}</span>
+                    <p v-for="(line, index) in selectedPlanSpeech" :key="index" class="video-script-speech-line">
+                      <span v-if="line.speaker" class="video-script-speaker">{{ line.speaker }}：</span>「{{ line.text }}」
+                    </p>
+                  </div>
+                  <p class="voice-reference-hint">{{ t('episode.sb.sourceExcerptHint') }}</p>
+                </section>
                 <div class="video-main-grid">
-                  <details class="video-inspector-section video-legacy-fields">
-                    <summary class="video-inspector-label">{{ t('episode.sb.legacyFields') }}</summary>
-                    <p class="voice-reference-hint">{{ t('episode.sb.legacyFieldsHint') }}</p>
-                    <label class="field">
-                      <span class="field-label">{{ t('episode.sb.descLabel') }} <span class="dim">({{ t('episode.sb.descHint') }})</span></span>
-                      <textarea ref="sbDescriptionInput" :value="selectedSb.description || ''" class="textarea video-desc-textarea" rows="7" @blur="updateField(selectedSb, 'description', $event.target.value)" :placeholder="t('episode.sb.descPlaceholder')" />
-                    </label>
-                    <label class="field">
-                      <span class="field-label">{{ t('episode.sb.atmosphere') }}</span>
-                      <textarea :value="selectedSb.atmosphere || ''" class="textarea" rows="2" @blur="updateField(selectedSb, 'atmosphere', $event.target.value)" :placeholder="t('episode.sb.atmospherePlaceholder')" />
-                    </label>
+                  <section class="video-inspector-section video-shot-basics">
                     <label class="field">
                       <span class="field-label">{{ t('episode.sb.transition') }}</span>
                       <BaseSelect
@@ -1042,12 +1073,25 @@
                         :searchable="false"
                         @update:model-value="v => updateField(selectedSb, 'transition', v)"
                       />
+                      <span class="voice-reference-hint">{{ t('episode.sb.transitionHint') }}</span>
                     </label>
                     <label class="field">
-                      <span class="field-label">{{ t('episode.sb.continuity') }}</span>
-                      <textarea :value="selectedSb.continuity || ''" class="textarea" rows="2" @blur="updateField(selectedSb, 'continuity', $event.target.value)" :placeholder="t('episode.sb.continuityPlaceholder')" />
+                      <span class="field-label">{{ t('episode.sb.descLabel') }} <span class="dim">({{ t('episode.sb.descHint') }})</span></span>
+                      <textarea ref="sbDescriptionInput" :value="selectedSb.description || ''" class="textarea video-desc-textarea" rows="5" @blur="updateField(selectedSb, 'description', $event.target.value)" :placeholder="t('episode.sb.descPlaceholder')" />
+                      <span class="voice-reference-hint">{{ t('episode.sb.descAiHint') }}</span>
                     </label>
-                  </details>
+                    <details class="video-legacy-fields">
+                      <summary class="video-inspector-label">{{ t('episode.sb.advancedFields') }}</summary>
+                      <label class="field">
+                        <span class="field-label">{{ t('episode.sb.atmosphere') }}</span>
+                        <textarea :value="selectedSb.atmosphere || ''" class="textarea" rows="2" @blur="updateField(selectedSb, 'atmosphere', $event.target.value)" :placeholder="t('episode.sb.atmospherePlaceholder')" />
+                      </label>
+                      <label class="field">
+                        <span class="field-label">{{ t('episode.sb.continuity') }}</span>
+                        <textarea :value="selectedSb.continuity || ''" class="textarea" rows="2" @blur="updateField(selectedSb, 'continuity', $event.target.value)" :placeholder="t('episode.sb.continuityPlaceholder')" />
+                      </label>
+                    </details>
+                  </section>
 
                   <section class="video-inspector-section">
                     <div class="video-inspector-prompt-head">
@@ -3057,7 +3101,7 @@ const splitPercent = computed(() => {
 })
 function pipelineShotClass(status) {
   if (status === 'validated') return 'done'
-  if (status === 'manual') return 'failed'
+  if (status === 'manual' || status === 'skipped') return 'failed'
   if (status === 'repairing' || status === 'repaired') return 'running'
   return 'pending'
 }
@@ -3246,6 +3290,34 @@ const breakdownMethodKey = ref('standard')
 const chainTemplates = ref([])
 const selectedChainKey = ref('standard-four-stage')
 const pipelineTrace = reactive({ open: false, loading: false, steps: [], job: null })
+const skipReason = ref('')
+const skipStarting = ref(false)
+const skippedShotNumbers = computed(() =>
+  new Set((splitJob.value?.skipped_shot_numbers || []).map(item => Number(item))))
+const firstSkippedShotNumber = computed(() =>
+  Number((splitJob.value?.skipped_shot_numbers || [])[0]) || null)
+
+function isSkippedShot(sb) {
+  return skippedShotNumbers.value.has(Number(sb?.storyboard_number ?? sb?.storyboardNumber))
+}
+
+async function skipPipelineShot() {
+  const job = splitJob.value
+  const shotNumber = Number(job?.current_shot_number)
+  if (!job?.id || !shotNumber || skipStarting.value) return
+  skipStarting.value = true
+  try {
+    const result = await pipelineChainAPI.skipShot(job.id, shotNumber, skipReason.value.trim() || undefined)
+    if (result?.job) applySplitJob(result.job)
+    skipReason.value = ''
+    if (splitRunning.value) startSplitPolling()
+    toast.success(t('episode.sb.manualSkipDone', { n: shotNumber }))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.sb.manualSkipFailed' })
+  } finally {
+    skipStarting.value = false
+  }
+}
 const methodSaving = ref(false)
 let breakdownMethodsLoaded = false
 
@@ -6001,6 +6073,25 @@ const transitionOptions = computed(() => [
   { label: t('episode.sb.transitionWipe'), value: 'wipe' },
 ])
 const selectedSb = ref(null)
+const selectedPipelineShot = computed(() => {
+  const shots = splitJob.value?.shots || []
+  const storyboardId = Number(selectedSb.value?.id)
+  if (storyboardId) {
+    const byId = shots.find(shot => Number(shot.storyboard_id ?? shot.storyboardId) === storyboardId)
+    if (byId) return byId
+  }
+  const number = storyboardNumberOf(selectedSb.value)
+  return number ? shots.find(shot => Number(shot.number) === number) || null : null
+})
+const selectedSourceExcerpt = computed(() =>
+  String(selectedPipelineShot.value?.source_excerpt ?? selectedPipelineShot.value?.sourceExcerpt ?? '').trim())
+const selectedPlanSpeech = computed(() => {
+  const raw = selectedPipelineShot.value?.speech_segments ?? selectedPipelineShot.value?.speechSegments ?? []
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map(item => ({ speaker: String(item?.speaker || '').trim(), text: String(item?.text || '').trim() }))
+    .filter(item => item.text)
+})
 const preflightReport = ref(null)
 const preflightStale = ref(false)
 const preflightBusy = ref(false)
@@ -10185,6 +10276,31 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   content: '▸'; color: var(--text-3); font-size: 10px; transition: transform .15s ease;
 }
 .video-legacy-fields[open] summary::before { transform: rotate(90deg); }
+.video-script-source {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+.video-script-source-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-1);
+}
+.video-script-speech { display: flex; flex-direction: column; gap: 3px; }
+.video-script-speech-label { font-size: 11px; font-weight: 600; color: var(--text-3); }
+.video-script-speech-line { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-0); }
+.video-script-speaker { color: var(--accent); }
+.video-shot-basics {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
 .video-inspector-label { color: var(--text-0); font-size: 12px; font-weight: 700; }
 .video-inspector-label-hero {
   color: var(--accent);

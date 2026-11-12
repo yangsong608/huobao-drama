@@ -201,24 +201,25 @@ test('Drizzle breakdownMethods 与 episodes 定义包含契约字段', () => {
   assert.ok('breakdownMethod' in episodeColumns, 'Drizzle episodes 缺少 breakdownMethod')
 })
 
-test('首次播种补齐六条内置方案，重复播种不覆盖编辑', async () => {
+test('首次播种补齐三条在用方案，归档方案不进默认列表，重复播种不覆盖编辑', async () => {
   await svc.ensureBreakdownMethodsSeeded()
   const list = svc.listBreakdownMethods()
   assert.deepEqual(list.map(item => item.key), [
-    'standard', 'hook-beat', 'hook-beat-extended', 'director-board', 'h3-compact', 'trailer-cut',
+    'standard', 'hook-beat-extended', 'h3-compact',
   ])
   assert.ok(list.every(item => item.builtin === 1))
+  assert.equal(svc.listBreakdownMethods(true).length, 6)
 
-  db.update(breakdownMethods).set({ name: '改过的钩子' }).where(eq(breakdownMethods.key, 'hook-beat')).run()
   db.update(breakdownMethods).set({ name: '改过的扩展版' }).where(eq(breakdownMethods.key, 'hook-beat-extended')).run()
+  db.update(breakdownMethods).set({ name: '改过的紧凑版' }).where(eq(breakdownMethods.key, 'h3-compact')).run()
   await svc.ensureBreakdownMethodsSeeded()
-  assert.equal(svc.getBreakdownMethod('hook-beat')?.name, '改过的钩子')
   assert.equal(svc.getBreakdownMethod('hook-beat-extended')?.name, '改过的扩展版')
+  assert.equal(svc.getBreakdownMethod('h3-compact')?.name, '改过的紧凑版')
 
-  svc.resetBreakdownMethod('hook-beat')
   svc.resetBreakdownMethod('hook-beat-extended')
-  assert.equal(svc.getBreakdownMethod('hook-beat')?.name, '爆款钩子节拍')
+  svc.resetBreakdownMethod('h3-compact')
   assert.equal(svc.getBreakdownMethod('hook-beat-extended')?.name, '爆款钩子节拍·扩展版')
+  assert.equal(svc.getBreakdownMethod('h3-compact')?.name, 'H3 紧凑段')
 })
 
 test('扩展版预置方案覆盖开场、钩子节点、机位、台词与自检', async () => {
@@ -592,18 +593,23 @@ test('方案接口覆盖列表、详情、创建、更新、复制、恢复、�
   assert.equal(res.status, 200)
   let payload = await readJson(res)
   assert.equal(payload.code, 200)
-  assert.equal(payload.data.list.length, 6)
+  assert.equal(payload.data.list.length, 3)
   assert.equal(payload.data.list[0].key, 'standard')
-  assert.equal(payload.data.list[2].key, 'hook-beat-extended')
+  assert.equal(payload.data.list[2].key, 'h3-compact')
   assert.ok('usage_count' in payload.data.list[0])
   assert.ok(!('prompt' in payload.data.list[0]))
   assert.ok(!('skill' in payload.data.list[0]))
 
-  res = await api.request('/breakdown-methods/hook-beat')
+  res = await api.request('/breakdown-methods?include_archived=1')
+  assert.equal(res.status, 200)
+  payload = await readJson(res)
+  assert.equal(payload.data.list.length, 6)
+
+  res = await api.request('/breakdown-methods/hook-beat-extended')
   assert.equal(res.status, 200)
   payload = await readJson(res)
   assert.ok(payload.data.prompt.includes('钩子'))
-  assert.equal(payload.data.sort_order, 20)
+  assert.equal(payload.data.sort_order, 25)
 
   assert.equal((await api.request('/breakdown-methods/not-exists')).status, 404)
 
@@ -627,17 +633,17 @@ test('方案接口覆盖列表、详情、创建、更新、复制、恢复、�
   assert.equal(payload.data.name, '接口方案改')
   assert.equal(payload.data.prompt, '接口提示词')
 
-  res = await sendJson('/breakdown-methods/hook-beat/duplicate', 'POST', {})
+  res = await sendJson('/breakdown-methods/hook-beat-extended/duplicate', 'POST', {})
   assert.equal(res.status, 201)
   payload = await readJson(res)
   const duplicateKey = payload.data.key
-  assert.equal(payload.data.name, '爆款钩子节拍 副本')
+  assert.equal(payload.data.name, '爆款钩子节拍·扩展版 副本')
   assert.match(duplicateKey, /^custom-/)
 
-  res = await sendJson('/breakdown-methods/hook-beat/reset', 'POST', {})
+  res = await sendJson('/breakdown-methods/hook-beat-extended/reset', 'POST', {})
   assert.equal(res.status, 200)
   payload = await readJson(res)
-  assert.equal(payload.data.name, '爆款钩子节拍')
+  assert.equal(payload.data.name, '爆款钩子节拍·扩展版')
 
   res = await sendJson(`/breakdown-methods/${customKey}/reset`, 'POST', {})
   assert.equal(res.status, 400)

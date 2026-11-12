@@ -24,7 +24,7 @@ export interface DialogueIntegrityReport {
 
 const NARRATION_PREFIX_RE = /(?:旁白|画外音|心声|内心独白|narration|voice[\s-]?over|inner\s+voice|ナレーション|心の声|내레이션|속마음)\s*(?:[（(][^）)]*[）)])?\s*[：:]?\s*$/i
 
-const SPEECH_VERB_RE = /(?:说|道|问|喊|答|嘟囔|自语|吼|叫|嘀咕|念|叹|哼|嚷|骂|(?<![A-Za-z])(?:says?|said|asks?|asked|shouts?|shouted|whispers?|whispered|replies?|replied|answers?|answered|murmurs?|murmured|mutters?|muttered|yells?|yelled|calls?|called)|言う|言った|話す|話した|叫ぶ|叫んだ|問う|答える|つぶやく|呟く|말한다|말했다|외친다|외쳤다|묻는다|물었다|대답한다|대답했다|중얼거린다|중얼거렸다)\s*(?:[（(][^）)]*[）)])?\s*[：:]?\s*$/i
+const SPEECH_VERB_RE = /(?:说|道|问|喊|答|唱喝|唱喏|嘟囔|自语|吼|叫|嘀咕|念|叹|哼|嚷|骂|(?<![A-Za-z])(?:says?|said|asks?|asked|shouts?|shouted|whispers?|whispered|replies?|replied|answers?|answered|murmurs?|murmured|mutters?|muttered|yells?|yelled|calls?|called)|言う|言った|話す|話した|叫ぶ|叫んだ|問う|答える|つぶやく|呟く|말한다|말했다|외친다|외쳤다|묻는다|물었다|대답한다|대답했다|중얼거린다|중얼거렸다)\s*(?:[（(][^）)]*[）)])?\s*[：:]?\s*$/i
 
 const SPEAKER_COLON_RE = /@[^\s，。！？；：、,.!?;:]{1,24}\s*(?:[（(][^）)]*[）)])?\s*[：:]\s*$/
 
@@ -42,6 +42,37 @@ function normalizeSpokenText(text: string): string {
   return stripStageDirections(text).replace(/[\s\u3000]+/g, '')
 }
 
+export interface ScriptDialogueSegment {
+  speaker: string
+  text: string
+  raw: string
+}
+
+const SCRIPT_META_SPEAKER_RE = /^(?:出场人物|场景|画面调度|画面左|画面右|过肩|背景地标|轴线|动作|动作起点|动作终点|时间帧|负面约束|负面调度|镜头|时长|转场|连续性|声音|BGM|环境声|音效|字幕|标题|注|说明|来源|原文|摘录|source|location|time|duration|transition|continuity|action|sound|negative|characters|scene)$/i
+const SCRIPT_SPEAKER_RE = /^\s*(?:@)?([\u4e00-\u9fa5A-Za-z0-9·（）()\-]{1,16})\s*(?:[（(][^）)]*[）)])?\s*[：:]\s*(.+?)\s*$/
+
+/**
+ * 剧本格式化台词：`角色：（情绪）台词`，没有引号也要算作原文台词。
+ * 只识别行首的角色冒号行，排除场景/调度/时间帧等元数据。
+ */
+export function extractScriptDialogueSegments(text: string): ScriptDialogueSegment[] {
+  const result: ScriptDialogueSegment[] = []
+  for (const rawLine of String(text || '').split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const match = SCRIPT_SPEAKER_RE.exec(line)
+    if (!match) continue
+    const speaker = match[1].replace(/^@/, '').trim()
+    if (!speaker || SCRIPT_META_SPEAKER_RE.test(speaker)) continue
+    if (/^\d+(?:-\d+)?秒?$/.test(speaker)) continue
+    const rawContent = match[2].trim()
+    const content = normalizeSpokenText(rawContent.replace(/^[「『“"]|[」』”"]$/g, ''))
+    if (!content || !/[\u4e00-\u9fa5A-Za-z0-9]/.test(content)) continue
+    result.push({ speaker, text: content, raw: rawContent })
+  }
+  return result
+}
+
 /**
  * 提取口白引号：只有紧邻旁白标记、说话动词或 @角色名 冒号的引号才算台词。
  * 招牌、字幕、告示等引号默认排除；短拟声词没有说话动词时也排除。
@@ -54,10 +85,11 @@ export function extractSpokenQuotes(text: string): SpokenQuote[] {
     if (NON_SPEECH_PREFIX_RE.test(before)) continue
     const narrated = NARRATION_PREFIX_RE.test(before)
     const spoken = SPEECH_VERB_RE.test(before)
-    if (!narrated && !spoken && !SPEAKER_COLON_RE.test(before)) continue
+    const speaker = SPEAKER_COLON_RE.test(before)
+    if (!narrated && !spoken && !speaker) continue
     const normalized = normalizeSpokenText(span.inner)
     if (!normalized) continue
-    if ([...normalized].length <= 3 && !spoken) continue
+    if ([...normalized].length <= 3 && !spoken && !speaker && !narrated) continue
     quotes.push({ text: normalized, raw: span.inner, at: span.start })
   }
   return quotes
@@ -65,6 +97,23 @@ export function extractSpokenQuotes(text: string): SpokenQuote[] {
 
 function joinQuotes(quotes: SpokenQuote[]): string {
   return quotes.map((quote) => quote.text).join('')
+}
+
+/**
+ * description → video_prompt 的台词完整性使用「所有引号片段」比对。
+ * 提示词会把一句台词拆到多个时间帧，第二段前面的“催促：”等文字不一定
+ * 满足说话人/动词判定；只认 spoken 引号会把后半句误判为缺失。
+ */
+function extractAllQuotes(text: string): string[] {
+  const source = text || ''
+  const result: string[] = []
+  for (const span of findQuotedSpans(source)) {
+    const before = source.slice(Math.max(0, span.start - 48), span.start).replace(/\s+$/, '')
+    if (NON_SPEECH_PREFIX_RE.test(before)) continue
+    const normalized = normalizeSpokenText(span.inner)
+    if (normalized) result.push(normalized)
+  }
+  return result
 }
 
 /**
@@ -93,10 +142,10 @@ export function inspectDialogueIntegrity(
   description: string | null | undefined,
   videoPrompt: string | null | undefined,
 ): DialogueIntegrityReport | null {
-  const expectedQuotes = extractSpokenQuotes(description || '')
+  const expectedQuotes = extractAllQuotes(description || '')
   if (!expectedQuotes.length) return null
-  const expected = joinQuotes(expectedQuotes)
-  const actual = joinQuotes(extractSpokenQuotes(videoPrompt || ''))
+  const expected = expectedQuotes.join('')
+  const actual = extractAllQuotes(videoPrompt || '').join('')
   const missingAt = firstMissingIndex(expected, actual)
   if (missingAt < 0) {
     return { ok: true, expected, actual, missing: '', before: '' }

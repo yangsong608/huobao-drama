@@ -32,7 +32,8 @@ function errorMessage(error: unknown) {
 }
 
 app.get('/', async (c) => {
-  return success(c, { list: listBreakdownMethods().map(row => toSnakeCase(row)) })
+  const includeArchived = ['1', 'true'].includes(String(c.req.query('include_archived') || ''))
+  return success(c, { list: listBreakdownMethods(includeArchived).map(row => toSnakeCase(row)) })
 })
 
 app.get('/:key', async (c) => {

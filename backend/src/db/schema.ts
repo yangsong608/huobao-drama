@@ -265,6 +265,12 @@ export const breakdownMethods = sqliteTable('breakdown_methods', {
   skill: text('skill').notNull().default(''),
   /** 覆盖下限使用的单段最长秒数；自定义方案按 15 秒兜底 */
   maxDurationSeconds: integer('max_duration_seconds').notNull().default(15),
+  /** 计划层最短镜头时长 */
+  minDurationSeconds: integer('min_duration_seconds').notNull().default(6),
+  /** 结构化 SplitPolicy：台词原子、边界策略、钩子策略、覆盖偏好等 */
+  policyJson: text('policy_json'),
+  /** 归档方案保留历史，不出现在新选择列表 */
+  archived: integer('archived').notNull().default(0),
   builtin: integer('builtin').notNull().default(0),
   sortOrder: integer('sort_order').notNull().default(0),
   createdAt: text('created_at').notNull(),
@@ -573,11 +579,28 @@ export const storyboardSkeletons = sqliteTable('storyboard_skeletons', {
   duration: integer('duration').default(0),
   transition: text('transition').default('cut'),
   continuity: text('continuity'),
+  /** 计划层：动作起点/终点、覆盖类型、台词原子单元与边界契约 */
+  actionStart: text('action_start'),
+  actionEnd: text('action_end'),
+  coverageType: text('coverage_type'),
+  /** JSON：[{ speaker, text, sourceQuote, order }] */
+  speechSegmentsJson: text('speech_segments_json'),
+  /** speech / action / reaction / scene / time */
+  boundaryType: text('boundary_type'),
+  /** 可选过渡词；只允许单侧出现 */
+  boundaryWord: text('boundary_word'),
+  /** JSON：本镜尾状态、下一镜起状态、剧集场景常量快照 */
+  boundaryOutJson: text('boundary_out_json'),
+  screenLeft: text('screen_left'),
+  screenRight: text('screen_right'),
+  axisSide: text('axis_side'),
+  landmarkSide: text('landmark_side'),
+  planVersion: integer('plan_version').notNull().default(1),
   /** 预拆动作摘要：只写谁做什么，不写最终台词/完整提示词 */
   actionSummary: text('action_summary').notNull(),
   /** 本镜覆盖的小说/剧本原文摘录，逐字截取；修补阶段据此补台词，禁止创作 */
   sourceExcerpt: text('source_excerpt').notNull(),
-  /** draft / repairing / repaired / validated / manual */
+  /** draft / repairing / repaired / validated / manual / skipped */
   status: text('status').notNull().default('draft'),
   storyboardId: integer('storyboard_id'),
   attempts: integer('attempts').notNull().default(0),

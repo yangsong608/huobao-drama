@@ -91,17 +91,16 @@ test('内置链、插件与规则包幂等播种', async () => {
   await chain.ensurePipelineSeeds()
   await chain.ensurePipelineSeeds()
   assert.equal(chain.listPipelineChains().length, 3)
-  assert.equal(chain.listPipelinePlugins().length, 10)
-  assert.equal(chain.listPipelineRulePacks().length, 7)
+  assert.equal(chain.listPipelinePlugins().length, 8)
+  assert.equal(chain.listPipelineRulePacks().length, 6)
   const view = chain.getPipelineChainView('standard-four-stage', 'global', 0)!
-  assert.equal(view.steps.length, 10)
-  assert.equal(view.parameters.length, 13)
+  assert.equal(view.steps.length, 8)
+  assert.equal(view.parameters.length, 10)
   const split = view.steps.find(step => step.key === 'skeleton-split')!
   assert.ok(split.required)
   assert.ok(split.knowledgeRefs?.includes('storyboard-direction'))
-  const review = view.steps.find(step => step.key === 'semantic-review')!
-  assert.equal(review.required, false)
-  assert.equal(review.available, false)
+  assert.equal(view.steps.some(step => step.key === 'semantic-review'), false)
+  assert.equal(view.parameters.some(param => param.key === 'semanticReviewEnabled'), false)
 })
 
 test('参数覆盖、可选步骤开关与必选步骤保护', async () => {
@@ -121,7 +120,7 @@ test('参数覆盖、可选步骤开关与必选步骤保护', async () => {
     scopeType: 'episode',
     scopeId: episodeId,
     stepToggles: { 'semantic-review': true },
-  }), /暂不可启用/)
+  }), /未知步骤/)
   assert.throws(() => chain.saveChainOverride({
     chainKey: 'standard-four-stage',
     scopeType: 'episode',

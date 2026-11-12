@@ -6,13 +6,13 @@
  * 规则层负责：合同/分区/台词完整性、发声动作必须有具体台词、原剧本台词不丢、相邻镜方向与动作端点。
  */
 import { validateStoryboardUnit } from './storyboard-unit-contract.js'
-import { extractSpokenQuotes, inspectDialogueIntegrity } from './dialogue-integrity.js'
+import { extractSpokenQuotes, extractScriptDialogueSegments, inspectDialogueIntegrity } from './dialogue-integrity.js'
 import { findQuotedSpans } from './dialogue-lines.js'
 import { parseContractFromPrompt, type ParsedContract } from './storyboard-contract.js'
 import { evaluateContractPairIssues } from './storyboard-contract-audit.js'
 
 /** 强发声动词：出现即表示角色在说话/叫喊，必须给出具体台词 */
-const VOCAL_VERB_RE = /(?:喊道?|叫道|喊话|高喊|吆喝|叫卖|揽客|嚷道?|吼道?|骂道?|呼唤|招呼道|嘟囔|嘀咕|自语|问道|答道|追问道|念叨|唱道)/g
+const VOCAL_VERB_RE = /(?:喊道?|叫道|喊话|高喊|吆喝|叫卖|揽客|嚷道?|吼道?|骂道?|呼唤|招呼道|嘟囔|嘀咕|自语|问道|答道|追问道|念叨|唱道|唱喝|唱喏)/g
 const VOCAL_VERB_EN_RE = /\b(?:shouts?|yells?|calls? out|hollers?|cries out|mutters?|murmurs?|whispers?|announces?|asks?|replies?|answers?)\b/gi
 
 export interface VocalIntent {
@@ -53,14 +53,15 @@ const NON_SPEECH_PREFIX_RE = /(?:招牌|告示|字幕|标题|牌匾|匾额|书�
  */
 function extractSourceQuotes(text: string): string[] {
   const source = String(text || '')
-  const result: string[] = []
+  const result = new Set<string>()
   for (const span of findQuotedSpans(source)) {
     const before = source.slice(Math.max(0, span.start - 24), span.start).replace(/\s+$/, '')
     if (NON_SPEECH_PREFIX_RE.test(before)) continue
     const normalized = span.inner.replace(/[\s\u3000]+/g, '')
-    if (normalized) result.push(normalized)
+    if (normalized) result.add(normalized)
   }
-  return result
+  for (const line of extractScriptDialogueSegments(source)) result.add(line.text)
+  return [...result]
 }
 
 function includesAllQuotes(container: string[], source: string[]) {
@@ -77,6 +78,8 @@ export interface RepairedShotInput {
   sceneId?: number | null
   characters?: Array<{ id: number; name: string }>
   shotLabel?: string
+  /** 计划层台词原子单元；渲染只能逐字使用，不能新增或删除 */
+  planSpeechSegments?: Array<{ speaker?: string; text: string }>
   previous?: {
     storyboardNumber: number
     sceneId: number | null
@@ -116,6 +119,41 @@ export function validateRepairedShot(input: RepairedShotInput): RepairedShotVali
   const sourceQuotes = extractSourceQuotes(source)
   const descriptionQuotes = normalizedQuotes(description)
   const promptQuotes = normalizedQuotes(prompt)
+  const allQuoted = (text: string) => findQuotedSpans(text || '')
+    .map(span => span.inner.replace(/[（(][^）)]*[）)]/g, '').replace(/[\s\u3000]+/g, ''))
+    .filter(Boolean)
+  const planTexts = (input.planSpeechSegments || [])
+    .map(item => String(item.text || '').replace(/[\s\u3000]+/g, ''))
+    .filter(Boolean)
+  if (planTexts.length) {
+    const descriptionAll = allQuoted(description)
+    const promptAll = allQuoted(prompt)
+    const missingDescription = planTexts.filter(text => !descriptionAll.join('').includes(text))
+    if (missingDescription.length) {
+      errors.push(`${label}description 没有逐字保留计划台词：${missingDescription.map(text => `「${text.slice(0, 30)}${text.length > 30 ? '…' : ''}」`).join('、')}。`)
+    }
+    const missingPrompt = planTexts.filter(text => !promptAll.join('').includes(text))
+    if (missingPrompt.length) {
+      errors.push(`${label}video_prompt 没有逐字保留计划台词：${missingPrompt.map(text => `「${text.slice(0, 30)}${text.length > 30 ? '…' : ''}」`).join('、')}。`)
+    }
+    const extraDescription = descriptionAll.filter(text => !planTexts.some(plan => plan.includes(text) || text.includes(plan)))
+    if (extraDescription.length) {
+      errors.push(`${label}description 出现计划外台词：${extraDescription.map(text => `「${text.slice(0, 30)}${text.length > 30 ? '…' : ''}」`).join('、')}；台词只能来自计划层。`)
+    }
+    const extraPrompt = promptAll.filter(text => !planTexts.some(plan => plan.includes(text) || text.includes(plan)))
+    if (extraPrompt.length) {
+      errors.push(`${label}video_prompt 出现计划外台词：${extraPrompt.map(text => `「${text.slice(0, 30)}${text.length > 30 ? '…' : ''}」`).join('、')}；台词只能来自计划层。`)
+    }
+  } else if (sourceIntent.vocal && !sourceQuotes.length) {
+    // 原文只有「喊道」这类发声动作、没有可引用的台词，计划层本来就提不出台词；
+    // 渲染层按语意补一句具体台词是这条规则要求的动作，不能当成计划外台词驳回。
+  } else {
+    const extraDescription = allQuoted(description)
+    const unexpected = extraDescription.filter(text => !sourceQuotes.some(quote => quote.includes(text) || text.includes(quote)))
+    if (unexpected.length) {
+      errors.push(`${label}计划层没有台词，渲染却自行加了台词；请删掉创作台词，或回到计划层补上原文依据。`)
+    }
+  }
 
   if (sourceQuotes.length) {
     const missing = includesAllQuotes(descriptionQuotes, sourceQuotes)
