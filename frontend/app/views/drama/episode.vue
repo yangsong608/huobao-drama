@@ -3668,9 +3668,9 @@ watch([panel, scriptStep, prodTab, dubStep], ([p, s, pt, ds]) => {
 // ===== 视频制作三栏宽度：按档位夹取 + 分组持久化（双击分隔条恢复当前档默认） =====
 const VIDEO_COL_STORE_KEY = 'huobao:workbench:video-cols'
 const VIDEO_COL_TABLET_STORE_KEY = 'huobao:workbench:video-cols:tablet'
-const VIDEO_COL_DEFAULTS = { left: 236, right: 340 }
+const VIDEO_COL_DEFAULTS = { left: 320, right: 340 }
 const VIDEO_COL_TABLET_DEFAULTS = { left: 180, right: 280 }
-const VIDEO_COL_LIMITS = { left: [180, 420], right: [260, 560] }
+const VIDEO_COL_LIMITS = { left: [300, 460], right: [260, 560] }
 const VIDEO_COL_TABLET_LIMITS = { left: [180, 200], right: [280, 300] }
 const VIDEO_MAIN_MIN = 320
 
@@ -9865,7 +9865,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   background: var(--surface-raised);
 }
 .video-task-workbench.has-player {
-  grid-template-columns: var(--vleft, 236px) minmax(0, 1fr);
+  grid-template-columns: var(--vleft, 320px) minmax(0, 1fr);
 }
 .video-task-side {
   min-width: 0;
@@ -9885,7 +9885,7 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   cursor: col-resize;
   touch-action: none;
 }
-.video-col-divider.is-left { left: calc(var(--vleft, 236px) - 4px); }
+.video-col-divider.is-left { left: calc(var(--vleft, 320px) - 4px); }
 .video-col-divider.is-right { right: calc(var(--vright, 340px) - 4px); }
 .video-col-divider::after {
   content: '';
@@ -11363,6 +11363,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   background: transparent;
   color: var(--text-2);
   font: 700 12px var(--font-body);
+  white-space: nowrap;
   cursor: pointer;
 }
 .video-tablet-tab.on { background: var(--sel-bg); color: var(--sel-text); }
@@ -11483,7 +11484,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 
   .pipeline { flex: 1; flex-direction: row; overflow-x: auto; overflow-y: hidden; }
 
-  .pipe-section { flex-direction: row; align-items: center; gap: 2px; }
+  .pipe-section { flex-direction: row; align-items: center; gap: 2px; flex-shrink: 0; }
 
   .pipe-section-label { display: none; }
 
@@ -12020,6 +12021,13 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
     overflow-y: auto;
     scroll-padding-bottom: calc(72px + var(--safe-bottom));
   }
+
+  /* 紧凑平板：has-player 的两列规则特异性更高，必须同级覆盖，否则页签会被塞进左侧 180px 列 */
+  .video-task-workbench.has-player {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .video-task-workbench.has-player .video-tablet-bar { grid-column: 1 / -1; }
 
   .video-tablet-bar {
     display: flex;
