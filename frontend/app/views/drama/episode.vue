@@ -608,6 +608,10 @@
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   {{ resumeSplitLabel }}
                 </button>
+                <button v-if="splitPanelAvailable && splitPanelCollapsed" type="button" class="btn btn-sm video-split-collapsed-btn" :class="{ 'has-issues': splitIssueCount > 0 }" :title="t('episode.sb.splitPanelExpand')" @click="toggleSplitPanel">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                  {{ splitCollapsedLabel }}
+                </button>
                 <button class="btn btn-sm" :disabled="videoPromptBatch.running || !sbs.length" @click="batchVideoPrompts">
                   <Loader2 v-if="videoPromptBatch.running" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -634,21 +638,18 @@
                 </button>
               </div>
             </div>
-            <div v-if="splitRunning || (canResumeSplit && splitJob) || (splitJob?.status === 'done' && splitJob?.skipped_shots > 0)" :class="['video-split-panel', { 'is-collapsed': splitPanelCollapsed }]">
+            <div v-if="splitPanelAvailable && !splitPanelCollapsed" class="video-split-panel">
               <div class="video-split-panel-head">
                 <div class="video-split-panel-copy">
                   <div class="video-split-panel-title">{{ t('episode.sb.title') }} · {{ pipelineStageLabel }} · {{ selectedChainName }}</div>
                   <div class="video-split-panel-sub">{{ splitProgressText }}</div>
                   <div v-if="splitRunning" class="video-split-panel-elapsed">{{ t('episode.sb.breakingElapsed', { s: breakdownElapsed }) }}</div>
                   <div v-else-if="splitJob?.error" class="video-split-panel-error">{{ splitJob.error }}</div>
-                  <span v-if="splitPanelCollapsed && splitJob?.status === 'done' && splitJob?.skipped_shots > 0" class="tag video-split-collapsed-tag">
-                    {{ t('episode.sb.skippedTag') }} · {{ splitJob.skipped_shots }}
-                  </span>
                 </div>
                 <div class="video-split-panel-actions">
-                  <button type="button" class="btn btn-sm video-split-toggle" :aria-expanded="!splitPanelCollapsed" aria-controls="video-split-panel-body" @click="toggleSplitPanel">
-                    <svg :class="['video-split-toggle-icon', { 'is-collapsed': splitPanelCollapsed }]" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-                    {{ t(splitPanelCollapsed ? 'episode.sb.splitPanelExpand' : 'episode.sb.splitPanelCollapse') }}
+                  <button type="button" class="btn btn-sm video-split-toggle" aria-controls="video-split-panel-body" @click="toggleSplitPanel">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                    {{ t('episode.sb.splitPanelCollapse') }}
                   </button>
                   <button v-if="splitRunning" type="button" class="btn btn-sm" :disabled="splitPausing" @click="pauseSplit">
                     <Loader2 v-if="splitPausing" :size="11" class="animate-spin" />
@@ -660,7 +661,7 @@
                   </button>
                 </div>
               </div>
-              <div v-show="!splitPanelCollapsed" id="video-split-panel-body">
+              <div id="video-split-panel-body">
               <div class="video-split-progress-track">
                 <div class="video-split-progress-fill" :style="{ width: splitPercent + '%' }" />
               </div>
@@ -3166,6 +3167,23 @@ const splitPercent = computed(() => {
   if (job.stage === 'sound') return job.sound_status === 'done' ? 100 : 92
   const total = Number(job.total_shots || 0)
   return total ? Math.min(90, Math.round((Number(job.validated_shots || 0) / total) * 90)) : 0
+})
+const splitPanelAvailable = computed(() => Boolean(splitJob.value && (
+  splitRunning.value
+  || canResumeSplit.value
+  || (splitJob.value.status === 'done' && Number(splitJob.value.skipped_shots || 0) > 0)
+)))
+const splitIssueCount = computed(() => {
+  const job = splitJob.value
+  if (!job) return 0
+  const skipped = Array.isArray(job.skipped_shot_numbers) && job.skipped_shot_numbers.length
+    ? job.skipped_shot_numbers.length
+    : Number(job.skipped_shots || 0)
+  return skipped + Number(job.failed_shots || 0)
+})
+const splitCollapsedLabel = computed(() => {
+  if (splitRunning.value) return t('episode.sb.splitPanelRunning', { p: splitPercent.value })
+  return t('episode.sb.splitPanelIssues', { n: splitIssueCount.value || 1 })
 })
 function pipelineShotClass(status) {
   if (status === 'validated') return 'done'
@@ -9267,11 +9285,8 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   box-shadow: var(--shadow-sm);
 }
 .video-split-panel-head { display: flex; align-items: flex-start; gap: 16px; }
-.video-split-panel.is-collapsed { padding: 10px 18px; margin: 10px auto; }
-.video-split-panel.is-collapsed .video-split-panel-head { align-items: center; }
-.video-split-toggle-icon { transition: transform .15s ease; }
-.video-split-toggle-icon.is-collapsed { transform: rotate(-90deg); }
-.video-split-collapsed-tag { margin-top: 6px; }
+.video-split-collapsed-btn { border-color: var(--accent); color: var(--accent); }
+.video-split-collapsed-btn.has-issues { border-color: var(--warning); color: var(--warning); }
 .video-split-panel-copy { flex: 1; min-width: 0; }
 .video-split-panel-title { font-size: 15px; font-weight: 700; color: var(--text-0); }
 .video-split-panel-sub { margin-top: 3px; font-size: 12px; color: var(--text-2); }

@@ -1342,7 +1342,7 @@
       "advancedFields": "Atmosphere and continuity (advanced)",
       "breakingElapsed": "Breaking down the storyboard… {s}s elapsed; generated shots refresh automatically",
       "splitPanelCollapse": "Collapse",
-      "splitPanelExpand": "Expand",
+      "splitPanelExpand": "Show split results",
       "splitProgress": "Chunked split: chunk {done}/{total} · {shots} shots saved",
       "pipelineStage": {
         "skeleton": "Skeleton",
@@ -1383,7 +1383,9 @@
       "batchDone": "Batch video prompt generation complete",
       "batchDoneFailed": "Batch video prompt generation complete, {n} failed",
       "batchFailed": "Batch video prompt generation failed",
-      "promptGenerated": "Video prompt for shot #{n} generated"
+      "promptGenerated": "Video prompt for shot #{n} generated",
+      "splitPanelIssues": "Split results · {n} issue(s)",
+      "splitPanelRunning": "Splitting {p}%"
     },
     "soundPanel": {
       "button": "Sound plan",

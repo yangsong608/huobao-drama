@@ -1342,7 +1342,7 @@
       "advancedFields": "氛围与连续性（高级）",
       "breakingElapsed": "正在拆分分镜…已等待 {s} 秒，期间会自动刷新已生成的镜头",
       "splitPanelCollapse": "收起",
-      "splitPanelExpand": "展开",
+      "splitPanelExpand": "展开拆分结果",
       "splitProgress": "分块拆分中：第 {done}/{total} 段 · 已保存 {shots} 个镜头",
       "pipelineStage": {
         "skeleton": "预拆骨架",
@@ -1383,7 +1383,9 @@
       "batchDone": "视频提示词批量生成完成",
       "batchDoneFailed": "视频提示词批量生成完成，{n} 个失败",
       "batchFailed": "视频提示词批量生成失败",
-      "promptGenerated": "分镜 #{n} 视频提示词已生成"
+      "promptGenerated": "分镜 #{n} 视频提示词已生成",
+      "splitPanelIssues": "拆分结果 · {n} 个问题镜",
+      "splitPanelRunning": "拆分进行中 {p}%"
     },
     "soundPanel": {
       "button": "声音计划",

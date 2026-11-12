@@ -12,7 +12,7 @@ const locales = ['zh', 'en', 'ja', 'ko'].map(lang => [
 
 test('视频制作页使用独立的拆分进度面板，不再用 banner + 空状态重复进度', () => {
   assert.match(episode, /['"]video-split-panel['"]/)
-  assert.match(episode, /v-if="splitRunning \|\| \(canResumeSplit && splitJob\) \|\| \(splitJob\?\.status === 'done' && splitJob\?\.skipped_shots > 0\)"/)
+  assert.match(episode, /v-if="splitPanelAvailable && !splitPanelCollapsed"/)
   assert.match(episode, /class="video-split-progress-track"/)
   assert.match(episode, /class="video-split-chunk-list"/)
   assert.match(episode, /@click="pauseSplit"/)
@@ -164,13 +164,15 @@ test('拆分面板可手动收起展开，完成态带问题分镜也能收起',
   assert.match(episode, /splitPanelCollapsed/)
   assert.match(episode, /function toggleSplitPanel\(\)/)
   assert.match(episode, /aria-controls="video-split-panel-body"/)
-  assert.match(episode, /v-show="!splitPanelCollapsed" id="video-split-panel-body"/)
-  assert.match(episode, /'is-collapsed': splitPanelCollapsed/)
+  assert.match(episode, /video-split-collapsed-btn/)
+  assert.match(episode, /splitCollapsedLabel/)
+  assert.match(episode, /splitIssueCount/)
   assert.match(episode, /huobao:split-panel-collapsed:/)
   for (const [lang, bundle] of locales) {
     const sb = bundle.episode?.sb || {}
-    assert.equal(typeof sb.splitPanelCollapse, 'string', `${lang} 缺少 episode.sb.splitPanelCollapse`)
-    assert.equal(typeof sb.splitPanelExpand, 'string', `${lang} 缺少 episode.sb.splitPanelExpand`)
+    for (const key of ['splitPanelCollapse', 'splitPanelExpand', 'splitPanelIssues', 'splitPanelRunning']) {
+      assert.equal(typeof sb[key], 'string', `${lang} 缺少 episode.sb.${key}`)
+    }
     for (const key of ['manualSkip', 'manualSkipReason', 'skippedSummary', 'skippedTag', 'skippedNumbers', 'skippedHint', 'skippedView', 'skippedShort']) {
       assert.equal(typeof sb[key], 'string', `${lang} 缺少 episode.sb.${key}`)
     }

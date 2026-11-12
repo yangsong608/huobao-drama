@@ -1342,7 +1342,7 @@
       "advancedFields": "雰囲気と連続性（上級）",
       "breakingElapsed": "分鏡を分解中…{s} 秒経過。生成済みカットは自動更新されます",
       "splitPanelCollapse": "たたむ",
-      "splitPanelExpand": "展開",
+      "splitPanelExpand": "分割結果を展開",
       "splitProgress": "分割分解中：{done}/{total} 段 · {shots} カット保存済み",
       "pipelineStage": {
         "skeleton": "スケルトン",
@@ -1383,7 +1383,9 @@
       "batchDone": "動画プロンプトの一括生成が完了しました",
       "batchDoneFailed": "動画プロンプトの一括生成が完了しました（{n} 件失敗）",
       "batchFailed": "動画プロンプトの一括生成に失敗しました",
-      "promptGenerated": "分镜 #{n} の動画プロンプトを生成しました"
+      "promptGenerated": "分镜 #{n} の動画プロンプトを生成しました",
+      "splitPanelIssues": "分割結果 · 問題 {n} カット",
+      "splitPanelRunning": "分割中 {p}%"
     },
     "soundPanel": {
       "button": "音声プラン",
