@@ -1181,7 +1181,7 @@
                       @duration="v => updateField(selectedSb, 'duration', v)"
                     />
                     <p class="voice-reference-hint">{{ t('characterVoice.referenceHint') }}</p>
-                    <p v-if="previousShotFrameRef" class="voice-reference-hint">{{ t('episode.frameAssets.autoPromptHint', { token: previousShotFrameRef.token }) }}</p>
+                    <p v-if="previousShotFrameRef && !isLocalH3Video" class="voice-reference-hint">{{ t('episode.frameAssets.autoPromptHint', { token: previousShotFrameRef.token }) }}</p>
                     <div class="video-final-prompt">
                       <div class="video-inspector-prompt-head">
                         <span class="video-inspector-label">{{ t('episode.sb.finalPromptSection') }}</span>
@@ -1340,7 +1340,6 @@
                       <div class="frame-asset-current-meta">
                         <span>{{ t('episode.frameAssets.previousRef') }}</span>
                         <span class="dim">@{{ previousShotFrameRef.token }}</span>
-                        <span v-if="!currentShotFirstFrame && !isWan3Video" class="tag tag-success">{{ t('episode.frameAssets.autoFirstFrame') }}</span>
                       </div>
                     </div>
                     <div class="frame-asset-current">
@@ -7015,7 +7014,8 @@ function getShotReferenceEntries(sb) {
     entries.push({ name, url })
   }
   const previous = getPreviousShotFrameRef(sb)
-  if (previous) push(previous.token, previous.url)
+  // 本地 H3 的首帧/尾帧是硬引导；未显式设首帧时，上一镜末帧也不再塞进普通参考图。
+  if (previous && !isLocalH3Video.value) push(previous.token, previous.url)
   const scene = getStoryboardScene(sb)
   push(scene?.location || '', scene?.image_url || scene?.imageUrl)
   for (const char of getStoryboardCharacters(sb)) {
@@ -7034,9 +7034,8 @@ function getShotReferenceImages(sb) {
 // 首帧是本地 H3 fl2v 的 Picture 1；尾帧不参与图片编号。
 function getFirstFrameImageForGeneration(sb) {
   const explicitFirst = sb?.first_frame_image || sb?.firstFrameImage || ''
-  const previous = getPreviousShotFrameRef(sb)
-  const autoTail = !explicitFirst && previous?.url ? previous.url : ''
-  return isWan3Video.value ? '' : (explicitFirst || autoTail)
+  // 首帧只能在用户显式设置时使用；不再自动拿上一镜末帧当首帧。
+  return isWan3Video.value ? '' : explicitFirst
 }
 
 function getPromptReferenceEntries(sb) {
@@ -7386,6 +7385,8 @@ function appendPreviousFramePrompt(sb, prompt) {
     if (prompt.includes(line)) return prompt
     return prompt.trim() ? `${line}\n${prompt}` : line
   }
+  // 本地 H3 没有显式首帧时，不能再用上一镜末帧做隐式锚点。
+  if (isLocalH3Video.value) return prompt
   const token = `@${previous.token}`
   if (prompt.includes(token)) return prompt
   const line = t('episode.frameAssets.promptLine', { token: previous.token })
@@ -7600,12 +7601,10 @@ function uploadAssetImage(kind, id) {
 
 function buildVideoGenerationParams(sb) {
   const audioMode = episodeVideoAudioMode.value
-  const previous = getPreviousShotFrameRef(sb)
   const explicitFirst = sb.first_frame_image || sb.firstFrameImage || ''
   const lastFrameImage = sb.last_frame_image || sb.lastFrameImage
-  // Wan 3.0 首帧不能和参考图混用：降级为参考图；其他模型优先用显式首帧，否则接上一镜末帧。
-  const autoTail = !explicitFirst && previous?.url ? previous.url : ''
-  const firstFrameImage = isWan3Video.value ? '' : (explicitFirst || autoTail)
+  // 首帧只在显式设置时使用；Wan 3.0 仍不支持首帧+参考图混用。
+  const firstFrameImage = isWan3Video.value ? '' : explicitFirst
   const pictureEntries = getPromptReferenceEntries(sb)
   let referenceImages = pictureEntries
     .filter(entry => !(isLocalH3Video.value && firstFrameImage && entry.url === firstFrameImage))

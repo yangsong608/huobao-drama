@@ -1537,7 +1537,6 @@
       "firstFrameSetFailed": "先頭フレームの設定に失敗しました",
       "firstFrameClearFailed": "先頭フレームの解除に失敗しました",
       "deleteFailed": "絵コンテ素材の削除に失敗しました",
-      "autoFirstFrame": "自動先頭フレーム",
       "firstFrameContinuation": "先頭フレーム継承：前カットの末フレームを先頭フレームとして使用します。人物の同一性、姿勢、視線、小道具の位置を維持してください。"
     },
     "comfy": {

@@ -1537,7 +1537,6 @@
       "firstFrameSetFailed": "Failed to set first frame",
       "firstFrameClearFailed": "Failed to clear first frame",
       "deleteFailed": "Failed to delete storyboard asset",
-      "autoFirstFrame": "Auto first frame",
       "firstFrameContinuation": "First frame continuation: the previous shot last frame is provided as the first frame; keep its character identity, pose, eyeline and prop positions."
     },
     "comfy": {

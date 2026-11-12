@@ -109,17 +109,17 @@ test('生成前置门禁：单镜和批量生成前读取最新审计错误并�
   assert.match(episode, /toast\.error\(`不能生成：/)
 })
 
-test('尾帧链：上一镜末帧自动作为本镜首帧，Wan 3.0 降级为参考图', () => {
-  assert.match(episode, /const previous = getPreviousShotFrameRef\(sb\)/)
-  assert.match(episode, /const autoTail = !explicitFirst && previous\?\.url \? previous\.url : ''/)
-  assert.match(episode, /const firstFrameImage = isWan3Video\.value \? '' : \(explicitFirst \|\| autoTail\)/)
+test('首帧只在显式设置时使用；未设置时不再自动使用上一镜末帧', () => {
+  assert.match(episode, /function getFirstFrameImageForGeneration\(sb\)/)
+  assert.match(episode, /return isWan3Video\.value \? '' : explicitFirst/)
+  assert.doesNotMatch(episode, /const autoTail =/)
+  assert.match(episode, /const firstFrameImage = isWan3Video\.value \? '' : explicitFirst/)
+  assert.match(episode, /if \(previous && !isLocalH3Video\.value\) push\(previous\.token, previous\.url\)/)
+  assert.match(episode, /if \(isLocalH3Video\.value\) return prompt/)
+  assert.doesNotMatch(episode, /episode\.frameAssets\.autoFirstFrame/)
   assert.match(episode, /params\.first_frame_url = firstFrameImage/)
   assert.match(episode, /const pictureEntries = getPromptReferenceEntries\(sb\)/)
   assert.match(episode, /isLocalH3Video/)
-  assert.match(episode, /t\('episode\.frameAssets\.autoFirstFrame'\)/)
-  for (const [lang, data] of locales) {
-    assert.ok(data.episode?.frameAssets?.autoFirstFrame, `${lang} 缺少自动首帧文案`)
-  }
 })
 
 test('覆盖板刷新计划后同步镜头合同，旧分镜也能参与成对校验', () => {

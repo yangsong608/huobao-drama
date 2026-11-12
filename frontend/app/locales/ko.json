@@ -1537,7 +1537,6 @@
       "firstFrameSetFailed": "첫 프레임 설정 실패",
       "firstFrameClearFailed": "첫 프레임 지우기 실패",
       "deleteFailed": "스토리보드 자산 삭제 실패",
-      "autoFirstFrame": "자동 첫 프레임",
       "firstFrameContinuation": "첫 프레임 연결: 이전 샷의 마지막 프레임을 첫 프레임으로 사용합니다. 인물 동일성, 자세, 시선, 소품 위치를 유지하세요."
     },
     "comfy": {

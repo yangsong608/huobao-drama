@@ -1537,7 +1537,6 @@
       "firstFrameSetFailed": "设置首帧失败",
       "firstFrameClearFailed": "清除首帧失败",
       "deleteFailed": "删除分镜资产失败",
-      "autoFirstFrame": "自动首帧",
       "firstFrameContinuation": "首帧承接：已使用上一镜末帧作为首帧，保持其人物身份、姿势、视线和道具位置。"
     },
     "comfy": {
