@@ -1409,7 +1409,40 @@
         "ambience": "环境声",
         "sfx": "画内音效",
         "silence": "静默"
-      }
+      },
+      "generateAll": "生成全部缺失",
+      "generateAllHint": "生成当前计划中尚未生成的环境声、BGM 和音效",
+      "generate": "生成",
+      "regenerate": "重新生成",
+      "generatingProgress": "生成中 {done}/{total}",
+      "cancelGenerate": "取消生成",
+      "preview": "试听",
+      "stopPreview": "停止",
+      "download": "下载",
+      "attach": "加入音轨",
+      "updateTrack": "更新音轨",
+      "statusIdle": "未生成",
+      "statusGenerating": "生成中",
+      "statusReady": "已生成",
+      "statusFailed": "失败",
+      "statusSilence": "静默",
+      "needAudioConfig": "未配置音频生成服务，请先在设置页添加 ComfyUI audio-gen",
+      "needMerge": "请先完成合片，才能按实际时间加入音轨",
+      "generateStarted": "已开始生成声音",
+      "generateRunning": "当前正在生成声音",
+      "generateDone": "声音生成完成",
+      "generateFailed": "声音生成失败",
+      "generateCancelled": "已取消声音生成",
+      "generateNoneMissing": "没有待生成的声音线索",
+      "previewFailed": "试听失败",
+      "attachDone": "已加入音轨",
+      "duration": "时长",
+      "actualTime": "实际时间",
+      "plannedTime": "计划时间",
+      "dialogueCount": "范围内台词 {n} 句",
+      "generationBasis": "生成依据",
+      "promptPlaceholder": "留空则按分镜内容自动编译英文提示词",
+      "promptHint": "编辑只影响本次生成，不修改声音计划。"
     },
     "ref": {
       "title": "参考素材",
@@ -1493,7 +1526,7 @@
       "confirmApprox": "约 {n}s",
       "confirmModel": "视频模型",
       "confirmResolution": "分辨率",
-      "confirmNote": "任务由后端排队执行，关闭页面或重启应用后会继续；失败镜头不会自动重试。",
+      "confirmNote": "任务由后端排队执行，关闭页面或重启应用后会继续；相邻分镜会等待上一镜完成并自动抽取末帧作为参考图；失败镜头不会自动重试。",
       "confirmStart": "开始生成 ({n})",
       "confirmConcurrency": "同时生成任务数",
       "confirmConcurrencyHint": "默认 1 个最稳；同时开启越多，账号限流与失败风险越高（最多 5 个）。",
@@ -1511,13 +1544,13 @@
     },
     "frameAssets": {
       "title": "分镜资产",
-      "scopeHint": "仅本集可用；末帧作为下一镜的参考图，也可手动设为本镜首帧",
+      "scopeHint": "当前镜只显示上一镜的尾帧，不显示其他分镜的尾帧",
       "extract": "抽取末帧",
       "extracting": "抽取中…",
       "extractTitle": "从当前主视频末尾抽帧",
       "extracted": "已抽取末帧，下一镜生成时会自动作为首帧",
-      "bindHint": "需要固定开场时，可手动把本集资产设为本镜首帧",
-      "empty": "本集还没有分镜资产",
+      "bindHint": "需要固定开场时，可把上一分镜尾帧设为本镜首帧",
+      "empty": "上一分镜还没有尾帧",
       "useAsFirstFrame": "设为首帧",
       "current": "当前首帧",
       "clearFirstFrame": "清除首帧",
@@ -1537,7 +1570,8 @@
       "firstFrameSetFailed": "设置首帧失败",
       "firstFrameClearFailed": "清除首帧失败",
       "deleteFailed": "删除分镜资产失败",
-      "firstFrameContinuation": "首帧承接：已使用上一镜末帧作为首帧，保持其人物身份、姿势、视线和道具位置。"
+      "firstFrameContinuation": "首帧承接：已使用上一镜末帧作为首帧，保持其人物身份、姿势、视线和道具位置。",
+      "firstShot": "当前镜是第一个分镜，没有上一分镜"
     },
     "comfy": {
       "modelLabel": "ComfyUI 配置",
@@ -3214,7 +3248,8 @@
       "importAudio": "导入音频",
       "prevPage": "上一页",
       "nextPage": "下一页",
-      "pageInfo": "第 {x} / {y} 页"
+      "pageInfo": "第 {x} / {y} 页",
+      "soundDesign": "声音设计"
     },
     "advanced": {
       "title": "高级"

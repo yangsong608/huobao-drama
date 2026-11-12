@@ -8,6 +8,7 @@ import { mastra } from '../mastra/index.js'
 import { buildAgentRequestContext } from '../agents/context.js'
 import { logTaskError, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 import { renderPipelineRule } from './pipeline-rules.js'
+import { deriveProjectNegativeConstraints, formatProjectNegativeAnalysis } from './project-negative-constraints.js'
 import { failAiTaskRun, finishAiTaskRun, patchAiTaskRun, startAiTaskRun } from './ai-task-runs.js'
 
 export interface VideoPromptBatchStatus {
@@ -65,6 +66,7 @@ export async function startVideoPromptBatch(
     model: opts.model || null,
     params: { total: pending.length, completed: 0, failed: 0 },
   })
+  const projectNegative = await deriveProjectNegativeConstraints(dramaId, episodeId)
   const progress = (currentStoryboardId?: number) => ({
     total: task.total,
     completed: task.completed,
@@ -88,11 +90,15 @@ export async function startVideoPromptBatch(
       try {
         await agent.generate([{
           role: 'user',
-          content: renderPipelineRule('video_prompts', {
-            shotNumber: sb.storyboardNumber,
-            storyboardId: sb.id,
-            videoModel: videoLabel,
-          }),
+          content: [
+            renderPipelineRule('video_prompts', {
+              shotNumber: sb.storyboardNumber,
+              storyboardId: sb.id,
+              videoModel: videoLabel,
+              projectNegatives: projectNegative.rule,
+            }),
+            formatProjectNegativeAnalysis(projectNegative),
+          ].join('\n\n'),
         }], { maxSteps: 8, requestContext })
         // 以实际落库为准判定成败
         const [fresh] = await db.select().from(schema.storyboards).where(eq(schema.storyboards.id, sb.id))

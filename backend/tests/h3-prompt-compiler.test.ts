@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 const {
   compileH3Prompt,
@@ -7,6 +8,8 @@ const {
   clearH3TranslationCache,
   H3_TRANSLATOR_SYSTEM,
   H3PromptTranslationError,
+  shouldSilenceLocalH3Audio,
+  stripH3AudioLine,
   translateH3Text,
 } = await import('../src/services/h3-prompt.ts')
 
@@ -255,6 +258,22 @@ test('english-only prompts skip the text model entirely', async () => {
   })
   assert.match(out, /^A cat runs across a rainy street\.\nThis shot has no spoken dialogue/)
   assert.equal(calls, 0)
+})
+
+test('任务层把无台词本地 H3 镜头降为 silent', () => {
+  const source = readFileSync(new URL('../src/routes/tasks.ts', import.meta.url), 'utf8')
+  assert.match(source, /shouldSilenceLocalH3Audio\(audioMode, videoPrompt, dialogueLineCount\)/)
+  assert.match(source, /h3-no-dialogue-silent/)
+  assert.match(source, /videoBody!\.audio_mode = 'silent'/)
+  assert.match(source, /isNull\(schema\.storyboardLines\.deletedAt\)/)
+})
+
+test('无台词镜头降为 silent，不能只靠负面提示词', () => {
+  assert.equal(shouldSilenceLocalH3Audio('native', 'A cat.\nThis shot has no spoken dialogue.', 0), true)
+  assert.equal(shouldSilenceLocalH3Audio('native', 'X says, <d>[Chinese] 你好</d>', 0), false)
+  assert.equal(shouldSilenceLocalH3Audio('native', 'A cat.', 1), false)
+  assert.equal(shouldSilenceLocalH3Audio('ambient', 'A cat.', 0), false)
+  assert.equal(stripH3AudioLine('A cat.\nAudio: rain and crowd\nShot: street'), 'A cat.\nShot: street')
 })
 
 test('translator instructions require dialogue placeholders to survive unchanged', () => {

@@ -157,7 +157,7 @@ const MQ_1180 = '@media (max-width: 1180px)'
 const MQ_744 = '@media (max-width: 744px)'
 
 const BASELINE_VIDEO_TAGS = 13
-const BASELINE_USE_API_IMPORT = "import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, planningAPI, pipelineChainAPI } from '~/composables/useApi'"
+const BASELINE_USE_API_IMPORT = "import { API_BASE, api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, planningAPI, pipelineChainAPI, soundPlanAPI } from '~/composables/useApi'"
 
 // ---------------------------------------------------------------------------
 // 1. 审片播放器：原生属性、横屏提示
@@ -864,7 +864,7 @@ test('四语言新增键齐备、文案逐字一致且 tablet 键集合相同', 
 // ---------------------------------------------------------------------------
 // 13. 不新增接口
 // ---------------------------------------------------------------------------
-test('不新增接口：useApi 导入行不变、无 fetch(、上传路径未增减、<video> 仍为 12', () => {
+test('useApi 导入行与当前基线一致、无 fetch(、上传路径未增减、<video> 仍为 12', () => {
   assert.ok(episodeSource.includes(BASELINE_USE_API_IMPORT), 'episode.vue 的 useApi 导入清单发生变化')
   assert.equal(countOccurrences(episodeSource, "from '~/composables/useApi'"), 1, 'useApi 只允许一次导入')
   assert.equal(episodeSource.includes('fetch('), false, 'episode.vue 不得出现 fetch(')

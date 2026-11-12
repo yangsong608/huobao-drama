@@ -241,10 +241,13 @@ test('画内人物过滤：信息头只列沈砚时，不给画外的阿蛮送�
   assert.ok(!request.prompt.includes('@图片3阿蛮'))
 })
 
-test('尾帧链：没有显式首帧时，用上一镜末帧资产作为本镜首帧', async () => {
+test('尾帧链：没有显式首帧时，用上一镜末帧资产作为本镜参考图', async () => {
   const [ep] = await db.select().from(schema.episodes)
   const [previous] = await db.select().from(schema.storyboards)
     .where(eq(schema.storyboards.storyboardNumber, 2))
+  await db.update(schema.storyboards)
+    .set({ videoUrl: 'static/projects/1/videos/sb2.mp4', updatedAt: ts })
+    .where(eq(schema.storyboards.id, previous.id))
   await db.insert(schema.assets).values({
     dramaId: 1,
     episodeId: ep.id,
@@ -270,6 +273,7 @@ test('尾帧链：没有显式首帧时，用上一镜末帧资产作为本镜�
   await db.insert(schema.storyboardProps).values([{ storyboardId: shot.id, propId: 1 }])
 
   const request = await buildVideoRequest(ep.id, shot)
-  assert.equal(request.firstFrameUrl, 'static/projects/1/frames/ep-1/sb2-last.jpg')
-  assert.ok(!request.referenceImageUrls.includes('static/projects/1/frames/ep-1/sb2-last.jpg'))
+  assert.equal(request.firstFrameUrl, '')
+  assert.ok(request.referenceImageUrls.includes('static/projects/1/frames/ep-1/sb2-last.jpg'))
+  assert.match(request.prompt, /分镜首帧：@图片\d+镜头2末帧/)
 })

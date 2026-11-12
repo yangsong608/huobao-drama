@@ -288,6 +288,22 @@ export const storyboardAPI = {
   soundPlan: (episodeId: number) => api.get(`/storyboards/sound-plan/${episodeId}`),
 }
 
+export const soundPlanAPI = {
+  generate: (episodeId: number, data: {
+    cue_ids: number[]
+    overwrite?: boolean
+    config_id?: number
+    prompts?: Record<number, string>
+    negatives?: Record<number, string>
+  }) => api.post(`/episodes/${episodeId}/sound-plan/generate`, data),
+  status: (episodeId: number) => api.get(`/episodes/${episodeId}/sound-plan/status`),
+  cancel: (episodeId: number) => api.post(`/episodes/${episodeId}/sound-plan/cancel`, {}),
+  attach: (episodeId: number, cueId: number, data: { track_id?: number; replace_existing?: boolean } = {}) =>
+    api.post(`/episodes/${episodeId}/sound-plan/cues/${cueId}/attach`, data),
+  downloadUrl: (episodeId: number, assetId: number) =>
+    `${API_BASE}/episodes/${episodeId}/audio/assets/${assetId}/download`,
+}
+
 export const characterAPI = {
   uploadVoice: (id: number, file: File) => uploadReq<CharacterVoice>(`/characters/${id}/voice`, file),
   removeVoice: (id: number) => api.del<CharacterVoice>(`/characters/${id}/voice`),
@@ -902,6 +918,7 @@ export interface MixClip {
   assetId: number | null
   takeId: number | null
   lineId: number | null
+  soundCueId: number | null
   name: string | null
   startMs: number
   endMs: number

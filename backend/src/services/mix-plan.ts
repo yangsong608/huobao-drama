@@ -99,6 +99,7 @@ export interface MixClip {
   assetId: number | null
   takeId: number | null
   lineId: number | null
+  soundCueId: number | null
   name: string | null
   startMs: number
   endMs: number
@@ -229,6 +230,7 @@ function toClip(row: ClipRow): MixClip {
     assetId: row.assetId ?? null,
     takeId: row.takeId ?? null,
     lineId: row.lineId ?? null,
+    soundCueId: row.soundCueId ?? null,
     name: row.name ?? null,
     startMs: row.startMs,
     endMs: row.endMs,
@@ -371,6 +373,7 @@ function buildVirtualDialogueTracks(
       assetId: null,
       takeId: take?.id ?? null,
       lineId: cue.lineId,
+      soundCueId: null,
       name: null,
       startMs: cue.startMs,
       endMs: cue.endMs,
@@ -468,6 +471,7 @@ function buildVirtualBedTrack(bed: { url: string; durationMs: number }): MixTrac
       assetId: null,
       takeId: null,
       lineId: null,
+      soundCueId: null,
       name: '合片原声',
       startMs: 0,
       endMs: bed.durationMs,
@@ -523,6 +527,7 @@ async function buildVirtualBgmTrack(
       assetId: null,
       takeId: null,
       lineId: null,
+      soundCueId: null,
       name: '本集配乐',
       startMs: 0,
       endMs: durationMs,
@@ -618,11 +623,12 @@ export async function compileMixPlanDetailed(
   )
   const hasOriginalUserTrack = tracks.some((track) => (
     track.origin !== 'soundscape'
+    && track.origin !== 'sound-plan'
     && (track.role === 'original' || track.role === 'ambience' || track.busId === 'original')
   ))
   const hasBgmUserTrack = tracks.some((track) => (
     (track.role === 'bgm' || track.busId === 'bgm')
-    && (track.origin !== 'soundscape' || track.clips.length > 0)
+    && ((track.origin !== 'soundscape' && track.origin !== 'sound-plan') || track.clips.length > 0)
   ))
   // 无声集必须在混音层再次静音原声，避免旧合片把原声带回成片
   const silentEpisode = normalizeVideoAudioMode(episode.videoAudioMode) === 'silent'
@@ -786,6 +792,7 @@ export async function compilePlanWithoutSource(episodeId: number, dramaId: numbe
           assetId: clip.assetId ?? null,
           takeId: clip.takeId ?? null,
           lineId: clip.lineId ?? null,
+          soundCueId: clip.soundCueId ?? null,
           name: clip.name ?? null,
           startMs: clip.startMs,
           endMs: clip.endMs,
@@ -906,6 +913,7 @@ export interface MixPlanInputClip {
   assetId?: number | null
   takeId?: number | null
   lineId?: number | null
+  soundCueId?: number | null
   name?: string | null
   startMs?: number
   endMs?: number
@@ -1228,6 +1236,7 @@ export async function saveMixPlan(
           audioUrl: clip.audioUrl || clip.sourceUrl || null,
           takeId: optionalId(clip.takeId),
           lineId: optionalId(clip.lineId),
+          soundCueId: optionalId(clip.soundCueId),
           followTake: true,
           loop: Boolean(clip.loop),
           status: 'ready',
@@ -1329,6 +1338,7 @@ export function restoreMixRevision(episodeId: number, revisionId: number): { rev
     loop: Boolean(clip.loop),
     status: 'ready',
     lineId: clip.lineId,
+    soundCueId: clip.soundCueId,
     createdAt: now(),
     updatedAt: now(),
   })

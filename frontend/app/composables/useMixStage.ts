@@ -83,6 +83,7 @@ export interface NewMixClipInput {
   assetId?: number | null
   takeId?: number | null
   lineId?: number | null
+  soundCueId?: number | null
   sourceStartMs?: number
   name?: string | null
   gainDb?: number
@@ -442,6 +443,7 @@ export function useMixStage(options: UseMixStageOptions) {
             assetId: clip.assetId,
             takeId: clip.takeId,
             lineId: clip.lineId,
+            soundCueId: clip.soundCueId,
             name: clip.name,
             startMs: Math.round(clip.startMs),
             endMs: Math.round(clip.endMs),
@@ -873,6 +875,7 @@ export function useMixStage(options: UseMixStageOptions) {
       assetId: input.assetId ?? null,
       takeId: input.takeId ?? null,
       lineId: input.lineId ?? null,
+      soundCueId: input.soundCueId ?? null,
       name: input.name ?? null,
       startMs,
       endMs,

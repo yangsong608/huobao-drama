@@ -1409,7 +1409,40 @@
         "ambience": "환경음",
         "sfx": "화면 내 효과음",
         "silence": "정적"
-      }
+      },
+      "generateAll": "미생성 모두 생성",
+      "generateAllHint": "이 플랜에서 아직 생성되지 않은 환경음, BGM, 효과음을 생성합니다",
+      "generate": "생성",
+      "regenerate": "다시 생성",
+      "generatingProgress": "생성 중 {done}/{total}",
+      "cancelGenerate": "생성 취소",
+      "preview": "미리 듣기",
+      "stopPreview": "정지",
+      "download": "다운로드",
+      "attach": "트랙에 추가",
+      "updateTrack": "트랙 업데이트",
+      "statusIdle": "미생성",
+      "statusGenerating": "생성 중",
+      "statusReady": "생성됨",
+      "statusFailed": "실패",
+      "statusSilence": "정적",
+      "needAudioConfig": "오디오 생성 서비스가 없습니다. 설정에서 ComfyUI audio-gen을 추가하세요.",
+      "needMerge": "실제 시간에 배치하려면 먼저 합편을 완료하세요.",
+      "generateStarted": "사운드 생성이 시작되었습니다",
+      "generateRunning": "사운드 생성 중입니다",
+      "generateDone": "사운드 생성 완료",
+      "generateFailed": "사운드 생성 실패",
+      "generateCancelled": "사운드 생성이 취소되었습니다",
+      "generateNoneMissing": "생성할 사운드 큐가 없습니다",
+      "previewFailed": "미리 듣기 실패",
+      "attachDone": "트랙에 추가되었습니다",
+      "duration": "길이",
+      "actualTime": "실제 시간",
+      "plannedTime": "계획 시간",
+      "dialogueCount": "범위 내 대사 {n}줄",
+      "generationBasis": "생성 근거",
+      "promptPlaceholder": "비워 두면 샷 내용으로 영어 프롬프트를 자동 컴파일합니다",
+      "promptHint": "편집은 이번 생성에만 적용되며 사운드 플랜은 변경되지 않습니다."
     },
     "ref": {
       "title": "참조 소재",
@@ -1493,7 +1526,7 @@
       "confirmApprox": "약 {n}초",
       "confirmModel": "영상 모델",
       "confirmResolution": "해상도",
-      "confirmNote": "작업은 백엔드 대기열에서 실행되며 페이지를 닫거나 앱을 다시 시작해도 계속됩니다. 실패한 샷은 자동으로 재시도하지 않습니다.",
+      "confirmNote": "작업은 백엔드 대기열에서 실행되며 페이지를 닫거나 앱을 다시 시작해도 계속됩니다. 인접 샷은 이전 샷이 완료될 때까지 기다린 뒤 마지막 프레임을 자동 추출해 참고 이미지로 사용합니다. 실패한 샷은 자동으로 재시도하지 않습니다.",
       "confirmStart": "생성 시작 ({n})",
       "confirmConcurrency": "동시 생성 수",
       "confirmConcurrencyHint": "기본값 1이 가장 안정적입니다. 동시 수가 많을수록 속도 제한과 실패 위험이 커집니다(최대 5).",
@@ -1511,13 +1544,13 @@
     },
     "frameAssets": {
       "title": "스토리보드 자산",
-      "scopeHint": "이 에피소드에서만 사용 가능하며, 마지막 프레임은 다음 샷의 참조 이미지로 쓰이고 이 샷의 첫 프레임으로 수동 설정할 수도 있습니다",
+      "scopeHint": "이 샷에는 이전 샷의 마지막 프레임만 표시하며 다른 샷의 마지막 프레임은 표시하지 않습니다",
       "extract": "마지막 프레임 추출",
       "extracting": "추출 중…",
       "extractTitle": "현재 메인 영상의 끝에서 프레임 추출",
       "extracted": "마지막 프레임을 추출했습니다. 다음 샷 생성 시 자동으로 첫 프레임으로 사용됩니다",
-      "bindHint": "오프닝을 고정하려면 이 에피소드 자산을 이 샷의 첫 프레임으로 수동 설정하세요",
-      "empty": "이 에피소드에는 아직 스토리보드 자산이 없습니다",
+      "bindHint": "오프닝을 고정하려면 이전 샷의 마지막 프레임을 이 샷의 첫 프레임으로 설정하세요",
+      "empty": "이전 샷에는 아직 마지막 프레임이 없습니다",
       "useAsFirstFrame": "첫 프레임으로 설정",
       "current": "현재 첫 프레임",
       "clearFirstFrame": "첫 프레임 지우기",
@@ -1537,7 +1570,8 @@
       "firstFrameSetFailed": "첫 프레임 설정 실패",
       "firstFrameClearFailed": "첫 프레임 지우기 실패",
       "deleteFailed": "스토리보드 자산 삭제 실패",
-      "firstFrameContinuation": "첫 프레임 연결: 이전 샷의 마지막 프레임을 첫 프레임으로 사용합니다. 인물 동일성, 자세, 시선, 소품 위치를 유지하세요."
+      "firstFrameContinuation": "첫 프레임 연결: 이전 샷의 마지막 프레임을 첫 프레임으로 사용합니다. 인물 동일성, 자세, 시선, 소품 위치를 유지하세요.",
+      "firstShot": "이 샷은 첫 번째 샷이라 이전 샷이 없습니다"
     },
     "comfy": {
       "modelLabel": "ComfyUI 설정",
@@ -3214,7 +3248,8 @@
       "importAudio": "오디오 가져오기",
       "prevPage": "이전",
       "nextPage": "다음",
-      "pageInfo": "{x} / {y} 페이지"
+      "pageInfo": "{x} / {y} 페이지",
+      "soundDesign": "사운드 설계"
     },
     "advanced": {
       "title": "고급"

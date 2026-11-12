@@ -473,6 +473,47 @@ app.delete('/episodes/:id/audio/assets/:assetId', (c) => {
   }
 })
 
+app.get('/episodes/:id/audio/assets/:assetId/download', (c) => {
+  const episodeId = parseId(c.req.param('id'))
+  const assetId = parseId(c.req.param('assetId'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  if (!assetId) return badRequest(c, '素材编号无效')
+  const asset = listEpisodeAssets(episodeId).find(item => item.id === assetId)
+  if (!asset?.url || asset.status !== 'ready') return notFound(c, '音频素材不存在或尚未生成')
+  let file: string
+  try {
+    file = getAbsolutePath(asset.url)
+  } catch {
+    return notFound(c, '音频素材文件不存在')
+  }
+  if (!fs.existsSync(file)) return notFound(c, '音频素材文件不存在')
+  let meta: Record<string, any> = {}
+  try { meta = JSON.parse(asset.metadataJson || '{}') } catch {}
+  const ext = path.extname(file).toLowerCase() || '.wav'
+  const mime = ext === '.mp3'
+    ? 'audio/mpeg'
+    : ext === '.flac'
+      ? 'audio/flac'
+      : ext === '.ogg'
+        ? 'audio/ogg'
+        : ext === '.m4a' || ext === '.aac'
+          ? 'audio/mp4'
+          : 'audio/wav'
+  const categoryLabel = meta.source === 'sound-plan'
+    ? ({ ambience: '环境声', sfx: '音效', bgm: 'BGM' } as Record<string, string>)[String(meta.category || '')] || '声音'
+    : '音频素材'
+  const range = meta.fromShotNumber && meta.toShotNumber
+    ? `-${meta.fromShotNumber}-${meta.toShotNumber}`
+    : ''
+  const baseName = `声音设计-${categoryLabel}${range}`.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+  const filename = `${baseName || `audio-${asset.id}`}${ext}`
+  const asciiName = `sound-design-${asset.id}${ext}`
+  return c.body(new Uint8Array(fs.readFileSync(file)), 200, {
+    'Content-Type': mime,
+    'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+  })
+})
+
 app.post('/episodes/:id/audio/assets/:assetId/tracks', (c) => {
   const episodeId = parseId(c.req.param('id'))
   const assetId = parseId(c.req.param('assetId'))

@@ -1409,7 +1409,40 @@
         "ambience": "Ambience",
         "sfx": "Diegetic SFX",
         "silence": "Silence"
-      }
+      },
+      "generateAll": "Generate missing",
+      "generateAllHint": "Generate ambience, BGM and SFX not yet generated in this plan",
+      "generate": "Generate",
+      "regenerate": "Regenerate",
+      "generatingProgress": "Generating {done}/{total}",
+      "cancelGenerate": "Cancel",
+      "preview": "Preview",
+      "stopPreview": "Stop",
+      "download": "Download",
+      "attach": "Add to track",
+      "updateTrack": "Update track",
+      "statusIdle": "Not generated",
+      "statusGenerating": "Generating",
+      "statusReady": "Ready",
+      "statusFailed": "Failed",
+      "statusSilence": "Silence",
+      "needAudioConfig": "No audio generation service configured. Add a ComfyUI audio-gen service in Settings.",
+      "needMerge": "Finish the merged episode first to place audio at actual time.",
+      "generateStarted": "Sound generation started",
+      "generateRunning": "Sound generation is already running",
+      "generateDone": "Sound generation complete",
+      "generateFailed": "Sound generation failed",
+      "generateCancelled": "Sound generation cancelled",
+      "generateNoneMissing": "No missing sound cues to generate",
+      "previewFailed": "Preview failed",
+      "attachDone": "Added to track",
+      "duration": "Duration",
+      "actualTime": "Actual time",
+      "plannedTime": "Planned time",
+      "dialogueCount": "{n} dialogue line(s) in range",
+      "generationBasis": "Generation basis",
+      "promptPlaceholder": "Leave blank to compile an English prompt from the shots automatically",
+      "promptHint": "Edits affect this generation only and do not change the sound plan."
     },
     "ref": {
       "title": "Reference Assets",
@@ -1493,7 +1526,7 @@
       "confirmApprox": "~{n}s",
       "confirmModel": "Video model",
       "confirmResolution": "Resolution",
-      "confirmNote": "Tasks run in a persistent backend queue and continue after you close the page or restart the app; failed shots are not retried automatically.",
+      "confirmNote": "Tasks run in a persistent backend queue and continue after you close the page or restart the app; adjacent shots wait for the previous shot and use its extracted tail frame as a reference; failed shots are not retried automatically.",
       "confirmStart": "Start ({n})",
       "confirmConcurrency": "Parallel tasks",
       "confirmConcurrencyHint": "1 is the safest default; more parallel tasks raise rate-limit and failure risk (max 5).",
@@ -1511,13 +1544,13 @@
     },
     "frameAssets": {
       "title": "Storyboard assets",
-      "scopeHint": "This episode only; last frames serve as reference images for the next shot and can also be set manually as this shot's first frame",
+      "scopeHint": "This shot only shows the previous shot last frame, not last frames from other shots",
       "extract": "Extract last frame",
       "extracting": "Extracting…",
       "extractTitle": "Extract the last frame from the current main video",
       "extracted": "Last frame extracted; the next shot will use it automatically as its first frame",
-      "bindHint": "Set an asset as this shot's first frame manually when you need a fixed opening",
-      "empty": "No storyboard assets in this episode yet",
+      "bindHint": "Set the previous shot last frame as this shot first frame when you need a fixed opening",
+      "empty": "The previous shot has no last frame yet",
       "useAsFirstFrame": "Use as first frame",
       "current": "Current first frame",
       "clearFirstFrame": "Clear first frame",
@@ -1537,7 +1570,8 @@
       "firstFrameSetFailed": "Failed to set first frame",
       "firstFrameClearFailed": "Failed to clear first frame",
       "deleteFailed": "Failed to delete storyboard asset",
-      "firstFrameContinuation": "First frame continuation: the previous shot last frame is provided as the first frame; keep its character identity, pose, eyeline and prop positions."
+      "firstFrameContinuation": "First frame continuation: the previous shot last frame is provided as the first frame; keep its character identity, pose, eyeline and prop positions.",
+      "firstShot": "This is the first shot and has no previous shot"
     },
     "comfy": {
       "modelLabel": "ComfyUI config",
@@ -3214,7 +3248,8 @@
       "importAudio": "Import audio",
       "prevPage": "Prev",
       "nextPage": "Next",
-      "pageInfo": "Page {x} / {y}"
+      "pageInfo": "Page {x} / {y}",
+      "soundDesign": "Sound design"
     },
     "advanced": {
       "title": "Advanced"

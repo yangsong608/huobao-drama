@@ -46,7 +46,10 @@ test('prompt agent instructions reference per-asset skills; skill files define t
   // 角色三视图 / 场景固定视角的必备要素由技能文件承载
   assert.match(charSkill, /正脸特写/)
   assert.match(charSkill, /正面、90 度侧面、背面/)
-  assert.match(charSkill, /三个视图的脸、发型和服装完全一致/)
+  assert.match(charSkill, /左侧特写与右侧身体视图的服装、体型和配色完全一致/)
+  assert.match(charSkill, /无头全身视图/)
+  assert.match(charSkill, /不出现头部、人脸或头发/)
+  assert.match(charSkill, /只显示颈部以下/)
   assert.match(sceneSkill, /固定机位广角镜头/)
   assert.match(sceneSkill, /前景（\[前景元素\]）、中景（\[中景主体空间\]）、后景（\[后景纵深\]）/)
   assert.match(sceneSkill, /出入口/)
@@ -68,7 +71,7 @@ test('image generation prefers the stored final prompt with agent generation and
   assert.match(characters, /ensureCharacterFinalPrompt\(char, ep\.id, /)
   // 文本模型覆盖（text_model/text_config_id）透传到提示词 Agent
   assert.match(characters, /text_model/)
-  assert.match(characters, /finalPrompt \|\| characterImagePrompt\(char, stylePrompt\)/)
+  assert.match(characters, /ensureCharacterSheetGuard\(finalPrompt \|\| characterImagePrompt\(char, stylePrompt\)\)/)
   assert.match(scenes, /ensureSceneFinalPrompt\(scene, ep\.id, /)
   // 修改资产信息不再自动清空最终提示词，只有显式传入 final_prompt 才更新
   assert.match(characters, /if \(body\.final_prompt !== undefined\) updates\.finalPrompt = body\.final_prompt \|\| null/)

@@ -91,6 +91,7 @@ export interface AudioClipInput {
   followTake?: boolean
   loop?: boolean
   lineId?: number | null
+  soundCueId?: number | null
 }
 
 export interface VoiceClipInput {
@@ -232,7 +233,7 @@ export function createAudioTrack(episodeId: number, input: AudioTrackInput): Aud
     duckAttackMs: Math.round(clampNumber(input.duckAttackMs, 0, 2000, 20)),
     duckReleaseMs: Math.round(clampNumber(input.duckReleaseMs, 0, 5000, 250)),
     sortOrder: Number.isFinite(Number(input.sortOrder)) ? Math.round(Number(input.sortOrder)) : maxOrder + 1,
-    origin: input.origin === 'soundscape' ? 'soundscape' : null,
+    origin: input.origin === 'soundscape' || input.origin === 'sound-plan' ? input.origin : null,
     createdAt: now(),
     updatedAt: now(),
   }).returning().get()
@@ -317,6 +318,7 @@ export function createAudioClip(episodeId: number, trackId: number, input: Audio
     followTake: input.followTake === undefined ? true : Boolean(input.followTake),
     loop: Boolean(input.loop),
     lineId: input.lineId ? Number(input.lineId) : null,
+    soundCueId: input.soundCueId ? Number(input.soundCueId) : null,
     status: 'ready',
     createdAt: now(),
     updatedAt: now(),

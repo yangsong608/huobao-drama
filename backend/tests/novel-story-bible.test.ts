@@ -155,7 +155,7 @@ test('注入点：rewrite 6000 / extract 4000 / storyboards 800，生图生视�
 
   const automation = await fs.readFile(new URL('automation.ts', servicesDir), 'utf8')
   assert.match(automation, /withStoryBible\(\s*renderPipelineRule\('rewrite'\),\s*dramaId,\s*6000\)/)
-  assert.match(automation, /withStoryBible\(\s*renderPipelineRule\('storyboards',\s*\{[\s\S]*?\}\),\s*dramaId,\s*800\)/)
+  assert.match(automation, /withStoryBible\(\[[\s\S]*?renderPipelineRule\('storyboards'[\s\S]*?dramaId,\s*800\)/)
 
   const extraction = await fs.readFile(new URL('extraction.ts', servicesDir), 'utf8')
   assert.match(extraction, /withStoryBible\(\s*renderPipelineRule\(`extract\.\$\{target\}` as const\),\s*dramaId,\s*4000\)/)

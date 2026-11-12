@@ -14,6 +14,7 @@ import { resolveVoiceMentions } from '../../services/character-voice-references.
 import { getDramaBackground } from '../../services/drama-background.js'
 import { cleanupFrameAssetsForEpisode } from '../../services/storyboard-frame-assets.js'
 import { parseContractFromPrompt, syncStoryboardContract } from '../../services/storyboard-contract.js'
+import { ensureNoDialogueNegativeConstraint } from '../../services/storyboard-negative.js'
 import { stripPlaceholderDialogue, validateStoryboardUnit } from '../../services/storyboard-unit-contract.js'
 import { validateRepairedShot } from '../../services/storyboard-shot-validation.js'
 import { buildShotSoundDelta, parseSoundSection, setSoundSection, type SoundSection, type ShotSoundCue } from '../../services/storyboard-sound.js'
@@ -555,7 +556,8 @@ function normalizeVideoPrompt(
   while (bodyLines.length && !bodyLines[0].trim()) bodyLines.shift()
   while (bodyLines.length && !bodyLines[bodyLines.length - 1].trim()) bodyLines.pop()
   const body = normalizeVideoPromptBody(bodyLines).join('\n')
-  return body.trim() ? `${header}\n${body}` : header
+  const normalized = body.trim() ? `${header}\n${body}` : header
+  return ensureNoDialogueNegativeConstraint(normalized)
 }
 
 const saveStoryboards = createTool({
@@ -1911,6 +1913,13 @@ const saveSoundPlan = createTool({
       updatedAt: ts,
     })
     const planId = getInsertId(plan)
+    const plannedTimes = new Map<number, { startMs: number; endMs: number }>()
+    let plannedCursor = 0
+    for (const shot of shots) {
+      const durationMs = Math.max(0, Math.round(Number(shot.duration || 5) * 1000))
+      plannedTimes.set(shot.id, { startMs: plannedCursor, endMs: plannedCursor + durationMs })
+      plannedCursor += durationMs
+    }
     for (const [index, cue] of normalizedCues.entries()) {
       const from = shotByNumber.get(cue.from_shot_number)!
       const to = shotByNumber.get(cue.to_shot_number)!
@@ -1923,12 +1932,15 @@ const saveSoundPlan = createTool({
         toShotId: to.id,
         fromShotNumber: cue.from_shot_number,
         toShotNumber: cue.to_shot_number,
+        startMs: plannedTimes.get(from.id)?.startMs ?? null,
+        endMs: plannedTimes.get(to.id)?.endMs ?? null,
         description: cue.description,
         intensity: cue.intensity || null,
         entry: cue.entry || null,
         exit: cue.exit || null,
         delivery: cue.delivery,
         sortOrder: index,
+        generationStatus: 'idle',
         createdAt: ts,
         updatedAt: ts,
       }).run()
@@ -1954,11 +1966,11 @@ const saveSoundPlan = createTool({
           exit: cue.exit,
         })),
       })
-      const prompt = setSoundSection(
+      const prompt = ensureNoDialogueNegativeConstraint(setSoundSection(
         shot.videoPrompt || '',
         section,
         getContentLanguageFromRC(context?.requestContext),
-      )
+      ))
       const cueIds = cuesForShot.map(cue => `${cue.kind}:${cue.from_shot_number}-${cue.to_shot_number}`)
       const bgmCue = cuesForShot.find(cue => cue.kind === 'bgm')
       const ambienceCue = cuesForShot.find(cue => cue.kind === 'silence')

@@ -1409,7 +1409,40 @@
         "ambience": "環境音",
         "sfx": "画面内効果音",
         "silence": "静寂"
-      }
+      },
+      "generateAll": "未生成をすべて生成",
+      "generateAllHint": "このプランで未生成の環境音、BGM、効果音を生成します",
+      "generate": "生成",
+      "regenerate": "再生成",
+      "generatingProgress": "生成中 {done}/{total}",
+      "cancelGenerate": "生成を中止",
+      "preview": "試聴",
+      "stopPreview": "停止",
+      "download": "ダウンロード",
+      "attach": "トラックに追加",
+      "updateTrack": "トラックを更新",
+      "statusIdle": "未生成",
+      "statusGenerating": "生成中",
+      "statusReady": "生成済み",
+      "statusFailed": "失敗",
+      "statusSilence": "静寂",
+      "needAudioConfig": "音声生成サービスが未設定です。設定で ComfyUI audio-gen を追加してください。",
+      "needMerge": "実際の時間に配置するには、先に合片を完了してください。",
+      "generateStarted": "音声生成を開始しました",
+      "generateRunning": "音声生成中です",
+      "generateDone": "音声生成が完了しました",
+      "generateFailed": "音声生成に失敗しました",
+      "generateCancelled": "音声生成を中止しました",
+      "generateNoneMissing": "生成待ちの音声线索はありません",
+      "previewFailed": "試聴に失敗しました",
+      "attachDone": "トラックに追加しました",
+      "duration": "長さ",
+      "actualTime": "実際の時間",
+      "plannedTime": "計画時間",
+      "dialogueCount": "範囲内の台詞 {n} 行",
+      "generationBasis": "生成根拠",
+      "promptPlaceholder": "空欄の場合はカット内容から英語プロンプトを自動生成します",
+      "promptHint": "編集は今回の生成だけに反映され、音響プランは変更しません。"
     },
     "ref": {
       "title": "参照素材",
@@ -1493,7 +1526,7 @@
       "confirmApprox": "約 {n} 秒",
       "confirmModel": "動画モデル",
       "confirmResolution": "解像度",
-      "confirmNote": "タスクはバックエンドのキューで実行され、ページを閉じたりアプリを再起動しても継続します。失敗ショットは自動再試行しません。",
+      "confirmNote": "タスクはバックエンドのキューで実行され、ページを閉じたりアプリを再起動しても継続します。隣接ショットは前のショットの完了を待ち、その末尾フレームを自動抽出して参考画像にします。失敗ショットは自動再試行しません。",
       "confirmStart": "生成開始 ({n})",
       "confirmConcurrency": "同時実行数",
       "confirmConcurrencyHint": "既定の 1 が最も安定します。増やすほどレート制限と失敗のリスクが上がります（最大 5）。",
@@ -1511,13 +1544,13 @@
     },
     "frameAssets": {
       "title": "絵コンテ素材",
-      "scopeHint": "このエピソード内でのみ使用可能。ラストフレームは次のショットの参考画像になり、手動でこのショットの先頭フレームにも設定できます",
+      "scopeHint": "このショットには前のショットのラストフレームだけを表示し、他のショットのラストフレームは表示しません",
       "extract": "ラストフレームを抽出",
       "extracting": "抽出中…",
       "extractTitle": "現在のメイン動画の末尾からフレームを抽出",
       "extracted": "ラストフレームを抽出しました。次のカット生成時に自動で先頭フレームとして使用されます",
-      "bindHint": "冒頭を固定したい場合は、このエピソードの素材をこのショットの先頭フレームに手動設定できます",
-      "empty": "このエピソードにはまだ絵コンテ素材がありません",
+      "bindHint": "冒頭を固定したい場合は、前のショットのラストフレームをこのショットの先頭フレームに設定できます",
+      "empty": "前のショットにはまだラストフレームがありません",
       "useAsFirstFrame": "先頭フレームに設定",
       "current": "現在の先頭フレーム",
       "clearFirstFrame": "先頭フレームを解除",
@@ -1537,7 +1570,8 @@
       "firstFrameSetFailed": "先頭フレームの設定に失敗しました",
       "firstFrameClearFailed": "先頭フレームの解除に失敗しました",
       "deleteFailed": "絵コンテ素材の削除に失敗しました",
-      "firstFrameContinuation": "先頭フレーム継承：前カットの末フレームを先頭フレームとして使用します。人物の同一性、姿勢、視線、小道具の位置を維持してください。"
+      "firstFrameContinuation": "先頭フレーム継承：前カットの末フレームを先頭フレームとして使用します。人物の同一性、姿勢、視線、小道具の位置を維持してください。",
+      "firstShot": "このショットは最初のショットで、前のショットがありません"
     },
     "comfy": {
       "modelLabel": "ComfyUI 設定",
@@ -3214,7 +3248,8 @@
       "importAudio": "オーディオを読み込む",
       "prevPage": "前へ",
       "nextPage": "次へ",
-      "pageInfo": "{x} / {y} ページ"
+      "pageInfo": "{x} / {y} ページ",
+      "soundDesign": "音響設計"
     },
     "advanced": {
       "title": "詳細"

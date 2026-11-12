@@ -1381,7 +1381,9 @@
                         </div>
                       </div>
                     </div>
-                    <div v-else class="video-bound-refs-empty">{{ t('episode.frameAssets.empty') }}</div>
+                    <div v-else-if="!previousShotFrameRef" class="video-bound-refs-empty">
+                      {{ previousStoryboardForSelected ? t('episode.frameAssets.empty') : t('episode.frameAssets.firstShot') }}
+                    </div>
                   </section>
                   <section class="video-inspector-section visual-check-section">
                     <div class="video-inspector-prompt-head">
@@ -1985,6 +1987,19 @@
               </div>
             </div>
             <div class="task-drawer-head-actions">
+              <button
+                type="button"
+                class="btn btn-sm"
+                :disabled="soundPlanPanel.loading || soundPlanBusy || !soundPlanPanel.audioConfigReady || !soundPlanMissingCues.length"
+                :title="!soundPlanPanel.audioConfigReady ? t('episode.soundPanel.needAudioConfig') : t('episode.soundPanel.generateAllHint')"
+                @click="generateAllSoundCues"
+              >
+                <Loader2 v-if="soundPlanBusy" :size="11" class="animate-spin" />
+                {{ soundPlanBusy ? t('episode.soundPanel.generatingProgress', { done: soundPlanDoneCount, total: soundPlanTotalCount }) : t('episode.soundPanel.generateAll') }}
+              </button>
+              <button v-if="soundPlanBusy" type="button" class="btn btn-sm" @click="cancelSoundPlanGeneration">
+                {{ t('episode.soundPanel.cancelGenerate') }}
+              </button>
               <button type="button" class="btn btn-sm" :disabled="soundRerunBusy || splitRunning || !splitJob" :title="t('episode.soundPanel.rerunHint')" @click="rerunSoundDesign">
                 <Loader2 v-if="soundRerunBusy" :size="11" class="animate-spin" />
                 {{ t('episode.soundPanel.rerun') }}
@@ -1997,6 +2012,7 @@
             <div v-else-if="!soundPlanPanel.plan" class="step-empty">{{ t('episode.soundPanel.empty') }}</div>
             <div v-else class="sound-plan-body">
               <p v-if="soundPlanPanel.plan.summary" class="sound-plan-summary">{{ soundPlanPanel.plan.summary }}</p>
+              <p v-if="soundPlanPanel.warnings?.length" class="sound-plan-warning">{{ soundPlanPanel.warnings.join('；') }}</p>
               <section v-for="unit in soundPlanUnits" :key="unit.key" class="sound-unit">
                 <div class="sound-unit-head">
                   <b>{{ unit.label }}</b>
@@ -2006,10 +2022,65 @@
                   <div class="sound-track-label">{{ t(`episode.soundPanel.track.${track.kind}`) }}</div>
                   <div class="sound-track-cues">
                     <div v-for="cue in unit.cues.filter(item => item.kind === track.kind)" :key="cue.id" class="sound-cue">
-                      <span class="sound-cue-range">#{{ cue.from_shot_number }}–#{{ cue.to_shot_number }}</span>
-                      <span class="sound-cue-text">{{ cue.description }}</span>
-                      <span v-if="cue.entry" class="dim">{{ t('episode.soundPanel.entry') }}{{ cue.entry }}</span>
-                      <span v-if="cue.exit" class="dim">{{ t('episode.soundPanel.exit') }}{{ cue.exit }}</span>
+                      <div class="sound-cue-main">
+                        <span class="sound-cue-range">#{{ cue.from_shot_number }}–#{{ cue.to_shot_number }}</span>
+                        <span class="sound-cue-text">{{ cue.description }}</span>
+                        <span v-if="cue.entry" class="dim">{{ t('episode.soundPanel.entry') }}{{ cue.entry }}</span>
+                        <span v-if="cue.exit" class="dim">{{ t('episode.soundPanel.exit') }}{{ cue.exit }}</span>
+                        <span class="sound-cue-status" :class="'is-' + (cue.generation_status || 'idle')">{{ soundCueStatusLabel(cue) }}</span>
+                      </div>
+                      <div v-if="cue.kind !== 'silence'" class="sound-cue-actions">
+                        <button
+                          type="button"
+                          class="btn btn-sm"
+                          :disabled="soundPlanBusy || !cue.can_generate || cue.generation_status === 'running'"
+                          :title="!cue.can_generate ? t('episode.soundPanel.needAudioConfig') : ''"
+                          @click="generateSoundCue(cue)"
+                        >
+                          <Loader2 v-if="cue.generation_status === 'running'" :size="10" class="animate-spin" />
+                          {{ cue.asset ? t('episode.soundPanel.regenerate') : t('episode.soundPanel.generate') }}
+                        </button>
+                        <button v-if="cue.asset" type="button" class="btn btn-sm" @click="toggleSoundCuePreview(cue)">
+                          {{ soundPreviewCueId === cue.id ? t('episode.soundPanel.stopPreview') : t('episode.soundPanel.preview') }}
+                        </button>
+                        <button v-if="cue.asset" type="button" class="btn btn-sm" @click="downloadSoundCue(cue)">
+                          {{ t('episode.soundPanel.download') }}
+                        </button>
+                        <button
+                          v-if="cue.asset"
+                          type="button"
+                          class="btn btn-sm"
+                          :disabled="!cue.can_attach || soundPlanAttachingCueId === cue.id"
+                          :title="!cue.can_attach ? t('episode.soundPanel.needMerge') : ''"
+                          @click="attachSoundCueToMix(cue)"
+                        >
+                          <Loader2 v-if="soundPlanAttachingCueId === cue.id" :size="10" class="animate-spin" />
+                          {{ cue.attached ? t('episode.soundPanel.updateTrack') : t('episode.soundPanel.attach') }}
+                        </button>
+                      </div>
+                      <div v-if="cue.asset" class="sound-cue-asset">
+                        <span>{{ t('episode.soundPanel.duration') }} {{ Math.round((cue.asset.durationMs || 0) / 1000) }}s</span>
+                        <span v-if="cue.asset.model" class="dim">{{ cue.asset.model }}</span>
+                        <span class="dim">{{ formatSoundCueTime(cue) }}</span>
+                        <span class="dim">{{ soundTimeSourceLabel(cue.time_source) }}</span>
+                      </div>
+                      <div v-if="cue.generation_error" class="sound-cue-error">{{ cue.generation_error }}</div>
+                      <details v-if="cue.kind !== 'silence'" class="sound-cue-basis">
+                        <summary>{{ t('episode.soundPanel.generationBasis') }}</summary>
+                        <div class="sound-cue-source">{{ cue.source_summary }}</div>
+                        <div class="sound-cue-meta">
+                          <span>{{ t('episode.soundPanel.dialogueCount', { n: cue.dialogue_count || 0 }) }}</span>
+                          <span>{{ soundTimeSourceLabel(cue.time_source) }}</span>
+                        </div>
+                        <textarea
+                          v-model="soundPromptDrafts[cue.id]"
+                          rows="3"
+                          spellcheck="false"
+                          maxlength="2000"
+                          :placeholder="t('episode.soundPanel.promptPlaceholder')"
+                        />
+                        <p class="dim">{{ t('episode.soundPanel.promptHint') }}</p>
+                      </details>
                     </div>
                     <span v-if="!unit.cues.some(item => item.kind === track.kind)" class="dim">—</span>
                   </div>
@@ -3022,7 +3093,7 @@ import {
   Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors, Ellipsis,
   Share2, AlertCircle, Sparkles,
 } from 'lucide-vue-next'
-import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, planningAPI, pipelineChainAPI } from '~/composables/useApi'
+import { API_BASE, api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, planningAPI, pipelineChainAPI, soundPlanAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
 import { useAgent, coverageShortfall } from '~/composables/useAgent'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
@@ -3191,9 +3262,28 @@ function pipelineShotClass(status) {
   return 'pending'
 }
 
-// ===== 第四步声音计划（只读时间线） =====
-const soundPlanPanel = ref({ open: false, loading: false, plan: null, cues: [] })
+// ===== 第四步声音计划：只读时间线 + 单条 cue 生成/试听/下载/加入音轨 =====
+const soundPlanPanel = ref({
+  open: false,
+  loading: false,
+  plan: null,
+  cues: [],
+  audioConfigReady: false,
+  warnings: [],
+})
+const soundPromptDrafts = reactive({})
+const soundPreviewCueId = ref(null)
+const soundPlanAttachingCueId = ref(null)
+const soundPlanJob = ref(null)
+const soundPlanPollToken = ref(0)
+let soundPreviewAudio = null
 const soundRerunBusy = ref(false)
+const soundPlanBusy = computed(() => soundPlanJob.value?.status === 'running'
+  || (soundPlanPanel.value.cues || []).some(cue => cue.generation_status === 'running'))
+const soundPlanMissingCues = computed(() => (soundPlanPanel.value.cues || [])
+  .filter(cue => cue.kind !== 'silence' && !cue.asset && cue.can_generate))
+const soundPlanDoneCount = computed(() => Number(soundPlanJob.value?.counts?.done || 0))
+const soundPlanTotalCount = computed(() => Number(soundPlanJob.value?.counts?.total || soundPlanMissingCues.value.length || 0))
 const soundTracks = [
   { kind: 'bgm' },
   { kind: 'ambience' },
@@ -3212,13 +3302,67 @@ const soundPlanUnits = computed(() => {
   }
   return [...groups.values()]
 })
+function soundCueStatusLabel(cue) {
+  if (cue.kind === 'silence') return t('episode.soundPanel.statusSilence')
+  if (cue.generation_status === 'running') return t('episode.soundPanel.statusGenerating')
+  if (cue.generation_status === 'failed') return t('episode.soundPanel.statusFailed')
+  if (cue.asset || cue.generation_status === 'ready') return t('episode.soundPanel.statusReady')
+  return t('episode.soundPanel.statusIdle')
+}
+function formatSoundTime(ms) {
+  const total = Math.max(0, Math.round(Number(ms || 0) / 1000))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+function formatSoundCueTime(cue) {
+  return `${formatSoundTime(cue.start_ms)}–${formatSoundTime(cue.end_ms)}`
+}
+function soundTimeSourceLabel(source) {
+  return source === 'timeline'
+    ? t('episode.soundPanel.actualTime')
+    : t('episode.soundPanel.plannedTime')
+}
+function applySoundPlanStatus(status) {
+  soundPlanJob.value = status
+  if (!Array.isArray(status?.cues)) return
+  const byId = new Map(status.cues.map(item => [item.id, item]))
+  soundPlanPanel.value.cues = (soundPlanPanel.value.cues || []).map(cue => {
+    const row = byId.get(cue.id)
+    if (!row) return cue
+    return {
+      ...cue,
+      generation_status: row.generation_status,
+      generation_error: row.generation_error || '',
+      asset_id: row.asset_id ?? cue.asset?.id ?? null,
+    }
+  })
+}
+async function loadSoundPlanData() {
+  const result = await storyboardAPI.soundPlan(epId.value)
+  soundPlanPanel.value.plan = result?.plan || null
+  soundPlanPanel.value.cues = result?.cues || []
+  soundPlanPanel.value.audioConfigReady = Boolean(result?.audio_config_ready)
+  soundPlanPanel.value.warnings = result?.warnings || []
+  const cueIds = new Set((result?.cues || []).map(cue => cue.id))
+  for (const key of Object.keys(soundPromptDrafts)) {
+    if (!cueIds.has(Number(key))) delete soundPromptDrafts[key]
+  }
+  for (const cue of result?.cues || []) {
+    if (soundPromptDrafts[cue.id] === undefined) soundPromptDrafts[cue.id] = ''
+  }
+}
 async function openSoundPlan() {
   soundPlanPanel.value.open = true
   soundPlanPanel.value.loading = true
+  stopSoundCuePreview()
   try {
-    const result = await storyboardAPI.soundPlan(epId.value)
-    soundPlanPanel.value.plan = result?.plan || null
-    soundPlanPanel.value.cues = result?.cues || []
+    await loadSoundPlanData()
+    const status = await soundPlanAPI.status(epId.value)
+    if (status?.status === 'running') {
+      applySoundPlanStatus(status)
+      void pollSoundPlanGeneration()
+    } else {
+      soundPlanJob.value = null
+    }
   } catch (e) {
     toastError(e)
   } finally {
@@ -3227,6 +3371,142 @@ async function openSoundPlan() {
 }
 function closeSoundPlan() {
   soundPlanPanel.value.open = false
+  soundPlanPollToken.value += 1
+  stopSoundCuePreview()
+}
+async function pollSoundPlanGeneration() {
+  const token = ++soundPlanPollToken.value
+  for (let i = 0; i < 600; i += 1) {
+    await sleep(3000)
+    if (token !== soundPlanPollToken.value || !soundPlanPanel.value.open) return
+    try {
+      const status = await soundPlanAPI.status(epId.value)
+      applySoundPlanStatus(status)
+      if (status?.status !== 'running') {
+        await loadSoundPlanData().catch(() => {})
+        soundPlanJob.value = null
+        if (status?.status === 'completed') toast.success(t('episode.soundPanel.generateDone'))
+        else if (status?.status === 'failed') toast.error(status?.error || t('episode.soundPanel.generateFailed'))
+        else if (status?.status === 'cancelled') toast.info(t('episode.soundPanel.generateCancelled'))
+        return
+      }
+    } catch {}
+  }
+}
+function soundPlanPromptPayload(cueIds) {
+  const prompts = {}
+  for (const cueId of cueIds) {
+    const value = String(soundPromptDrafts[cueId] || '').trim()
+    if (value) prompts[cueId] = value
+  }
+  return Object.keys(prompts).length ? prompts : undefined
+}
+async function generateSoundCues(cueIds, overwrite) {
+  const ids = [...new Set(cueIds)].filter(id => soundPlanPanel.value.cues.some(cue => cue.id === id))
+  if (!ids.length) return
+  if (!soundPlanPanel.value.audioConfigReady) {
+    toast.error(t('episode.soundPanel.needAudioConfig'))
+    return
+  }
+  if (soundPlanBusy.value) {
+    toast.info(t('episode.soundPanel.generateRunning'))
+    return
+  }
+  try {
+    const result = await soundPlanAPI.generate(epId.value, {
+      cue_ids: ids,
+      overwrite: Boolean(overwrite),
+      prompts: soundPlanPromptPayload(ids),
+    })
+    const selected = new Set(ids)
+    soundPlanPanel.value.cues = soundPlanPanel.value.cues.map(cue => selected.has(cue.id)
+      ? { ...cue, generation_status: 'running', generation_error: '' }
+      : cue)
+    soundPlanJob.value = {
+      jobId: result?.jobId ?? null,
+      status: 'running',
+      progress: 0,
+      counts: { total: ids.length, done: 0, failed: 0, reused: 0, generated: 0 },
+    }
+    toast.success(t('episode.soundPanel.generateStarted'))
+    void pollSoundPlanGeneration()
+  } catch (e) {
+    toastError(e, { fallback: 'episode.soundPanel.generateFailed' })
+  }
+}
+function generateSoundCue(cue) {
+  return generateSoundCues([cue.id], Boolean(cue.asset))
+}
+function generateAllSoundCues() {
+  const ids = soundPlanMissingCues.value.map(cue => cue.id)
+  if (!ids.length) {
+    toast.info(t('episode.soundPanel.generateNoneMissing'))
+    return
+  }
+  return generateSoundCues(ids, false)
+}
+async function cancelSoundPlanGeneration() {
+  try {
+    await soundPlanAPI.cancel(epId.value)
+    soundPlanPollToken.value += 1
+    soundPlanJob.value = null
+    await loadSoundPlanData()
+    toast.info(t('episode.soundPanel.generateCancelled'))
+  } catch (e) {
+    toastError(e)
+  }
+}
+function stopSoundCuePreview() {
+  if (soundPreviewAudio) {
+    soundPreviewAudio.pause()
+    soundPreviewAudio.src = ''
+    soundPreviewAudio = null
+  }
+  soundPreviewCueId.value = null
+}
+function toggleSoundCuePreview(cue) {
+  if (!cue?.asset?.url) return
+  if (soundPreviewCueId.value === cue.id) {
+    stopSoundCuePreview()
+    return
+  }
+  stopSoundCuePreview()
+  const url = /^(https?:|blob:|data:|\/)/i.test(cue.asset.url) ? cue.asset.url : `/${cue.asset.url}`
+  const audio = new Audio(url)
+  soundPreviewAudio = audio
+  soundPreviewCueId.value = cue.id
+  audio.onended = () => {
+    if (soundPreviewAudio === audio) stopSoundCuePreview()
+  }
+  audio.play().catch(() => {
+    stopSoundCuePreview()
+    toast.error(t('episode.soundPanel.previewFailed'))
+  })
+}
+function downloadSoundCue(cue) {
+  if (!cue?.asset?.id) return
+  const anchor = document.createElement('a')
+  anchor.href = soundPlanAPI.downloadUrl(epId.value, cue.asset.id)
+  anchor.download = ''
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+async function attachSoundCueToMix(cue) {
+  if (!cue?.can_attach) {
+    toast.error(t('episode.soundPanel.needMerge'))
+    return
+  }
+  soundPlanAttachingCueId.value = cue.id
+  try {
+    await soundPlanAPI.attach(epId.value, cue.id, { replace_existing: Boolean(cue.attached) })
+    cue.attached = true
+    toast.success(t('episode.soundPanel.attachDone'))
+  } catch (e) {
+    toastError(e)
+  } finally {
+    soundPlanAttachingCueId.value = null
+  }
 }
 async function rerunSoundDesign() {
   const job = splitJob.value
@@ -5083,7 +5363,7 @@ async function confirmBatchVideos() {
   const failedCount = targets.filter(sb => latestVideoTask(sb.id)?.status === 'failed').length
   if (failedCount && !window.confirm(t('episode.vid.batchFailedConfirm', { n: failedCount }))) return
 
-  await ensureAutoFrameAssets(targets)
+  // 批内后续镜头此刻还没有上一镜视频；末帧抽取与引用注入由后端在每个镜头派发时完成
   const gateResults = await Promise.all(targets.map(async sb => ({ sb, gate: await fetchGenerationGate(sb) })))
   const blocked = gateResults.filter(item => item.gate && item.gate.allowed === false)
   if (blocked.length) {
@@ -7122,7 +7402,14 @@ const currentShotFirstFrame = computed(() => {
   const sb = selectedSb.value
   return sb?.first_frame_image || sb?.firstFrameImage || ''
 })
-const episodeFrameAssets = computed(() => frameAssets.value)
+const previousStoryboardForSelected = computed(() => getPreviousStoryboard(selectedSb.value))
+// 当前镜只关心上一镜有没有尾帧，不展示其他分镜的资产
+const episodeFrameAssets = computed(() => {
+  const previous = previousStoryboardForSelected.value
+  if (!previous) return []
+  return frameAssets.value.filter(asset =>
+    Number(asset?.storyboard_id ?? asset?.storyboardId) === Number(previous.id))
+})
 const previousShotFrameRef = computed(() => getPreviousShotFrameRef(selectedSb.value))
 
 function visualVerdictLabel(verdict) {
@@ -12700,9 +12987,10 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 
 /* 第四步声音计划：按声音单元和时间线轨道只读展示 */
-.task-drawer.sound-plan-drawer { width: min(720px, 100%); }
+.task-drawer.sound-plan-drawer { width: min(1120px, 96vw); max-width: 96vw; }
 .sound-plan-body { padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 16px; }
 .sound-plan-summary { margin: 0; color: var(--text-3); font-size: 12px; }
+.sound-plan-warning { margin: 0; color: #b45309; font-size: 11px; line-height: 1.5; }
 .sound-unit {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -12732,13 +13020,19 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 .sound-track-cues { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .sound-cue {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   padding: 6px 8px;
   border-radius: 8px;
   background: var(--accent-bg);
   font-size: 12px;
   line-height: 1.45;
+}
+.sound-cue-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .sound-cue-range {
   flex: none;
@@ -12746,6 +13040,42 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   color: var(--accent-text);
 }
 .sound-cue-text { min-width: 0; }
+.sound-cue-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.sound-cue-status {
+  margin-left: auto;
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--text-3);
+  background: var(--surface-3);
+}
+.sound-cue-status.is-running { color: var(--accent-text); }
+.sound-cue-status.is-ready { color: #16a34a; }
+.sound-cue-status.is-failed { color: var(--danger, #dc2626); }
+.sound-cue-asset,
+.sound-cue-meta { display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-3); font-size: 11px; }
+.sound-cue-error { color: var(--danger, #dc2626); font-size: 11px; }
+.sound-cue-basis { color: var(--text-3); }
+.sound-cue-basis summary { cursor: pointer; font-size: 11px; }
+.sound-cue-source { margin: 6px 0; color: var(--text-2); }
+.sound-cue-basis textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 11px;
+  resize: vertical;
+}
+.sound-cue-basis textarea::placeholder { color: var(--text-3); }
+@media (max-width: 900px) {
+  .task-drawer.sound-plan-drawer { width: 100vw; max-width: 100vw; }
+}
 @media (max-width: 640px) {
   .sound-track { grid-template-columns: 60px minmax(0, 1fr); }
 }

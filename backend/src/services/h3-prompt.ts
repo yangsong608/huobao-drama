@@ -22,6 +22,27 @@ const TRANSLATE_TIMEOUT_MS = 120_000
 const TRANSLATE_ATTEMPTS = 2
 const DIALOGUE_ONLY_RULE = 'Only text inside <d> tags is spoken; all other text is visual description and must never be voiced.'
 const NO_DIALOGUE_RULE = 'This shot has no spoken dialogue: do not voice any line; characters stay silent except for ambient sound.'
+
+/**
+ * H3 的 negative 文本不是严格负向提示词，实测无台词镜头仍会生成听不懂的人声。
+ * 无台词且没有 <d> 标签时，任务层必须把音频模式降为 silent，不能只靠提示词约束。
+ */
+export function shouldSilenceLocalH3Audio(
+  audioMode: VideoAudioMode,
+  compiledPrompt: string,
+  dialogueLineCount: number,
+): boolean {
+  if (audioMode !== 'native') return false
+  if (dialogueLineCount > 0) return false
+  return !/<d>\s*\[Chinese\]/i.test(String(compiledPrompt || ''))
+}
+
+export function stripH3AudioLine(prompt: string): string {
+  return String(prompt || '')
+    .replace(/^\s*Audio\s*:.*(?:\n|$)/gim, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
 const translationCache = new Map<string, string>()
 
 export class H3PromptTranslationError extends Error {

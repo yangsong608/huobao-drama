@@ -761,6 +761,12 @@ export const soundCues = sqliteTable('sound_cues', {
   /** native / post */
   delivery: text('delivery').default('native'),
   sortOrder: integer('sort_order').notNull().default(0),
+  /** 当前激活的声音设计生成素材 */
+  assetId: integer('asset_id'),
+  /** idle / running / ready / failed */
+  generationStatus: text('generation_status').default('idle'),
+  generationError: text('generation_error'),
+  generatedAt: text('generated_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })
@@ -1408,6 +1414,8 @@ export const episodeAudioClips = sqliteTable('episode_audio_clips', {
   status: text('status').default('ready'),
   error: text('error'),
   lineId: integer('line_id'),
+  /** 来源声音设计线索；用于避免重复加入和追踪替换 */
+  soundCueId: integer('sound_cue_id'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })

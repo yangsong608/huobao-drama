@@ -14,7 +14,7 @@ const FRAME_ASSET_KEYS = [
   'current', 'clearFirstFrame', 'firstFrameSet', 'firstFrameCleared',
   'delete', 'deleteConfirm', 'deleted', 'sourceShot', 'noFirstFrame', 'onlyThisEpisode',
   'fromCurrentShot', 'firstFrameSetFailed', 'firstFrameClearFailed', 'deleteFailed',
-  'previousRef', 'promptLine', 'autoPromptHint',
+  'previousRef', 'promptLine', 'autoPromptHint', 'firstShot',
 ]
 
 test('useApi 暴露本集分镜资产接口', () => {
@@ -84,7 +84,9 @@ test('提示词 @ 候选与提示条展示上一分镜尾帧', () => {
   assert.match(episode, /previousShotFrameRef/)
 })
 
-test('检查器展示本镜首帧与本集资产，可设首帧、清首帧、删资产', () => {
+test('检查器只展示上一镜尾帧资产，可设首帧、清首帧、删资产', () => {
+  assert.match(episode, /const previousStoryboardForSelected = computed/)
+  assert.match(episode, /=== Number\(previous\.id\)/)
   assert.match(episode, /t\('episode\.frameAssets\.title'\)/)
   assert.match(episode, /t\('episode\.frameAssets\.onlyThisEpisode'\)/)
   assert.match(episode, /t\('episode\.frameAssets\.noFirstFrame'\)/)

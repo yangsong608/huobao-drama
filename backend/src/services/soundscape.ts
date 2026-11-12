@@ -506,7 +506,7 @@ function findReadyAsset(episodeId: number, sourceHash: string): SoundscapeAssetR
   return null
 }
 
-function normalizeAudioFile(source: string, target: string): Promise<void> {
+export function normalizeAudioFile(source: string, target: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const command = ffmpeg()
       .input(source)

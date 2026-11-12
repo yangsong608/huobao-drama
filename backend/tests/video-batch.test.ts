@@ -52,10 +52,12 @@ function batchItems(...ids: number[]) {
 }
 
 let dispatches: number[] = []
+let dispatchRequests: Array<{ storyboardId: number; request: Record<string, unknown> }> = []
 let dispatcherMode: 'ok' | 'throw' = 'ok'
 
 setVideoBatchDispatcher(async (item) => {
   dispatches.push(item.storyboardId)
+  dispatchRequests.push({ storyboardId: item.storyboardId, request: { ...item.request } })
   if (dispatcherMode === 'throw') throw new Error('视频模型未配置')
   const ts = now()
   const res = await db.insert(schema.sysTask).values({
@@ -171,6 +173,57 @@ test('调度：同时最多 N 个任务，空出槽位后补发', async () => {
   assert.equal(view?.completed, 5)
   assert.equal(view?.queued, 0)
   assert.ok(view?.finished_at)
+})
+
+test('批量派发：相邻镜头等待上一镜，自动抽取并注入末帧参考', async () => {
+  dispatches = []
+  dispatchRequests = []
+  const episodeId = await createEpisode()
+  const ts = now()
+  const first = await db.insert(schema.storyboards).values({
+    episodeId, storyboardNumber: 1, duration: 5, videoPrompt: '镜头 1',
+    videoUrl: 'static/projects/1/videos/sb1.mp4', createdAt: ts, updatedAt: ts,
+  }).returning().get()
+  const second = await db.insert(schema.storyboards).values({
+    episodeId, storyboardNumber: 2, duration: 5, videoPrompt: '画面调度：六婶转身；',
+    createdAt: ts, updatedAt: ts,
+  }).returning().get()
+  await db.insert(schema.assets).values({
+    dramaId: 1,
+    episodeId,
+    storyboardId: first.id,
+    storyboardNum: 1,
+    name: '镜头1末帧',
+    type: 'image',
+    category: 'storyboard_frame',
+    url: 'static/projects/1/frames/ep-1/sb1-last.jpg',
+    createdAt: ts,
+    updatedAt: ts,
+  })
+
+  await startVideoBatch({
+    episodeId,
+    dramaId: 1,
+    concurrency: 2,
+    items: [
+      { storyboard_id: first.id, request: { prompt: '镜头 1' } },
+      { storyboard_id: second.id, request: { prompt: '画面调度：六婶转身；' } },
+    ],
+  })
+  await runVideoBatchTick()
+  assert.deepEqual(dispatches, [first.id], '上一镜未完成前，下一镜不能派发')
+
+  await setTaskStatus(first.id, 'completed')
+  await runVideoBatchTick()
+  assert.deepEqual(dispatches, [first.id, second.id])
+  const secondRequest = dispatchRequests.find(item => item.storyboardId === second.id)!.request
+  assert.equal(secondRequest.first_frame_url, undefined)
+  assert.ok((secondRequest.reference_image_urls as string[])
+    .includes('static/projects/1/frames/ep-1/sb1-last.jpg'))
+  assert.match(String(secondRequest.prompt), /分镜首帧：@图片1镜头1末帧/)
+
+  await setTaskStatus(second.id, 'completed')
+  await runVideoBatchTick()
 })
 
 test('失败不自动重试；派发异常只失败一次', async () => {

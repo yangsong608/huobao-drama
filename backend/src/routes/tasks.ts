@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { success, created, badRequest } from '../utils/response.js'
 import { slimTaskParams } from '../utils/transform.js'
@@ -17,7 +17,7 @@ import { resolveStoryboardVoiceReferences } from '../services/character-voice-re
 import { durationSupportError, resolutionSupportError } from '../services/model-capabilities.js'
 import { isLocalShimConfig } from '../services/adapters/minimax-video.js'
 import { normalizeVideoAudioMode } from '../services/video-audio.js'
-import { compileLocalH3Prompt, translateH3Text } from '../services/h3-prompt.js'
+import { compileLocalH3Prompt, shouldSilenceLocalH3Audio, stripH3AudioLine, translateH3Text } from '../services/h3-prompt.js'
 import { evaluateStoryboardGenerationGate } from '../services/storyboard-generation-gate.js'
 import { stripLegacyAudioInstruction } from '../services/video-prompt-sanitize.js'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
@@ -309,6 +309,25 @@ app.post('/', async (c) => {
         audioMode,
         chars: `${rawPrompt.length}->${videoPrompt.length}`,
       })
+      const dialogueLineCount = body.storyboard_id
+        ? db.select({ text: schema.storyboardLines.text }).from(schema.storyboardLines)
+          .where(and(
+            eq(schema.storyboardLines.storyboardId, Number(body.storyboard_id)),
+            isNull(schema.storyboardLines.deletedAt),
+          ))
+          .all()
+          .filter(line => String(line.text || '').trim()).length
+        : 0
+      if (body.storyboard_id && shouldSilenceLocalH3Audio(audioMode, videoPrompt, dialogueLineCount)) {
+        // 无台词镜头只靠提示词无法阻止 H3 生成人声；降为 silent，环境声/BGM 由后期声音设计补。
+        videoBody!.audio_mode = 'silent'
+        videoBody!.generate_audio = false
+        videoPrompt = stripH3AudioLine(videoPrompt)
+        logTaskProgress('TaskAPI', 'h3-no-dialogue-silent', {
+          storyboardId: body.storyboard_id,
+          chars: videoPrompt.length,
+        })
+      }
     }
 
     // 本地 H3 的风格与视觉背景在编译后再前置，避免重复翻译；云端则在拼装阶段已就绪

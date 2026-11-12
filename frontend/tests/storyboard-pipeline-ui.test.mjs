@@ -5,6 +5,8 @@ import assert from 'node:assert/strict'
 const episode = readFileSync(new URL('../app/views/drama/episode.vue', import.meta.url), 'utf8')
 const editor = readFileSync(new URL('../app/components/PromptSectionEditor.vue', import.meta.url), 'utf8')
 const api = readFileSync(new URL('../app/composables/useApi.ts', import.meta.url), 'utf8')
+const mixStage = readFileSync(new URL('../app/components/MixStage.vue', import.meta.url), 'utf8')
+const mixLibrary = readFileSync(new URL('../app/components/MixStemLibrary.vue', import.meta.url), 'utf8')
 const locales = ['zh', 'en', 'ja', 'ko'].map(lang => [
   lang,
   JSON.parse(readFileSync(new URL(`../app/locales/${lang}.json`, import.meta.url), 'utf8')),
@@ -133,7 +135,29 @@ test('提示词显式引用 @镜头N末帧 时作为普通参考图，不自动�
   assert.match(episode, /async function ensureAutoFrameAssets\(targets\)/)
   assert.match(episode, /getFirstFrameImageForGeneration\(sb\)/)
   assert.match(episode, /await ensureAutoFrameAssets\(\[sb\]\)/)
-  assert.match(episode, /await ensureAutoFrameAssets\(targets\)/)
+  // 批量在下发前不抽帧：批内后续镜头还没有上一镜视频，改由后端派发时抽取
+  assert.doesNotMatch(episode, /await ensureAutoFrameAssets\(targets\)/)
+})
+
+test('声音设计抽屉支持单条 cue 生成、试听、下载和加入音轨', () => {
+  assert.match(episode, /soundPlanAPI\.generate/)
+  assert.match(episode, /soundPlanAPI\.status/)
+  assert.match(episode, /soundPlanAPI\.attach/)
+  assert.match(episode, /generateAllSoundCues/)
+  assert.match(episode, /toggleSoundCuePreview/)
+  assert.match(episode, /downloadSoundCue/)
+  assert.match(episode, /soundPlanAPI\.downloadUrl/)
+  assert.match(api, /\/episodes\/\$\{episodeId\}\/sound-plan\/generate/)
+  assert.match(api, /\/episodes\/\$\{episodeId\}\/sound-plan\/cues\/\$\{cueId\}\/attach/)
+  assert.match(mixStage, /meta\?\.source === 'sound-plan'/)
+  assert.match(mixLibrary, /mix\.stems\.soundDesign/)
+  for (const [lang, bundle] of locales) {
+    const panel = bundle.episode?.soundPanel || {}
+    for (const key of ['generate', 'regenerate', 'preview', 'download', 'attach', 'generateAll', 'needMerge', 'generationBasis']) {
+      assert.equal(typeof panel[key], 'string', `${lang} 缺少 episode.soundPanel.${key}`)
+    }
+    assert.equal(typeof bundle.mix?.stems?.soundDesign, 'string', `${lang} 缺少 mix.stems.soundDesign`)
+  }
 })
 
 test('覆盖板刷新计划后同步镜头合同，旧分镜也能参与成对校验', () => {

@@ -10,6 +10,8 @@ import { evaluateStoryboardGenerationGate } from '../services/storyboard-generat
 import { getPreflightState, runVisualPreflight } from '../services/storyboard-visual-preflight.js'
 import { getAcceptanceState, runAcceptance } from '../services/storyboard-acceptance.js'
 import { optimizeStoryboardShot } from '../services/storyboard-pipeline.js'
+import { describeSoundPlan } from '../services/sound-plan-audio.js'
+import { getActiveConfig } from '../services/ai.js'
 
 const app = new Hono()
 const TRANSITIONS = new Set(['cut', 'fade', 'dissolve', 'wipe'])
@@ -100,43 +102,12 @@ async function ensureStoryboardBindings(episodeId: number, sceneId: number | nul
 app.get('/sound-plan/:episodeId', async (c) => {
   const episodeId = Number(c.req.param('episodeId'))
   if (!episodeId) return badRequest(c, '缺少 episodeId')
-  const plan = db.select().from(schema.soundPlans)
-    .where(eq(schema.soundPlans.episodeId, episodeId))
-    .orderBy(desc(schema.soundPlans.id))
-    .limit(1)
-    .get()
-  if (!plan) return success(c, { plan: null, cues: [] })
-  const cues = db.select().from(schema.soundCues)
-    .where(eq(schema.soundCues.planId, plan.id))
-    .orderBy(schema.soundCues.sortOrder)
-    .all()
-  return success(c, {
-    plan: {
-      id: plan.id,
-      version: plan.version,
-      status: plan.status,
-      delivery: (() => {
-        try { return JSON.parse(plan.planJson || '{}').delivery || 'native' } catch { return 'native' }
-      })(),
-      summary: (() => {
-        try { return JSON.parse(plan.planJson || '{}').summary || '' } catch { return '' }
-      })(),
-      created_at: plan.createdAt,
-    },
-    cues: cues.map(cue => ({
-      id: cue.id,
-      unit_key: cue.unitKey,
-      unit_label: cue.unitLabel || '',
-      kind: cue.kind,
-      from_shot_number: cue.fromShotNumber,
-      to_shot_number: cue.toShotNumber,
-      description: cue.description,
-      intensity: cue.intensity || '',
-      entry: cue.entry || '',
-      exit: cue.exit || '',
-      delivery: cue.delivery,
-    })),
-  })
+  const episode = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).get()
+  if (!episode) return badRequest(c, '集不存在')
+  const audioConfig = await getActiveConfig('audio-gen')
+  return success(c, await describeSoundPlan(episodeId, episode.dramaId, {
+    audioConfigReady: Boolean(audioConfig && String(audioConfig.provider || '').toLowerCase() === 'comfyui'),
+  }))
 })
 
 app.get('/:id/generation-gate', async (c) => {

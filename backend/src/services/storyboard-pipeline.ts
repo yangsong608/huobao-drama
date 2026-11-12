@@ -15,6 +15,7 @@ import { getEpisodeCoverage, getMaxSegmentSeconds, type EpisodeCoverage } from '
 import { splitScriptIntoChunks } from './storyboard-split-jobs.js'
 import { buildSceneBindingBlock, getCanonicalSceneGroups } from './scene-canonical.js'
 import { buildSceneContractBlock, getSceneContractMap } from './scene-contract.js'
+import { deriveProjectNegativeConstraints, formatProjectNegativeAnalysis } from './project-negative-constraints.js'
 import { buildPlannedShotsBlock, planStoryboardShots, type PlannedStoryboardShot } from './storyboard-planner.js'
 import { interruptStoryboardAuditForEpisode } from './storyboard-audit-jobs.js'
 import { validateRepairedShot } from './storyboard-shot-validation.js'
@@ -633,7 +634,8 @@ function buildSkeletonMessage(input: SkeletonRunnerInput, sceneBindingBlock: str
   ].filter(Boolean).join('\n')
 }
 
-function buildRepairMessage(input: RepairRunnerInput) {
+async function buildRepairMessage(input: RepairRunnerInput) {
+  const projectNegative = await deriveProjectNegativeConstraints(input.dramaId, input.episodeId)
   const skeleton = skeletonPayload(input.skeleton)
   const previousBlock = input.previousShots.length
     ? input.previousShots.map(shot => [
@@ -717,6 +719,8 @@ function buildRepairMessage(input: RepairRunnerInput) {
     '9. 同一说话人的一句台词尽量放在一个时间帧；装不下就在原文标点处拆到相邻分镜，不要在本镜拆成多段轮流说话。',
     '10. 只调用 save_repaired_storyboard 保存这一镜；不要批量保存、不要修改其它镜头。',
     '11. 服务端拒绝时按错误清单修同一镜后重试，最多 2 次；不要跳过。',
+    `12. 负面约束按项目分析生成：只出现画内人物；不换脸/换装/加人；不生成字幕；${projectNegative.rule}。`,
+    `13. ${formatProjectNegativeAnalysis(projectNegative)}。`,
   ].join('\n')
 }
 
@@ -768,7 +772,7 @@ async function defaultRepairRunner(input: RepairRunnerInput) {
   const agent = mastra.getAgent('storyboard_director')
   if (!agent) throw new Error('分镜导演 Agent 不可用')
   await agent.generate(
-    [{ role: 'user', content: buildRepairMessage(input) }],
+    [{ role: 'user', content: await buildRepairMessage(input) }],
     { maxSteps: 24, requestContext: input.requestContext },
   )
 }

@@ -9,6 +9,8 @@ import type { Hono } from 'hono'
 import { and, eq, inArray } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { logTaskError, logTaskProgress, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
+import { getActiveConfig, getConfigById } from './ai.js'
+import { applyAutoTailFrameToRequest, previousStoryboardFor, resolveAutoTailFrame } from './video-auto-frame.js'
 
 export const VIDEO_BATCH_MAX_CONCURRENCY = 5
 
@@ -107,6 +109,79 @@ function parseRequest(raw: string | null | undefined): Record<string, unknown> {
   } catch {
     return {}
   }
+}
+
+async function referenceLimitFor(
+  episodeId: number,
+  request: Record<string, unknown>,
+): Promise<number> {
+  try {
+    const explicit = Number(request.config_id)
+    const [episode] = await db.select().from(schema.episodes)
+      .where(eq(schema.episodes.id, episodeId))
+    const configId = Number.isInteger(explicit) && explicit > 0
+      ? explicit
+      : episode?.videoConfigId ?? undefined
+    const config = configId
+      ? await getConfigById(configId)
+      : await getActiveConfig('video')
+    return config?.provider === 'aliyun' ? 10 : 9
+  } catch {
+    return 9
+  }
+}
+
+/** 派发时再解析上一镜末帧：批内后续镜头此时才拿到上一镜视频 */
+async function dispatchRequest(
+  episodeId: number,
+  storyboardId: number,
+  request: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  try {
+    const tail = await resolveAutoTailFrame(episodeId, storyboardId)
+    if (!tail) return request
+    const applied = applyAutoTailFrameToRequest(request, tail, {
+      referenceLimit: await referenceLimitFor(episodeId, request),
+    })
+    if (applied.changed) {
+      logTaskProgress('VideoBatch', 'auto-tail-frame', {
+        episodeId,
+        storyboardId,
+        sourceStoryboardId: tail.sourceStoryboardId,
+        token: tail.token,
+      })
+    } else if (applied.reason === 'reference-limit') {
+      logTaskWarn('VideoBatch', 'auto-tail-frame-skipped', {
+        episodeId,
+        storyboardId,
+        reason: applied.reason,
+      })
+    }
+    return applied.request
+  } catch (error: any) {
+    logTaskWarn('VideoBatch', 'auto-tail-frame-failed', {
+      episodeId,
+      storyboardId,
+      error: error?.message || String(error),
+    })
+    return request
+  }
+}
+
+/** 相邻分镜都要求自动尾帧时，上一镜完成前不能派发下一镜 */
+async function blockedByPreviousItem(
+  episodeId: number,
+  item: typeof schema.videoBatchItems.$inferSelect,
+  items: Array<typeof schema.videoBatchItems.$inferSelect>,
+): Promise<boolean> {
+  const request = parseRequest(item.requestJson)
+  if (String(request.first_frame_url || '').trim()) return false
+  const previous = await previousStoryboardFor(episodeId, item.storyboardId)
+  if (!previous) return false
+  const previousItem = items.find(entry => entry.storyboardId === previous.id)
+  if (!previousItem) return false
+  return ACTIVE.includes((previousItem.status || 'queued') as BatchItemStatus)
+    || (previousItem.status || 'queued') === 'queued'
 }
 
 async function loadItems(batchId: number) {
@@ -296,7 +371,10 @@ async function dispatchQueued(job: typeof schema.videoBatchJobs.$inferSelect) {
   const queued = items.filter(i => (i.status || 'queued') === 'queued')
   if (!queued.length) return
 
-  for (const item of queued.slice(0, slots)) {
+  let dispatched = 0
+  for (const item of queued) {
+    if (dispatched >= slots) break
+    if (await blockedByPreviousItem(job.episodeId, item, items)) continue
     const [freshJob] = await db.select().from(schema.videoBatchJobs).where(eq(schema.videoBatchJobs.id, job.id))
     if (!freshJob || freshJob.status !== 'running' || freshJob.stopRequested) return
 
@@ -309,10 +387,12 @@ async function dispatchQueued(job: typeof schema.videoBatchJobs.$inferSelect) {
 
     logTaskProgress('VideoBatch', 'dispatch', { batchId: job.id, storyboardId: item.storyboardId, position: item.position })
     try {
+      const request = await dispatchRequest(job.episodeId, item.storyboardId, parseRequest(item.requestJson))
       const taskId = await dispatcher(
-        { storyboardId: item.storyboardId, request: parseRequest(item.requestJson) },
+        { storyboardId: item.storyboardId, request },
         { id: job.id, episodeId: job.episodeId, dramaId: job.dramaId ?? null },
       )
+      dispatched += 1
       db.update(schema.videoBatchItems)
         .set({ status: 'processing', taskId, updatedAt: new Date().toISOString() })
         .where(eq(schema.videoBatchItems.id, item.id))

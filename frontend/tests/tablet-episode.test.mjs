@@ -456,9 +456,9 @@ test('引导：帮助按钮走 startEpisodeTour，窄屏先开抽屉、紧凑先
   assert.match(useTour, /matchMedia\('\(max-width: 900px\)'\)/, 'useTour 应保留 900 自动引导守卫')
 })
 
-test('不新增接口：useApi 导入清单与基线一致且无 fetch(', () => {
+test('useApi 导入清单与当前基线一致且无 fetch(', () => {
   const src = read(EPISODE)
-  const baseline = "import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, planningAPI, pipelineChainAPI } from '~/composables/useApi'"
+  const baseline = "import { API_BASE, api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, planningAPI, pipelineChainAPI, soundPlanAPI } from '~/composables/useApi'"
   assert.ok(src.includes(baseline), 'useApi 导入清单发生变化')
   assert.equal(countOccurrences(src, 'from \'~/composables/useApi\''), 1, 'useApi 只允许一次导入')
   assert.equal(src.includes('fetch('), false, '页面不得新增 fetch(')

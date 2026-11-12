@@ -13,6 +13,7 @@ import { getDramaBackground, withDramaBackground } from '../services/drama-backg
 import { ensureCharacterFinalPrompt } from '../services/final-prompt.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 import { parseReferenceImages, serializeReferenceImages, withAssetReferenceHint } from '../utils/asset-references.js'
+import { buildCharacterSheetFallbackPrompt, ensureCharacterSheetGuard } from '../services/character-sheet-prompt.js'
 
 const app = new Hono()
 const CHARACTER_IMAGE_SIZE = '1920x1080'
@@ -87,17 +88,7 @@ app.post('/', async (c) => {
 })
 
 function characterImagePrompt(char: typeof schema.characters.$inferSelect, stylePrompt = '') {
-  return [
-    stylePrompt || '',
-    char.name,
-    char.appearance || char.description || '人物立绘',
-    char.styling || '',
-    '16:9 横版角色定妆照',
-    '半身角色海报构图',
-    '正面',
-    '高质量',
-    '白色背景',
-  ].filter(Boolean).join(', ')
+  return buildCharacterSheetFallbackPrompt(char, stylePrompt)
 }
 
 // PUT /characters/:id
@@ -145,7 +136,11 @@ app.post('/:id/generate-image', async (c) => {
     ? parseReferenceImages(body.reference_images)
     : parseReferenceImages(char.referenceImages)
   const prompt = withDramaBackground(
-    withAssetReferenceHint(finalPrompt || characterImagePrompt(char, stylePrompt), 'character', referenceImages.length),
+    withAssetReferenceHint(
+      ensureCharacterSheetGuard(finalPrompt || characterImagePrompt(char, stylePrompt)),
+      'character',
+      referenceImages.length,
+    ),
     background,
   )
   try {
@@ -196,7 +191,11 @@ app.post('/batch-generate-images', async (c) => {
     const finalPrompt = await ensureCharacterFinalPrompt(char, ep.id, false, { model: body.text_model, configId: body.text_config_id ?? undefined })
     const referenceImages = parseReferenceImages(char.referenceImages)
     const prompt = withDramaBackground(
-      withAssetReferenceHint(finalPrompt || characterImagePrompt(char, stylePrompt), 'character', referenceImages.length),
+      withAssetReferenceHint(
+        ensureCharacterSheetGuard(finalPrompt || characterImagePrompt(char, stylePrompt)),
+        'character',
+        referenceImages.length,
+      ),
       background,
     )
     try {

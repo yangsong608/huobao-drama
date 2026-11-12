@@ -34,9 +34,11 @@ function soundscapeMeta(asset: { kind: string; metadataJson?: string | null }): 
 
 function assetLabel(asset: { kind: string; metadataJson?: string | null }): string {
   if (asset.kind === 'soundscape') {
-    const category = soundscapeMeta(asset)?.category
+    const meta = soundscapeMeta(asset)
+    const category = meta?.category
     const key = typeof category === 'string' ? SOUNDSCAPE_CATEGORY_KEYS[category] : undefined
-    return key ? t(`mix.assetKind${key}`) : t('mix.assetKindSoundscape')
+    const label = key ? t(`mix.assetKind${key}`) : t('mix.assetKindSoundscape')
+    return meta?.source === 'sound-plan' ? `${label} · ${t('mix.stems.soundDesign')}` : label
   }
   if (asset.kind !== 'import') return t(`mix.assetKind${asset.kind}`)
   try {
@@ -47,7 +49,16 @@ function assetLabel(asset: { kind: string; metadataJson?: string | null }): stri
 }
 
 function assetTitle(asset: { kind: string; metadataJson?: string | null }): string {
-  const prompt = soundscapeMeta(asset)?.prompt
+  const meta = soundscapeMeta(asset)
+  if (meta?.source === 'sound-plan') {
+    const description = typeof meta.description === 'string' ? meta.description : ''
+    const range = meta.fromShotNumber && meta.toShotNumber
+      ? `#${meta.fromShotNumber}–#${meta.toShotNumber}`
+      : ''
+    const title = [description, range].filter(Boolean).join(' · ')
+    return title || assetLabel(asset)
+  }
+  const prompt = meta?.prompt
   return typeof prompt === 'string' && prompt ? prompt : assetLabel(asset)
 }
 

@@ -13,6 +13,13 @@ import { getDubbingDefaults, VIDEO_AUDIO_MODES } from '../services/app-settings.
 import { createComfyUiSession, previewEpisodeComfyRun, runEpisodeComfy } from '../services/comfyui-episode.js'
 import { getBreakdownMethod } from '../services/breakdown-methods.js'
 import { cleanupFrameAssetsForEpisode } from '../services/storyboard-frame-assets.js'
+import {
+  SoundPlanError,
+  attachSoundCue,
+  cancelSoundPlan,
+  getSoundPlanStatus,
+  startSoundPlanGeneration,
+} from '../services/sound-plan-generation.js'
 
 const app = new Hono()
 
@@ -394,6 +401,81 @@ app.post('/:id/generate-video-prompts', async (c) => {
 app.get('/:id/video-prompts-status', async (c) => {
   const id = Number(c.req.param('id'))
   return success(c, getVideoPromptBatchStatus(id))
+})
+
+function numberStringRecord(raw: unknown): Record<number, string> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const result: Record<number, string> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const id = Number(key)
+    if (!Number.isInteger(id) || id <= 0 || typeof value !== 'string' || !value.trim()) continue
+    result[id] = value.trim()
+  }
+  return Object.keys(result).length ? result : undefined
+}
+
+function soundPlanError(c: any, error: any) {
+  if (error instanceof SoundPlanError) {
+    return c.json({ code: error.status, message: error.message }, error.status)
+  }
+  return c.json({ code: 500, message: error?.message || '声音设计生成失败' }, 500)
+}
+
+// POST /episodes/:id/sound-plan/generate — 按单条/多条声音线索生成音频
+app.post('/:id/sound-plan/generate', async (c) => {
+  const episodeId = Number(c.req.param('id'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  const body = await c.req.json().catch(() => ({}))
+  try {
+    const result = await startSoundPlanGeneration(episodeId, {
+      cueIds: Array.isArray(body.cue_ids) ? body.cue_ids.map(Number) : [],
+      overwrite: body.overwrite === true,
+      configId: body.config_id == null ? undefined : Number(body.config_id),
+      prompts: numberStringRecord(body.prompts),
+      negatives: numberStringRecord(body.negatives),
+    })
+    return success(c, result)
+  } catch (error: any) {
+    return soundPlanError(c, error)
+  }
+})
+
+// GET /episodes/:id/sound-plan/status — 生成进度和逐条状态
+app.get('/:id/sound-plan/status', async (c) => {
+  const episodeId = Number(c.req.param('id'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  try {
+    return success(c, getSoundPlanStatus(episodeId))
+  } catch (error: any) {
+    return soundPlanError(c, error)
+  }
+})
+
+// POST /episodes/:id/sound-plan/cancel — 取消当前声音设计生成
+app.post('/:id/sound-plan/cancel', async (c) => {
+  const episodeId = Number(c.req.param('id'))
+  if (!episodeId) return badRequest(c, '集编号无效')
+  try {
+    return success(c, { cancelled: cancelSoundPlan(episodeId) })
+  } catch (error: any) {
+    return soundPlanError(c, error)
+  }
+})
+
+// POST /episodes/:id/sound-plan/cues/:cueId/attach — 按 cue 实际时间加入音轨
+app.post('/:id/sound-plan/cues/:cueId/attach', async (c) => {
+  const episodeId = Number(c.req.param('id'))
+  const cueId = Number(c.req.param('cueId'))
+  if (!episodeId || !cueId) return badRequest(c, '集编号或线索编号无效')
+  const body = await c.req.json().catch(() => ({}))
+  try {
+    return success(c, await attachSoundCue(episodeId, cueId, {
+      trackId: body.track_id == null ? undefined : Number(body.track_id),
+      replaceExisting: body.replace_existing === true,
+    }))
+  } catch (error: any) {
+    return soundPlanError(c, error)
+  }
 })
 
 // POST /episodes/:id/video-batch — 后端持久批量生成视频（同集运行中复用，并发 1-5）

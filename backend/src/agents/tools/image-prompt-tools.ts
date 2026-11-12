@@ -16,6 +16,7 @@ import { now } from '../../utils/response.js'
 import { getDramaStylePrompt } from '../../services/style-preset.js'
 import { getDramaBackground } from '../../services/drama-background.js'
 import { getDramaId } from '../context.js'
+import { ensureCharacterSheetGuard } from '../../services/character-sheet-prompt.js'
 
 // ─── 角色提示词 ───────────────────────────────────────
 
@@ -60,7 +61,8 @@ const saveCharacterFinalPrompt = createTool({
     if (!c) return { error: 'Character not found' }
 
     const stylePrompt = await getDramaStylePrompt(dramaId)
-    const finalPrompt = stylePrompt ? `${stylePrompt}, ${prompt}` : prompt
+    const guardedPrompt = ensureCharacterSheetGuard(prompt)
+    const finalPrompt = stylePrompt ? `${stylePrompt}, ${guardedPrompt}` : guardedPrompt
     await db.update(schema.characters)
       .set({ finalPrompt, updatedAt: now() })
       .where(eq(schema.characters.id, character_id))

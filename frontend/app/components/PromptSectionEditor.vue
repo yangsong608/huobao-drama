@@ -135,7 +135,7 @@ const COPY = {
     sound: '声音', soundHint: 'BGM / 环境声', soundPlaceholder: 'BGM：轻快市井弦乐；环境声：清晨街市人声、炊具碰撞、远处叫卖',
     soundLocked: '声音由第四步按场景/剧情统一设计，这里只读保留；编辑其他分区不会丢失。',
     negative: '负面约束', negativeHint: '默认约束可删改',
-    negativePlaceholder: '只出现画内人物；不换脸/换装/加人；不生成字幕；不出现现代物品',
+    negativePlaceholder: '只出现画内人物；不换脸/换装/加人；不生成字幕；不出现与项目时代、地域和设定冲突的物品、服装、文字和标识',
     raw: '查看渲染原文',
     minMax: '每段 1–6 秒；总时长受当前模式和模型上限约束。',
   },

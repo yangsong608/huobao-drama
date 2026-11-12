@@ -665,6 +665,10 @@ export const sqliteSchemaStatements = [
     exit TEXT,
     delivery TEXT DEFAULT 'native',
     sort_order INTEGER NOT NULL DEFAULT 0,
+    asset_id INTEGER,
+    generation_status TEXT DEFAULT 'idle',
+    generation_error TEXT,
+    generated_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
@@ -895,6 +899,7 @@ export const sqliteSchemaStatements = [
     status TEXT DEFAULT 'ready',
     error TEXT,
     line_id INTEGER,
+    sound_cue_id INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
@@ -1930,9 +1935,20 @@ export function initSqliteSchema(sqlite: Database.Database) {
     take_id: 'INTEGER',
     follow_take: 'INTEGER DEFAULT 1',
     loop: 'INTEGER DEFAULT 0',
+    sound_cue_id: 'INTEGER',
   }
   for (const [name, type] of Object.entries(clipWorkbenchColumns)) {
     if (!clipColumns.has(name)) sqlite.exec(`ALTER TABLE episode_audio_clips ADD COLUMN ${name} ${type}`)
+  }
+  const soundCueColumns = new Set((sqlite.prepare('PRAGMA table_info(sound_cues)').all() as { name: string }[]).map(c => c.name))
+  const soundCueAudioColumns: Record<string, string> = {
+    asset_id: 'INTEGER',
+    generation_status: "TEXT DEFAULT 'idle'",
+    generation_error: 'TEXT',
+    generated_at: 'TEXT',
+  }
+  for (const [name, type] of Object.entries(soundCueAudioColumns)) {
+    if (!soundCueColumns.has(name)) sqlite.exec(`ALTER TABLE sound_cues ADD COLUMN ${name} ${type}`)
   }
   if (!episodeColumns.has('mix_revision_id')) sqlite.exec('ALTER TABLE episodes ADD COLUMN mix_revision_id INTEGER')
   if (!episodeColumns.has('mix_virtual_tracks')) sqlite.exec('ALTER TABLE episodes ADD COLUMN mix_virtual_tracks TEXT')

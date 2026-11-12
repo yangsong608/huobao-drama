@@ -1374,12 +1374,24 @@ function insertAsset(asset: EpisodeAudioAsset) {
   }
   if (!target) return
   const duration = Math.max(500, Number(asset.durationMs) || 10000)
-  const start = playheadMs.value
+  let cueStart = null
+  let soundCueId = null
+  try {
+    const meta = JSON.parse(asset.metadataJson || '{}')
+    if (meta?.source === 'sound-plan') {
+      if (meta.timeSource === 'timeline' && Number.isFinite(Number(meta.startMs))) {
+        cueStart = Math.max(0, Math.round(Number(meta.startMs)))
+      }
+      if (Number.isInteger(Number(meta.cueId)) && Number(meta.cueId) > 0) soundCueId = Number(meta.cueId)
+    }
+  } catch {}
+  const start = cueStart ?? playheadMs.value
   const clip = createClip(target, {
     startMs: start,
     endMs: start + duration,
     audioUrl: asset.url,
     assetId: asset.id,
+    soundCueId,
     name: assetLabel(asset),
   })
   if (clip) {

@@ -586,9 +586,9 @@ function checkVideoPrompt(
       check: 1,
       severity: 'warning',
       code: 'prompt_negative_missing',
-      message: '固定分区提示词缺少「负面约束」：画内人物、加人、字幕和现代物品没有约束。',
+      message: '固定分区提示词缺少「负面约束」：画内人物、加人、字幕和项目时代物品没有约束。',
       evidence: clip(prompt.split(/\r?\n/, 1)[0] || ''),
-      suggestion: '在提示词分区里补「负面约束：只出现画内人物；不换脸/换装/加人；不生成字幕；不出现现代物品」。',
+      suggestion: '在提示词分区里补「负面约束：只出现画内人物；不换脸/换装/加人；不生成字幕；不出现与项目时代、地域和设定冲突的物品、服装、文字和标识」。',
       repairable: false,
     })
   }

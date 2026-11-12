@@ -16,7 +16,7 @@
  * - 进度落库（episodes.automation_*），项目页剧集卡片直接读，不必额外查任务表。
  * - 生成仍走内部 REST（app.fetch），复用资产生图/视频任务里的风格、背景、参考图与音色逻辑。
  */
-import { and, desc, eq, isNull, lt } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import type { Hono } from 'hono'
 import { db, schema } from '../db/index.js'
 import { now } from '../utils/response.js'
@@ -33,7 +33,10 @@ import {
   runStoryboardPipelineJob,
 } from './storyboard-pipeline.js'
 import { withStoryBible } from './drama-story-bible.js'
-import { getActiveConfig } from './ai.js'
+import { getActiveConfig, getConfigById } from './ai.js'
+import { isLocalShimConfig } from './adapters/minimax-video.js'
+import { deriveProjectNegativeConstraints, formatProjectNegativeAnalysis } from './project-negative-constraints.js'
+import { injectAutoTailPrompt, resolveAutoTailFrame } from './video-auto-frame.js'
 import { extractEpisodeLines } from './dialogue-extract.js'
 import { getDubbingState, startDubbing } from './dubbing.js'
 import { applyVoiceProfiles, generateNarratorProfile, generateVoiceProfiles } from './voice-design.js'
@@ -253,12 +256,14 @@ async function videoConfigInfo(ep: typeof schema.episodes.$inferSelect) {
   try { model = effective?.model ? (JSON.parse(effective.model)[0] || '') : '' } catch { /* 忽略 */ }
   const label = effective ? `${effective.name} (${effective.provider})` : '默认'
   const isWan3 = effective?.provider === 'aliyun' || String(model).startsWith('wan3.0-video')
+  const localShim = effective ? isLocalShimConfig(await getConfigById(effective.id)) : false
   return {
     label,
     refLimit: isWan3 ? 10 : 9,
     provider: effective?.provider || '',
     model,
     isWan3,
+    localShim,
   }
 }
 
@@ -495,12 +500,17 @@ async function stepStoryboards(episodeId: number, dramaId: number, opts: RunOpti
     : '（当前项目还没有道具）'
 
   assertRunning(episodeId)
-  const message = withStoryBible(renderPipelineRule('storyboards', {
-    videoModel: label,
-    characters: charList,
-    scenes: sceneList,
-    props: propList,
-  }), dramaId, 800)
+  const projectNegative = await deriveProjectNegativeConstraints(dramaId, episodeId)
+  const message = withStoryBible([
+    renderPipelineRule('storyboards', {
+      videoModel: label,
+      characters: charList,
+      scenes: sceneList,
+      props: propList,
+      projectNegatives: projectNegative.rule,
+    }),
+    formatProjectNegativeAnalysis(projectNegative),
+  ].join('\n\n'), dramaId, 800)
   const { job } = await createStoryboardPipelineJob({
     episodeId,
     dramaId,
@@ -595,39 +605,11 @@ function parseStoredIdList(value: string | null | undefined): number[] {
   }
 }
 
-async function resolvePreviousTailFrame(
-  episodeId: number,
-  sb: typeof schema.storyboards.$inferSelect,
-): Promise<{ url: string; token: string }> {
-  const [previous] = await db.select().from(schema.storyboards)
-    .where(and(
-      eq(schema.storyboards.episodeId, episodeId),
-      lt(schema.storyboards.storyboardNumber, sb.storyboardNumber),
-      isNull(schema.storyboards.deletedAt),
-    ))
-    .orderBy(desc(schema.storyboards.storyboardNumber))
-    .limit(1)
-  if (!previous) return { url: '', token: '' }
-  const token = `镜头${previous.storyboardNumber}末帧`
-  const explicit = String(previous.lastFrameImage || '').trim()
-  if (explicit) return { url: explicit, token }
-  const [frameAsset] = await db.select().from(schema.assets)
-    .where(and(
-      eq(schema.assets.episodeId, episodeId),
-      eq(schema.assets.storyboardId, previous.id),
-      eq(schema.assets.category, 'storyboard_frame'),
-      isNull(schema.assets.deletedAt),
-    ))
-    .orderBy(desc(schema.assets.id))
-    .limit(1)
-  return { url: String(frameAsset?.url || '').trim(), token }
-}
-
 /** 分镜 → 视频请求参数：绑定素材作参考图，@名字 替换为 @图片N名字（导出便于单测与 MCP 复用） */
 export async function buildVideoRequest(episodeId: number, sb: typeof schema.storyboards.$inferSelect) {
   const ep = await loadEpisode(episodeId)
   if (!ep) throw new Error('剧集不存在')
-  const { refLimit, isWan3 } = await videoConfigInfo(ep)
+  const { refLimit, isWan3, localShim } = await videoConfigInfo(ep)
   // 画面比例固定在项目上（创建项目时选择），视频生成统一沿用
   const [drama] = await db.select().from(schema.dramas).where(eq(schema.dramas.id, ep.dramaId))
 
@@ -651,11 +633,12 @@ export async function buildVideoRequest(episodeId: number, sb: typeof schema.sto
       : chars
 
   const explicitFirstFrame = String(sb.firstFrameImage || '').trim()
-  const previousTail = explicitFirstFrame ? { url: '', token: '' } : await resolvePreviousTailFrame(episodeId, sb)
-  const previousTailFrame = previousTail.url
-  // Wan 3.0 的首帧不能与参考图混用：降级为参考图；其他模型优先走首帧链。
-  const firstFrameUrl = isWan3 ? '' : (explicitFirstFrame || previousTailFrame)
-  const frameReference = isWan3 ? (explicitFirstFrame || previousTailFrame) : ''
+  // 显式首帧优先；没有首帧才用上一镜末帧做普通参考图，且派发时再抽帧。
+  const autoTail = explicitFirstFrame ? null : await resolveAutoTailFrame(episodeId, sb.id)
+  // Wan 3.0 的首帧不能与参考图混用：降级为参考图；其他模型只在显式设置时走首帧。
+  const firstFrameUrl = isWan3 ? '' : explicitFirstFrame
+  const frameReference = isWan3 ? (explicitFirstFrame || autoTail?.url || '') : (autoTail?.url || '')
+  const frameName = explicitFirstFrame ? '首帧' : (autoTail?.token || '上一镜尾帧')
 
   const ordered: { name: string; url: string }[] = []
   const seen = new Set<string>()
@@ -664,17 +647,28 @@ export async function buildVideoRequest(episodeId: number, sb: typeof schema.sto
     seen.add(url)
     ordered.push({ name: name || '', url })
   }
-  if (frameReference) push(explicitFirstFrame ? '首帧' : (previousTail.token || '上一镜尾帧'), frameReference)
-  push(scene?.location, scene?.imageUrl)
-  for (const c of onScreenChars) push(c.name, c.imageUrl)
-  for (const p of props) push(p.name, p.imageUrl)
+  if (isWan3) {
+    if (frameReference) push(frameName, frameReference)
+    push(scene?.location, scene?.imageUrl)
+    for (const c of onScreenChars) push(c.name, c.imageUrl)
+    for (const p of props) push(p.name, p.imageUrl)
+  } else {
+    // 云端把上一镜尾帧放在最前；本地 H3 放在人物/道具之后，避免挤掉人物参考。
+    if (autoTail && !localShim) push(autoTail.token, autoTail.url)
+    push(scene?.location, scene?.imageUrl)
+    for (const c of onScreenChars) push(c.name, c.imageUrl)
+    for (const p of props) push(p.name, p.imageUrl)
+    if (autoTail && localShim) push(autoTail.token, autoTail.url)
+  }
 
   const nameToIndex: Record<string, number> = {}
   ordered.forEach((item, i) => {
     if (item.name && !(item.name in nameToIndex)) nameToIndex[item.name] = i + 1
   })
   const names = Object.keys(nameToIndex).sort((a, b) => b.length - a.length)
-  const rawPrompt = promptSource
+  const rawPrompt = autoTail && !explicitFirstFrame
+    ? injectAutoTailPrompt(promptSource, `@${autoTail.token}`)
+    : promptSource
   const prompt = names.length
     ? rawPrompt.replace(/@([^\s@#]+)/g, (match, raw: string) => {
       for (const name of names) {

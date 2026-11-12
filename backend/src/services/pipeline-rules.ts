@@ -60,7 +60,7 @@ export const DEFAULT_PIPELINE_RULES: Record<PipelineRuleKey, string> = {
 1. 第一行信息头：列出本镜出场人物与场景，用 @角色名/@场景名 引用；没有角色写「出场人物：无」，没有场景写「场景：未指定」
 2. 「画面调度：画面左：…；画面右：…；过…肩；窗/门/桌在…；动作起点：…；动作终点：…」；没有过肩写「无过肩」，空镜动作端点写「无」
 3. 从「0-3秒：」开始的时间帧，每段 1-6 秒，连续不重叠，最后一段结束时间等于 duration；时间帧内必须同一个机位/主体/连续动作
-4. 「负面约束：只出现画内人物；不换脸/换装/加人；不生成字幕；不出现现代物品」
+4. 「负面约束：只出现画内人物；不换脸/换装/加人；不生成字幕；{{projectNegatives}}」
 声音由第四步统一设计；不要逐镜重复完整 BGM/环境声风格。
 
 台词/旁白规则：
@@ -128,7 +128,9 @@ export function renderPipelineRule(key: PipelineRuleKey, vars: Record<string, st
   const template = getPipelineRule(key)
   return template.replace(/\{\{\s*([a-zA-Z]+)\s*\}\}/g, (match, name: string) => {
     const value = vars[name]
-    return value === undefined || value === null ? match : String(value)
+    if (value !== undefined && value !== null) return String(value)
+    if (name === 'projectNegatives') return '不出现与项目时代、地域和设定冲突的物品、服装、文字和标识'
+    return match
   })
 }
 
