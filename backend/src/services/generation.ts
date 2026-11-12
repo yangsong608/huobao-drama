@@ -20,6 +20,7 @@ import { getImageAdapter, getVideoAdapter } from './adapters/registry'
 import { imageModelSupportsReferenceImages, imageReferenceLimit } from './model-capabilities.js'
 import { normalizeVideoAudioMode, type VideoAudioMode } from './video-audio.js'
 import { bootstrapCurrentFilmIfEmpty } from './film-hub.js'
+import { queueAcceptance } from './storyboard-acceptance.js'
 import type { AIConfig, ComfyTimelineTask, ImageProviderAdapter } from './adapters/types'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn, redactUrl } from '../utils/task-logger.js'
 import { withProviderSlot } from './provider-concurrency.js'
@@ -824,6 +825,12 @@ export async function handleVideoComplete(record: SysTaskRecord, videoUrl: strin
     // 事务提交后：仅当本次新建了拼接成片且该集还没有当前成片时，才接管当前指针
     if (newMergeId != null) bootstrapCurrentFilmIfEmpty(episodeId, newMergeId)
     if (record.storyboardId || record.transitionId || timeline) emitTaskChange(record)
+    if (record.storyboardId && !timeline) {
+      const [fresh] = await db.select({ videoUrl: schema.storyboards.videoUrl })
+        .from(schema.storyboards)
+        .where(eq(schema.storyboards.id, record.storyboardId))
+      if (fresh?.videoUrl === localPath) queueAcceptance(record.storyboardId)
+    }
   } catch (error) {
     await failTask(record.id, safeTaskError(error), 'delivery_failed')
   }

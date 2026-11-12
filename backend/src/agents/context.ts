@@ -4,6 +4,7 @@
  */
 import { RequestContext } from '@mastra/core/request-context'
 import { getContentLanguage, type ContentLanguage } from '../services/app-settings.js'
+import type { PlannedStoryboardShot } from '../services/storyboard-planner.js'
 
 export interface AgentRequestContextValues {
   episodeId: number
@@ -42,7 +43,14 @@ export interface AgentRequestContextValues {
   pipelineChunkTotal?: number
   pipelineChunkLabel?: string
   pipelineChunkShotStart?: number
-  pipelineChunkState?: { replaced: boolean; nextShot: number; saved: number; excerptCursor?: number }
+  pipelineChunkState?: {
+    replaced: boolean
+    nextShot: number
+    saved: number
+    excerptCursor?: number
+    /** 拆分主算法锁定的镜头清单；保存工具按顺序对齐，禁止模型改边界 */
+    plannedShots?: PlannedStoryboardShot[]
+  }
   /** 逐镜修补：目标骨架、已修补前镜、后续草稿、完整场景原文、校验问题 */
   pipelineShotNumber?: number
   pipelineSkeleton?: Record<string, unknown>

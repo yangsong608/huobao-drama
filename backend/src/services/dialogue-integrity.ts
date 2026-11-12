@@ -49,6 +49,8 @@ export interface ScriptDialogueSegment {
 }
 
 const SCRIPT_META_SPEAKER_RE = /^(?:出场人物|场景|画面调度|画面左|画面右|过肩|背景地标|轴线|动作|动作起点|动作终点|时间帧|负面约束|负面调度|镜头|时长|转场|连续性|声音|BGM|环境声|音效|字幕|标题|注|说明|来源|原文|摘录|source|location|time|duration|transition|continuity|action|sound|negative|characters|scene)$/i
+/** 叙述句冒号不是台词：「更不对的是姿态：…」这类假说话人必须排除 */
+const NARRATIVE_SPEAKER_RE = /[的了着这那他她它我你更也都就才又还却的是]/
 const SCRIPT_SPEAKER_RE = /^\s*(?:@)?([\u4e00-\u9fa5A-Za-z0-9·（）()\-]{1,16})\s*(?:[（(][^）)]*[）)])?\s*[：:]\s*(.+?)\s*$/
 
 /**
@@ -64,6 +66,7 @@ export function extractScriptDialogueSegments(text: string): ScriptDialogueSegme
     if (!match) continue
     const speaker = match[1].replace(/^@/, '').trim()
     if (!speaker || SCRIPT_META_SPEAKER_RE.test(speaker)) continue
+    if (NARRATIVE_SPEAKER_RE.test(speaker)) continue
     if (/^\d+(?:-\d+)?秒?$/.test(speaker)) continue
     const rawContent = match[2].trim()
     const content = normalizeSpokenText(rawContent.replace(/^[「『“"]|[」』”"]$/g, ''))

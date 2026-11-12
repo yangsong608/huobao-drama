@@ -7027,6 +7027,25 @@ function getShotReferenceImages(sb) {
   return getShotReferenceEntries(sb).map(entry => entry.url)
 }
 
+// 首帧/尾帧是 guide，不参与 H3 的 <Picture N> 编号；提示词索引只基于实际发送的普通参考图
+function getFirstFrameImageForGeneration(sb) {
+  const explicitFirst = sb?.first_frame_image || sb?.firstFrameImage || ''
+  const previous = getPreviousShotFrameRef(sb)
+  const autoTail = !explicitFirst && previous?.url ? previous.url : ''
+  return isWan3Video.value ? '' : (explicitFirst || autoTail)
+}
+
+function getPromptReferenceEntries(sb) {
+  const firstFrame = getFirstFrameImageForGeneration(sb)
+  const entries = getShotReferenceEntries(sb).filter(entry => entry.url !== firstFrame)
+  const explicitFirst = sb?.first_frame_image || sb?.firstFrameImage || ''
+  if (isWan3Video.value && explicitFirst && !entries.some(entry => entry.url === explicitFirst)) {
+    // Wan3 的首帧会降级为普通参考图，必须参与同样的编号空间
+    entries.unshift({ name: '首帧', url: explicitFirst })
+  }
+  return entries
+}
+
 // ===== 分镜末帧资产：只在本集生效，可设为镜头首帧作为下一镜转场开头 =====
 const frameAssets = ref([])
 const frameAssetExtracting = ref(false)
@@ -7336,28 +7355,38 @@ const mentionOptions = computed(() => {
   ]
 })
 
-// 按参考图顺序（上一镜末帧、场景图、角色图、道具图）为 @名字 建立索引映射，供视频提示词引用替换
+// 只有实际发送的普通参考图参与 @图片N 编号；首帧/尾帧 guide 不占编号
 function getShotReferenceIndexMap(sb) {
   const nameToIndex = {}
-  getShotReferenceEntries(sb).forEach((entry, i) => {
+  getPromptReferenceEntries(sb).forEach((entry, i) => {
     if (entry.name && !(entry.name in nameToIndex)) nameToIndex[entry.name] = i + 1
   })
   return nameToIndex
 }
 
-// 上一镜末帧作为延续参考：提示词自动带一行 @镜头N末帧；用户已手写该引用时不重复
+// 上一镜末帧：作为首帧时只写承接说明，不占 @图片N；作为普通参考图时才写 @镜头N末帧
 function appendPreviousFramePrompt(sb, prompt) {
   const previous = getPreviousShotFrameRef(sb)
   if (!previous) return prompt
+  if (getFirstFrameImageForGeneration(sb) === previous.url) {
+    const line = t('episode.frameAssets.firstFrameContinuation')
+    if (prompt.includes(line)) return prompt
+    return prompt.trim() ? `${line}\n${prompt}` : line
+  }
   const token = `@${previous.token}`
   if (prompt.includes(token)) return prompt
   const line = t('episode.frameAssets.promptLine', { token: previous.token })
   return prompt.trim() ? `${line}\n${prompt}` : line
 }
 
-// 将视频提示词里的 @名字 替换为 @图片N名字（N 为参考图序号，1 起），生成时使用
+// 将视频提示词里的 @名字 替换为 @图片N名字（N 为实际普通参考图序号，1 起），生成时使用
 function resolveVideoPromptRefs(sb) {
-  const prompt = appendPreviousFramePrompt(sb, sb.video_prompt || sb.videoPrompt || '')
+  const previous = getPreviousShotFrameRef(sb)
+  let prompt = appendPreviousFramePrompt(sb, sb.video_prompt || sb.videoPrompt || '')
+  if (previous && getFirstFrameImageForGeneration(sb) === previous.url) {
+    // 旧提示词可能把上一镜末帧写成 @镜头N末帧；作为 guide 后它不再占 Picture 编号，必须移除
+    prompt = prompt.split(`@${previous.token}`).join('')
+  }
   const map = getShotReferenceIndexMap(sb)
   const names = Object.keys(map).sort((a, b) => b.length - a.length)
   if (!names.length) return prompt
@@ -7564,17 +7593,18 @@ function buildVideoGenerationParams(sb) {
   // Wan 3.0 首帧不能和参考图混用：降级为参考图；其他模型优先用显式首帧，否则接上一镜末帧。
   const autoTail = !explicitFirst && previous?.url ? previous.url : ''
   const firstFrameImage = isWan3Video.value ? '' : (explicitFirst || autoTail)
-  let referenceImages = getShotReferenceImages(sb)
-  if (isWan3Video.value && explicitFirst) {
-    referenceImages = [explicitFirst, ...referenceImages.filter(url => url !== explicitFirst)]
-  } else if (firstFrameImage && previous?.url === firstFrameImage) {
-    // 上一镜末帧已经作为首帧，不再重复占参考图槽位
-    referenceImages = referenceImages.filter(url => url !== firstFrameImage)
+  let referenceImages = getPromptReferenceEntries(sb).map(entry => entry.url)
+  const generationPrompt = finalGenerationPrompt(sb)
+  const badPictureRefs = [...generationPrompt.matchAll(/@图片(\d+)/g)]
+    .map(match => Number(match[1]))
+    .filter(index => index > referenceImages.length)
+  if (badPictureRefs.length) {
+    throw new Error(`最终提示词引用了不存在的参考图 @图片${badPictureRefs[0]}；当前只有 ${referenceImages.length} 张普通参考图，首帧和尾帧不参与图片编号。`)
   }
   const params = {
     storyboard_id: sb.id,
     drama_id: dramaId,
-    prompt: finalGenerationPrompt(sb),
+    prompt: generationPrompt,
     duration: Number(sb.duration || 10),
     aspect_ratio: dramaAspectRatio.value,
     generate_audio: audioMode !== 'ambient' && audioMode !== 'silent',

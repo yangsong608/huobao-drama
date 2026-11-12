@@ -530,6 +530,29 @@ export const sqliteSchemaStatements = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_storyboard_skeletons_job ON storyboard_skeletons (job_id, storyboard_number)`,
 
+  `CREATE TABLE IF NOT EXISTS scene_contracts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    drama_id INTEGER NOT NULL,
+    scene_id INTEGER NOT NULL,
+    scene_name TEXT,
+    location TEXT,
+    time TEXT,
+    screen_left TEXT,
+    screen_right TEXT,
+    axis_side TEXT,
+    landmark_side TEXT,
+    geography_json TEXT,
+    source_type TEXT NOT NULL DEFAULT 'establishing_shot',
+    source_job_id INTEGER,
+    source_episode_id INTEGER,
+    source_shot_number INTEGER,
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'draft',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_scene_contracts_scene ON scene_contracts (drama_id, scene_id)`,
+
   `CREATE TABLE IF NOT EXISTS pipeline_chains (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT NOT NULL UNIQUE,

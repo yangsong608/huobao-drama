@@ -19,6 +19,8 @@ export interface PlanSpeechSegment {
 export interface PlanShot {
   shotNumber: number
   sceneId: number | null
+  location?: string | null
+  time?: string | null
   sourceExcerpt: string
   duration: number
   actionStart: string | null
@@ -31,6 +33,21 @@ export interface PlanShot {
   screenRight: string | null
   axisSide: string | null
   landmarkSide: string | null
+  /** 画内人物数量：单人或空镜不建立人物轴线 */
+  characterCount?: number
+  /** 台词来源：excerpt=从摘录逐字提取；planner=拆分器切分的长台词片段 */
+  speechSource?: 'excerpt' | 'planner'
+}
+
+/** 场景契约的最小只读视图；由 scene-contract 服务提供，避免服务间循环依赖 */
+export interface PlanSceneContract {
+  sceneId: number
+  sceneName?: string | null
+  screenLeft: string | null
+  screenRight: string | null
+  axisSide: string | null
+  landmarkSide: string | null
+  sourceShotNumber?: number | null
 }
 
 export interface BoundaryContract {
@@ -67,6 +84,8 @@ export interface PlanGateResult {
 const META_BEFORE_QUOTE_RE = /(?:旁白|画外音|心声|内心独白|narration|voice[\s-]?over|inner\s+voice)\s*(?:[（(][^）)]*[）)])?\s*[：:]?\s*$/i
 const SPEAKER_COLON_RE = /(@?[\u4e00-\u9fa5A-Za-z0-9·]{1,16})\s*(?:[（(][^）)]*[）)])?\s*[：:]\s*$/
 const SPEECH_LEAD_IN_RE = /(?:[：:]|唱喝|唱喏|吆喝|叫卖|揽客|喊道?|叫道|说道|问道|答道|骂道?|嚷道?|吼道?)\s*[。！？!?…]*\s*$/
+const SIGNBOARD_BEFORE_RE = /(?:写|印|刻|绣|标|题|显示|上书|挂着|贴着)[^，。！？!?]{0,8}[：:]?\s*$/
+const NARRATIVE_QUOTE_SPEAKER_RE = /[的了着这那他她它我你更也都就才又还却的是]/
 
 function normalizeText(text: string) {
   return String(text || '')
@@ -78,11 +97,21 @@ function extractQuotedSegments(text: string): PlanSpeechSegment[] {
   const source = String(text || '')
   const segments: PlanSpeechSegment[] = []
   for (const span of findQuotedSpans(source)) {
-    const before = source.slice(Math.max(0, span.start - 32), span.start).replace(/\s+$/, '')
-    const speakerMatch = before.match(SPEAKER_COLON_RE)
-    const speaker = speakerMatch?.[1]?.replace(/^@/, '') || (META_BEFORE_QUOTE_RE.test(before) ? '旁白' : '')
+    const before = source.slice(Math.max(0, span.start - 40), span.start).replace(/\s+$/, '')
+    if (SIGNBOARD_BEFORE_RE.test(before)) continue
+    const rawSpeaker = before.match(SPEAKER_COLON_RE)?.[1]?.replace(/^@/, '')
+    const speakerMatch = rawSpeaker && !NARRATIVE_QUOTE_SPEAKER_RE.test(rawSpeaker) ? { 1: rawSpeaker } : null
+    const narrated = META_BEFORE_QUOTE_RE.test(before)
+    const spoken = SPEECH_LEAD_IN_RE.test(before)
     const value = normalizeText(span.inner)
     if (!value) continue
+    // 没有说话提示的引号多数是专有名词/拟声词（“半截扁担”“啪嗒”“求方便”）；
+    // 只有成句且带句读时才按无主台词保留，避免把叙述性引号误判为台词。
+    if (!speakerMatch && !narrated && !spoken) {
+      const compact = value.replace(/\s/g, '')
+      if (compact.length < 3 || !/[。！？!?…，,；;]/.test(value)) continue
+    }
+    const speaker = speakerMatch?.[1]?.replace(/^@/, '') || (narrated ? '旁白' : '')
     segments.push({ speaker, text: value, sourceQuote: span.inner, order: segments.length + 1 })
   }
   return segments
@@ -112,8 +141,13 @@ function startsWithSpeech(sourceExcerpt: string) {
   return /^[「『“"]/.test(text)
 }
 
+const SCRIPT_LINE_ONLY_RE = /^\s*(?:@)?[^\s，。！？；：、,.!?;:]{1,16}\s*(?:[（(][^）)]*[）)])?\s*[：:]\s*[。！？!?…\s]*$/
+
 function endsWithSpeechLeadIn(sourceExcerpt: string) {
-  return SPEECH_LEAD_IN_RE.test(String(sourceExcerpt || '').trim())
+  const text = String(sourceExcerpt || '').trim()
+  // `角色：……` 是完整的无词台词行，不是停在说话提示上
+  if (SCRIPT_LINE_ONLY_RE.test(text)) return false
+  return SPEECH_LEAD_IN_RE.test(text)
 }
 
 function repeatedBoundaryLength(current: string, next: string) {
@@ -138,14 +172,54 @@ function issue(
   return { layer: 'plan', code, severity, shotNumber, boundary, message, evidence, fixable: severity !== 'error' }
 }
 
+const INTERNAL_ACTION_RE = /(心酸|失落|渐弱|愈发|自觉|无趣|吃味|得意|紧张|害怕|高兴|难过|愤怒|委屈|不甘|眼红)/
+const INDOOR_ACTION_RE = /((?:回|走进|走入|进了|进入)(?:了)?(?:店|屋|堂)(?:内|里)?)/
+const OUTDOOR_LOCATION_RE = /(街|市|广场|门外|巷|路)/
+
+function effectiveSpeechChars(text: string) {
+  return String(text || '').replace(/[\s，。！？；：、“”‘’（）《》【】…—,.!?;:"'()\[\]]/g, '').length
+}
+
 export function validatePlanSequence(plans: PlanShot[], options: {
   minDuration?: number
   maxDuration?: number
+  sceneContracts?: Map<number, PlanSceneContract>
 } = {}): PlanGateResult {
   const minDuration = options.minDuration ?? 6
   const maxDuration = options.maxDuration ?? 15
   const issues: PlanIssue[] = []
   const boundaries: BoundaryContract[] = []
+  const canonicalByScene = new Map<number, { plan: PlanShot; origin: string }>()
+  for (const contract of options.sceneContracts?.values() || []) {
+    if (!contract.screenLeft && !contract.screenRight && !contract.axisSide && !contract.landmarkSide) continue
+    canonicalByScene.set(Number(contract.sceneId), {
+      plan: {
+        shotNumber: contract.sourceShotNumber ?? 0,
+        sceneId: contract.sceneId,
+        sourceExcerpt: '',
+        duration: 0,
+        actionStart: null,
+        actionEnd: null,
+        coverageType: null,
+        speechSegments: [],
+        boundaryType: null,
+        boundaryWord: null,
+        screenLeft: contract.screenLeft,
+        screenRight: contract.screenRight,
+        axisSide: contract.axisSide,
+        landmarkSide: contract.landmarkSide,
+      },
+      origin: `场景契约「${contract.sceneName || contract.sceneId}」`,
+    })
+  }
+  for (const plan of plans) {
+    if (plan.sceneId == null) continue
+    const sceneId = Number(plan.sceneId)
+    if (canonicalByScene.has(sceneId)) continue
+    if (plan.screenLeft || plan.screenRight || plan.axisSide || plan.landmarkSide) {
+      canonicalByScene.set(sceneId, { plan, origin: `同场建立镜第 ${plan.shotNumber} 镜` })
+    }
+  }
 
   for (const plan of plans) {
     const label = `第 ${plan.shotNumber} 镜`
@@ -164,7 +238,7 @@ export function validatePlanSequence(plans: PlanShot[], options: {
     if (sourceSegments.length && !plan.speechSegments.length) {
       issues.push(issue('plan_speech_missing', plan.shotNumber, `${label}原文含台词，但计划没有台词原子单元。`, sourceSegments.map(item => item.text).join('、')))
     }
-    if (!sourceSegments.length && plan.speechSegments.length) {
+    if (!sourceSegments.length && plan.speechSegments.length && plan.speechSource !== 'planner') {
       issues.push(issue('plan_speech_invented', plan.shotNumber, `${label}原文没有台词，计划却包含台词。`, plan.speechSegments.map(item => item.text).join('、')))
     }
     if (sourceSegments.length && plan.speechSegments.length) {
@@ -172,6 +246,76 @@ export function validatePlanSequence(plans: PlanShot[], options: {
       const missing = sourceSegments.filter(item => !planned.includes(normalizeText(item.text)))
       if (missing.length) {
         issues.push(issue('plan_speech_incomplete', plan.shotNumber, `${label}计划漏掉原文台词。`, missing.map(item => item.text).join('、')))
+      }
+    }
+
+    const speakers = [...new Set(plan.speechSegments.map(item => String(item.speaker || '').trim()).filter(Boolean))]
+    if (speakers.length > 1) {
+      issues.push(issue(
+        'multi_speaker_shot',
+        plan.shotNumber,
+        `${label}有 ${speakers.length} 个说话人（${speakers.join('、')}）；一个分镜只能一个说话人，请拆成正反打或单人镜头。`,
+        plan.sourceExcerpt.slice(0, 80),
+      ))
+    }
+
+    const speechChars = plan.speechSegments.reduce((sum, item) => sum + effectiveSpeechChars(item.text), 0)
+    const speechCapacity = Math.max(0, plan.duration - 1) * 4
+    if (speechChars > speechCapacity) {
+      issues.push(issue(
+        'dialogue_over_capacity',
+        plan.shotNumber,
+        `${label}台词约 ${speechChars} 字，${plan.duration} 秒最多容纳 ${speechCapacity} 字；请拆到相邻分镜或延长时长，不要靠加快语速硬塞。`,
+        plan.speechSegments.map(item => item.text).join('、'),
+      ))
+    }
+
+    for (const [field, value] of [['动作起点', plan.actionStart], ['动作终点', plan.actionEnd]] as const) {
+      const text = String(value || '').trim()
+      if (text && INTERNAL_ACTION_RE.test(text)) {
+        issues.push(issue(
+          'action_endpoint_internal',
+          plan.shotNumber,
+          `${label}${field}「${text}」是心理/声音描述，不是可见动作；请改成手、视线、身体或道具的具体状态。`,
+          text,
+        ))
+      }
+    }
+
+    const location = String(plan.location || '')
+    // 舞台提示（如「（扔下一句，折回店里）」）不是本镜动作，不能据此判定跨室内外
+    const actionAndExcerpt = `${plan.actionStart || ''} ${plan.actionEnd || ''} ${plan.sourceExcerpt || ''}`
+      .replace(/[（(][^）)]*[）)]/g, '')
+    if (location && OUTDOOR_LOCATION_RE.test(location) && INDOOR_ACTION_RE.test(actionAndExcerpt)) {
+      issues.push(issue(
+        'location_change_inside_shot',
+        plan.shotNumber,
+        `${label}地点是「${location}」，但动作进入「${actionAndExcerpt.match(INDOOR_ACTION_RE)?.[1] || '室内'}」；一个分镜不能跨室内外，请拆镜或改回门槛外动作。`,
+        actionAndExcerpt.slice(0, 100),
+      ))
+    }
+
+    const canonical = plan.sceneId == null ? null : canonicalByScene.get(Number(plan.sceneId))
+    const isOriginShot = canonical?.origin.startsWith('同场建立镜') && canonical.plan.shotNumber === plan.shotNumber
+    if (canonical && !isOriginShot) {
+      for (const [field, labelText] of [
+        ['screenLeft', '画面左'],
+        ['screenRight', '画面右'],
+        ['axisSide', '轴线'],
+        ['landmarkSide', '地标侧'],
+      ] as const) {
+        const value = String(plan[field] || '').trim()
+        const base = String(canonical.plan[field] || '').trim()
+        if (value && base && value !== base) {
+          issues.push(issue(
+            'scene_constant_flip',
+            plan.shotNumber,
+            `${label}${labelText}「${value}」与${canonical.origin}「${base}」不一致；请修正本镜，不要翻转场景常量。`,
+            `${canonical.origin}：${base} → ${label}：${value}`,
+            'error',
+            `${canonical.plan.shotNumber}-${plan.shotNumber}`,
+          ))
+        }
       }
     }
   }
@@ -223,27 +367,6 @@ export function validatePlanSequence(plans: PlanShot[], options: {
     }
 
     const sameScene = current.sceneId != null && next.sceneId != null && Number(current.sceneId) === Number(next.sceneId)
-    if (sameScene) {
-      for (const [field, label] of [
-        ['screenLeft', '画面左'],
-        ['screenRight', '画面右'],
-        ['axisSide', '轴线'],
-        ['landmarkSide', '地标侧'],
-      ] as const) {
-        const a = String(current[field] || '').trim()
-        const b = String(next[field] || '').trim()
-        if (a && b && a !== b) {
-          issues.push(issue(
-            'scene_constant_flip',
-            next.shotNumber,
-            `同场相邻镜${label}不一致：第 ${current.shotNumber} 镜「${a}」，第 ${next.shotNumber} 镜「${b}」。`,
-            boundaryKey,
-            'error',
-            boundaryKey,
-          ))
-        }
-      }
-    }
 
     const type: BoundaryContract['type'] = !sameScene
       ? 'scene'

@@ -62,7 +62,7 @@ test('上一分镜尾帧作为参考图参与当前镜生成', () => {
   assert.match(episode, /function getPreviousShotFrameRef\(/)
   assert.match(episode, /function getShotReferenceEntries\(/)
   assert.match(episode, /getShotReferenceEntries\(sb\)\.map/)
-  assert.match(episode, /getShotReferenceEntries\(sb\)\.forEach/)
+  assert.match(episode, /getPromptReferenceEntries\(sb\)\.forEach/)
   assert.match(episode, /const previousShotFrameRef = computed/)
 })
 

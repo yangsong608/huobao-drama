@@ -22,6 +22,7 @@ export const STORYBOARD_UNIT_RULES = `### 分镜单位与提示词硬约束（�
 - 同一场戏的屏幕左右、轴线、背景地标侧是场景级常量：先定一次，后续同场分镜必须沿用；禁止在后续镜头交换人物左右或门/窗侧。
 - 画面调度必须写清画面左、画面右、过肩侧、背景地标、轴线和动作端点；没有过肩写「无过肩」，没有地标写「背景地标：无」，单人/空镜轴线写「轴线无」，双人及以上必须写「轴线A」或「轴线B」。
 - 没有台词/旁白时直接省略该句，绝对不要写「旁白（画外音）：「无。」」或「@角色说：无。」这类占位台词。
+- 多角色同框时只有说话人张嘴；其他角色嘴唇闭合、不说话、不做说话动作。同一分镜默认只允许一个说话人。
 - 时间帧内只写同一个机位/主体的画面；台词按 4 字/秒容量分配到时间帧，装不下就拆到相邻分镜，不能靠加快语速硬塞。`
 
 /** 清理模型把“无”占位写成真实台词的情况；只删除占位句，不改真实台词 */
@@ -110,6 +111,14 @@ export function validateStoryboardUnit(input: StoryboardUnitInput): string[] {
   const spokenChars = spokenText.replace(/[\s，。！？；：、“”‘’（）《》【】…—,.!?;:\"\'()\[\]]/g, '').length
   if (duration > 0 && spokenChars > Math.max(0, duration - 1) * 4) {
     errors.push(`${label}台词+旁白约 ${spokenChars} 字，按 4 字/秒 + 1 秒气口需要约 ${(spokenChars / 4 + 1).toFixed(1)} 秒，镜头只有 ${duration} 秒；请拆到相邻分镜或延长时长。`)
+  }
+  for (const segment of segments) {
+    const segmentText = [...String(segment.text || '').matchAll(/「([^」]*)」/g)].map(match => match[1]).join('')
+    const segmentChars = segmentText.replace(/[\s，。！？；：、“”‘’（）《》【】…—,.!?;:\"\'()\[\]]/g, '').length
+    const segmentSeconds = Math.max(0, segment.endSec - segment.startSec)
+    if (segmentChars > segmentSeconds * 4) {
+      errors.push(`${label}第 ${segment.index} 段时间帧台词约 ${segmentChars} 字，${segmentSeconds} 秒最多容纳 ${segmentSeconds * 4} 字；请把台词拆到相邻时间帧或相邻分镜，不要压在一个时间帧里。`)
+    }
   }
   if (!segments.length) {
     errors.push(`${label}没有时间帧；请从 0 秒开始按 1-6 秒连续分段。`)

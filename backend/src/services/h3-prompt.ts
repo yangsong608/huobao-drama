@@ -46,7 +46,7 @@ interface NamedDialogue {
 }
 
 const SPEECH_VERBS = '说道|问道|答道|喊道|叫道|开口说|接着说|低语|喃喃道|轻声说|低声说|大声说|说|道'
-const SPEECH_MANNER = '轻声|低声|大声|高声|小声|冷冷地|温柔地|笑着|哭着|沉声|怒声|柔声|喃喃|喃喃地|缓缓|开口'
+const SPEECH_MANNER = '轻声|低声|大声|高声|小声|冷冷地|温柔地|笑着|哭着|沉声|怒声|柔声|喃喃|喃喃地|缓缓|开口|又|接着|随后|随即|继续|再次|然后'
 const NAME_CHAR = '[^\\s，。！？；、：,.!?;:「」“”"\'（）()\\[\\]{}<>#@]'
 const DIALOGUE: NamedDialogue[] = [
   {
@@ -153,10 +153,52 @@ export function compileH3Prompt(prompt: string, audioMode: VideoAudioMode = 'nat
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
-  return delimitDialogueTags(dialogueTags.reduce(
+  const restored = dialogueTags.reduce(
     (value, tag, index) => value.split(`[[H3_DLG_${index}]]`).join(tag),
     compiled,
-  ))
+  )
+  return delimitDialogueTags(mergeSameSpeakerDialogueTags(restored))
+}
+
+const SPEAKER_TAG_RE = /([A-Za-z0-9\u4e00-\u9fa5][A-Za-z0-9\u4e00-\u9fa5·._'’()（） -]{0,39}?)\s+says,\s*<d>\[Chinese\]\s*([\s\S]*?)<\/d>/g
+
+/**
+ * H3 对同一说话人的多个 `<d>` 标签绑定不稳定（容易让听者张嘴或丢句）。
+ * 一个镜头内同一说话人的台词强制合并为一个标签：文本按原顺序拼到第一次出现处，
+ * 后续位置保留“继续说话”的口型提示，不再产生第二个语音标签。
+ */
+export function mergeSameSpeakerDialogueTags(text: string): string {
+  const matches = [...String(text || '').matchAll(SPEAKER_TAG_RE)]
+  if (matches.length < 2) return text
+  const bySpeaker = new Map<string, typeof matches>()
+  for (const match of matches) {
+    const speaker = String(match[1] || '').trim()
+    if (!speaker || /^(?:says|continues speaking)$/i.test(speaker)) continue
+    if (!bySpeaker.has(speaker)) bySpeaker.set(speaker, [])
+    bySpeaker.get(speaker)!.push(match)
+  }
+  let result = text
+  for (const [speaker, items] of bySpeaker) {
+    if (items.length < 2) continue
+    const merged = items
+      .map(item => String(item[2] || '').trim())
+      .filter(Boolean)
+      .reduce((value, line) => {
+        if (!value) return line
+        return /[。！？!?…；;，,]$/.test(value) ? `${value}${line}` : `${value}，${line}`
+      }, '')
+    const mergedTag = `<d>[Chinese] ${merged}</d>`
+    let seenFirst = false
+    result = result.replace(SPEAKER_TAG_RE, (whole, name: string) => {
+      if (String(name || '').trim() !== speaker) return whole
+      if (!seenFirst) {
+        seenFirst = true
+        return `${name} says, ${mergedTag}`
+      }
+      return `${name} continues speaking`
+    })
+  }
+  return result
 }
 
 /** `</d>` 后没有句读时 H3 会把后续画面描述并进台词，补一个句号把边界钉死 */

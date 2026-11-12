@@ -59,6 +59,11 @@ const REQUIRED_TABLES: Record<string, string[]> = {
     'import_id', 'chapter_no', 'part_no', 'episode_id', 'content_hash', 'chapter_hash',
     'synced_title', 'status', 'synced_at',
   ],
+  scene_contracts: [
+    'drama_id', 'scene_id', 'scene_name', 'location', 'time', 'screen_left', 'screen_right',
+    'axis_side', 'landmark_side', 'geography_json', 'source_type', 'source_job_id',
+    'source_episode_id', 'source_shot_number', 'version', 'status', 'created_at', 'updated_at',
+  ],
 }
 
 const REQUIRED_COLUMNS: Record<string, string[]> = {

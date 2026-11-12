@@ -14,6 +14,8 @@ import { getAbsolutePath } from '../utils/storage.js'
 import { probeMedia } from './export-validation.js'
 import { extractVideoFrameAt } from './video-frames.js'
 import { callVisionJson, loadVisionImages } from './vision-call.js'
+import { analyzeVideoAudio, formatAudioAnalysis, type SpeechWindow } from './video-audio-analysis.js'
+import { logTaskWarn } from '../utils/task-logger.js'
 
 type StoryboardRow = typeof schema.storyboards.$inferSelect
 
@@ -49,14 +51,16 @@ const CHECK_LABELS: Record<string, string> = {
   identity: '人物身份',
   set: '场景地理',
   axis: '轴线与屏幕方向',
-  action: '动作与尾帧衔接',
+  action: '动作连续性',
   presence: '人物在场',
-  prop: '道具',
-  audio: '声音',
-  text: '画面文字',
+  prop: '道具变化',
+  lip: '说话人口型',
+  audio: '声音与台词',
+  subtitle: '字幕烧入',
+  text: '字幕烧入',
 }
 
-const CHECK_ORDER = ['identity', 'set', 'axis', 'action', 'presence', 'prop', 'audio', 'text']
+const CHECK_ORDER = ['identity', 'set', 'axis', 'action', 'presence', 'prop', 'lip', 'audio', 'subtitle']
 const SAMPLE_RATIOS = [0.08, 0.25, 0.5, 0.75, 0.92]
 
 function parseJsonArray(value: string | null | undefined): any[] {
@@ -138,20 +142,21 @@ async function buildContext(row: StoryboardRow) {
   }
 }
 
-const SYSTEM_PROMPT = `你是短剧成片验收员。只根据随附的成片抽帧、参考图和合同做验收，不评价剧情创意，不要求补拍。
+const SYSTEM_PROMPT = `你是短剧成片验收员。只根据随附的成片抽帧、参考图、台词时间表和合同做验收，不评价剧情创意，不要求补拍。
 只输出一个 JSON 对象，不要 Markdown 代码块、不要解释：
-{"verdict":"pass|warn|fail","summary":"一句话结论","checks":[{"key":"identity|set|axis|action|presence|prop|audio|text","verdict":"pass|warn|fail|skipped","detail":"证据"}],"issues":[{"code":"accept_identity|accept_set|accept_axis|accept_action|accept_presence|accept_prop|accept_audio|accept_text","severity":"error|warning|info","message":"问题","suggestion":"修复动作","evidence":"对应帧/合同字段"}]}
+{"verdict":"pass|warn|fail","summary":"一句话结论","checks":[{"key":"identity|set|axis|action|presence|prop|lip|audio|subtitle","verdict":"pass|warn|fail|skipped","detail":"证据"}],"issues":[{"code":"accept_identity|accept_set|accept_axis|accept_action|accept_presence|accept_prop|accept_lip|accept_audio|accept_subtitle","severity":"error|warning|info","message":"问题","suggestion":"修复动作","evidence":"对应帧/合同字段"}]}
 
 判定规则：
 - 身份：画内人物是否与角色参考图一致；换脸/换装/加人= fail。
 - 场景：背景地标、窗/门/桌方位是否与合同和场景参考图一致；翻面/换景= fail。
 - 轴线：人物左右、视线、过肩侧是否与合同一致；翻面= fail。
-- 动作：最后一帧姿态是否接得上合同「动作终点」和上一镜尾帧；明显断开= warn，动作方向相反= fail。
+- 动作连续性：相邻抽帧的姿态/手部/道具是否连续，最后一帧是否接得上合同「动作终点」和上一镜尾帧；跳变= warn，动作方向相反或人物瞬移= fail。
 - 在场：画内人物是否齐全；画外人物误入= fail。
-- 道具：关键道具外观/位置是否明显错误；错误= warn。
-- 声音：你只能看到音轨是否存在，内容无法判断；按输入的音轨状态填 pass 或 skipped，不编造听感。
-- 文字：帧内字幕/招牌/界面文字是否乱码、错字或与剧情无关；乱码= warn。
-- 最多 4 条 issues；每条都要给可执行修复。`
+- 道具变化：关键道具在相邻抽帧中是否凭空出现/消失、换手、换外观或位置跳变；明显不一致= fail，轻微= warn。
+- 说话人口型：按台词时间表检查对应时间点抽帧——正在说话的角色嘴应张开，听者嘴唇必须闭合；张冠李戴（听者动嘴/说话人闭口）= fail；旁白/心声不要求画内人物张嘴；无法看清嘴部= skipped。
+- 声音与台词：你听不到声音，只根据输入的音轨事实填写；音轨是否存在、台词窗口是否静音由系统检测，不得编造听感。
+- 字幕烧入：帧内是否出现提示词正文、英文说明、重复字幕条、乱码或与剧情无关的文字；出现明显烧入字幕= warn，大面积乱码遮挡画面= fail。场景招牌/道具文字不算。
+- 最多 5 条 issues；每条都要给可执行修复。`
 
 function normalizeVerdict(value: unknown): 'pass' | 'warn' | 'fail' {
   const text = String(value || '').toLowerCase()
@@ -170,7 +175,8 @@ function normalizeChecks(value: unknown): AcceptanceCheck[] {
   if (!Array.isArray(value)) return []
   const byKey = new Map<string, AcceptanceCheck>()
   value.slice(0, 12).forEach((item: any, index: number) => {
-    const key = String(item?.key || `check_${index + 1}`)
+    const rawKey = String(item?.key || `check_${index + 1}`)
+    const key = rawKey === 'text' ? 'subtitle' : rawKey
     const verdict = ['pass', 'warn', 'fail', 'skipped'].includes(String(item?.verdict)) ? String(item.verdict) as AcceptanceCheck['verdict'] : 'warn'
     byKey.set(key, { key, label: CHECK_LABELS[key] || key, verdict, detail: String(item?.detail || '') })
   })
@@ -201,6 +207,29 @@ export async function runAcceptance(
   if (!videoUrl) throw new Error('该镜还没有视频，请先生成镜头视频')
 
   const context = await buildContext(row)
+  const dialogueLines = await db.select({
+    text: schema.storyboardLines.text,
+    speakerType: schema.storyboardLines.speakerType,
+    speakerName: schema.storyboardLines.speakerName,
+    plannedStartMs: schema.storyboardLines.plannedStartMs,
+    plannedEndMs: schema.storyboardLines.plannedEndMs,
+  })
+    .from(schema.storyboardLines)
+    .where(and(eq(schema.storyboardLines.storyboardId, row.id), isNull(schema.storyboardLines.deletedAt)))
+  const hasDialogue = dialogueLines.some(line => String(line.text || '').trim())
+  const hasLipDialogue = dialogueLines.some(line => (
+    String(line.text || '').trim()
+    && line.speakerType !== 'narration'
+    && line.speakerType !== 'inner'
+  ))
+  const speechWindows: SpeechWindow[] = dialogueLines
+    .filter(line => String(line.text || '').trim() && line.plannedStartMs != null && line.plannedEndMs != null && Number(line.plannedEndMs) > Number(line.plannedStartMs))
+    .map(line => ({
+      startMs: Number(line.plannedStartMs),
+      endMs: Number(line.plannedEndMs),
+      speaker: `${String(line.speakerName || '角色')}${line.speakerType === 'narration' || line.speakerType === 'inner' ? '（旁白）' : ''}`,
+      text: String(line.text || ''),
+    }))
   const evidence: Array<{ label: string; path: string; time?: number }> = []
   let mediaProbe: Awaited<ReturnType<typeof probeMedia>> | null = null
   try {
@@ -209,49 +238,65 @@ export async function runAcceptance(
     mediaProbe = null
   }
   const duration = mediaProbe?.durationMs ? mediaProbe.durationMs / 1000 : Number(row.duration) || 0
+  const sampledTimes = new Set<string>()
+  const sampleFrame = async (time: number, label: string) => {
+    if (duration <= 0) return
+    const clamped = Math.max(0, Math.min(duration - 0.05, Math.round(time * 100) / 100))
+    const key = clamped.toFixed(1)
+    if (sampledTimes.has(key)) return
+    sampledTimes.add(key)
+    try {
+      const frame = await extractVideoFrameAt(videoUrl, clamped, {
+        dramaId: context.episode?.dramaId,
+        label: `sb-${row.id}-accept`,
+        subDir: `storyboards/acceptance/ep-${row.episodeId}`,
+        tag: `t${clamped.toFixed(2)}`,
+        maxEdge: 960,
+      })
+      evidence.push({ label, path: frame.relativePath, time: clamped })
+    } catch {
+      // 单帧失败不阻断整体验收
+    }
+  }
   if (duration > 0) {
     for (const ratio of SAMPLE_RATIOS) {
       const time = Math.max(0, Math.round(duration * ratio * 100) / 100)
-      try {
-        const frame = await extractVideoFrameAt(videoUrl, time, {
-          dramaId: context.episode?.dramaId,
-          label: `sb-${row.id}-accept`,
-          subDir: `storyboards/acceptance/ep-${row.episodeId}`,
-          tag: `t${time.toFixed(2)}`,
-          maxEdge: 960,
-        })
-        evidence.push({ label: `成片抽帧 t=${time.toFixed(2)}s`, path: frame.relativePath, time })
-      } catch {
-        // 单帧失败不阻断整体验收
-      }
+      await sampleFrame(time, `成片抽帧 t=${time.toFixed(2)}s`)
+    }
+    for (const window of speechWindows.slice(0, 3)) {
+      const mid = (window.startMs + window.endMs) / 2000
+      await sampleFrame(mid, `台词帧：${window.speaker} t=${mid.toFixed(2)}s`)
     }
   }
 
   const referenceImages: Array<{ label: string; path: string }> = []
   if (context.scene?.imageUrl) referenceImages.push({ label: `参考图：场景「${context.scene.location || '本场'}」`, path: context.scene.imageUrl })
-  for (const character of context.onScreen.slice(0, 3)) {
+  for (const character of context.onScreen.slice(0, 2)) {
     if (character.imageUrl) referenceImages.push({ label: `参考图：角色「${character.name}」`, path: character.imageUrl })
   }
-  for (const prop of context.props.slice(0, 2)) {
+  for (const prop of context.props.slice(0, 1)) {
     if (prop.imageUrl) referenceImages.push({ label: `参考图：道具「${prop.name}」`, path: prop.imageUrl })
   }
   if (context.previous?.lastFrameImage) {
     referenceImages.push({ label: `上一镜尾帧（第 ${context.previous.storyboardNumber} 镜）`, path: context.previous.lastFrameImage })
   }
 
+  const visionEvidence = evidence.slice(0, 7)
   const imageItems = [
-    ...evidence.map(item => ({ label: item.label, path: item.path })),
+    ...visionEvidence.map(item => ({ label: item.label, path: item.path })),
     ...referenceImages,
   ].slice(0, 12)
   const images = await loadVisionImages(imageItems)
 
-  const dialogueLines = await db.select({ text: schema.storyboardLines.text })
-    .from(schema.storyboardLines)
-    .where(and(eq(schema.storyboardLines.storyboardId, row.id), isNull(schema.storyboardLines.deletedAt)))
-  const hasDialogue = dialogueLines.some(line => String(line.text || '').trim())
   const hasAudio = Boolean(mediaProbe?.audio)
-  const audioFact = hasAudio ? '成片存在音轨' : '成片没有音轨'
+  const audioAnalysis = await analyzeVideoAudio(videoUrl, speechWindows)
+  const audioFact = formatAudioAnalysis(audioAnalysis, hasDialogue)
   const dialogueFact = hasDialogue ? '本镜有台词' : '本镜无台词'
+  const speechTimeline = speechWindows.length
+    ? speechWindows.map((window, index) => (
+        `${index + 1}. ${window.speaker} ${(window.startMs / 1000).toFixed(2)}-${(window.endMs / 1000).toFixed(2)}s：「${window.text}」`
+      )).join('\n')
+    : '本镜没有可定位的台词窗口。'
 
   let verdict: AcceptanceReport['verdict'] = 'warn'
   let checks: AcceptanceCheck[] = []
@@ -263,7 +308,7 @@ export async function runAcceptance(
     checks = CHECK_ORDER.map(key => ({
       key,
       label: CHECK_LABELS[key],
-      verdict: key === 'audio' ? (hasAudio ? 'skipped' : 'fail') : 'skipped',
+      verdict: key === 'audio' ? (!hasAudio && hasDialogue ? 'fail' : 'skipped') : 'skipped',
       detail: key === 'audio' ? audioFact : '抽帧失败，未做视觉对照',
     }))
     issues = [{
@@ -275,26 +320,55 @@ export async function runAcceptance(
     }]
     verdict = 'fail'
   } else {
-    const result = await callVisionJson<{
-      verdict?: string
-      summary?: string
-      checks?: unknown
-      issues?: unknown
-    }>({
-      system: SYSTEM_PROMPT,
-      prompt: `镜头合同：\n${context.contractText}\n\n声音事实：${audioFact}；${dialogueFact}。\n随附 ${evidence.length} 张成片抽帧（按时间顺序）和 ${referenceImages.length} 张参考图。请做生成后验收。`,
-      images,
-      configId: opts.configId,
-      model: opts.model,
-      maxTokens: 3600,
-      temperature: 0.2,
-    })
-    provider = result.provider
-    model = result.model
-    verdict = normalizeVerdict(result.data?.verdict)
-    checks = normalizeChecks(result.data?.checks)
-    issues = normalizeIssues(result.data?.issues)
-    if (hasDialogue && !hasAudio) {
+    try {
+      const result = await callVisionJson<{
+        verdict?: string
+        summary?: string
+        checks?: unknown
+        issues?: unknown
+      }>({
+        system: SYSTEM_PROMPT,
+        prompt: [
+          `镜头合同：\n${context.contractText}`,
+          `声音事实：${audioFact}；${dialogueFact}。`,
+          `台词与口型时间表：\n${speechTimeline}`,
+          `随附 ${visionEvidence.length} 张成片抽帧（按时间顺序，含台词时间点帧）和 ${referenceImages.length} 张参考图。`,
+          '请重点检查：动作连续性、说话人口型、字幕烧入、道具变化。',
+        ].join('\n\n'),
+        images,
+        configId: opts.configId,
+        model: opts.model,
+        maxTokens: 3800,
+        temperature: 0.2,
+      })
+      provider = result.provider
+      model = result.model
+      verdict = normalizeVerdict(result.data?.verdict)
+      checks = normalizeChecks(result.data?.checks)
+      issues = normalizeIssues(result.data?.issues)
+    } catch (error) {
+      verdict = 'warn'
+      checks = []
+      issues = [{
+        code: 'accept_vision_failed',
+        severity: 'warning',
+        message: `视觉对照失败，本次只完成抽帧与音轨检测：${error instanceof Error ? error.message : String(error)}`,
+        suggestion: '检查视觉模型配置/网络后重跑验收；音轨问题仍会照常记录。',
+        evidence: videoUrl,
+      }]
+    }
+
+    const audioVerdict: AcceptanceCheck['verdict'] = !hasAudio
+      ? (hasDialogue ? 'fail' : 'skipped')
+      : (!hasDialogue ? 'pass' : (audioAnalysis.error ? 'skipped' : (audioAnalysis.allSpeechSilent ? 'fail' : 'pass')))
+    const audioCheck = checks.find(check => check.key === 'audio')
+    if (audioCheck) {
+      audioCheck.verdict = audioVerdict
+      audioCheck.detail = audioFact
+    } else {
+      checks.push({ key: 'audio', label: CHECK_LABELS.audio, verdict: audioVerdict, detail: audioFact })
+    }
+    if (!hasAudio && hasDialogue) {
       issues.push({
         code: 'accept_audio',
         severity: 'error',
@@ -302,9 +376,46 @@ export async function runAcceptance(
         suggestion: '检查生成参数的声音开关或配音合成，重新生成/合成后再验收。',
         evidence: audioFact,
       })
+    } else if (hasAudio && hasDialogue && audioAnalysis.error) {
+      issues.push({
+        code: 'accept_audio_unknown',
+        severity: 'warning',
+        message: `音轨存在，但静音检测失败，无法确认台词是否真的发出：${audioAnalysis.error}`,
+        suggestion: '人工试听台词窗口，或检查 FFmpeg 后重跑验收。',
+        evidence: audioFact,
+      })
+    } else if (hasDialogue && audioAnalysis.allSpeechSilent) {
+      issues.push({
+        code: 'accept_audio_silent',
+        severity: 'error',
+        message: '本镜有台词，但所有台词时间窗口都接近静音。',
+        suggestion: '检查 H3 台词标签是否完整、声音开关是否开启；重新生成或改用后期配音。',
+        evidence: audioFact,
+      })
+    } else if (hasDialogue && audioAnalysis.speechWindows.some(window => window.silentRatio >= 0.8)) {
+      issues.push({
+        code: 'accept_audio_speech_gap',
+        severity: 'warning',
+        message: '部分台词时间窗口接近静音，可能存在丢句或时间轴偏移。',
+        suggestion: '核对台词标签与时间帧；必要时重跑声音设计/后期配音。',
+        evidence: audioFact,
+      })
     }
-    if (issues.some(issue => issue.severity === 'error')) verdict = 'fail'
-    else if (issues.some(issue => issue.severity === 'warning') && verdict === 'pass') verdict = 'warn'
+    for (const key of ['action', 'prop', 'lip', 'subtitle'] as const) {
+      if (checks.some(check => check.key === key)) continue
+      checks.push({
+        key,
+        label: CHECK_LABELS[key],
+        verdict: 'skipped',
+        detail: key === 'lip' && !hasLipDialogue ? '本镜没有画内说话人，不需要口型对照' : '视觉模型没有返回该项结论',
+      })
+    }
+    checks = CHECK_ORDER
+      .map(key => checks.find(check => check.key === key))
+      .filter((check): check is AcceptanceCheck => Boolean(check))
+    if (checks.some(check => check.verdict === 'fail')) verdict = 'fail'
+    else if (issues.some(issue => issue.severity === 'error')) verdict = 'fail'
+    else if ((issues.some(issue => issue.severity === 'warning') || checks.some(check => check.verdict === 'warn')) && verdict === 'pass') verdict = 'warn'
   }
 
   const ts = now()
@@ -335,6 +446,28 @@ export async function runAcceptance(
     video_url: videoUrl,
     created_at: ts,
   }
+}
+
+const acceptanceTimers = new Map<number, NodeJS.Timeout>()
+
+/** 视频落盘后自动跑一次抽帧/音频验收；再次落盘会重置计时，只验收最新视频。 */
+export function queueAcceptance(storyboardId: number, opts: { configId?: number; model?: string } = {}): void {
+  if (process.env.DISABLE_AUTO_ACCEPTANCE === '1') return
+  if (!storyboardId) return
+  const existing = acceptanceTimers.get(storyboardId)
+  if (existing) clearTimeout(existing)
+  const timer = setTimeout(() => {
+    acceptanceTimers.delete(storyboardId)
+    void runAcceptance(storyboardId, opts)
+      .catch(error => {
+        logTaskWarn('Acceptance', 'auto-run-failed', {
+          storyboardId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
+  }, 1500)
+  timer.unref?.()
+  acceptanceTimers.set(storyboardId, timer)
 }
 
 export async function getLatestAcceptance(storyboardId: number): Promise<AcceptanceReport | null> {

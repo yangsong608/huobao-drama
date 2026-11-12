@@ -6,7 +6,7 @@ import { createTool } from '@mastra/core/tools'
 import type { ToolExecutionContext } from '@mastra/core/tools'
 import { z } from 'zod'
 import { db, getInsertId, schema } from '../../db/index.js'
-import { and, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { now } from '../../utils/response.js'
 import { logTaskProgress, logTaskSuccess, logTaskWarn } from '../../utils/task-logger.js'
 import { getContentLanguageFromRC, getDramaId, getEpisodeId } from '../context.js'
@@ -19,6 +19,12 @@ import { validateRepairedShot } from '../../services/storyboard-shot-validation.
 import { buildShotSoundDelta, parseSoundSection, setSoundSection, type SoundSection, type ShotSoundCue } from '../../services/storyboard-sound.js'
 import { applyAssetAliases, buildAssetAliasMap } from '../../services/asset-aliases.js'
 import { getCanonicalSceneGroups, resolveCanonicalSceneByName, resolveCanonicalSceneId } from '../../services/scene-canonical.js'
+import {
+  applySceneContractToPlan,
+  getSceneContractMap,
+  syncSceneContractsFromPlans,
+  type SceneContractView,
+} from '../../services/scene-contract.js'
 import { evaluateContractPairIssues } from '../../services/storyboard-contract-audit.js'
 import { createSceneSidePlan, normalizeSceneSides } from '../../services/storyboard-scene-sides.js'
 import {
@@ -26,6 +32,7 @@ import {
   planIssuesText,
   validatePlanSequence,
   type PlanShot,
+  type PlanSpeechSegment,
 } from '../../services/storyboard-plan-contract.js'
 import { getMaxSegmentSeconds } from '../../services/breakdown-methods.js'
 import {
@@ -172,7 +179,13 @@ interface StoryboardPipelineRuntime {
     total?: number
     label?: string
     shotStart?: number
-    state?: { replaced: boolean; nextShot: number; saved: number; excerptCursor?: number }
+    state?: {
+      replaced: boolean
+      nextShot: number
+      saved: number
+      excerptCursor?: number
+      plannedShots?: import('../../services/storyboard-planner.js').PlannedStoryboardShot[]
+    }
   }
   shotNumber?: number
   skeleton?: Record<string, any>
@@ -210,7 +223,13 @@ function getPipelineRuntime(context: ToolContext): StoryboardPipelineRuntime {
       total: rc?.get('pipelineChunkTotal' as never) as number | undefined,
       label: rc?.get('pipelineChunkLabel' as never) as string | undefined,
       shotStart: rc?.get('pipelineChunkShotStart' as never) as number | undefined,
-      state: rc?.get('pipelineChunkState' as never) as { replaced: boolean; nextShot: number; saved: number; excerptCursor?: number } | undefined,
+      state: rc?.get('pipelineChunkState' as never) as {
+        replaced: boolean
+        nextShot: number
+        saved: number
+        excerptCursor?: number
+        plannedShots?: import('../../services/storyboard-planner.js').PlannedStoryboardShot[]
+      } | undefined,
     },
     shotNumber: rc?.get('pipelineShotNumber' as never) as number | undefined,
     skeleton,
@@ -1213,6 +1232,13 @@ const saveStoryboardSkeletons = createTool({
     const state = runtime.chunk.state
     let cursor = state.excerptCursor || 0
     const errors: string[] = []
+    const plannedShots = state.plannedShots || []
+    if (plannedShots.length && skeletons.length !== plannedShots.length) {
+      throw new Error(
+        `预拆分已锁定 ${plannedShots.length} 个镜头（第 ${plannedShots[0].storyboardNumber}-${plannedShots[plannedShots.length - 1].storyboardNumber} 镜），`
+        + `但你保存了 ${skeletons.length} 个骨架。请严格按系统预拆分逐条保存，不要增删、合并或拆分镜头。`,
+      )
+    }
 
     const aliasMap = await buildAssetAliasMap(dramaId)
     const canonicalGroups = await getCanonicalSceneGroups(dramaId)
@@ -1224,14 +1250,21 @@ const saveStoryboardSkeletons = createTool({
     const rows: Array<typeof schema.storyboardSkeletons.$inferInsert> = []
     const planShots: PlanShot[] = []
     for (const [index, skeleton] of skeletons.entries()) {
-      const excerpt = String(skeleton.source_excerpt || '').trim()
-      const summary = String(skeleton.action_summary || '').trim()
-      const storyboardNumber = state.nextShot + index
+      const planned = plannedShots[index] || null
+      const excerpt = String(planned?.sourceExcerpt ?? skeleton.source_excerpt ?? '').trim()
+      const summary = String(skeleton.action_summary || '').trim() || planned?.summaryHint || ''
+      const storyboardNumber = planned?.storyboardNumber ?? state.nextShot + index
       const label = `本块第 ${index + 1} 个骨架`
       if (!summary) errors.push(`${label}缺少动作摘要。`)
       if (!excerpt) errors.push(`${label}缺少原文摘录。`)
-      const speechSegments = extractPlanSpeechSegments(excerpt)
-      const duration = Number(skeleton.duration || 0)
+      const plannedSpeech = planned?.speechSegments?.map((item, order) => ({
+        speaker: item.speaker,
+        text: item.text,
+        sourceQuote: item.sourceQuote,
+        order: order + 1,
+      })) || []
+      const speechSegments = plannedSpeech.length ? plannedSpeech : extractPlanSpeechSegments(excerpt)
+      const duration = Number(planned?.duration || skeleton.duration || 0)
       if (duration < 6 || duration > 15) errors.push(`${label}时长 ${duration} 秒，必须在 6-15 秒之间。`)
       if (excerpt) {
         const normalizedExcerpt = normalizeExcerptText(excerpt)
@@ -1243,10 +1276,13 @@ const saveStoryboardSkeletons = createTool({
         }
       }
 
-      let sceneId = typeof skeleton.scene_id === 'number'
-        ? canonicalSceneMap.get(skeleton.scene_id) ?? skeleton.scene_id
-        : null
-      const location = String(skeleton.location || '').trim()
+      let sceneId = planned?.sceneId ?? null
+      if (sceneId == null) {
+        sceneId = typeof skeleton.scene_id === 'number'
+          ? canonicalSceneMap.get(skeleton.scene_id) ?? skeleton.scene_id
+          : null
+      }
+      const location = String(planned?.location || skeleton.location || '').trim()
       if (sceneId == null && location) {
         const group = resolveCanonicalSceneByName(canonicalGroups, location)
         if (group) sceneId = group.canonicalId
@@ -1258,6 +1294,18 @@ const saveStoryboardSkeletons = createTool({
         errors.push(`${label}${error instanceof Error ? error.message : String(error)}`)
       }
       const scene = sceneId != null ? canonicalGroups.find(group => group.canonicalId === sceneId) : null
+      const actionStart = planned?.actionStart || skeleton.action_start?.trim() || null
+      const actionEnd = planned?.actionEnd || skeleton.action_end?.trim() || null
+      const coverageType = planned?.coverageType || skeleton.coverage_type?.trim() || null
+      const boundaryType = planned?.boundaryType || skeleton.boundary_type || (speechSegments.length ? 'speech' : 'action')
+      const uniqueCharacterIds = [...new Set(skeleton.character_ids || [])]
+      const characterCount = uniqueCharacterIds.length
+      const sides = {
+        screenLeft: planned?.screenLeft || skeleton.screen_left?.trim() || null,
+        screenRight: planned?.screenRight || skeleton.screen_right?.trim() || null,
+        axisSide: characterCount >= 2 ? (planned?.axisSide || skeleton.axis_side?.trim() || null) : null,
+        landmarkSide: planned?.landmarkSide || skeleton.landmark_side?.trim() || null,
+      }
       rows.push({
         jobId: runtime.jobId!,
         episodeId,
@@ -1265,25 +1313,22 @@ const saveStoryboardSkeletons = createTool({
         chunkIndex: runtime.chunk.index ?? null,
         storyboardNumber,
         sceneId,
-        title: skeleton.title ? applyAssetAliases(skeleton.title, aliasMap) : null,
+        title: skeleton.title ? applyAssetAliases(skeleton.title, aliasMap) : (planned?.titleHint || null),
         location: location || scene?.name || null,
-        time: skeleton.time || null,
-        characterIds: JSON.stringify([...new Set(skeleton.character_ids || [])]),
+        time: planned?.time || skeleton.time || null,
+        characterIds: JSON.stringify(uniqueCharacterIds),
         propIds: JSON.stringify([...new Set(skeleton.prop_ids || [])]),
         duration,
-        transition: skeleton.transition || 'cut',
+        transition: skeleton.transition || planned?.transition || 'cut',
         continuity: skeleton.continuity || null,
-        actionStart: skeleton.action_start?.trim() || null,
-        actionEnd: skeleton.action_end?.trim() || null,
-        coverageType: skeleton.coverage_type?.trim() || null,
+        actionStart,
+        actionEnd,
+        coverageType,
         speechSegmentsJson: JSON.stringify(speechSegments),
-        boundaryType: skeleton.boundary_type || (speechSegments.length ? 'speech' : 'action'),
-        boundaryWord: skeleton.boundary_word?.trim() || null,
-        screenLeft: skeleton.screen_left?.trim() || null,
-        screenRight: skeleton.screen_right?.trim() || null,
-        axisSide: skeleton.axis_side?.trim() || null,
-        landmarkSide: skeleton.landmark_side?.trim() || null,
-        planVersion: 1,
+        boundaryType,
+        boundaryWord: planned?.boundaryWord || skeleton.boundary_word?.trim() || null,
+        ...sides,
+        planVersion: planned ? 2 : 1,
         actionSummary: applyAssetAliases(summary, aliasMap),
         sourceExcerpt: excerpt,
         status: 'draft',
@@ -1293,18 +1338,19 @@ const saveStoryboardSkeletons = createTool({
       planShots.push({
         shotNumber: storyboardNumber,
         sceneId,
+        location: location || scene?.name || null,
+        time: planned?.time || skeleton.time || null,
         sourceExcerpt: excerpt,
         duration,
-        actionStart: skeleton.action_start?.trim() || null,
-        actionEnd: skeleton.action_end?.trim() || null,
-        coverageType: skeleton.coverage_type?.trim() || null,
+        actionStart,
+        actionEnd,
+        coverageType,
         speechSegments,
-        boundaryType: skeleton.boundary_type || (speechSegments.length ? 'speech' : 'action'),
-        boundaryWord: skeleton.boundary_word?.trim() || null,
-        screenLeft: skeleton.screen_left?.trim() || null,
-        screenRight: skeleton.screen_right?.trim() || null,
-        axisSide: skeleton.axis_side?.trim() || null,
-        landmarkSide: skeleton.landmark_side?.trim() || null,
+        characterCount,
+        ...(planned?.speechSource ? { speechSource: planned.speechSource } : {}),
+        boundaryType,
+        boundaryWord: planned?.boundaryWord || skeleton.boundary_word?.trim() || null,
+        ...sides,
       })
     }
     if (!errors.length && planShots.length) {
@@ -1312,37 +1358,95 @@ const saveStoryboardSkeletons = createTool({
         .from(schema.episodes)
         .where(eq(schema.episodes.id, episodeId))
         .get()
-      const previous = db.select().from(schema.storyboardSkeletons)
+      const history = db.select().from(schema.storyboardSkeletons)
         .where(eq(schema.storyboardSkeletons.jobId, runtime.jobId!))
-        .orderBy(desc(schema.storyboardSkeletons.storyboardNumber))
-        .limit(1)
-        .get()
-      const previousPlan: PlanShot | null = previous ? {
-        shotNumber: previous.storyboardNumber,
-        sceneId: previous.sceneId,
-        sourceExcerpt: previous.sourceExcerpt,
-        duration: previous.duration || 0,
-        actionStart: previous.actionStart,
-        actionEnd: previous.actionEnd,
-        coverageType: previous.coverageType,
-        speechSegments: extractPlanSpeechSegments(previous.sourceExcerpt),
-        boundaryType: previous.boundaryType,
-        boundaryWord: previous.boundaryWord,
-        screenLeft: previous.screenLeft,
-        screenRight: previous.screenRight,
-        axisSide: previous.axisSide,
-        landmarkSide: previous.landmarkSide,
-      } : null
+        .orderBy(asc(schema.storyboardSkeletons.storyboardNumber))
+        .all()
+      const firstNewNumber = planShots[0]?.shotNumber ?? Number.MAX_SAFE_INTEGER
+      const historyPlans: PlanShot[] = history
+        .filter(item => item.storyboardNumber < firstNewNumber)
+        .map(item => ({
+          shotNumber: item.storyboardNumber,
+          sceneId: item.sceneId,
+          location: item.location,
+          time: item.time,
+          sourceExcerpt: item.sourceExcerpt,
+          duration: item.duration || 0,
+          actionStart: item.actionStart,
+          actionEnd: item.actionEnd,
+          coverageType: item.coverageType,
+          speechSegments: (() => {
+            try {
+              const parsed = JSON.parse(item.speechSegmentsJson || '[]')
+              if (Array.isArray(parsed) && parsed.length) {
+                return parsed.map((segment: any, index: number): PlanSpeechSegment => ({
+                  speaker: String(segment?.speaker || ''),
+                  text: String(segment?.text || ''),
+                  sourceQuote: String(segment?.sourceQuote || segment?.text || ''),
+                  order: index + 1,
+                })).filter(segment => segment.text)
+              }
+            } catch {
+              // 旧数据没有 JSON 时回退到摘录提取
+            }
+            return extractPlanSpeechSegments(item.sourceExcerpt)
+          })(),
+          speechSource: 'planner' as const,
+          boundaryType: item.boundaryType,
+          boundaryWord: item.boundaryWord,
+          screenLeft: item.screenLeft,
+          screenRight: item.screenRight,
+          axisSide: item.axisSide,
+          landmarkSide: item.landmarkSide,
+          characterCount: (() => {
+            try {
+              const ids = JSON.parse(item.characterIds || '[]')
+              return Array.isArray(ids) ? ids.length : 0
+            } catch {
+              return 0
+            }
+          })(),
+        }))
+      const contractMap = await getSceneContractMap(dramaId)
+      const withContracts = (plans: PlanShot[], map: Map<number, SceneContractView>) => plans.map(plan => (
+        plan.sceneId == null ? plan : applySceneContractToPlan(plan, map.get(Number(plan.sceneId)))
+      ))
+      const maxDuration = getMaxSegmentSeconds(episode?.breakdownMethod)
+      let effectiveHistory = withContracts(historyPlans, contractMap)
+      let effectiveNew = withContracts(planShots, contractMap)
       const planGate = validatePlanSequence(
-        [...(previousPlan ? [previousPlan] : []), ...planShots],
-        { minDuration: 6, maxDuration: getMaxSegmentSeconds(episode?.breakdownMethod) },
+        [...effectiveHistory, ...effectiveNew],
+        { minDuration: 6, maxDuration, sceneContracts: contractMap },
       )
       if (planGate.issues.some(item => item.severity === 'error')) {
         const messages = planGate.issues.filter(item => item.severity === 'error').map(item => item.message)
         logTaskWarn('StoryboardPipeline', 'plan-gate-rejected', { episodeId, errors: messages.join('；') })
-        throw new Error(`拒绝保存骨架：${planIssuesText(planGate.issues.filter(item => item.severity === 'error'))}。请合并被拆开的说话提示与台词，或把上一镜截到提示之前。`)
+        throw new Error(`拒绝保存骨架：${planIssuesText(planGate.issues.filter(item => item.severity === 'error'))}。请逐字沿用同场建立镜的画面常量，或修正被拆开的说话提示与台词。`)
       }
-      for (const boundary of planGate.boundaries) {
+      const synced = await syncSceneContractsFromPlans({
+        dramaId,
+        episodeId,
+        jobId: runtime.jobId!,
+        plans: [...effectiveHistory, ...effectiveNew],
+      })
+      effectiveHistory = withContracts(effectiveHistory, synced)
+      effectiveNew = withContracts(effectiveNew, synced)
+      const finalGate = validatePlanSequence(
+        [...effectiveHistory, ...effectiveNew],
+        { minDuration: 6, maxDuration, sceneContracts: synced },
+      )
+      if (finalGate.issues.some(item => item.severity === 'error')) {
+        throw new Error(`拒绝保存骨架：${planIssuesText(finalGate.issues.filter(item => item.severity === 'error'))}。`)
+      }
+      for (const row of rows) {
+        const plan = effectiveNew.find(item => item.shotNumber === row.storyboardNumber)
+        if (!plan) continue
+        row.screenLeft = row.screenLeft || plan.screenLeft
+        row.screenRight = row.screenRight || plan.screenRight
+        row.axisSide = row.axisSide || plan.axisSide
+        row.landmarkSide = row.landmarkSide || plan.landmarkSide
+      }
+      for (const boundary of finalGate.boundaries) {
         const row = rows.find(item => item.storyboardNumber === boundary.fromShotNumber)
         if (row) {
           row.boundaryOutJson = JSON.stringify(boundary)

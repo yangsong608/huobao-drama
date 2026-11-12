@@ -14,6 +14,8 @@ import { buildAgentRequestContext, getContentLanguageFromRC, type AgentRequestCo
 import { getEpisodeCoverage, getMaxSegmentSeconds, type EpisodeCoverage } from './breakdown-methods.js'
 import { splitScriptIntoChunks } from './storyboard-split-jobs.js'
 import { buildSceneBindingBlock, getCanonicalSceneGroups } from './scene-canonical.js'
+import { buildSceneContractBlock, getSceneContractMap } from './scene-contract.js'
+import { buildPlannedShotsBlock, planStoryboardShots, type PlannedStoryboardShot } from './storyboard-planner.js'
 import { interruptStoryboardAuditForEpisode } from './storyboard-audit-jobs.js'
 import { validateRepairedShot } from './storyboard-shot-validation.js'
 import { cleanupFrameAssetsForEpisode } from './storyboard-frame-assets.js'
@@ -127,6 +129,7 @@ export interface SkeletonRunnerInput {
   baseMessage: string
   maxSegmentSeconds: number
   previousDrafts: Array<Record<string, any>>
+  plannedShots: PlannedStoryboardShot[]
   requestContext: RequestContext<AgentRequestContextValues>
 }
 
@@ -142,6 +145,7 @@ export interface RepairRunnerInput {
   issues: string[]
   attempt: number
   requestContext: RequestContext<AgentRequestContextValues>
+  previousFrameAnchor?: { shotNumber: number; url: string } | null
 }
 
 export interface SoundRunnerInput {
@@ -584,38 +588,35 @@ function previousShotPayload(row: typeof schema.storyboards.$inferSelect) {
   }
 }
 
-function buildSkeletonMessage(input: SkeletonRunnerInput, sceneBindingBlock: string) {
+function buildSkeletonMessage(input: SkeletonRunnerInput, sceneBindingBlock: string, sceneContractBlock: string) {
   const chunkChars = nonWsLength(input.chunk.script)
   const previousBlock = input.previousDrafts.length
     ? input.previousDrafts.map(draft => `- 第 ${draft.storyboard_number} 镜：${draft.action_summary || ''}（场景 ${draft.scene_id ?? '未绑定'}，${draft.duration || 0} 秒，转场 ${draft.transition || 'cut'}）`).join('\n')
     : '（本段是第一段，没有前序骨架）'
+  const plannedCount = input.plannedShots.length
   return [
     input.baseMessage.trim(),
     '',
     `## 四段式管线 · 第一段：预拆骨架（第 ${input.chunk.index + 1}/${input.totalChunks} 段）`,
-    `本段范围：${input.chunk.label}，约 ${chunkChars} 字；镜头号由系统从第 ${input.shotStart} 镜连续分配，按剧情顺序输出骨架即可。`,
+    `本段范围：${input.chunk.label}，约 ${chunkChars} 字；镜头号由系统从第 ${input.shotStart} 镜连续分配。`,
+    '',
+    buildPlannedShotsBlock(input.plannedShots),
     '',
     '### 本段任务',
-    '- 只拆分下面给出的剧本片段，不要拆分或改写其它场次，不要读取旧分镜当参考。',
-    '- 先把本段按场次/节拍拆成骨架；每个骨架 = 一个机位 + 一个主体 + 一个连续动作，6-15 秒，禁止子镜头切镜。',
-    '- 骨架只写：scene_id/location、character_ids、prop_ids、duration、action_summary、source_excerpt、transition、continuity、title、time、action_start、action_end、coverage_type、boundary_type、boundary_word、screen_left、screen_right、axis_side、landmark_side。',
+    `- 拆分主算法已经按「台词→场景→说话人→节拍→分镜」完成预拆分，本段固定 ${plannedCount} 个骨架；你的任务不是重新拆分，而是逐条补全语义字段后保存。`,
+    '- 必须严格按上面清单的顺序和数量调用 save_storyboard_skeletons；禁止增删、合并、拆分、改镜头号或改摘录边界。',
+    '- source_excerpt、duration、台词由系统锁定；scene_id 已给出的必须沿用，显示“场景待绑定”的由你补绑；即使你传了不同摘录/时长，服务端也会按锁定量覆盖。',
+    '- 需要你补全：action_summary（谁做什么）、character_ids、prop_ids、title、transition、continuity、action_start、action_end、coverage_type、boundary_type、boundary_word、screen_left/right、axis_side、landmark_side。',
     '- 不写最终台词，不写 video_prompt，不写 BGM/环境声；这些留给逐镜修补和声音设计。',
-    '- source_excerpt 必须从本段剧本逐字截取（可去掉空白），按剧情顺序、互不重复；覆盖本段每一场、每一句台词和关键动作。',
-    '- 原文里的「喊/叫卖/揽客/吆喝/唱喝」等发声动作必须保留在摘录里，修补阶段会补具体台词；不要把发声动作改写成别的动作。',
-    '- 说话提示（角色：/高声唱喝：）必须和后面的台词放在同一个骨架；如果本镜只拍到开口前的动作，摘录必须停在说话提示之前。禁止把提示留在上一镜、台词放到下一镜。',
-    '- 过渡词只能出现一次：可以放在上一镜末尾引出，或放在下一镜开头承接；下一镜必须从上一镜尾状态继续，不能重复上一镜开头。',
-    '- 同一场第一镜确定画面左/右、轴线、地标侧；后续骨架必须沿用，不得因为说话人变化交换左右；换场才允许重置。',
-    '- 对话密集时按说话人/反应拆成多个骨架，不要把整场塞进一个骨架；但不要把同一句台词拆到两镜。',
     '- action_summary 只写谁做什么、动作起点和终点，一句话；不要写台词原文。',
-    '- boundary_type 取 speech/action/reaction/scene/time；boundary_word 只在确有过渡词时填写。',
+    '- 同一场第一镜必须补全画面左/右、轴线、地标侧，作为场景地理契约的建立镜；后续镜头逐字沿用，不得因为说话人变化交换左右。',
+    '- boundary_type 取 speech/action/reaction/scene/time；boundary_word 只在确有过渡词时填写，且过渡词只能出现一次。',
     '- 每个骨架必须绑定 canonical 场景；同名场景只选主场景，不要用别名。',
     '- 直接调用 save_storyboard_skeletons 保存本段全部骨架；全部保存完成前不要结束。',
     '',
-    `### 本段分镜数下限`,
-    `约 ${Math.max(1, Math.ceil(chunkChars * 0.12 / input.maxSegmentSeconds * 0.9))} 个（按 0.12 秒/字、单镜最长 ${input.maxSegmentSeconds} 秒、90% 折算）。`,
-    '',
     '### 前序骨架（用于本段第一镜承接，不要重复拆）',
     previousBlock,
+    sceneContractBlock ? `\n${sceneContractBlock}` : '',
     sceneBindingBlock ? `\n${sceneBindingBlock}` : '',
     '',
     `### 本段剧本片段（${input.chunk.label}）`,
@@ -686,6 +687,11 @@ function buildRepairMessage(input: RepairRunnerInput) {
     '### 后镜草稿（只用于判断本镜动作终点，不要提前写后镜）',
     nextBlock,
     issueBlock,
+    ...(input.previousFrameAnchor ? [
+      '',
+      '### 首帧锚点（已作为首帧输入）',
+      `本镜首帧固定为第 ${input.previousFrameAnchor.shotNumber} 镜末帧；0 秒必须从该帧的人物身份、手部姿势、视线和道具位置继续，禁止重新摆姿势、换前景道具或改机位。`,
+    ] : []),
     '',
     '### 修补要求（最高优先级）',
     '1. 计划层台词是唯一台词来源：计划有台词就逐字写进 description 和 video_prompt；计划没有台词就不得自行加台词。发声动作没有具体词时，只能在计划层补出原文依据后再使用，不能直接创作。',
@@ -695,8 +701,10 @@ function buildRepairMessage(input: RepairRunnerInput) {
     '5. 不写完整 BGM/环境声风格；声音由第四步统一设计。',
     '6. 不得改变计划层的边界：上一镜尾状态和本镜起状态必须接上；过渡词只允许出现一次，不能在本镜和上一镜重复。',
     '7. 同一场戏必须逐字沿用上一镜的画面左/右、地标侧、轴线；不得因为说话人变化交换左右；需要换边/越轴时先插中性镜头，不要在本镜硬翻。',
-    '8. 只调用 save_repaired_storyboard 保存这一镜；不要批量保存、不要修改其它镜头。',
-    '9. 服务端拒绝时按错误清单修同一镜后重试，最多 2 次；不要跳过。',
+    '8. 多角色同框时只有说话人张嘴；其他角色嘴唇闭合、不说话、不做说话动作。',
+    '9. 同一说话人的一句台词尽量放在一个时间帧；装不下就在原文标点处拆到相邻分镜，不要在本镜拆成多段轮流说话。',
+    '10. 只调用 save_repaired_storyboard 保存这一镜；不要批量保存、不要修改其它镜头。',
+    '11. 服务端拒绝时按错误清单修同一镜后重试，最多 2 次；不要跳过。',
   ].join('\n')
 }
 
@@ -735,8 +743,10 @@ async function defaultSkeletonRunner(input: SkeletonRunnerInput) {
   if (!agent) throw new Error('分镜导演 Agent 不可用')
   const groups = await getCanonicalSceneGroups(input.dramaId)
   const sceneBindingBlock = buildSceneBindingBlock(input.chunk.script, groups)
+  const contracts = [...(await getSceneContractMap(input.dramaId)).values()]
+  const sceneContractBlock = buildSceneContractBlock(contracts)
   await agent.generate(
-    [{ role: 'user', content: buildSkeletonMessage(input, sceneBindingBlock) }],
+    [{ role: 'user', content: buildSkeletonMessage(input, sceneBindingBlock, sceneContractBlock) }],
     { maxSteps: 40, requestContext: input.requestContext },
   )
 }
@@ -1039,6 +1049,23 @@ export async function optimizeStoryboardShot(
     .find(item => item.storyboardNumber === storyboard.storyboardNumber)
   if (!initialSkeleton) throw new Error('该分镜没有拆分计划，请先重新拆分分镜')
 
+  const previousStoryboard = liveStoryboards(episode.id)
+    .filter(item => item.storyboardNumber < storyboard.storyboardNumber)
+    .slice(-1)[0]
+  const previousFrameAsset = previousStoryboard
+    ? db.select().from(schema.assets)
+        .where(and(
+          eq(schema.assets.storyboardId, previousStoryboard.id),
+          eq(schema.assets.category, 'storyboard_frame'),
+          isNull(schema.assets.deletedAt),
+        ))
+        .orderBy(desc(schema.assets.id))
+        .get()
+    : null
+  const previousFrameAnchor = previousStoryboard && previousFrameAsset?.url
+    ? { shotNumber: previousStoryboard.storyboardNumber, url: previousFrameAsset.url }
+    : null
+
   const script = String(episode.scriptContent || episode.content || '')
   const novelContent = String(episode.content || '')
   const hasSeparateNovel = Boolean(novelContent.trim()) && novelContent.trim() !== script.trim()
@@ -1125,6 +1152,7 @@ export async function optimizeStoryboardShot(
           issues: lastIssues,
           attempt,
           requestContext,
+          previousFrameAnchor,
         })
       } catch (error) {
         runnerError = `修补调用失败：${error instanceof Error ? error.message : String(error)}`
@@ -1371,10 +1399,43 @@ async function runSkeletonStage(
     chunk.shots = 0
     persistState(row.id, state, { status: 'running', errorMsg: null })
     const shotStart = chunkStartShot(state.chunks, chunk)
-    const previousDrafts = skeletonShots(row.id)
-      .filter(item => item.storyboardNumber < shotStart)
-      .slice(-2)
-      .map(skeletonPayload)
+    const allHistory = skeletonShots(row.id).filter(item => item.storyboardNumber < shotStart)
+    const previousDrafts = allHistory.slice(-2).map(skeletonPayload)
+    const previousSkeleton = allHistory[allHistory.length - 1]
+    const sceneGroups = await getCanonicalSceneGroups(row.dramaId)
+    const sceneContracts = await getSceneContractMap(row.dramaId)
+    const planned = planStoryboardShots({
+      script: chunk.script,
+      shotStart,
+      sceneGroups,
+      previousShot: previousSkeleton ? {
+        shotNumber: previousSkeleton.storyboardNumber,
+        sceneId: previousSkeleton.sceneId,
+        location: previousSkeleton.location,
+        time: previousSkeleton.time,
+        screenLeft: previousSkeleton.screenLeft,
+        screenRight: previousSkeleton.screenRight,
+        axisSide: previousSkeleton.axisSide,
+        landmarkSide: previousSkeleton.landmarkSide,
+      } : null,
+      sceneContracts,
+      minDuration: 6,
+      maxDuration: maxSegmentSeconds,
+    })
+    if (!planned.shots.length) {
+      persistState(row.id, state, {
+        status: 'failed',
+        errorMsg: `第 ${chunk.index + 1}/${state.chunks.length} 段没有可拆分的台词或动作节拍`,
+      })
+      return false
+    }
+    logTaskProgress('StoryboardPipeline', 'skeleton-plan', {
+      jobId: row.id,
+      chunk: `${chunk.index + 1}/${state.chunks.length}`,
+      shots: planned.shots.length,
+      coverage: Number(planned.coverage.toFixed(3)),
+      shotStart,
+    })
     let chunkDone = false
     let lastError = ''
     for (let blockAttempt = 1; blockAttempt <= params.blockMaxAttempts; blockAttempt += 1) {
@@ -1382,7 +1443,13 @@ async function runSkeletonStage(
         persistState(row.id, state, { status: 'interrupted', errorMsg: budgetMessage(params), finishedAt: null })
         return false
       }
-      const chunkState = { replaced: false, nextShot: shotStart, saved: 0, excerptCursor: 0 }
+      const chunkState = {
+        replaced: false,
+        nextShot: shotStart,
+        saved: 0,
+        excerptCursor: 0,
+        plannedShots: planned.shots,
+      }
       const knowledgeIds = stepKnowledgeIds(row, 'skeleton-split')
       const requestContext = pipelineContext({
         episodeId: row.episodeId,
@@ -1427,6 +1494,7 @@ async function runSkeletonStage(
           baseMessage: row.message,
           maxSegmentSeconds,
           previousDrafts,
+          plannedShots: planned.shots,
           requestContext,
         })
         if (chunkState.saved <= 0) throw new Error('本段没有保存任何分镜骨架（模型可能只回复了文字）')

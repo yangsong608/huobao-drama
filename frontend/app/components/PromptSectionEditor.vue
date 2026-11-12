@@ -109,7 +109,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MentionTextarea from '~/components/MentionTextarea.vue'
 
@@ -124,7 +124,7 @@ const { locale } = useI18n()
 const COPY = {
   zh: {
     title: '视频提示词',
-    hint: '固定分区；Enter 换行，Ctrl/Cmd+Enter 保存；@/# 可插入资产。',
+    hint: '固定分区；停止输入约 0.7 秒或失焦自动保存，Ctrl/Cmd+Enter 立即保存；@/# 可插入资产。',
     cast: '出场人物', castPlaceholder: '只写画内人物，如 @唐大奕',
     scene: '场景', scenePlaceholder: '如 @邓州小饭馆',
     blocking: '画面调度', blockingPlaceholder: '画面左是谁、右边是谁、过谁的肩、背景窗/门/桌在哪；动作起点：…；动作终点：…',
@@ -141,7 +141,7 @@ const COPY = {
   },
   en: {
     title: 'Video prompt',
-    hint: 'Fixed sections; Enter for a new line, Ctrl/Cmd+Enter to save; @/# inserts assets.',
+    hint: 'Fixed sections; auto-saves about 0.7s after typing stops or on blur, Ctrl/Cmd+Enter saves now; @/# inserts assets.',
     cast: 'On-screen cast', castPlaceholder: 'On-screen characters only, e.g. @Tang Yi',
     scene: 'Scene', scenePlaceholder: 'e.g. @Dengzhou tavern',
     blocking: 'Blocking', blockingPlaceholder: 'Who is screen-left/right, over whose shoulder, window/door/table; action start/end',
@@ -158,7 +158,7 @@ const COPY = {
   },
   ja: {
     title: '動画プロンプト',
-    hint: '固定セクション。Enter で改行、Ctrl/Cmd+Enter で保存、@/# で素材を挿入。',
+    hint: '固定セクション。入力停止から約0.7秒またはフォーカスを外すと自動保存、Ctrl/Cmd+Enter ですぐ保存、@/# で素材を挿入。',
     cast: '登場人物', castPlaceholder: '画面内の人物のみ、例 @唐奕',
     scene: 'シーン', scenePlaceholder: '例 @鄧州の小さな食堂',
     blocking: '画面演出', blockingPlaceholder: '画面左/右、誰の肩越し、窓/扉/机の位置；動作開始：…；動作終了：…',
@@ -175,7 +175,7 @@ const COPY = {
   },
   ko: {
     title: '비디오 프롬프트',
-    hint: '고정 섹션; Enter로 줄바꿈, Ctrl/Cmd+Enter로 저장, @/#로 자산 삽입.',
+    hint: '고정 섹션; 입력을 멈추고 약 0.7초 후 또는 포커스를 벗어나면 자동 저장, Ctrl/Cmd+Enter는 즉시 저장, @/#로 자산 삽입.',
     cast: '화면 인물', castPlaceholder: '화면에 나오는 인물만, 예 @탕이',
     scene: '장면', scenePlaceholder: '예 @덩저우 작은 식당',
     blocking: '화면 연출', blockingPlaceholder: '화면 왼쪽/오른쪽, 누구 어깨 너머, 창/문/책상 위치; 동작 시작: …; 동작 끝: …',
@@ -204,6 +204,18 @@ const unrecognized = ref([])
 const lockTotal = ref(true)
 const segmentWarning = ref('')
 let nextSegmentId = 1
+let autoSaveTimer = null
+function cancelAutoSave() {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  autoSaveTimer = null
+}
+function scheduleAutoSave() {
+  cancelAutoSave()
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = null
+    commitAll()
+  }, 700)
+}
 
 const timeUnit = computed(() => {
   if (locale.value === 'en') return 's'
@@ -328,9 +340,11 @@ function emitPrompt() {
   const value = buildPrompt()
   emit('update:modelValue', value)
   emit('duration', totalDuration.value)
+  scheduleAutoSave()
 }
 
 function commitAll() {
+  cancelAutoSave()
   const value = buildPrompt()
   emit('update:modelValue', value)
   emit('commit', value)
@@ -376,7 +390,7 @@ function adjustSegment(index, delta) {
       segment.end = round1(segment.start + nextDuration)
       segmentWarning.value = copy.value.minMax
       normalizeSegmentTimes()
-      emitPrompt()
+      commitAll()
       return
     }
     let remaining = round1(total - nextDuration)
@@ -418,7 +432,7 @@ function adjustSegment(index, delta) {
     segment.end = round1(segment.start + nextDuration)
     updateTimesFromStart(index + 1)
   }
-  emitPrompt()
+  commitAll()
 }
 
 function addSegment() {
@@ -426,14 +440,14 @@ function addSegment() {
   const start = last ? last.end : 0
   const end = round1(start + 2)
   segments.value.push({ id: segmentId(), start, end, text: '' })
-  emitPrompt()
+  commitAll()
 }
 
 function removeSegment(index) {
   if (segments.value.length <= 1) return
   segments.value.splice(index, 1)
   normalizeSegmentTimes()
-  emitPrompt()
+  commitAll()
 }
 
 function evenSegments() {
@@ -445,7 +459,7 @@ function evenSegments() {
     segment.end = round1(segment.start + each)
   }
   normalizeSegmentTimes()
-  emitPrompt()
+  commitAll()
 }
 
 function fitDialogue() {
@@ -484,13 +498,16 @@ function fitDialogue() {
     }
   }
   normalizeSegmentTimes()
-  emitPrompt()
+  commitAll()
 }
 
 watch(() => props.modelValue, (value) => {
+  cancelAutoSave()
   if (String(value || '') === rendered.value) return
   parsePrompt(value)
 }, { immediate: true })
+
+onBeforeUnmount(cancelAutoSave)
 
 watch(() => props.duration, (value) => {
   if (!segments.value.length) return

@@ -1515,7 +1515,7 @@
       "extract": "抽取末帧",
       "extracting": "抽取中…",
       "extractTitle": "从当前主视频末尾抽帧",
-      "extracted": "已抽取末帧，下一镜生成时会自动作为参考图",
+      "extracted": "已抽取末帧，下一镜生成时会自动作为首帧",
       "bindHint": "需要固定开场时，可手动把本集资产设为本镜首帧",
       "empty": "本集还没有分镜资产",
       "useAsFirstFrame": "设为首帧",
@@ -1537,7 +1537,8 @@
       "firstFrameSetFailed": "设置首帧失败",
       "firstFrameClearFailed": "清除首帧失败",
       "deleteFailed": "删除分镜资产失败",
-      "autoFirstFrame": "自动首帧"
+      "autoFirstFrame": "自动首帧",
+      "firstFrameContinuation": "首帧承接：已使用上一镜末帧作为首帧，保持其人物身份、姿势、视线和道具位置。"
     },
     "comfy": {
       "modelLabel": "ComfyUI 配置",
@@ -2006,7 +2007,7 @@
     "visualCheck": {
       "title": "视觉预检与验收",
       "hintTag": "L2 / L3",
-      "hint": "预检用现有场景/人物参考图和首帧对照合同；验收从成片抽 5 帧对照合同、参考图和上一镜尾帧。抽帧无法判断声音内容。",
+      "hint": "预检用现有场景/人物参考图和首帧对照合同；验收从成片抽帧并检测音轨，重点核对动作连续性、说话人口型、字幕烧入、道具变化和台词窗口是否静音。",
       "runPreflight": "生成前预检",
       "runningPreflight": "预检中…",
       "runAcceptance": "生成后验收",

@@ -114,7 +114,8 @@ test('尾帧链：上一镜末帧自动作为本镜首帧，Wan 3.0 降级为参
   assert.match(episode, /const autoTail = !explicitFirst && previous\?\.url \? previous\.url : ''/)
   assert.match(episode, /const firstFrameImage = isWan3Video\.value \? '' : \(explicitFirst \|\| autoTail\)/)
   assert.match(episode, /params\.first_frame_url = firstFrameImage/)
-  assert.match(episode, /referenceImages = referenceImages\.filter\(url => url !== firstFrameImage\)/)
+  assert.match(episode, /let referenceImages = getPromptReferenceEntries\(sb\)\.map/)
+  assert.match(episode, /firstFrameContinuation/)
   assert.match(episode, /t\('episode\.frameAssets\.autoFirstFrame'\)/)
   for (const [lang, data] of locales) {
     assert.ok(data.episode?.frameAssets?.autoFirstFrame, `${lang} 缺少自动首帧文案`)
@@ -232,7 +233,8 @@ test('每个分镜提供优化按钮，按第二步修补与第三步校验重�
 
 test('最终提示词预览可编辑，生成使用覆盖值，上游变化单向刷新', () => {
   assert.match(episode, /function finalGenerationPrompt\(sb\)/)
-  assert.match(episode, /prompt: finalGenerationPrompt\(sb\)/)
+  assert.match(episode, /const generationPrompt = finalGenerationPrompt\(sb\)/)
+  assert.match(episode, /prompt: generationPrompt,/)
   assert.match(episode, /finalPromptOverrideValue\(sb\) \|\| autoFinalPromptFor\(sb\)/)
   assert.match(episode, /const finalPromptDraft = ref\(''\)/)
   assert.match(episode, /function commitFinalPrompt\(\)/)
@@ -244,5 +246,33 @@ test('最终提示词预览可编辑，生成使用覆盖值，上游变化单�
     for (const key of ['finalPromptSection', 'finalPromptHint', 'finalPromptManual', 'finalPromptAuto', 'finalPromptReset', 'finalPromptRefreshed']) {
       assert.equal(typeof sb[key], 'string', `${lang} 缺少 episode.sb.${key}`)
     }
+  }
+})
+
+test('视频提示词分区自动保存：文字防抖、失焦立即存、分段/时长操作立即存', () => {
+  assert.match(editor, /function scheduleAutoSave\(\)/)
+  assert.match(editor, /setTimeout\(\(\) => \{[\s\S]*?commitAll\(\)[\s\S]*?\}, 700\)/)
+  assert.match(editor, /function commitAll\(\) \{\s*cancelAutoSave\(\)/)
+  assert.match(editor, /onBeforeUnmount\(cancelAutoSave\)/)
+  const commitFn = editor.slice(editor.indexOf('function emitPrompt()'), editor.indexOf('function commitAll()'))
+  assert.match(commitFn, /scheduleAutoSave\(\)/)
+  for (const fn of ['adjustSegment', 'addSegment', 'removeSegment', 'evenSegments', 'fitDialogue']) {
+    const start = editor.indexOf(`function ${fn}(`)
+    const next = editor.indexOf('\nfunction ', start + 10)
+    const block = editor.slice(start, next > 0 ? next : editor.length)
+    assert.ok(block.includes('commitAll()'), `${fn} 必须立即保存`)
+  }
+})
+
+test('首帧/尾帧 guide 不占 Picture 编号，参考图按实际发送列表编号', () => {
+  assert.match(episode, /function getPromptReferenceEntries\(sb\)/)
+  assert.match(episode, /function getFirstFrameImageForGeneration\(sb\)/)
+  assert.match(episode, /getPromptReferenceEntries\(sb\)\.forEach/)
+  assert.match(episode, /let referenceImages = getPromptReferenceEntries\(sb\)\.map/)
+  assert.match(episode, /badPictureRefs/)
+  assert.match(episode, /firstFrameContinuation/)
+  assert.match(episode, /prompt = prompt\.split\(`@\$\{previous\.token\}`\)\.join\(''\)/)
+  for (const [lang, bundle] of locales) {
+    assert.equal(typeof bundle.episode?.frameAssets?.firstFrameContinuation, 'string', `${lang} 缺少首帧承接文案`)
   }
 })

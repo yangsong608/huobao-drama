@@ -613,6 +613,34 @@ export const storyboardSkeletons = sqliteTable('storyboard_skeletons', {
 })
 
 // 链式分镜流水线：链定义、步骤插件、规则包、项目/剧集覆盖与步骤级运行记录
+/**
+ * 场景地理契约：同场建立镜确定的画面常量与场景布局，后续镜头只读沿用。
+ * 目前来源为同场第一个带左右/轴线的骨架；manual 预留人工编辑。
+ */
+export const sceneContracts = sqliteTable('scene_contracts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  dramaId: integer('drama_id').notNull(),
+  sceneId: integer('scene_id').notNull(),
+  sceneName: text('scene_name'),
+  location: text('location'),
+  time: text('time'),
+  screenLeft: text('screen_left'),
+  screenRight: text('screen_right'),
+  axisSide: text('axis_side'),
+  landmarkSide: text('landmark_side'),
+  /** JSON：布局、地标、出入口、固定道具、光线与景深层次 */
+  geographyJson: text('geography_json'),
+  /** establishing_shot / manual */
+  sourceType: text('source_type').notNull().default('establishing_shot'),
+  sourceJobId: integer('source_job_id'),
+  sourceEpisodeId: integer('source_episode_id'),
+  sourceShotNumber: integer('source_shot_number'),
+  version: integer('version').notNull().default(1),
+  status: text('status').notNull().default('draft'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
 export const pipelineChains = sqliteTable('pipeline_chains', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   key: text('key').notNull(),

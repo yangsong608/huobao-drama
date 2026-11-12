@@ -28,11 +28,15 @@ function stripQuoted(text: string) {
   return String(text || '').replace(/「[^」]*」|“[^”]*”|"[^"]*"/g, '')
 }
 
+// “骂完/喊过”是上一动作的完成态，不是本镜要新开口的发声提示
+const COMPLETED_VOCAL_RE = /(?:骂|喊|说|问|答|叫|吼|嚷|唱喝|唱喏|吆喝|招呼)(?:完|过)/g
+
 export function detectVocalIntent(text: string | null | undefined): VocalIntent {
   const source = String(text || '')
+  const uncompleted = stripQuoted(source).replace(COMPLETED_VOCAL_RE, '')
   const evidence = [...new Set([
-    ...[...stripQuoted(source).matchAll(VOCAL_VERB_RE)].map(match => match[0]),
-    ...[...stripQuoted(source).matchAll(VOCAL_VERB_EN_RE)].map(match => match[0]),
+    ...[...uncompleted.matchAll(VOCAL_VERB_RE)].map(match => match[0]),
+    ...[...uncompleted.matchAll(VOCAL_VERB_EN_RE)].map(match => match[0]),
   ])]
   return {
     vocal: evidence.length > 0,
@@ -53,12 +57,16 @@ const NON_SPEECH_PREFIX_RE = /(?:招牌|告示|字幕|标题|牌匾|匾额|书�
  */
 function extractSourceQuotes(text: string): string[] {
   const source = String(text || '')
-  const result = new Set<string>()
+  const result = new Set<string>(extractSpokenQuotes(source).map(quote => quote.text))
   for (const span of findQuotedSpans(source)) {
     const before = source.slice(Math.max(0, span.start - 24), span.start).replace(/\s+$/, '')
     if (NON_SPEECH_PREFIX_RE.test(before)) continue
-    const normalized = span.inner.replace(/[\s\u3000]+/g, '')
-    if (normalized) result.add(normalized)
+    const normalized = span.inner
+      .replace(/[（(][^）)]*[）)]/g, '')
+      .replace(/[\s\u3000]+/g, '')
+    if (!normalized || result.has(normalized)) continue
+    // 无说话提示的引号只有成句（带句读）才算台词；“半截扁担”“啪嗒”“求方便”是叙述引号。
+    if (normalized.length >= 3 && /[。！？!?…，,；;]/.test(normalized)) result.add(normalized)
   }
   for (const line of extractScriptDialogueSegments(source)) result.add(line.text)
   return [...result]
@@ -192,6 +200,39 @@ export function validateRepairedShot(input: RepairedShotInput): RepairedShotVali
   }
 
   const parsedContract = parseContractFromPrompt(prompt, input.characters || [], input.characterIds || [])
+  if (parsedContract.contractVersion > 0) {
+    const candidateNames = [...new Set([
+      ...parsedContract.screenLeft,
+      ...parsedContract.screenRight,
+    ].map(name => String(name || '').trim()).filter(Boolean))]
+    const mentions = (label: string) => {
+      const result: string[] = []
+      let from = 0
+      while (from < description.length) {
+        const index = description.indexOf(label, from)
+        if (index < 0) break
+        const before = description.slice(Math.max(0, index - 20), index)
+        for (const name of candidateNames) {
+          const nameIndex = before.lastIndexOf(name)
+          if (nameIndex < 0) continue
+          const tail = before.slice(nameIndex + name.length)
+          if (/^(?:立在|站在|坐在|位于|已向|自|向|在|朝|往|的)?\s*$/.test(tail)) result.push(name)
+        }
+        from = index + label.length
+      }
+      return [...new Set(result)]
+    }
+    const describedLeft = mentions('画面左')
+    const describedRight = mentions('画面右')
+    const leftConflict = describedLeft.filter(name => parsedContract.screenRight.includes(name) && !parsedContract.screenLeft.includes(name))
+    const rightConflict = describedRight.filter(name => parsedContract.screenLeft.includes(name) && !parsedContract.screenRight.includes(name))
+    if (leftConflict.length || rightConflict.length) {
+      errors.push(`${label}description 与画面调度左右矛盾：${[
+        ...leftConflict.map(name => `「${name}」在 description 是画面左，调度写成画面右`),
+        ...rightConflict.map(name => `「${name}」在 description 是画面右，调度写成画面左`),
+      ].join('；')}。同一分镜必须沿用同一场景左右，不能翻转。`)
+    }
+  }
   if (input.previous && parsedContract.contractVersion > 0 && input.previous.videoPrompt) {
     const previousContract = parseContractFromPrompt(input.previous.videoPrompt, input.characters || [], input.previous.characterIds || [])
     if (previousContract.contractVersion > 0) {

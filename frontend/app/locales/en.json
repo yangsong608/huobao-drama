@@ -1515,7 +1515,7 @@
       "extract": "Extract last frame",
       "extracting": "Extracting…",
       "extractTitle": "Extract the last frame from the current main video",
-      "extracted": "Last frame extracted; it will be used as a reference image when generating the next shot",
+      "extracted": "Last frame extracted; the next shot will use it automatically as its first frame",
       "bindHint": "Set an asset as this shot's first frame manually when you need a fixed opening",
       "empty": "No storyboard assets in this episode yet",
       "useAsFirstFrame": "Use as first frame",
@@ -1537,7 +1537,8 @@
       "firstFrameSetFailed": "Failed to set first frame",
       "firstFrameClearFailed": "Failed to clear first frame",
       "deleteFailed": "Failed to delete storyboard asset",
-      "autoFirstFrame": "Auto first frame"
+      "autoFirstFrame": "Auto first frame",
+      "firstFrameContinuation": "First frame continuation: the previous shot last frame is provided as the first frame; keep its character identity, pose, eyeline and prop positions."
     },
     "comfy": {
       "modelLabel": "ComfyUI config",
@@ -2006,7 +2007,7 @@
     "visualCheck": {
       "title": "Visual preflight & acceptance",
       "hintTag": "L2 / L3",
-      "hint": "Preflight compares existing scene/cast references and the first frame with the contract; acceptance samples 5 frames and compares them with the contract, references and previous tail frame. Sampled frames cannot judge audio content.",
+      "hint": "Preflight compares existing scene/cast references and the first frame with the contract; acceptance samples frames and analyzes the audio track, focusing on action continuity, speaker lip sync, burned-in subtitles, prop changes, and silent dialogue windows.",
       "runPreflight": "Preflight",
       "runningPreflight": "Checking…",
       "runAcceptance": "Accept generated video",

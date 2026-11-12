@@ -94,6 +94,26 @@ test('unknown hash and at tokens are removed without losing surrounding action',
   assert.match(out, /林小雨推门/)
 })
 
+test('same speaker keeps multiple dialogue segments in one H3 tag', () => {
+  const prompt = [
+    '0-3秒：@图片2六婶说：「第一句。」@图片3贾婆子点头。',
+    '3-6秒：@图片2六婶又说：「第二句，别忘了带篮子。」',
+  ].join('\n')
+  const out = compileH3Prompt(prompt, 'native')
+  assert.equal((out.match(/<d>/g) || []).length, 1)
+  assert.match(out, /六婶 says, <d>\[Chinese\] 第一句。第二句，别忘了带篮子。<\/d>/)
+  assert.match(out, /六婶 continues speaking/)
+  assert.doesNotMatch(out, /<d>\[Chinese\] 第二句/)
+})
+
+test('different speakers keep separate H3 dialogue tags', () => {
+  const prompt = '0-3秒：@图片2六婶说：「第一句。」@图片3贾婆子说：「第二句。」'
+  const out = compileH3Prompt(prompt, 'native')
+  assert.equal((out.match(/<d>/g) || []).length, 2)
+  assert.match(out, /六婶 says, <d>\[Chinese\] 第一句。<\/d>/)
+  assert.match(out, /贾婆子 says, <d>\[Chinese\] 第二句。<\/d>/)
+})
+
 test('dialogue tags end at a sentence boundary before following visual description', () => {
   const prompt = [
     '0-3秒：@范公子怒目而视，@范公子说：「一心图强」满脸激愤。',
