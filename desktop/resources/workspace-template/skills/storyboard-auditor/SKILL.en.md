@@ -19,7 +19,7 @@ The audit covers one episode's storyboard: live shots, dialogue/narration, chara
 
 ### Check 1: camera work, dialogue, action, expression, narration of each shot
 
-Rules already cover: empty description, empty prompt, missing camera fields, missing 【Shot N】 structure, missing header, broken timeline, >12-character dialogue in a 3-second segment, action written as dialogue.
+Rules already cover: empty description, empty prompt, missing camera fields, missing 【Shot N】 structure, missing header, broken timeline, >12-character dialogue in a 3-second segment (capacity hint only — never trim text to fit), prompt dialogue not verbatim with the description (compression, dropped words, rewording, missing punctuation), action written as dialogue.
 
 Semantic focus:
 
@@ -44,6 +44,7 @@ Severity:
 Each round the prompt gives exactly one pair of adjacent real shots, never a full window. Read both video prompts completely and judge only this pair.
 
 1. Ending action carry-over: what the character was doing, what was in hand, which way they faced; does the next shot's first segment visibly carry it through action, gaze, position or prop? Break example: previous shot "@A pushes the door and rushes out", next shot "@A sits at the table drinking tea" with no transition.
+   - When the contract has action end/action start, compare those fields first; if only one side is written or the two contradict, report at least a warning.
    - Judge by the video-prompt timeline: compare the previous shot's last segment with the next shot's first segment.
    - The continuity field is only a claim, not evidence; if it claims a carry-over that the first segment does not show, it is still a break.
    - A table change, location change, character-group change or time jump without a transitional action or transition shot is broken.

@@ -62,7 +62,10 @@ const CROWD_LABEL_TAIL_RE = /(接|说道|说|道|喊|叫|问|答|嘟囔)$/
 
 /** 切段时间码：0-3秒： / 3–6秒: */
 export function splitSegments(videoPrompt: string, fallbackDurationMs = 0): Segment[] {
-  const text = videoPrompt || ''
+  // 负面约束是独立分区，不能算进最后一段的台词/旁白
+  const raw = String(videoPrompt || '').replace(/\r\n?/g, '\n')
+  const negativeStart = raw.search(/\n\s*(?:负面约束|Negative constraints|ネガティブ制約|네거티브 제약)\s*[：:]/i)
+  const text = negativeStart >= 0 ? raw.slice(0, negativeStart) : raw
   const re = /^(\d+)\s*[-–—]\s*(\d+)\s*秒\s*[：:]\s*/gm
   const marks: { index: number; startMs: number; endMs: number; textStart: number }[] = []
   let m: RegExpExecArray | null

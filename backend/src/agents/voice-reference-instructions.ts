@@ -41,6 +41,6 @@ const instructions: Record<string, string> = {
 }
 
 export function getVoiceReferenceInstructions(agentType: string, language?: string | null): string {
-  if (agentType !== 'prompt_generator' && agentType !== 'storyboard_breaker') return ''
+  if (!['prompt_generator', 'storyboard_breaker', 'storyboard_director'].includes(agentType)) return ''
   return instructions[language || 'zh'] || instructions.zh
 }

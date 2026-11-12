@@ -358,3 +358,41 @@ test('拆分完成后自动创建动作检验任务，沿用拆分模型并标�
   assert.equal(audit.model, null)
   assert.equal(audit.total_shots, liveStoryboards(episodeId).length)
 })
+
+test('块间暂停：当前块完成后停止，续拆清空暂停标记（D10）', async () => {
+  const episodeId = newEpisode(makeScript())
+  const created = await svc.createStoryboardSplitJob(
+    { episodeId, dramaId: 1, message: '暂停测试' },
+    { autorun: false },
+  )
+  const jobId = created.job.id
+  const calls: number[] = []
+  const runner = async (input: any) => {
+    calls.push(input.chunk.index)
+    db.insert(schema.storyboards).values({
+      episodeId: input.episodeId,
+      storyboardNumber: input.shotStart,
+      title: `pause-chunk-${input.chunk.index}`,
+      description: 'pause chunk',
+      duration: 10,
+      createdAt: ts,
+      updatedAt: ts,
+    }).run()
+    if (input.chunk.index === 0) {
+      const paused = svc.pauseStoryboardSplitJob(jobId)
+      assert.equal(paused.pause_requested, true)
+    }
+  }
+
+  await svc.runStoryboardSplitJob(jobId, runner)
+
+  const pausedJob = svc.getStoryboardSplitJob(jobId)!
+  assert.equal(pausedJob.status, 'interrupted')
+  assert.equal(pausedJob.pause_requested, true)
+  assert.equal(calls.length, 1, '当前块完成后不应再启动下一块')
+  assert.match(pausedJob.error || '', /已暂停/)
+
+  const resumed = await svc.resumeStoryboardSplitJob(jobId, { autorun: false })
+  assert.equal(resumed.pause_requested, false)
+  assert.equal(resumed.status, 'pending')
+})

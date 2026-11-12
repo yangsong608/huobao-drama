@@ -96,15 +96,15 @@ function safeLabel(label: string): string {
   return label.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'frame'
 }
 
-/** 抽取镜头视频首帧或尾帧；目标文件已存在且可读时直接复用 */
-export async function extractVideoFrame(
+/** 按绝对时间抽帧；tag 进入文件名，避免不同时间点互相覆盖 */
+export async function extractVideoFrameAt(
   videoRelativePath: string,
-  position: FramePosition,
-  options: ExtractFrameOptions = {},
+  seconds: number,
+  options: ExtractFrameOptions & { tag?: string } = {},
 ): Promise<ExtractedFrame> {
   const { ffmpeg: ffmpegOk, ffprobe: ffprobeOk } = await checkFfmpegSuite()
   if (!ffmpegOk || !ffprobeOk) {
-    throw new Error('FFmpeg/FFprobe 不可用，无法提取过渡首尾帧；请在设置页「通用 → 媒体工具」指定 FFmpeg 目录')
+    throw new Error('FFmpeg/FFprobe 不可用，无法抽帧；请在设置页「通用 → 媒体工具」指定 FFmpeg 目录')
   }
 
   const sourceAbsolute = getAbsolutePath(videoRelativePath)
@@ -117,11 +117,12 @@ export async function extractVideoFrame(
   if (!stat.isFile()) throw new Error(`源视频不存在：${videoRelativePath}，请先重新生成镜头视频`)
 
   const dramaId = options.dramaId ?? parseProjectStoragePath(videoRelativePath)?.dramaId
-  if (!dramaId) throw new Error('过渡抽帧需要项目 ID')
+  if (!dramaId) throw new Error('抽帧需要项目 ID')
 
   const subDir = options.subDir || 'transitions/frames'
   const label = safeLabel(options.label || path.basename(videoRelativePath, path.extname(videoRelativePath)))
-  const filename = `${label}-${position}-${sourceHash(videoRelativePath, stat)}.jpg`
+  const tag = safeLabel(options.tag || `t${seconds.toFixed(2)}`)
+  const filename = `${label}-${tag}-${sourceHash(videoRelativePath, stat)}.jpg`
   const relativePath = projectStorageRelative(dramaId, subDir, filename)
   const absolutePath = path.join(projectSubdirPath(dramaId, subDir), filename)
 
@@ -138,10 +139,11 @@ export async function extractVideoFrame(
   await fsp.mkdir(path.dirname(absolutePath), { recursive: true })
 
   const meta = await probeVideo(sourceAbsolute)
+  const at = Math.max(0, Math.min(seconds, Math.max(0, meta.duration - 0.05)))
   const filter = scaleFilter(meta.width, meta.height, options.maxEdge ?? 1280)
   await new Promise<void>((resolve, reject) => {
     ffmpeg(sourceAbsolute)
-      .seekInput(seekSeconds(position, meta.duration))
+      .seekInput(at)
       .outputOptions(['-frames:v', '1', '-vf', filter, '-q:v', '2'])
       .output(absolutePath)
       .on('end', () => resolve())
@@ -157,4 +159,20 @@ export async function extractVideoFrame(
 
   const size = await probeImageSize(absolutePath)
   return { relativePath, absolutePath, ...size }
+}
+
+/** 抽取镜头视频首帧或尾帧；目标文件已存在且可读时直接复用 */
+export async function extractVideoFrame(
+  videoRelativePath: string,
+  position: FramePosition,
+  options: ExtractFrameOptions = {},
+): Promise<ExtractedFrame> {
+  const sourceAbsolute = getAbsolutePath(videoRelativePath)
+  let meta: VideoMeta
+  try {
+    meta = await probeVideo(sourceAbsolute)
+  } catch {
+    throw new Error(`源视频不存在：${videoRelativePath}，请先重新生成镜头视频`)
+  }
+  return extractVideoFrameAt(videoRelativePath, seekSeconds(position, meta.duration), { ...options, tag: position })
 }

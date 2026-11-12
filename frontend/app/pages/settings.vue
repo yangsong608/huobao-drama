@@ -1538,6 +1538,9 @@
               <button v-if="agentPane === 'skills'" class="btn btn-primary btn-sm ml-auto" @click="startAddSkill">
                 <Plus :size="13" /> {{ t('settings.skills.add') }}
               </button>
+              <button v-else-if="agentPane === 'knowledge'" class="btn btn-primary btn-sm ml-auto" @click="startAddKnowledge">
+                <Plus :size="13" /> {{ t('settings.knowledge.add') }}
+              </button>
             </div>
 
             <!-- Prompt 面板（子 tab 作为卡片头，与卡片同宽对齐） -->
@@ -1547,6 +1550,9 @@
                   <button :class="['agent-pane-tab', { active: agentPane === 'prompt' }]" @click="agentPane = 'prompt'">System Prompt</button>
                   <button :class="['agent-pane-tab', { active: agentPane === 'skills' }]" @click="agentPane = 'skills'">
                     Skills<template v-if="agentSkillCount(selectedAgent) > 0"> ({{ agentSkillCount(selectedAgent) }})</template>
+                  </button>
+                  <button :class="['agent-pane-tab', { active: agentPane === 'knowledge' }]" @click="agentPane = 'knowledge'">
+                    {{ t('settings.knowledge.tab') }}<template v-if="agentKnowledgeCount(selectedAgent) > 0"> ({{ agentKnowledgeCount(selectedAgent) }})</template>
                   </button>
                 </div>
                 <span class="agent-lang-follow dim">
@@ -1574,13 +1580,16 @@
             </div>
 
             <!-- Skills 面板（子 tab 同为卡片头） -->
-            <template v-else>
+            <template v-else-if="agentPane === 'skills'">
               <div class="agent-pane-tabs-wrap card">
                 <div class="agent-pane-tabs">
                   <div class="agent-pane-tabs-nav">
                     <button :class="['agent-pane-tab', { active: agentPane === 'prompt' }]" @click="agentPane = 'prompt'">System Prompt</button>
                     <button :class="['agent-pane-tab', { active: agentPane === 'skills' }]" @click="agentPane = 'skills'">
                       Skills<template v-if="agentSkillCount(selectedAgent) > 0"> ({{ agentSkillCount(selectedAgent) }})</template>
+                    </button>
+                    <button :class="['agent-pane-tab', { active: agentPane === 'knowledge' }]" @click="agentPane = 'knowledge'">
+                      {{ t('settings.knowledge.tab') }}<template v-if="agentKnowledgeCount(selectedAgent) > 0"> ({{ agentKnowledgeCount(selectedAgent) }})</template>
                     </button>
                   </div>
                   <span class="agent-lang-follow dim">
@@ -1636,6 +1645,99 @@
                   </div>
                 </div>
               </div>
+              </div>
+            </template>
+
+            <!-- 知识库面板：只显示分配给当前 Agent 的知识，不做全员共读 -->
+            <template v-else>
+              <div class="agent-pane-tabs-wrap card">
+                <div class="agent-pane-tabs">
+                  <div class="agent-pane-tabs-nav">
+                    <button :class="['agent-pane-tab', { active: agentPane === 'prompt' }]" @click="agentPane = 'prompt'">System Prompt</button>
+                    <button :class="['agent-pane-tab', { active: agentPane === 'skills' }]" @click="agentPane = 'skills'">
+                      Skills<template v-if="agentSkillCount(selectedAgent) > 0"> ({{ agentSkillCount(selectedAgent) }})</template>
+                    </button>
+                    <button :class="['agent-pane-tab', { active: agentPane === 'knowledge' }]" @click="agentPane = 'knowledge'">
+                      {{ t('settings.knowledge.tab') }}<template v-if="agentKnowledgeCount(selectedAgent) > 0"> ({{ agentKnowledgeCount(selectedAgent) }})</template>
+                    </button>
+                  </div>
+                  <span class="agent-lang-follow dim">
+                    {{ t('settings.agents.followContentLang', { lang: contentLangLabel }) }}
+                  </span>
+                </div>
+              </div>
+              <p class="settings-desc" style="margin-top:0">{{ t('settings.knowledge.desc') }}</p>
+
+              <div class="knowledge-toolbar">
+                <span class="tag">{{ t('settings.knowledge.assignedCount', { n: currentKnowledge.length }) }}</span>
+              </div>
+
+              <div v-if="!currentKnowledge.length" class="card skills-empty">
+                <div class="skills-empty-icon"><BookOpen :size="24" /></div>
+                <div class="skills-empty-title">{{ t('settings.knowledge.emptyTitle') }}</div>
+                <div class="skills-empty-desc">{{ t('settings.knowledge.emptyDesc') }}</div>
+              </div>
+
+              <div v-else class="knowledge-list">
+                <div v-for="k in currentKnowledge" :key="k.id" class="card skill-card">
+                  <div class="skill-card-head" @click="toggleKnowledgeEdit(k.id)">
+                    <BookOpen :size="14" style="color:var(--accent);flex-shrink:0" />
+                    <div style="flex:1;min-width:0">
+                      <div style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                        {{ k.name }}
+                        <span class="tag mono">{{ k.id }}</span>
+                        <span v-if="k.required" class="tag">{{ t('settings.knowledge.required') }}</span>
+                        <span v-if="!k.fileExists" class="tag" style="color:var(--danger)">{{ t('settings.knowledge.fileMissing') }}</span>
+                      </div>
+                      <div class="dim" style="font-size:11px">{{ k.description }}</div>
+                    </div>
+                    <button class="btn btn-ghost btn-sm" @click.stop="unassignKnowledge(k)">{{ t('settings.knowledge.unassign') }}</button>
+                    <ChevronDown :size="14" :style="{ transform: editingKnowledge === k.id ? 'rotate(180deg)' : '', transition: '0.2s' }" />
+                  </div>
+                  <div v-if="editingKnowledge === k.id" class="skill-card-body">
+                    <div class="knowledge-meta-grid">
+                      <label class="field">
+                        <span class="field-label">{{ t('settings.knowledge.name') }}</span>
+                        <input v-model="knowledgeForm.name" class="input" />
+                      </label>
+                      <label class="field">
+                        <span class="field-label">{{ t('settings.knowledge.description') }}</span>
+                        <input v-model="knowledgeForm.description" class="input" />
+                      </label>
+                    </div>
+                    <label class="field">
+                      <span class="field-label">{{ t('settings.knowledge.content') }} <span class="dim">knowledge/{{ k.id }}.md</span></span>
+                      <textarea v-model="knowledgeContent" class="textarea mono skill-content-input" rows="20" style="font-size:12px;line-height:1.6" />
+                    </label>
+                    <div class="skill-card-foot">
+                      <label class="dim" style="display:flex;align-items:center;gap:6px;font-size:11px">
+                        <input v-model="knowledgeForm.required" type="checkbox" />
+                        {{ t('settings.knowledge.required') }}
+                      </label>
+                      <span class="dim" style="font-size:11px">{{ (k.agents || []).join('、') }}</span>
+                      <span v-if="knowledgeSaved === k.id" class="tag tag-success" style="margin-left:8px">
+                        <Check :size="10" /> {{ t('common.saved') }}
+                      </span>
+                      <button class="btn btn-primary btn-sm ml-auto" :disabled="knowledgeSaving" @click="saveKnowledgeItem(k.id)">
+                        <Loader2 v-if="knowledgeSaving" :size="12" class="animate-spin" />
+                        {{ t('common.save') }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="unassignedKnowledge.length" class="knowledge-unassigned">
+                <div class="settings-desc" style="margin:0 0 6px;font-weight:600">{{ t('settings.knowledge.unassignedTitle') }}</div>
+                <div v-for="k in unassignedKnowledge" :key="k.id" class="knowledge-assign-row">
+                  <BookOpen :size="13" style="color:var(--muted);flex-shrink:0" />
+                  <div style="flex:1;min-width:0">
+                    <div style="font-weight:600;font-size:12.5px">{{ k.name }} <span class="tag mono">{{ k.id }}</span></div>
+                    <div class="dim" style="font-size:11px">{{ k.description }}</div>
+                  </div>
+                  <button class="btn btn-sm" @click="assignKnowledge(k)">{{ t('settings.knowledge.assign') }}</button>
+                  <button class="btn btn-danger btn-icon btn-sm" :title="t('settings.knowledge.delete')" @click="deleteKnowledgeItem(k)"><Trash2 :size="13" /></button>
+                </div>
               </div>
             </template>
           </div>
@@ -2052,6 +2154,37 @@
       </form>
     </div>
 
+    <!-- Add Knowledge Dialog -->
+    <div v-if="knowledgeDialog" class="overlay" @click.self="knowledgeDialog = false">
+      <form class="dialog skill-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-knowledge-title" @submit.prevent="confirmAddKnowledge" @keydown="onSettingsDialogKeydown">
+        <div class="dialog-head">
+          <div class="dialog-title" id="settings-knowledge-title">{{ t('settings.knowledge.addTitle', { agent: selectedAgentLabel }) }}</div>
+        </div>
+        <div class="dialog-body skill-dialog-body">
+          <label class="field">
+            <span class="field-label">{{ t('settings.knowledge.id') }} <span class="dim">{{ t('settings.knowledge.idHint') }}</span></span>
+            <input v-model="knowledgeDraft.id" class="input mono" placeholder="my-short-drama-rules" />
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.knowledge.name') }}</span>
+            <input v-model="knowledgeDraft.name" class="input" />
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.knowledge.description') }}</span>
+            <input v-model="knowledgeDraft.description" class="input" />
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.knowledge.content') }}</span>
+            <textarea v-model="knowledgeDraft.content" class="textarea" rows="8" />
+          </label>
+        </div>
+        <div class="dialog-foot">
+          <button type="button" class="btn" @click="knowledgeDialog = false">{{ t('common.cancel') }}</button>
+          <button type="submit" class="btn btn-primary" :disabled="!knowledgeDraft.id || knowledgeCreating">{{ t('settings.knowledge.create') }}</button>
+        </div>
+      </form>
+    </div>
+
     <!-- Style Preset Dialog -->
     <div v-if="styleDialog" class="overlay" @click.self="styleDialog = false">
       <form class="dialog config-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-style-title" @submit.prevent="saveStyle" @keydown="onSettingsDialogKeydown">
@@ -2234,7 +2367,7 @@ import RemoteDeviceList from '~/components/RemoteDeviceList.vue'
 import { toast } from 'vue-sonner'
 import { toastError } from '~/composables/useToast'
 import { useI18n } from 'vue-i18n'
-import { aiConfigAPI, promptAPI, skillsAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, uploadAPI, pipelineRuleAPI, breakdownMethodAPI, dubbingAPI, bgmAPI } from '~/composables/useApi'
+import { aiConfigAPI, promptAPI, skillsAPI, knowledgeAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, uploadAPI, pipelineRuleAPI, breakdownMethodAPI, dubbingAPI, bgmAPI } from '~/composables/useApi'
 import { useRemoteRole, remoteErrorMessage } from '~/composables/useRemoteGuest'
 import { useRemotePairing } from '~/composables/useRemotePairing'
 import { presenceState, refreshPresenceEntries, safePresenceRelayPath } from '~/composables/usePresence'
@@ -3029,6 +3162,7 @@ const agentDefs = computed(() => [
   { type: 'storyboard_breaker', label: t('settings.agents.storyboardBreaker'), icon: '🎬' },
   { type: 'prompt_generator', label: t('settings.agents.promptGenerator'), icon: '🖼' },
   { type: 'storyboard_auditor', label: t('settings.agents.storyboardAuditor'), icon: '🛡' },
+  { type: 'voice_designer', label: t('settings.agents.voiceDesigner'), icon: '🎙' },
 ])
 
 function getAgentCfg(type) {
@@ -3458,6 +3592,133 @@ async function saveSkill(id) {
   }
 }
 
+// ===== Agent 专用知识库 =====
+const knowledgeItems = ref([])
+const editingKnowledge = ref(null)
+const knowledgeContent = ref('')
+const knowledgeSaving = ref(false)
+const knowledgeSaved = ref(null)
+const knowledgeForm = reactive({ name: '', description: '', required: true })
+
+const currentKnowledge = computed(() =>
+  knowledgeItems.value.filter(item => (item.agents || []).includes(selectedAgent.value))
+)
+const unassignedKnowledge = computed(() =>
+  knowledgeItems.value.filter(item => !(item.agents || []).includes(selectedAgent.value))
+)
+
+function agentKnowledgeCount(type) {
+  return knowledgeItems.value.filter(item => (item.agents || []).includes(type)).length
+}
+
+async function loadKnowledge() {
+  try { knowledgeItems.value = await knowledgeAPI.list(editLang.value) }
+  catch (e) { toastError(e) }
+}
+
+async function toggleKnowledgeEdit(id) {
+  if (editingKnowledge.value === id) { editingKnowledge.value = null; return }
+  try {
+    const item = await knowledgeAPI.get(id, editLang.value)
+    knowledgeContent.value = item.content || ''
+    knowledgeForm.name = item.name || ''
+    knowledgeForm.description = item.description || ''
+    knowledgeForm.required = item.required !== false
+    knowledgeSaved.value = null
+    editingKnowledge.value = id
+  } catch (e) { toastError(e) }
+}
+
+async function saveKnowledgeItem(id) {
+  if (knowledgeSaving.value) return
+  knowledgeSaving.value = true
+  knowledgeSaved.value = null
+  try {
+    await knowledgeAPI.update(id, {
+      name: knowledgeForm.name,
+      description: knowledgeForm.description,
+      required: knowledgeForm.required,
+      content: knowledgeContent.value,
+    }, editLang.value)
+    await loadKnowledge()
+    knowledgeSaved.value = id
+    toast.success(t('common.saved'))
+    setTimeout(() => { if (knowledgeSaved.value === id) knowledgeSaved.value = null }, 3000)
+  } catch (e) {
+    toastError(e)
+  } finally {
+    knowledgeSaving.value = false
+  }
+}
+
+async function assignKnowledge(item) {
+  try {
+    await knowledgeAPI.setAgents(item.id, [...new Set([...(item.agents || []), selectedAgent.value])])
+    await loadKnowledge()
+    toast.success(t('settings.knowledge.assign'))
+  } catch (e) { toastError(e) }
+}
+
+const CRITICAL_KNOWLEDGE_AGENTS = new Set(['storyboard_breaker', 'storyboard_auditor', 'prompt_generator'])
+
+async function unassignKnowledge(item) {
+  const remainingRequired = currentKnowledge.value.filter(entry => entry.required && entry.id !== item.id).length
+  if (CRITICAL_KNOWLEDGE_AGENTS.has(selectedAgent.value) && item.required && remainingRequired === 0) {
+    if (!window.confirm('取消后该 Agent 将没有必读知识库，拆分/校验/提示词会被阻断。继续？')) return
+  }
+  try {
+    await knowledgeAPI.setAgents(item.id, (item.agents || []).filter(agent => agent !== selectedAgent.value))
+    if (editingKnowledge.value === item.id) editingKnowledge.value = null
+    await loadKnowledge()
+    toast.success(t('settings.knowledge.unassign'))
+  } catch (e) { toastError(e) }
+}
+
+const knowledgeDialog = ref(false)
+const knowledgeCreating = ref(false)
+const knowledgeDraft = reactive({ id: '', name: '', description: '', content: '' })
+
+function startAddKnowledge() {
+  knowledgeDraft.id = ''
+  knowledgeDraft.name = ''
+  knowledgeDraft.description = ''
+  knowledgeDraft.content = ''
+  knowledgeDialog.value = true
+}
+
+async function confirmAddKnowledge() {
+  if (!knowledgeDraft.id || knowledgeCreating.value) return
+  knowledgeCreating.value = true
+  try {
+    await knowledgeAPI.create({
+      id: knowledgeDraft.id,
+      name: knowledgeDraft.name,
+      description: knowledgeDraft.description,
+      content: knowledgeDraft.content,
+      agents: [selectedAgent.value],
+      required: true,
+      enabled: true,
+    })
+    knowledgeDialog.value = false
+    await loadKnowledge()
+    toast.success(t('settings.knowledge.created'))
+  } catch (e) {
+    toastError(e)
+  } finally {
+    knowledgeCreating.value = false
+  }
+}
+
+async function deleteKnowledgeItem(item) {
+  if (!window.confirm(t('settings.knowledge.deleteConfirm', { name: item.name }))) return
+  try {
+    await knowledgeAPI.del(item.id)
+    if (editingKnowledge.value === item.id) editingKnowledge.value = null
+    await loadKnowledge()
+    toast.success(t('index.deleted'))
+  } catch (e) { toastError(e) }
+}
+
 // ===== Style Presets =====
 const stylePresets = ref([])
 const styleDialog = ref(false)
@@ -3840,6 +4101,7 @@ function loadHostSettingsOnce() {
   loadCfgs()
   loadAgents()
   loadAllSkills()
+  loadKnowledge()
   loadAgentPrompt(selectedAgent.value)
   loadMcp()
   loadMediaSettings()
@@ -4081,6 +4343,7 @@ watch(tab, (t) => {
   if (t === 'agents' && remoteRole.ready && !isGuest.value) {
     loadAgentPrompt(selectedAgent.value)
     loadAllSkills()
+    loadKnowledge()
   }
 })
 
@@ -4089,12 +4352,13 @@ const { isCompact } = useViewport()
 const navRef = ref(null)
 
 const settingsDialogOpen = computed(() => Boolean(
-  cfgDialog.value || addSkillDialog.value || styleDialog.value || styleRefDialog.value || migrateDialog.value,
+  cfgDialog.value || addSkillDialog.value || knowledgeDialog.value || styleDialog.value || styleRefDialog.value || migrateDialog.value,
 ))
 
 function closeSettingsDialogs() {
   cfgDialog.value = false
   addSkillDialog.value = false
+  knowledgeDialog.value = false
   styleDialog.value = false
   styleRefDialog.value = false
   // 迁移进行中不允许被返回键/关闭打断
@@ -4615,6 +4879,15 @@ onBeforeUnmount(stopUsagePoll)
 .skill-card-head:hover { background: var(--bg-hover); }
 .skill-card-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--border); }
 .skill-card-foot { display: flex; align-items: center; gap: 8px; }
+.knowledge-toolbar { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+.knowledge-list { display: flex; flex-direction: column; gap: 10px; }
+.knowledge-meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.knowledge-unassigned { margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.knowledge-assign-row { display: flex; align-items: center; gap: 9px; padding: 8px 0; border-top: 1px solid var(--border); }
+.knowledge-assign-row:first-of-type { border-top: 0; }
+@media (max-width: 640px) {
+  .knowledge-meta-grid { grid-template-columns: 1fr; }
+}
 
 /* Shared */
 .field { display: flex; flex-direction: column; gap: 5px; }

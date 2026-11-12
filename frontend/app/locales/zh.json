@@ -662,7 +662,8 @@
       "promptGenerator": "提示词",
       "langFallback": "跟随中文",
       "followContentLang": "编辑语言跟随：{lang}（在「通用 → AI 内容语言」切换）",
-      "storyboardAuditor": "分镜动作检验"
+      "storyboardAuditor": "分镜动作检验",
+      "voiceDesigner": "声音设计"
     },
     "skills": {
       "agentList": "Agent 列表",
@@ -681,6 +682,29 @@
       "descPlaceholder": "简短描述此 Skill 的用途",
       "create": "创建",
       "created": "Skill 创建成功"
+    },
+    "knowledge": {
+      "tab": "知识库",
+      "desc": "每个 Agent 只读自己分配的知识库，不做全员共读。",
+      "assignedCount": "已分配 {n} 个",
+      "emptyTitle": "本 Agent 还没有知识库",
+      "emptyDesc": "从下方未分配列表添加到本 Agent。",
+      "unassign": "取消分配",
+      "assign": "分配给本 Agent",
+      "unassignedTitle": "未分配给本 Agent",
+      "required": "必读",
+      "fileMissing": "文件缺失",
+      "name": "名称",
+      "description": "描述",
+      "content": "知识库正文",
+      "add": "新增知识库",
+      "addTitle": "新增知识库 — {agent}",
+      "id": "知识库 ID",
+      "idHint": "英文，唯一",
+      "create": "创建",
+      "created": "知识库创建成功",
+      "delete": "删除",
+      "deleteConfirm": "确定删除知识库「{name}」？"
     },
     "cfg": {
       "editTitle": "编辑服务配置",
@@ -1207,6 +1231,8 @@
       "totalCount": "共 {n} 个",
       "duration": "时长",
       "descSection": "分镜描述",
+      "legacyFields": "原始描述与旧版字段（一般不用改）",
+      "legacyFieldsHint": "分镜描述/氛围/转场/连续性仍保留给旧数据和 AI 生成使用；日常编辑请用下方固定分区的视频提示词。",
       "descLabel": "画面描述",
       "descHint": "按【镜头1】【镜头2】…逐子镜头描述；台词写「角色名说：「台词」」，旁白写「旁白：内容」",
       "descPlaceholder": "分镜画面描述",
@@ -1221,11 +1247,21 @@
       "continuityPlaceholder": "承接上一镜的尾动作、视线、站位、环境声如何延续",
       "breakingElapsed": "正在拆分分镜…已等待 {s} 秒，期间会自动刷新已生成的镜头",
       "splitProgress": "分块拆分中：第 {done}/{total} 段 · 已保存 {shots} 个镜头",
+      "pipelineStage": {
+        "skeleton": "预拆骨架",
+        "repair": "逐镜修补",
+        "sound": "声音设计"
+      },
+      "pipelineRepairProgress": "逐镜修补/校验：已通过 {done}/{total} 镜 · 当前第 {current} 镜",
+      "pipelineSoundProgress": "声音设计：{units} 个声音单元",
+      "splitPause": "暂停（当前块完成后）",
+      "splitPauseRequested": "已请求暂停：当前块完成后停止",
       "splitFailed": "第 {chunk}/{total} 段拆分失败：{error}",
       "splitDone": "分块拆分完成：共 {n} 个镜头",
       "splitResumed": "已继续拆分剩余场次",
       "splitAlreadyRunning": "已有拆分任务在运行，继续显示进度",
       "resumeSplit": "继续拆分剩余场次",
+      "resumePipeline": "继续修补/校验",
       "splitStartFailed": "启动分块拆分失败，请重试",
       "splitActionFailed": "继续拆分失败，请稍后重试",
       "videoPromptSection": "视频提示词",
@@ -1251,6 +1287,24 @@
       "batchDoneFailed": "视频提示词批量生成完成，{n} 个失败",
       "batchFailed": "视频提示词批量生成失败",
       "promptGenerated": "分镜 #{n} 视频提示词已生成"
+    },
+    "soundPanel": {
+      "button": "声音设计",
+      "title": "声音设计（场景/剧情级）",
+      "version": "第 {v} 版",
+      "deliveryNative": "视频模型原生 BGM/环境声",
+      "deliveryPost": "后期混音 BGM",
+      "loading": "正在读取声音计划…",
+      "empty": "还没有声音计划；逐镜校验全部通过后会自动进行第四步声音设计。",
+      "close": "关闭",
+      "entry": "进入：",
+      "exit": "退出：",
+      "track": {
+        "bgm": "BGM",
+        "ambience": "环境声",
+        "sfx": "画内音效",
+        "silence": "静默"
+      }
     },
     "ref": {
       "title": "参考素材",
@@ -1288,6 +1342,8 @@
       "emptyDesc": "视频任务来自分镜拆分结果。先生成分镜描述和视频提示词，再批量生成视频。",
       "lockedModel": "当前集视频模型：",
       "listTitle": "视频任务列表",
+      "coverageMode": "覆盖板",
+      "listMode": "列表",
       "listMeta": "按镜头顺序 · {n} 个任务",
       "metricPending": "{n} 生成中",
       "metricDone": "{n} 完成",
@@ -1375,7 +1431,8 @@
       "autoPromptHint": "生成时提示词自动加入「上一分镜尾帧：{'@'}{token}」",
       "firstFrameSetFailed": "设置首帧失败",
       "firstFrameClearFailed": "清除首帧失败",
-      "deleteFailed": "删除分镜资产失败"
+      "deleteFailed": "删除分镜资产失败",
+      "autoFirstFrame": "自动首帧"
     },
     "comfy": {
       "modelLabel": "ComfyUI 配置",
@@ -1422,6 +1479,7 @@
       "duration": "分镜时长",
       "durationUnit": "s（2-{max}）",
       "durationHint": "修改即保存到分镜，列表与批量生成同步生效",
+      "durationAutoHint": "总时长由提示词里的时间帧分段自动计算",
       "durationLimitWarning": "当前分镜 {dur}s 超过上限 {max}s，生成前请缩短时长或切换分辨率",
       "effective": "{model} · {res} · {dur}s",
       "boundRefs": "绑定参考图",
@@ -1839,6 +1897,31 @@
       "statusReady": "就绪",
       "statusFailed": "失败",
       "referenceAudioHint": "角色参考音频：生视频时用于对齐口型与音色，可上传片段或从音色版本同步。"
+    },
+    "visualCheck": {
+      "title": "视觉预检与验收",
+      "hintTag": "L2 / L3",
+      "hint": "预检用现有场景/人物参考图和首帧对照合同；验收从成片抽 5 帧对照合同、参考图和上一镜尾帧。抽帧无法判断声音内容。",
+      "runPreflight": "生成前预检",
+      "runningPreflight": "预检中…",
+      "runAcceptance": "生成后验收",
+      "runningAcceptance": "验收中…",
+      "preflightResult": "预览结论",
+      "acceptanceResult": "验收结论",
+      "notRun": "未运行",
+      "stale": "已过期",
+      "verdictPass": "通过",
+      "verdictWarn": "警告",
+      "verdictBlock": "阻断",
+      "verdictFail": "未通过",
+      "verdictSkipped": "跳过",
+      "noIssues": "没有发现问题",
+      "preflightDone": "视觉预检完成",
+      "preflightFailed": "视觉预检失败",
+      "acceptanceDone": "生成后验收完成",
+      "acceptanceFailed": "生成后验收失败",
+      "needPrompt": "先补视频提示词再预检",
+      "needVideo": "先生成镜头视频再验收"
     }
   },
   "errors": {

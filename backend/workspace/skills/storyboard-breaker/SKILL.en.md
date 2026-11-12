@@ -1,109 +1,64 @@
 ---
 name: storyboard-breaker
-description: Professional rules for storyboard breakdown — splitting a script into storyboard segments that each carry multiple sub-shots
+description: Storyboard splitting rules — one storyboard carries one camera setup, one subject and one continuous action
 ---
 
-# Storyboard Breakdown Guide
+# Storyboard Splitting Rules
 
-## Core Definition: Storyboard Segment
+## 1. Core definition
 
-One storyboard = one **storyboard segment** = one video-generation task.
+One storyboard = one video generation task = one camera setup + one subject + one continuous action. Screen left/right, axis and background-landmark sides are scene-level constants: set them once and keep them for every shot in the same scene.
 
-- Each segment is **8-15 seconds** long and internally carries **2-4 sub-shots**
-- Cuts between sub-shots **are allowed**: change shot size, angle, or subject, joined with hard cuts
-- Sub-shots **never cross scenes**: a segment takes place in a single scene (`scene_id` is a segment-level binding)
-- Each sub-shot is 2-6 seconds, focused on one visual unit (one action, one reaction, one close-up)
+- Each storyboard is 6-15 seconds.
+- Only continuous movement within the same camera setup is allowed. A new camera setup, subject, action or emotional beat requires a new storyboard.
+- Never write 【镜头2】 or later sub-shots inside one storyboard; time segments within one setup are not sub-shots.
 
-## Full Script Coverage (Highest-Priority Hard Rule)
+## 2. Script coverage
 
-- Full script coverage outranks pacing, hooks, and shot aesthetics: every scene, every line of dialogue, and every key action in the script must appear in the storyboard. Never delete a scene, merge scenes, or keep only the climax.
-- Break down scene by scene in script order; each scene gets at least one segment. When there are many scenes, split by scene instead of compressing several scenes into one segment.
-- Segment-count floor = ceil(non-whitespace script characters × 0.12 ÷ max seconds per segment × 0.9). Under the default 8-15 second rules, use 15 seconds: a 3000-character script needs at least 22 segments; methods with shorter segments raise the floor accordingly. Falling below the floor means incomplete coverage — keep splitting.
-- Never delete an entire line of dialogue; split long lines across sub-shots instead, but never drop information. Narration supplements the picture and never replaces deleted drama.
-- Audit scene by scene before saving: map every scene → segment → sub-shot; if a scene, line, or key action is missing, split and fill it in first.
+- Every scene, every line and every key action must appear; never delete or merge scenes or keep only highlights.
+- Cover the script scene by scene, at least one storyboard per scene.
+- Storyboard floor = ceil(non-whitespace script chars × 0.12 ÷ 15 × 0.9). Fewer means incomplete; add storyboards, never merge or delete.
+- Before saving, check scene → storyboard coverage; add missing storyboards rather than cutting.
 
-## Breakdown Process (Four Steps)
+## 3. Scenes and assets
 
-1. Call `read_storyboard_context` to read the script, characters, scenes, props, and existing storyboard summaries
-2. **Beat identification**: first identify the script's narrative beats — markers such as [Opening] [Trigger] [Climax] [Resolution], or narrative turning points (location changes, rule reveals, emotional eruptions, reversals). **Beat boundaries force a segment cut**; group sub-shots within the same beat into the same segment where possible, and do not scatter a causal chain (setup-event-reaction) across different segments. At the same time, cover every scene without deleting or merging scenes
-3. **Total-volume anchoring**: target total duration = script character count ÷ 500 characters/minute; segment count ≈ target total duration ÷ 12 seconds, with ±20% tolerance, but never below the full-coverage segment-count floor. Do not significantly overshoot or undershoot
-4. **Split sub-shots within each segment**: cut sub-shots at action-change points, viewpoint-change points, and subject-change points; after filling in all fields for each segment, call `save_storyboards` to save them in one go
+- Use the canonical scene_id from the canonical scene binding; when names repeat, use only the canonical scene and never pick aliases such as 54/55/56 by time or preference.
+- Express time changes in time or blocking, not by switching scene images.
+- Character/prop names must exactly match project assets; write @唐大郎（唐奕）, not @唐大郎.
+- Only pure environment shots may have no characters; empty shots still need blocking and `action start: none; action end: none`.
 
-## Pacing-Tier Durations
+## 4. Fields
 
-Determine duration by the segment's function — do not use one size for all:
+| Field | Requirement |
+|---|---|
+| `description` | One continuous shot: who + concrete action + body detail + expression + position/eyeline; at most one 【镜头1】, never 【镜头2】 or later |
+| `duration` | 6-15 seconds; internal time segments 1-6 seconds each |
+| `scene_id` | Canonical scene ID |
+| `character_ids` | Characters actually visible; empty array when none |
+| `prop_ids` | Key props; empty array when none |
+| `transition` | cut / fade / dissolve / wipe |
+| `continuity` | Previous tail action, eyeline, blocking, ambience; first shot writes "opening" |
+| `sound_effect` | Reuse the same ambience across storyboards in one scene |
+| `video_prompt` | Fixed four sections: header → blocking → time segments → negative constraints |
 
-| Segment type | Duration | Notes |
-|---|---|---|
-| Transition segment | 8-10 s | Traveling, empty shots, environment establishment, transitions |
-| Narrative segment | 10-15 s | Regular plot advancement, dialogue |
-| Payoff segment | 12-15 s | Close-ups, rule reveals, emotional eruptions, reversals; slower sub-shot pacing, a single sub-shot may hold for 4-6 s |
+## 5. Fixed video_prompt sections
 
-## Dialogue Duration Ceiling (Hard Rule)
+1. Header: `Characters: @CharacterA, @CharacterB | Scene: @SceneName`; `Characters: None` / `Scene: Unspecified` when empty; own line, no trailing period.
+2. Blocking: `Blocking: Screen left: …; screen right: …; over …'s shoulder; background landmarks: window back-left, door back-right; axis A; action start: …; action end: …`; `no over-shoulder` when none, `background landmarks: none` when none, `axis none` for one character/empty, `axis A` or `axis B` for two or more; any storyboard with characters must have action start and end.
+3. Time segments: start at `0-3s:`, each 1-6 seconds, continuous, non-overlapping, last ends at duration; each segment must be the same setup/subject/continuous action; visuals first, then dialogue/narration for that segment.
+4. Negative constraints: `Negative constraints: only listed on-screen cast; no face/costume changes or extra people; no subtitles; no modern items`.
 
-**Segment duration × 4 characters/second = the maximum total character count of dialogue and narration in the segment (leaving one extra second of breathing room). Example: a 12-second segment holds at most ~44 Chinese characters.**
+Sound is not written here: BGM/ambience are designed in step 4 by scene/plot sound units; only a short per-shot delta (continue/add/fade/silence) is inserted before the negative line afterwards. Never repeat a full style per shot.
 
-Dialogue that does not fit must be split into another segment; cramming unperformable dialogue into one segment or rushing the delivery is not allowed. Narration, memories, and inner monologue are always written as `Narration (voice-over): "line"`, never as a character speaking.
+## 6. Dialogue
 
-## Shot Elements
+- Dialogue only as `@CharacterName says: "line"`; narration only as `Narration (voice-over): "line"`.
+- Copy verbatim from description, including punctuation and filler particles; split only at original punctuation or semantic pauses into adjacent time segments.
+- Duration × 4 characters/second = dialogue + narration capacity, leaving one second of breath; split into adjacent storyboards instead of speeding up.
+- Never write camera moves, shot sizes, expressions, psychology or actions as dialogue/narration.
 
-1. **Shot title**: a 3-5-character summary of the segment's core content (e.g. "Nightmare Awakening")
-2. **Time**: specific time of day + lighting description
-3. **Location**: full scene description + spatial layout + environmental details
-4. **Shot size**: the dominant shot size of the segment; for multi-size segments write a combination, e.g. "medium shot + close-up"
-5. **Angle**: eye-level / low angle / high angle / side / back
-6. **Camera move**: static / push-in / pull-back / pan / tracking / dolly (different sub-shots within a segment may differ)
-7. **Visual description** `description`: describe sub-shot by sub-shot as `【镜头1】…【镜头2】…` what the audience actually sees and hears — the visuals (who + specific action + body-language details + expression) come first; when a sub-shot has dialogue, write it inside the corresponding `【镜头N】` as `@CharacterName says: "line"`, and narration as `Narration (voice-over): "line"`; camera moves, shot sizes, expressions, psychology, and actions must never become dialogue or narration
-8. **Visual result** `result`: the immediate consequence at the end of the segment + visual details
-9. **Atmosphere** `atmosphere`: lighting + color tone + sound + overall mood
-10. **Duration** `duration`: total segment duration 8-15 seconds, and it must satisfy the dialogue duration floor
-11. **Scene binding**: if it can be matched to an existing scene, `scene_id` must be filled in
-12. **Character binding**: fill in `character_ids`, binding 0 to multiple characters involved in this segment
-13. **Prop binding**: fill in `prop_ids`, binding 0 to multiple key props appearing in this segment
+## 7. Saving
 
-## Unified video_prompt Format (Hard Rule)
-
-The first line is a fixed header; then split into 3-second segments, one line each:
-
-```text
-Characters: @CharacterA, @CharacterB | Scene: @SceneName
-0-3s: visual description, @CharacterA says: "line"
-3-6s: visual description, Narration (voice-over): "line"
-6-10s: visual description, @CharacterB says: "line"
-```
-
-- No characters: `Characters: None`; no scene: `Scene: Unspecified`; the header has no trailing period and the body never contains an "Audio:" or voice/mix instruction
-- Time starts at 0 and stays continuous; the last segment's end time equals this shot's duration, and a final segment shorter than 3 seconds uses its actual duration
-- Visuals come before dialogue/narration in every segment; at most 12 Chinese characters of dialogue/narration per 3-second segment; split long lines across adjacent segments
-- Dialogue only as `@CharacterName says: "line"`; narration only as `Narration (voice-over): "line"`; camera moves, shot sizes, expressions, psychology, and actions must never become dialogue or narration
-- Dialogue must come from the corresponding `【镜头N】` in the description — never invent new lines; @character/@scene names must exactly match the lists returned by `read_storyboard_context`
-- Mood and lighting come from this shot's `atmosphere`; cuts within a segment are allowed, but never across scenes
-
-## Scene Binding Rules
-
-- Prefer the `scenes` returned by `read_storyboard_context`
-- When `location + time` can be clearly matched, the correct `scene_id` must be filled in
-- Do not fabricate scene IDs that do not exist
-- If the script content clearly falls within an existing scene, do not create a duplicate new scene description
-
-## Character Binding Rules
-
-- `character_ids` must be chosen from the character list returned by `read_storyboard_context`
-- A segment may have no characters, or may bind multiple characters
-- Any character with a clear appearance in the segment — seen, acting, or speaking — should be bound
-- Pure-environment segments, empty shots, and object close-ups may pass an empty array
-
-## Prop Binding Rules
-
-- `prop_ids` must be chosen from the prop list (`props`) returned by `read_storyboard_context`
-- When a prop is used by a character, handed over, shown in close-up, or clearly visible in frame and meaningful to the narrative, it must be bound to that segment
-- Prop close-up segments (without characters) should also bind the prop; `character_ids` may be empty
-- Do not bind background items or set dressing irrelevant to the plot; segments with no props pass an empty array
-- Bound props serve as reference images for video generation (white-background product shots), keeping the prop's appearance consistent across segments
-
-## Quality Requirements
-
-- `description` should be human-readable, describing sub-shot by sub-shot what the audience actually sees and hears; dialogue/narration is written directly inside the corresponding `【镜头N】`
-- `image_prompt` should highlight the single-frame composition, character appearance, environment, and lighting (corresponding to the segment's first sub-shot)
-- `bgm_prompt` and `sound_effect` may be concise phrases, but must not be as vague as just "tense" or "sad"
-- To make adjustments, call `update_storyboard` to modify the specific segment
+- Call `save_storyboards` in batches of at most 8; first batch uses `replace_existing: true`, later batches omit it.
+- `shot_number` increases in story order; do not stop before all storyboards are saved.
+- Self-check before saving: multiple sub-shots, missing blocking, missing action endpoints, missing negative constraints or scene aliases must be fixed first.

@@ -19,10 +19,10 @@ test('代理返回 200 但缺少必需保存调用时不提示成功', () => {
   assert.match(useAgent, /toast\.error\(i18n\.global\.t\('composables\.agent\.noSave'\)\)/)
 })
 
-test('重新拆分走分块任务接口：创建/续拆/进度轮询，替换与编号由后端负责', () => {
-  assert.match(episode, /storyboardSplitAPI\.create\(/)
-  assert.match(episode, /storyboardSplitAPI\.resume\(/)
-  assert.match(episode, /storyboardSplitAPI\.latest\(/)
+test('重新拆分走四段式管线接口：创建/续拆/进度轮询，替换与编号由后端负责', () => {
+  assert.match(episode, /storyboardPipelineAPI\.create\(/)
+  assert.match(episode, /storyboardPipelineAPI\.resume\(/)
+  assert.match(episode, /storyboardPipelineAPI\.latest\(/)
   assert.match(episode, /const splitPoll = useVisibilityPolling\(/)
   // 单次同步调用已移除：不再由页面声明 save_storyboards / replace_existing
   assert.doesNotMatch(episode, /runAgent\('storyboard_breaker'/)

@@ -28,6 +28,7 @@ import {
   type AuditIssue,
   type AuditIssueDraft,
 } from './storyboard-audit-rules.js'
+import { evaluateContractPairIssues, evaluateCoverageGapIssues } from './storyboard-contract-audit.js'
 import {
   buildAuditContinuityPrompt,
   buildAuditEpisodeContext,
@@ -229,7 +230,7 @@ export interface RunStoryboardAuditOptions {
   runner?: AuditWindowRunner
   pairRunner?: AuditPairRunner
   repairRunner?: AuditRepairRunner
-  promptBatchProbe?: (episodeId: number) => Partial<VideoPromptBatchStatus> | null
+  promptBatchProbe?: (episodeId: number) => Partial<VideoPromptBatchStatus> | null | Promise<Partial<VideoPromptBatchStatus> | null>
   maxPromptWaitMs?: number
   promptWaitIntervalMs?: number
   fileExists?: (relativePath: string) => boolean
@@ -1414,6 +1415,10 @@ async function runRepairAndRecheck(input: RepairFlowInput): Promise<RepairFlowRe
       affectedPairKeys.add(pair.key)
     }
   }
+  // 修复后重新跑合同成对检查；只检查受影响的切点，避免把无关旧问题带回来
+  ruleDrafts.push(...recheckContext.continuityPairs
+    .filter(pair => affectedPairKeys.has(pair.key))
+    .flatMap(pair => evaluateContractPairIssues(pair.from, pair.to)))
   const affectedIndexes = new Set<number>()
   for (const pair of recheckContext.continuityPairs) {
     if (affectedPairKeys.has(pair.key)) affectedIndexes.add(pair.windowIndex)
@@ -1706,7 +1711,7 @@ export async function runStoryboardAuditJob(
       if (!current || current.status !== 'preparing') return
       let status: Partial<VideoPromptBatchStatus> | null = null
       try {
-        status = probe(initial.episodeId)
+        status = await probe(initial.episodeId)
       } catch {
         status = null
       }
@@ -1751,7 +1756,16 @@ export async function runStoryboardAuditJob(
       fingerprintsJson: JSON.stringify(context.fingerprints),
     })
 
-    const ruleDrafts = evaluateStoryboardRules(context.ruleInput)
+    const contractPairDrafts = context.continuityPairs.flatMap(pair => evaluateContractPairIssues(pair.from, pair.to))
+    const coverageGapDrafts = await evaluateCoverageGapIssues(
+      initial.episodeId,
+      context.shots.filter(shot => shot.transitionKind == null),
+    )
+    const ruleDrafts = [
+      ...evaluateStoryboardRules(context.ruleInput),
+      ...contractPairDrafts,
+      ...coverageGapDrafts,
+    ]
     const ruleIssues = assignIssueIds(ruleDrafts)
     persistJob(jobId, {
       phase: 'semantic',

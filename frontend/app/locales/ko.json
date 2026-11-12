@@ -662,7 +662,8 @@
       "promptGenerator": "프롬프트 생성",
       "langFallback": "중국어로 폴백",
       "followContentLang": "편집 언어: {lang} (일반 → AI 콘텐츠 언어에서 전환)",
-      "storyboardAuditor": "스토리보드 동작 검사"
+      "storyboardAuditor": "스토리보드 동작 검사",
+      "voiceDesigner": "음성 디자인"
     },
     "skills": {
       "agentList": "Agent 목록",
@@ -681,6 +682,29 @@
       "descPlaceholder": "이 Skill의 용도를 간단히 기술",
       "create": "생성",
       "created": "Skill이 생성되었습니다"
+    },
+    "knowledge": {
+      "tab": "지식 베이스",
+      "desc": "각 Agent는 자신에게 할당된 지식 베이스만 읽습니다. 전체 공통 읽기는 하지 않습니다.",
+      "assignedCount": "{n}개 할당됨",
+      "emptyTitle": "이 Agent에 할당된 지식 베이스가 없습니다",
+      "emptyDesc": "아래 미할당 목록에서 추가하세요.",
+      "unassign": "할당 해제",
+      "assign": "이 Agent에 할당",
+      "unassignedTitle": "이 Agent에 미할당",
+      "required": "필독",
+      "fileMissing": "파일 없음",
+      "name": "이름",
+      "description": "설명",
+      "content": "지식 베이스 본문",
+      "add": "지식 베이스 추가",
+      "addTitle": "지식 베이스 추가 — {agent}",
+      "id": "지식 베이스 ID",
+      "idHint": "영문, 고유",
+      "create": "생성",
+      "created": "지식 베이스가 생성되었습니다",
+      "delete": "삭제",
+      "deleteConfirm": "지식 베이스 \"{name}\"을(를) 삭제할까요?"
     },
     "cfg": {
       "editTitle": "서비스 설정 편집",
@@ -1207,6 +1231,8 @@
       "totalCount": "총 {n}개",
       "duration": "길이",
       "descSection": "스토리보드 설명",
+      "legacyFields": "원본 설명 및 레거시 필드 (일반적으로 편집 불필요)",
+      "legacyFieldsHint": "설명/분위기/전환/연속성은 기존 데이터와 AI 생성용으로 유지됩니다. 일상 편집은 아래 고정 섹션 비디오 프롬프트를 사용하세요.",
       "descLabel": "화면 설명",
       "descHint": "【샷1】【샷2】…로 하위 샷마다 기술. 대사는 「캐릭터명의 대사: 「대사」」, 나레이션은 「나레이션: 내용」",
       "descPlaceholder": "스토리보드 화면 설명",
@@ -1221,11 +1247,21 @@
       "continuityPlaceholder": "이전 샷의 끝 동작, 시선, 위치, 환경음이 어떻게 이어지는지",
       "breakingElapsed": "스토리보드 분해 중… {s}초 경과, 생성된 샷은 자동으로 새로고침됩니다",
       "splitProgress": "분할 분해 중: {done}/{total} 구간 · 샷 {shots}개 저장됨",
+      "pipelineStage": {
+        "skeleton": "스켈레톤",
+        "repair": "샷별 수정",
+        "sound": "사운드 설계"
+      },
+      "pipelineRepairProgress": "샷별 수정/검증: {done}/{total} 통과 · 현재 {current}번 샷",
+      "pipelineSoundProgress": "사운드 설계: {units}개 사운드 유닛",
+      "splitPause": "일시정지 (현재 블록 완료 후)",
+      "splitPauseRequested": "일시정지를 요청했습니다. 현재 블록 완료 후 중지됩니다",
       "splitFailed": "{chunk}/{total} 구간 분해 실패: {error}",
       "splitDone": "분할 분해 완료: 총 샷 {n}개",
       "splitResumed": "남은 구간 분해를 다시 시작했습니다",
       "splitAlreadyRunning": "이미 분해 작업이 실행 중입니다. 진행 상황을 계속 표시합니다",
       "resumeSplit": "남은 구간 분해 계속",
+      "resumePipeline": "수정/검증 계속",
       "splitStartFailed": "분할 분해를 시작하지 못했습니다. 다시 시도하세요",
       "splitActionFailed": "분해를 계속하지 못했습니다. 잠시 후 다시 시도하세요",
       "videoPromptSection": "영상 프롬프트",
@@ -1251,6 +1287,24 @@
       "batchDoneFailed": "영상 프롬프트 일괄 생성이 완료되었습니다({n}개 실패)",
       "batchFailed": "영상 프롬프트 일괄 생성에 실패했습니다",
       "promptGenerated": "스토리보드 #{n}의 영상 프롬프트가 생성되었습니다"
+    },
+    "soundPanel": {
+      "button": "사운드 설계",
+      "title": "사운드 설계 (장면/서사 단위)",
+      "version": "{v}번째 버전",
+      "deliveryNative": "비디오 모델 네이티브 BGM/환경음",
+      "deliveryPost": "포스트 프로덕션 BGM",
+      "loading": "사운드 플랜 불러오는 중…",
+      "empty": "아직 사운드 플랜이 없습니다. 모든 샷 검증 통과 후 4단계가 자동 실행됩니다.",
+      "close": "닫기",
+      "entry": "시작: ",
+      "exit": "종료: ",
+      "track": {
+        "bgm": "BGM",
+        "ambience": "환경음",
+        "sfx": "화면 내 효과음",
+        "silence": "정적"
+      }
     },
     "ref": {
       "title": "참조 소재",
@@ -1288,6 +1342,8 @@
       "emptyDesc": "영상 작업은 스토리보드 분해 결과에서 만들어집니다. 먼저 스토리보드 설명과 영상 프롬프트를 생성한 후 영상을 일괄 생성하세요.",
       "lockedModel": "이 화의 영상 모델: ",
       "listTitle": "영상 작업 목록",
+      "coverageMode": "커버리지",
+      "listMode": "목록",
       "listMeta": "샷 순서 · 작업 {n}개",
       "metricPending": "{n} 생성 중",
       "metricDone": "{n} 완료",
@@ -1375,7 +1431,8 @@
       "autoPromptHint": "생성 시 프롬프트에 자동 추가: \"이전 샷 마지막 프레임: {'@'}{token}\"",
       "firstFrameSetFailed": "첫 프레임 설정 실패",
       "firstFrameClearFailed": "첫 프레임 지우기 실패",
-      "deleteFailed": "스토리보드 자산 삭제 실패"
+      "deleteFailed": "스토리보드 자산 삭제 실패",
+      "autoFirstFrame": "자동 첫 프레임"
     },
     "comfy": {
       "modelLabel": "ComfyUI 설정",
@@ -1422,6 +1479,7 @@
       "duration": "분镜 길이",
       "durationUnit": "초(2-{max})",
       "durationHint": "수정 시 스토리보드에 즉시 저장되어 목록 및 배치 생성에도 적용됩니다",
+      "durationAutoHint": "총 길이는 프롬프트의 시간 구간에서 자동 계산됩니다",
       "durationLimitWarning": "현재 스토리보드 {dur}초가 상한 {max}초를 초과했습니다. 생성 전에 줄이거나 해상도를 변경하세요",
       "effective": "{model} · {res} · {dur}초",
       "boundRefs": "바인딩 참조 이미지",
@@ -1839,6 +1897,31 @@
       "statusReady": "준비됨",
       "statusFailed": "실패",
       "referenceAudioHint": "캐릭터 참조 음성: 영상 생성 시 입 모양과 음색을 맞추는 데 사용됩니다. 클립을 업로드하거나 음성 버전에서 동기화할 수 있습니다."
+    },
+    "visualCheck": {
+      "title": "비주얼 사전 검사 및 검수",
+      "hintTag": "L2 / L3",
+      "hint": "사전 검사는 기존 장면/인물 참고 이미지와 첫 프레임을 계약과 대조합니다. 검수는 완성 영상에서 5프레임을 추출해 계약, 참고 이미지, 이전 컷 마지막 프레임과 대조합니다. 추출 프레임으로는 소리 내용을 판단할 수 없습니다.",
+      "runPreflight": "생성 전 검사",
+      "runningPreflight": "검사 중…",
+      "runAcceptance": "생성 후 검수",
+      "runningAcceptance": "검수 중…",
+      "preflightResult": "사전 검사 결과",
+      "acceptanceResult": "검수 결과",
+      "notRun": "미실행",
+      "stale": "만료됨",
+      "verdictPass": "통과",
+      "verdictWarn": "경고",
+      "verdictBlock": "차단",
+      "verdictFail": "실패",
+      "verdictSkipped": "건너뜀",
+      "noIssues": "발견된 문제가 없습니다",
+      "preflightDone": "비주얼 사전 검사가 완료되었습니다",
+      "preflightFailed": "비주얼 사전 검사에 실패했습니다",
+      "acceptanceDone": "생성 후 검수가 완료되었습니다",
+      "acceptanceFailed": "생성 후 검수에 실패했습니다",
+      "needPrompt": "먼저 동영상 프롬프트를 작성하세요",
+      "needVideo": "먼저 컷 영상을 생성하세요"
     }
   },
   "errors": {

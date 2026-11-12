@@ -11,6 +11,10 @@ import { now } from '../utils/response.js'
 import { getMaxSegmentSeconds } from './breakdown-methods.js'
 import { parseVideoPrompt } from './dialogue-lines.js'
 import {
+  formatDialogueIntegrityIssue,
+  inspectDialogueIntegrity,
+} from './dialogue-integrity.js'
+import {
   buildAuditEpisodeContext,
   computeAuditShotFingerprint,
   type AuditContextShot,
@@ -32,6 +36,7 @@ import {
   type TransitionInsertionPlan,
 } from './storyboard-audit-insertion.js'
 import { registerAuditRepairHooks, resolveJobPolicy } from './storyboard-audit-jobs.js'
+import { parseSoundSection, setSoundSection } from './storyboard-sound.js'
 
 export type AuditRepairAction =
   | 'fill_camera_fields'
@@ -324,6 +329,7 @@ function promptProblems(
   prompt: string,
   duration: number,
   cast: AuditEpisodeContext['cast'],
+  descriptionOverride?: string | null,
 ): string[] {
   const problems: string[] = []
   if (!hasVideoPromptHeader(prompt)) {
@@ -354,6 +360,12 @@ function promptProblems(
     }
   }
 
+  const description = descriptionOverride ?? shot.description
+  const descriptionIntegrity = inspectDialogueIntegrity(description, prompt)
+  if (descriptionIntegrity && !descriptionIntegrity.ok) {
+    problems.push(formatDialogueIntegrityIssue(descriptionIntegrity, '视频提示词'))
+  }
+
   const oldPrompt = shot.videoPrompt || ''
   const oldLines = oldPrompt
     ? parseVideoPrompt(oldPrompt, { cast, durationMs: Math.round(Math.max(0, shot.duration) * 1000) })
@@ -368,24 +380,32 @@ function promptProblems(
   }
   const newKeys = newLines.map((line) => dialogueKey(line.text)).filter(Boolean)
 
-  for (const line of oldLines) {
-    const key = dialogueKey(line.text)
-    if (!key) continue
-    if (looksLikeActionDescription(line.text)) continue
-    if (!newKeys.includes(key)) {
-      problems.push(`台词/旁白被修改或丢弃：${clipValue(line.text, 40)}`)
-      break
+  // description 有口白时以它为原文权威：允许把旧提示词里丢掉的台词和标点补回来，
+  // 只有 description 没有可核对口白时才沿用「旧提示词逐句保留」的兜底规则
+  if (!descriptionIntegrity) {
+    for (const line of oldLines) {
+      const key = dialogueKey(line.text)
+      if (!key) continue
+      if (looksLikeActionDescription(line.text)) continue
+      if (!newKeys.includes(key)) {
+        problems.push(`台词/旁白被修改或丢弃：${clipValue(line.text, 40)}`)
+        break
+      }
+    }
+    for (const line of newLines) {
+      const key = dialogueKey(line.text)
+      if (!key) continue
+      if (!oldKeys.has(key)) {
+        problems.push(`新增了原提示词没有的台词/旁白：${clipValue(line.text, 40)}`)
+        break
+      }
     }
   }
   for (const line of newLines) {
     const key = dialogueKey(line.text)
     if (!key) continue
-    if (!oldKeys.has(key)) {
-      problems.push(`新增了原提示词没有的台词/旁白：${clipValue(line.text, 40)}`)
-      break
-    }
-    const oldSpeaker = oldSpeakers.get(key) || ''
-    if ((line.speakerName || '') !== oldSpeaker) {
+    const oldSpeaker = oldSpeakers.get(key)
+    if (oldSpeaker != null && (line.speakerName || '') !== oldSpeaker) {
       problems.push('不能新增或改变说话人')
       break
     }
@@ -544,7 +564,13 @@ function validateDraft(
     } else if (fields.duration != null && !fields.videoPrompt) {
       return { reason: '延长时长必须同步重写视频提示词时间轴' }
     } else {
-      const problems = promptProblems(shot, prompt, nextDuration, context.cast)
+      const problems = promptProblems(
+        shot,
+        prompt,
+        nextDuration,
+        context.cast,
+        typeof fields.description === 'string' ? fields.description : undefined,
+      )
       if (problems.length) return { reason: `视频提示词不合规：${problems.join('；')}` }
     }
   }
@@ -859,6 +885,13 @@ export function applyAuditRepairActions(
     const patch = patches.get(draft.shot.id) || {}
     for (const [field, value] of Object.entries(draft.fields)) {
       patch[field] = value as string | number
+    }
+    // 批量修复可能整段重写提示词；保留第四步写入的声音短增量
+    if (typeof patch.video_prompt === 'string') {
+      const previousSound = parseSoundSection(draft.shot.videoPrompt)
+      if (previousSound && !parseSoundSection(patch.video_prompt)) {
+        patch.video_prompt = setSoundSection(patch.video_prompt, previousSound)
+      }
     }
     patches.set(draft.shot.id, patch)
   }

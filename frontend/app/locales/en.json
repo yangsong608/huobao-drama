@@ -662,7 +662,8 @@
       "promptGenerator": "Prompt Generator",
       "langFallback": "Falls back to Chinese",
       "followContentLang": "Editing language: {lang} (switch in General → AI Content Language)",
-      "storyboardAuditor": "Storyboard Auditor"
+      "storyboardAuditor": "Storyboard Auditor",
+      "voiceDesigner": "Voice Designer"
     },
     "skills": {
       "agentList": "Agents",
@@ -681,6 +682,29 @@
       "descPlaceholder": "A short description of this skill",
       "create": "Create",
       "created": "Skill created"
+    },
+    "knowledge": {
+      "tab": "Knowledge",
+      "desc": "Each agent reads only the knowledge bases assigned to it; there is no shared read for all agents.",
+      "assignedCount": "{n} assigned",
+      "emptyTitle": "No knowledge assigned to this agent",
+      "emptyDesc": "Assign one from the unassigned list below.",
+      "unassign": "Unassign",
+      "assign": "Assign to this agent",
+      "unassignedTitle": "Not assigned to this agent",
+      "required": "Required",
+      "fileMissing": "File missing",
+      "name": "Name",
+      "description": "Description",
+      "content": "Knowledge content",
+      "add": "Add knowledge",
+      "addTitle": "Add knowledge — {agent}",
+      "id": "Knowledge ID",
+      "idHint": "English, unique",
+      "create": "Create",
+      "created": "Knowledge created",
+      "delete": "Delete",
+      "deleteConfirm": "Delete knowledge \"{name}\"?"
     },
     "cfg": {
       "editTitle": "Edit Service Config",
@@ -1207,6 +1231,8 @@
       "totalCount": "{n} in total",
       "duration": "Duration",
       "descSection": "Shot Description",
+      "legacyFields": "Original description and legacy fields (usually not edited)",
+      "legacyFieldsHint": "Description/atmosphere/transition/continuity are kept for legacy data and AI generation; use the fixed-section prompt below for daily editing.",
       "descLabel": "Visual description",
       "descHint": "Describe each sub-shot as 【Shot 1】【Shot 2】…; dialogue as “Name says: 「line」”, narration as “Narrator: …”",
       "descPlaceholder": "Shot visual description",
@@ -1221,11 +1247,21 @@
       "continuityPlaceholder": "How the previous shot's tail action, gaze, blocking and ambience continue",
       "breakingElapsed": "Breaking down the storyboard… {s}s elapsed; generated shots refresh automatically",
       "splitProgress": "Chunked split: chunk {done}/{total} · {shots} shots saved",
+      "pipelineStage": {
+        "skeleton": "Skeleton",
+        "repair": "Per-shot repair",
+        "sound": "Sound design"
+      },
+      "pipelineRepairProgress": "Repair/validate: {done}/{total} passed · current shot {current}",
+      "pipelineSoundProgress": "Sound design: {units} sound units",
+      "splitPause": "Pause after current chunk",
+      "splitPauseRequested": "Pause requested: stops after the current chunk",
       "splitFailed": "Chunk {chunk}/{total} failed: {error}",
       "splitDone": "Chunked split complete: {n} shots",
       "splitResumed": "Resuming the remaining chunks",
       "splitAlreadyRunning": "A split job is already running; progress continues here",
       "resumeSplit": "Resume remaining chunks",
+      "resumePipeline": "Resume repair/validation",
       "splitStartFailed": "Failed to start the chunked split; please retry",
       "splitActionFailed": "Failed to resume the split; please retry later",
       "videoPromptSection": "Video Prompt",
@@ -1251,6 +1287,24 @@
       "batchDoneFailed": "Batch video prompt generation complete, {n} failed",
       "batchFailed": "Batch video prompt generation failed",
       "promptGenerated": "Video prompt for shot #{n} generated"
+    },
+    "soundPanel": {
+      "button": "Sound design",
+      "title": "Sound design (scene/plot level)",
+      "version": "Version {v}",
+      "deliveryNative": "Native BGM/ambience from the video model",
+      "deliveryPost": "Post-production BGM",
+      "loading": "Loading sound plan…",
+      "empty": "No sound plan yet; step 4 runs automatically after all shots pass per-shot validation.",
+      "close": "Close",
+      "entry": "Entry: ",
+      "exit": "Exit: ",
+      "track": {
+        "bgm": "BGM",
+        "ambience": "Ambience",
+        "sfx": "Diegetic SFX",
+        "silence": "Silence"
+      }
     },
     "ref": {
       "title": "Reference Assets",
@@ -1288,6 +1342,8 @@
       "emptyDesc": "Video tasks come from the storyboard breakdown. Generate shot descriptions and video prompts first, then generate videos in batch.",
       "lockedModel": "Video model for this episode: ",
       "listTitle": "Video Task List",
+      "coverageMode": "Coverage",
+      "listMode": "List",
       "listMeta": "In shot order · {n} tasks",
       "metricPending": "{n} generating",
       "metricDone": "{n} done",
@@ -1375,7 +1431,8 @@
       "autoPromptHint": "Automatically added to the prompt on generate: \"Previous shot last frame: {'@'}{token}\"",
       "firstFrameSetFailed": "Failed to set first frame",
       "firstFrameClearFailed": "Failed to clear first frame",
-      "deleteFailed": "Failed to delete storyboard asset"
+      "deleteFailed": "Failed to delete storyboard asset",
+      "autoFirstFrame": "Auto first frame"
     },
     "comfy": {
       "modelLabel": "ComfyUI config",
@@ -1422,6 +1479,7 @@
       "duration": "Shot duration",
       "durationUnit": "s (2-{max})",
       "durationHint": "Edits save to the storyboard instantly and apply to list and batch generation",
+      "durationAutoHint": "Total duration is calculated from the time-frame segments in the prompt",
       "durationLimitWarning": "This shot is {dur}s, above the {max}s limit. Shorten it or switch resolution before generating",
       "effective": "{model} · {res} · {dur}s",
       "boundRefs": "Bound References",
@@ -1839,6 +1897,31 @@
       "statusReady": "Ready",
       "statusFailed": "Failed",
       "referenceAudioHint": "Character reference audio: aligns mouth shape and timbre during video generation. Upload a clip or sync a voice version."
+    },
+    "visualCheck": {
+      "title": "Visual preflight & acceptance",
+      "hintTag": "L2 / L3",
+      "hint": "Preflight compares existing scene/cast references and the first frame with the contract; acceptance samples 5 frames and compares them with the contract, references and previous tail frame. Sampled frames cannot judge audio content.",
+      "runPreflight": "Preflight",
+      "runningPreflight": "Checking…",
+      "runAcceptance": "Accept generated video",
+      "runningAcceptance": "Checking…",
+      "preflightResult": "Preflight verdict",
+      "acceptanceResult": "Acceptance verdict",
+      "notRun": "Not run",
+      "stale": "Stale",
+      "verdictPass": "Pass",
+      "verdictWarn": "Warn",
+      "verdictBlock": "Block",
+      "verdictFail": "Fail",
+      "verdictSkipped": "Skipped",
+      "noIssues": "No issues found",
+      "preflightDone": "Visual preflight finished",
+      "preflightFailed": "Visual preflight failed",
+      "acceptanceDone": "Post-generation acceptance finished",
+      "acceptanceFailed": "Post-generation acceptance failed",
+      "needPrompt": "Add a video prompt before preflight",
+      "needVideo": "Generate the shot video before acceptance"
     }
   },
   "errors": {

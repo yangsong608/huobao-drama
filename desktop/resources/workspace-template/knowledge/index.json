@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "novel-to-short-drama",
+      "name": "小说改编短剧",
+      "description": "小说叙事转短剧剧本：钩子、节拍、对白化、心理外化、集尾钩子。",
+      "agents": ["script_rewriter"],
+      "required": true,
+      "enabled": true
+    },
+    {
+      "id": "asset-extraction",
+      "name": "角色场景道具提取",
+      "description": "角色、场景、道具的提取边界、去重、别名归一和参考图要求。",
+      "agents": ["extractor"],
+      "required": true,
+      "enabled": true
+    },
+    {
+      "id": "short-drama-grammar",
+      "name": "短剧叙事与节奏",
+      "description": "短剧结构、节拍、时长预算、对白容量、竖屏/横屏差异和常见失败模式。",
+      "agents": ["storyboard_breaker"],
+      "required": true,
+      "enabled": true
+    },
+    {
+      "id": "storyboard-direction",
+      "name": "分镜与导演语法",
+      "description": "景别、角度、运镜、构图、轴线、正反打、过肩、反应、动作匹配、场景地理和覆盖模板。",
+      "agents": ["storyboard_breaker"],
+      "required": true,
+      "enabled": true
+    },
+    {
+      "id": "continuity-and-transitions",
+      "name": "前后镜连贯与过渡分镜",
+      "description": "成对合同、尾帧/首帧、六条连贯规则，以及时间/场景/人物过渡空镜的用法。",
+      "agents": ["storyboard_breaker", "storyboard_auditor", "prompt_generator"],
+      "required": true,
+      "enabled": true
+    },
+    {
+      "id": "storyboard-validation",
+      "name": "分镜校验清单",
+      "description": "三层校验、检查矩阵、门禁、证据要求、修复动作和常见误报/漏报。",
+      "agents": ["storyboard_auditor"],
+      "required": true,
+      "enabled": true
+    },
+    {
+      "id": "video-prompt-consistency",
+      "name": "视频提示词一致性",
+      "description": "提示词结构、画内人物、参考图、首尾帧、台词/旁白、声音/BGM 和常见生成失败。",
+      "agents": ["prompt_generator"],
+      "required": true,
+      "enabled": true
+    },
+    {
+      "id": "voice-and-narration",
+      "name": "声音与旁白设计",
+      "description": "音色档案、对白/画外音/内心/旁白分型、跨集一致性和环境声/BGM 边界。",
+      "agents": ["voice_designer"],
+      "required": true,
+      "enabled": true
+    }
+  ]
+}

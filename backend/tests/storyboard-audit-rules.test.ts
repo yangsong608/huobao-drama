@@ -157,20 +157,20 @@ test('描述与提示词缺失为错误，景别角度运镜缺失为警告', ()
   assert.ok(!codes(result).includes('prompt_timeline_broken'))
 })
 
-test('占位描述视为缺失；时长超过 3 秒缺【镜头N】给警告', () => {
+test('占位描述视为缺失；多个【镜头N】子镜头报错；单镜头不报', () => {
   const placeholder = evaluateStoryboardRules(input({ shots: [shot({ description: '待补充' })] }))
   assert.ok(codes(placeholder).includes('shot_missing_description'))
 
-  const missingSubshots = evaluateStoryboardRules(input({
+  const singleShot = evaluateStoryboardRules(input({
     shots: [shot({ duration: 4, description: '@甲站在原地，目光平静。', videoPrompt: promptFor(4) })],
   }))
-  assert.ok(codes(missingSubshots).includes('description_missing_subshots'))
-  assert.equal(issuesByCode(missingSubshots, 'description_missing_subshots')[0].severity, 'warning')
+  assert.ok(!codes(singleShot).includes('description_multiple_subshots'))
 
-  const shortShot = evaluateStoryboardRules(input({
-    shots: [shot({ duration: 3, description: '@甲站在原地，目光平静。', videoPrompt: promptFor(3) })],
+  const multipleSubshots = evaluateStoryboardRules(input({
+    shots: [shot({ duration: 4, description: '【镜头1】@甲站着。【镜头2】@乙抬头。', videoPrompt: promptFor(4) })],
   }))
-  assert.ok(!codes(shortShot).includes('description_missing_subshots'))
+  assert.ok(codes(multipleSubshots).includes('description_multiple_subshots'))
+  assert.equal(issuesByCode(multipleSubshots, 'description_multiple_subshots')[0].severity, 'error')
 })
 
 test('视频提示词信息头缺失、时间轴断裂、尾端不符各报一次', () => {
@@ -196,7 +196,7 @@ test('视频提示词信息头缺失、时间轴断裂、尾端不符各报一�
   assert.match(issuesByCode(wrongTail, 'prompt_timeline_broken')[0].message, /结束/)
 })
 
-test('每个 3 秒段台词或旁白超过 12 个可发音字符给警告', () => {
+test('每个时间段的台词或旁白超过 4 字/秒容量给警告', () => {
   const tooLong = evaluateStoryboardRules(input({
     shots: [shot({ duration: 3, description: '【镜头1】@甲站着。', videoPrompt: '出场人物：@甲｜场景：@室\n0-3秒：@甲说：「这是一句超过十二个字的台词」' })],
   }))
@@ -204,7 +204,8 @@ test('每个 3 秒段台词或旁白超过 12 个可发音字符给警告', () =
   assert.equal(issues.length, 1)
   assert.equal(issues[0].severity, 'warning')
   assert.equal(issues[0].repairable, false, '缩短台词必须改台词文本，不允许自动修复')
-  assert.match(issues[0].message, /12/)
+  assert.match(issues[0].message, /4 字\/秒/)
+  assert.match(issues[0].evidence || '', /容量 12 字/)
 
   const actionLongText = evaluateStoryboardRules(input({
     shots: [shot({ duration: 3, description: '【镜头1】@甲站着。', videoPrompt: '出场人物：@甲｜场景：@室\n0-3秒：@甲慢慢转身，抬眼看向远处，表情里带着无法掩饰的复杂情绪。' })],
@@ -438,8 +439,8 @@ test('整镜所有台词需要时长之和超过镜头时长报错', () => {
   const result = evaluateStoryboardRules(input({
     shots: [shot({ duration: 4, description: '【镜头1】@甲站着。', videoPrompt: promptFor(4) })],
     lines: [
-      line({ id: 1, text: '一二三四五', speakText: '一二三四五' }),
-      line({ id: 2, text: '六七八九十', speakText: '六七八九十' }),
+      line({ id: 1, text: '一二三四五六七八九十一二三四五六七八九十', speakText: '一二三四五六七八九十一二三四五六七八九十' }),
+      line({ id: 2, text: '一二三四五六七八九十一二三四五六七八九十', speakText: '一二三四五六七八九十一二三四五六七八九十' }),
     ],
   }))
   assert.equal(issuesByCode(result, 'shot_dialogue_over_capacity').length, 1)
@@ -846,4 +847,106 @@ test('策略窗口可以自定义窗口大小、步长与上限', () => {
   ])
   assert.deepEqual(plan.ruleOnlyIds, [8, 9, 10])
   assert.equal(plan.truncated, true)
+})
+
+test('视频提示词压缩、删字或丢 description 标点时给出错误', () => {
+  const description = '【镜头1】@甲说：「呦！六婶起得可是够早，来来，咱这有刚出锅的大白炊饼，还不捡一笼家去？」'
+  const clipped = evaluateStoryboardRules(input({
+    shots: [shot({
+      duration: 9,
+      description,
+      videoPrompt: [
+        '出场人物：@甲｜场景：@室',
+        '0-3秒：@甲说：「呦！六婶起得可是够早」',
+        '3-6秒：@甲说：「咱这有刚出锅的大白炊饼」',
+        '6-9秒：@甲说：「还不捡一笼家去？」',
+      ].join('\n'),
+    })],
+  }))
+  const issues = issuesByCode(clipped, 'prompt_dialogue_mismatch')
+  assert.equal(issues.length, 1)
+  assert.equal(issues[0].severity, 'error')
+  assert.match(issues[0].evidence || '', /来来/)
+  assert.equal(issues[0].repairAction, 'normalize_video_prompt')
+
+  const complete = evaluateStoryboardRules(input({
+    shots: [shot({
+      duration: 9,
+      description,
+      videoPrompt: [
+        '出场人物：@甲｜场景：@室',
+        '0-3秒：@甲说：「呦！六婶起得可是够早，」',
+        '3-6秒：@甲说：「来来，咱这有刚出锅的大白炊饼，」',
+        '6-9秒：@甲说：「还不捡一笼家去？」',
+      ].join('\n'),
+    })],
+  }))
+  assert.ok(!codes(complete).includes('prompt_dialogue_mismatch'))
+})
+
+test('可变时间帧：1-6 秒通过，超出范围报 prompt_segment_duration_invalid，容量按时长计算', () => {
+  const valid = evaluateStoryboardRules(input({
+    shots: [shot({
+      duration: 10,
+      description: '【镜头1】@甲站着。',
+      videoPrompt: '出场人物：@甲｜场景：@室\n0-5秒：@甲站着。\n5-10秒：@甲抬头。',
+    })],
+  }))
+  assert.ok(!codes(valid).includes('prompt_segment_duration_invalid'))
+  assert.ok(!codes(valid).includes('prompt_timeline_broken'))
+
+  const invalid = evaluateStoryboardRules(input({
+    shots: [shot({
+      duration: 6,
+      description: '【镜头1】@甲站着。',
+      videoPrompt: '出场人物：@甲｜场景：@室\n0-0.5秒：@甲站着。\n0.5-6秒：@甲抬头。',
+    })],
+  }))
+  assert.ok(codes(invalid).includes('prompt_segment_duration_invalid'))
+
+  const overlong = evaluateStoryboardRules(input({
+    shots: [shot({
+      duration: 1,
+      description: '【镜头1】@甲说：「一二三四五六七八」。',
+      videoPrompt: '出场人物：@甲｜场景：@室\n0-1秒：@甲说：「一二三四五六七八」。',
+    })],
+  }))
+  assert.ok(codes(overlong).includes('prompt_segment_too_long'))
+
+  const fits = evaluateStoryboardRules(input({
+    shots: [shot({
+      duration: 5,
+      description: '【镜头1】@甲说：「一二三四五六七八九十一二三四五六七八」。',
+      videoPrompt: '出场人物：@甲｜场景：@室\n0-5秒：@甲说：「一二三四五六七八九十一二三四五六七八」。',
+    })],
+  }))
+  assert.ok(!codes(fits).includes('prompt_segment_too_long'))
+})
+
+test('固定分区提示词缺画面调度/负面约束给警告，旧格式不报', () => {
+  const legacy = evaluateStoryboardRules(input({
+    shots: [shot({ duration: 3, description: '【镜头1】@甲站着。', videoPrompt: '出场人物：@甲｜场景：@室\n0-3秒：@甲站着。' })],
+  }))
+  assert.ok(!codes(legacy).includes('prompt_blocking_missing'))
+  assert.ok(!codes(legacy).includes('prompt_negative_missing'))
+
+  const onlyNegative = evaluateStoryboardRules(input({
+    shots: [shot({
+      duration: 3,
+      description: '【镜头1】@甲站着。',
+      videoPrompt: '出场人物：@甲｜场景：@室\n0-3秒：@甲站着。\n负面约束：只出现画内人物。',
+    })],
+  }))
+  assert.ok(codes(onlyNegative).includes('prompt_blocking_missing'))
+  assert.ok(!codes(onlyNegative).includes('prompt_negative_missing'))
+
+  const full = evaluateStoryboardRules(input({
+    shots: [shot({
+      duration: 3,
+      description: '【镜头1】@甲站着。',
+      videoPrompt: '出场人物：@甲｜场景：@室\n画面调度：画面左@甲；画面右@乙；窗在左后。\n0-3秒：@甲站着。\n负面约束：只出现画内人物。',
+    })],
+  }))
+  assert.ok(!codes(full).includes('prompt_blocking_missing'))
+  assert.ok(!codes(full).includes('prompt_negative_missing'))
 })

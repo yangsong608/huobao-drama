@@ -9,17 +9,17 @@ const read = (path) => readFileSync(new URL(path, root), 'utf8')
 const useApi = read('app/composables/useApi.ts')
 const episode = read('app/views/drama/episode.vue')
 
-test('分块拆分 API：创建、最近任务、按 ID 查询与续拆', () => {
-  assert.match(useApi, /export const storyboardSplitAPI/)
-  assert.match(useApi, /\/agent\/storyboard_breaker\/split-jobs'/)
-  assert.match(useApi, /split-jobs\/latest\//)
+test('四段式管线 API：创建、最近任务、按 ID 查询与续拆', () => {
+  assert.match(useApi, /export const storyboardPipelineAPI/)
+  assert.match(useApi, /\/agent\/storyboard_director\/pipeline-jobs'/)
+  assert.match(useApi, /pipeline-jobs\/latest\//)
   assert.match(useApi, /\/resume/)
 })
 
-test('制作页改用分块任务接口拆分，不再走超长同步请求', () => {
-  assert.match(episode, /storyboardSplitAPI\.create/)
-  assert.match(episode, /storyboardSplitAPI\.latest/)
-  assert.match(episode, /storyboardSplitAPI\.resume/)
+test('制作页改用四段式管线接口拆分，不再走超长同步请求', () => {
+  assert.match(episode, /storyboardPipelineAPI\.create/)
+  assert.match(episode, /storyboardPipelineAPI\.latest/)
+  assert.match(episode, /storyboardPipelineAPI\.resume/)
   assert.match(episode, /splitJob/)
   assert.match(episode, /splitRunning/)
   assert.match(episode, /startSplitPolling|splitPoll/)
@@ -27,6 +27,7 @@ test('制作页改用分块任务接口拆分，不再走超长同步请求', ()
   // 续拆提示要出现在工具栏与空态
   assert.match(episode, /episode\.sb\.splitProgress/)
   assert.match(episode, /episode\.sb\.resumeSplit/)
+  assert.match(episode, /episode\.sb\.pipelineRepairProgress/)
   // 进入页面恢复最近任务
   assert.match(episode, /restoreSplitJob/)
 })

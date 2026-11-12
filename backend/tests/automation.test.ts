@@ -213,3 +213,65 @@ test('自动化检验任务无法创建时只记录错误，不抛出中断流�
 after(async () => {
   await fs.rm(root, { recursive: true, force: true })
 })
+
+test('画内人物过滤：信息头只列沈砚时，不给画外的阿蛮送参考图', async () => {
+  const [ep] = await db.select().from(schema.episodes)
+  const inserted = await db.insert(schema.storyboards).values({
+    episodeId: ep.id,
+    storyboardNumber: 2,
+    sceneId: 1,
+    duration: 5,
+    videoPrompt: '出场人物：@沈砚｜场景：@破庙\n0-5秒：@沈砚推门，@阿蛮在门外等候。',
+    createdAt: ts,
+    updatedAt: ts,
+  }).returning().get()
+  await db.insert(schema.storyboardCharacters).values([
+    { storyboardId: inserted.id, characterId: 1 },
+    { storyboardId: inserted.id, characterId: 2 },
+  ])
+  await db.insert(schema.storyboardProps).values([{ storyboardId: inserted.id, propId: 1 }])
+
+  const request = await buildVideoRequest(ep.id, inserted)
+  assert.deepEqual(request.referenceImageUrls, [
+    'static/projects/1/images/scene.png',
+    'static/projects/1/images/shen.png',
+    'static/projects/1/images/lamp.png',
+  ])
+  assert.match(request.prompt, /@图片2沈砚/)
+  assert.match(request.prompt, /@图片1破庙/)
+  assert.match(request.prompt, /@阿蛮/)
+  assert.ok(!request.prompt.includes('@图片3阿蛮'))
+})
+
+test('尾帧链：没有显式首帧时，用上一镜末帧资产作为本镜首帧', async () => {
+  const [ep] = await db.select().from(schema.episodes)
+  const [previous] = await db.select().from(schema.storyboards)
+    .where(eq(schema.storyboards.storyboardNumber, 2))
+  await db.insert(schema.assets).values({
+    dramaId: 1,
+    episodeId: ep.id,
+    storyboardId: previous.id,
+    storyboardNum: 2,
+    name: '镜头2末帧',
+    type: 'image',
+    category: 'storyboard_frame',
+    url: 'static/projects/1/frames/ep-1/sb2-last.jpg',
+    createdAt: ts,
+    updatedAt: ts,
+  })
+  const shot = await db.insert(schema.storyboards).values({
+    episodeId: ep.id,
+    storyboardNumber: 3,
+    sceneId: 1,
+    duration: 5,
+    videoPrompt: '出场人物：@沈砚｜场景：@破庙\n0-5秒：@沈砚推门。',
+    createdAt: ts,
+    updatedAt: ts,
+  }).returning().get()
+  await db.insert(schema.storyboardCharacters).values([{ storyboardId: shot.id, characterId: 1 }])
+  await db.insert(schema.storyboardProps).values([{ storyboardId: shot.id, propId: 1 }])
+
+  const request = await buildVideoRequest(ep.id, shot)
+  assert.equal(request.firstFrameUrl, 'static/projects/1/frames/ep-1/sb2-last.jpg')
+  assert.ok(!request.referenceImageUrls.includes('static/projects/1/frames/ep-1/sb2-last.jpg'))
+})

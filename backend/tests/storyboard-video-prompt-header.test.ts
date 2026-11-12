@@ -308,3 +308,65 @@ test('首行只是时间段台词时仍判定为缺少信息头', async () => {
     `出场人物：@孙郎中｜场景：@医馆\n${body}`,
   )
 })
+
+test('台词被压缩或丢标点时拒绝保存，且不清空旧分镜', async () => {
+  const episodeId = newEpisode()
+  const characterId = newCharacter('贾婆子')
+  const sceneId = newScene('邓州西市街道')
+  const rc = context(episodeId)
+  const line = '呦！六婶起得可是够早，来来，咱这有刚出锅的大白炊饼，还不捡一笼家去？'
+  const description = `【镜头1】@贾婆子说：「${line}」`
+
+  await save(rc, [{
+    shot_number: 1,
+    scene_id: sceneId,
+    character_ids: [characterId],
+    description,
+    video_prompt: `0-6秒：@贾婆子说：「${line}」`,
+    duration: 6,
+  }])
+  const before = liveRows(episodeId)[0].videoPrompt
+
+  await assert.rejects(
+    save(rc, [{
+      replace_existing: true,
+      shot_number: 1,
+      scene_id: sceneId,
+      character_ids: [characterId],
+      description,
+      video_prompt: '0-3秒：@贾婆子说：「呦！六婶起得可是够早」',
+      duration: 6,
+    }]),
+    /拒绝保存|来来/,
+  )
+  assert.equal(liveRows(episodeId).length, 1)
+  assert.equal(liveRows(episodeId)[0].videoPrompt, before)
+})
+
+test('更新视频提示词丢标点时拒绝更新并保留原提示词', async () => {
+  const episodeId = newEpisode()
+  const characterId = newCharacter('六婶')
+  const sceneId = newScene('邓州西市街道')
+  const rc = context(episodeId)
+  const line = '炊饼有何吃头儿？家里头的要吃唐记，要不老身才不起这大早！'
+  const description = `【镜头1】@六婶说：「${line}」`
+
+  await save(rc, [{
+    shot_number: 1,
+    scene_id: sceneId,
+    character_ids: [characterId],
+    description,
+    video_prompt: `0-6秒：@六婶说：「${line}」`,
+    duration: 6,
+  }])
+  const shot = liveRows(episodeId)[0]
+
+  await assert.rejects(
+    (storyboardTools.updateStoryboard as any).execute(
+      { storyboard_id: shot.id, video_prompt: '0-3秒：@六婶说：「炊饼有何吃头儿？」\n3-6秒：@六婶说：「家里头的要吃唐记」' },
+      { requestContext: rc },
+    ),
+    /拒绝更新|缺少/,
+  )
+  assert.equal(liveRows(episodeId)[0].videoPrompt, shot.videoPrompt)
+})

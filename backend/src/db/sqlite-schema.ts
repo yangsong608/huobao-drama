@@ -240,6 +240,102 @@ export const sqliteSchemaStatements = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_storyboard_props_prop_id ON storyboard_props (prop_id)`,
 
+  `CREATE TABLE IF NOT EXISTS scene_geographies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    drama_id INTEGER NOT NULL,
+    scene_id INTEGER NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    layout_json TEXT,
+    landmarks_json TEXT,
+    camera_sides_json TEXT,
+    axis_line TEXT,
+    canonical_scene_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_scene_geographies_scene ON scene_geographies (scene_id)`,
+
+  `CREATE TABLE IF NOT EXISTS coverage_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    scene_id INTEGER,
+    profile_key TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    target_duration INTEGER NOT NULL DEFAULT 0,
+    units_json TEXT,
+    summary_json TEXT,
+    status TEXT NOT NULL DEFAULT 'draft',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_coverage_plans_episode ON coverage_plans (episode_id, scene_id)`,
+
+  `CREATE TABLE IF NOT EXISTS shot_relations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    from_shot_id INTEGER NOT NULL,
+    to_shot_id INTEGER NOT NULL,
+    relation TEXT,
+    axis_side TEXT,
+    expected_screen_direction TEXT,
+    tail_frame_ref TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_shot_relations_episode ON shot_relations (episode_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_shot_relations_from ON shot_relations (from_shot_id)`,
+
+  `CREATE TABLE IF NOT EXISTS visual_preflight_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    storyboard_id INTEGER NOT NULL,
+    contract_version INTEGER NOT NULL DEFAULT 0,
+    prompt_hash TEXT,
+    verdict TEXT NOT NULL DEFAULT 'warn',
+    checks_json TEXT,
+    issues_json TEXT,
+    evidence_json TEXT,
+    model TEXT,
+    provider TEXT,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_visual_preflight_storyboard ON visual_preflight_reports (storyboard_id, id)`,
+
+  `CREATE TABLE IF NOT EXISTS acceptance_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    storyboard_id INTEGER NOT NULL,
+    task_id INTEGER,
+    video_url TEXT,
+    video_fingerprint TEXT,
+    contract_version INTEGER NOT NULL DEFAULT 0,
+    verdict TEXT NOT NULL DEFAULT 'warn',
+    checks_json TEXT,
+    issues_json TEXT,
+    evidence_json TEXT,
+    model TEXT,
+    provider TEXT,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_acceptance_storyboard ON acceptance_reports (storyboard_id, id)`,
+
+  `CREATE TABLE IF NOT EXISTS transition_shots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    from_shot_id INTEGER NOT NULL,
+    to_shot_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    reason TEXT,
+    time_cue TEXT,
+    location_cue TEXT,
+    character_cue TEXT,
+    duration INTEGER NOT NULL DEFAULT 2,
+    contract_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_transition_shots_episode ON transition_shots (episode_id)`,
+
   `CREATE TABLE IF NOT EXISTS ai_service_configs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     service_type TEXT NOT NULL,
@@ -350,11 +446,105 @@ export const sqliteSchemaStatements = [
     completed_chunks INTEGER NOT NULL DEFAULT 0,
     shot_count INTEGER NOT NULL DEFAULT 0,
     error_msg TEXT,
+    pause_requested INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     finished_at TEXT
   )`,
   `CREATE INDEX IF NOT EXISTS idx_storyboard_split_jobs_episode ON storyboard_split_jobs (episode_id, created_at)`,
+
+  `CREATE TABLE IF NOT EXISTS storyboard_pipeline_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    status TEXT DEFAULT 'pending',
+    stage TEXT DEFAULT 'skeleton',
+    message TEXT NOT NULL,
+    model TEXT,
+    config_id INTEGER,
+    total_shots INTEGER NOT NULL DEFAULT 0,
+    repaired_shots INTEGER NOT NULL DEFAULT 0,
+    validated_shots INTEGER NOT NULL DEFAULT 0,
+    failed_shots INTEGER NOT NULL DEFAULT 0,
+    current_shot_number INTEGER,
+    sound_units INTEGER NOT NULL DEFAULT 0,
+    sound_status TEXT NOT NULL DEFAULT 'none',
+    state_json TEXT,
+    error_msg TEXT,
+    pause_requested INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_storyboard_pipeline_jobs_episode ON storyboard_pipeline_jobs (episode_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_storyboard_pipeline_jobs_status ON storyboard_pipeline_jobs (status)`,
+
+  `CREATE TABLE IF NOT EXISTS storyboard_skeletons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    chunk_index INTEGER,
+    storyboard_number INTEGER NOT NULL,
+    scene_id INTEGER,
+    title TEXT,
+    location TEXT,
+    time TEXT,
+    character_ids TEXT,
+    prop_ids TEXT,
+    duration INTEGER DEFAULT 0,
+    transition TEXT DEFAULT 'cut',
+    continuity TEXT,
+    action_summary TEXT NOT NULL,
+    source_excerpt TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    storyboard_id INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    issues_json TEXT,
+    repair_log_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_storyboard_skeletons_job ON storyboard_skeletons (job_id, storyboard_number)`,
+
+  `CREATE TABLE IF NOT EXISTS sound_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'pending',
+    plan_json TEXT,
+    validation_json TEXT,
+    fingerprint TEXT,
+    model TEXT,
+    config_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sound_plans_episode ON sound_plans (episode_id, version)`,
+
+  `CREATE TABLE IF NOT EXISTS sound_cues (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL,
+    unit_key TEXT NOT NULL,
+    unit_label TEXT,
+    kind TEXT NOT NULL,
+    from_shot_id INTEGER NOT NULL,
+    to_shot_id INTEGER NOT NULL,
+    from_shot_number INTEGER,
+    to_shot_number INTEGER,
+    start_ms INTEGER,
+    end_ms INTEGER,
+    description TEXT NOT NULL,
+    intensity TEXT,
+    entry TEXT,
+    exit TEXT,
+    delivery TEXT DEFAULT 'native',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sound_cues_plan ON sound_cues (plan_id, kind, sort_order)`,
 
   `CREATE TABLE IF NOT EXISTS storyboard_audit_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1464,6 +1654,44 @@ export function initSqliteSchema(sqlite: Database.Database) {
   if (!storyboardColumns.has('transition_kind')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN transition_kind TEXT')
   if (!storyboardColumns.has('transition_text')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN transition_text TEXT')
   if (!storyboardColumns.has('transition_subtitle')) sqlite.exec('ALTER TABLE storyboards ADD COLUMN transition_subtitle TEXT')
+  // 镜头合同字段：旧数据 contract_version=0，解析后写入 1；全部可空，不阻断旧链路
+  const contractColumns: Record<string, string> = {
+    coverage_type: 'TEXT',
+    axis_side: 'TEXT',
+    screen_left: 'TEXT',
+    screen_right: 'TEXT',
+    foreground_shoulder: 'TEXT',
+    cast_on_screen: 'TEXT',
+    cast_off_screen: 'TEXT',
+    blocking_start: 'TEXT',
+    blocking_end: 'TEXT',
+    action_start: 'TEXT',
+    action_end: 'TEXT',
+    gaze_target: 'TEXT',
+    camera_side: 'TEXT',
+    scene_geography_id: 'INTEGER',
+    negative_constraints: 'TEXT',
+    background_landmarks: 'TEXT',
+    segment_plan: 'TEXT',
+    contract_version: 'INTEGER NOT NULL DEFAULT 0',
+    plan_unit_id: 'TEXT',
+    // 第四步声音设计：单镜只存短增量与声音单元键
+    sound_cue: 'TEXT',
+    sound_unit_key: 'TEXT',
+  }
+  for (const [name, type] of Object.entries(contractColumns)) {
+    if (!storyboardColumns.has(name)) {
+      sqlite.exec(`ALTER TABLE storyboards ADD COLUMN ${name} ${type}`)
+      storyboardColumns.add(name)
+    }
+  }
+  // 分镜拆分：块间暂停请求（D10），旧任务默认 0
+  const splitJobColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(storyboard_split_jobs)').all() as { name: string }[]).map(row => row.name),
+  )
+  if (!splitJobColumns.has('pause_requested')) {
+    sqlite.exec('ALTER TABLE storyboard_split_jobs ADD COLUMN pause_requested INTEGER NOT NULL DEFAULT 0')
+  }
   // 动作检验策略快照：旧任务为空，按当前默认策略展示。
   const auditJobColumns = new Set(
     (sqlite.prepare('PRAGMA table_info(storyboard_audit_jobs)').all() as { name: string }[]).map(row => row.name),

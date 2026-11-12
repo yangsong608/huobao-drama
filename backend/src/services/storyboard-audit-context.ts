@@ -97,6 +97,19 @@ export interface AuditContextShot {
   transitionText: string | null
   transitionSubtitle: string | null
   continuity: string | null
+  /** 镜头合同：用于成对轴线/屏幕方向/人物在场判定 */
+  coverageType: string | null
+  axisSide: string | null
+  screenLeft: string[]
+  screenRight: string[]
+  foregroundShoulder: string | null
+  castOnScreen: number[]
+  castOffScreen: number[]
+  backgroundLandmarks: Array<{ name: string; side: string }>
+  actionStart: string | null
+  actionEnd: string | null
+  sceneGeographyId: number | null
+  contractVersion: number
   duration: number
   composedImage: string | null
   firstFrameImage: string | null
@@ -256,6 +269,39 @@ function defaultFileExists(relativePath: string): boolean {
     return existsSync(getAbsolutePath(value))
   } catch {
     return false
+  }
+}
+
+function parseStringList(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function parseLandmarkList(raw: string | null | undefined): Array<{ name: string; side: string }> {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter(item => item && typeof item.name === 'string')
+      .map(item => ({ name: String(item.name), side: String(item.side || '') }))
+  } catch {
+    return []
+  }
+}
+
+function parseIdList(raw: string | null | undefined): number[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((item): item is number => typeof item === 'number') : []
+  } catch {
+    return []
   }
 }
 
@@ -633,6 +679,18 @@ export function buildAuditEpisodeContext(
       transitionText: row.transitionText,
       transitionSubtitle: row.transitionSubtitle,
       continuity: row.continuity,
+      coverageType: row.coverageType,
+      axisSide: row.axisSide,
+      screenLeft: parseStringList(row.screenLeft),
+      screenRight: parseStringList(row.screenRight),
+      foregroundShoulder: row.foregroundShoulder,
+      castOnScreen: parseIdList(row.castOnScreen),
+      castOffScreen: parseIdList(row.castOffScreen),
+      backgroundLandmarks: parseLandmarkList(row.backgroundLandmarks),
+      actionStart: row.actionStart,
+      actionEnd: row.actionEnd,
+      sceneGeographyId: row.sceneGeographyId ?? null,
+      contractVersion: row.contractVersion ?? 0,
       duration: row.duration ?? 0,
       composedImage: row.composedImage,
       firstFrameImage: row.firstFrameImage,
@@ -873,6 +931,13 @@ function shotBlock(shot: AuditContextShot, suffix = ''): string[] {
   lines.push(`- 转场：${shot.transition || 'cut'}｜连贯：${shot.continuity || '未填'}`)
   lines.push(`- 场景：${shot.location || '未指定'}（场景资产：${assetStatusText(shot.sceneAsset)}）｜时间：${(shot.time || '').trim() || '未填'}`)
   lines.push(`- 出场角色：${shot.characterAssets.length ? shot.characterAssets.map((asset) => `${asset.name}${asset.linked ? '' : '（未关联本集）'}`).join('、') : '无'}`)
+  if (shot.contractVersion > 0) {
+    const names = (ids: number[]) => ids
+      .map(id => shot.characterAssets.find(asset => asset.id === id)?.name)
+      .filter(Boolean)
+      .join('、') || '无'
+    lines.push(`- 镜头合同：覆盖=${shot.coverageType || '未填'}｜轴线=${shot.axisSide || '未填'}｜屏幕左=${shot.screenLeft.join('、') || '未填'}｜屏幕右=${shot.screenRight.join('、') || '未填'}｜过肩=${shot.foregroundShoulder || '未填'}｜画内=${names(shot.castOnScreen)}｜画外=${names(shot.castOffScreen)}｜地标=${shot.backgroundLandmarks.map(item => `${item.name}:${item.side}`).join('、') || '未填'}｜动作起点=${shot.actionStart || '未填'}｜动作终点=${shot.actionEnd || '未填'}`)
+  }
   if (shot.propAssets.length) {
     lines.push(`- 道具：${shot.propAssets.map((asset) => asset.name).join('、')}`)
   }
@@ -1076,7 +1141,7 @@ export function buildAuditRepairPrompt(context: AuditEpisodeContext, issues: Aud
   lines.push('- 把本轮所有有把握的动作放在一次 apply_storyboard_repair 调用里批量提交；不要分批提交，也不要只处理一部分就结束。')
   lines.push('- 没有把握、需要创作判断或证据不足的问题不要提交动作，交给人工处理；若确实没有任何可安全执行的动作，直接结束本轮。')
   lines.push('- 不新增角色、场景、道具、台词或旁白；不改台词文本与说话人。')
-  lines.push(`- 延长时长只能增加且不得超过 ${context.maxSegmentSeconds} 秒（当前拆分方式单段上限）；超出上限的台词容量问题不要提交动作，交人工压缩或拆分台词。`)
+  lines.push(`- 延长时长只能增加且不得超过 ${context.maxSegmentSeconds} 秒（当前拆分方式单段上限）；超出上限的台词容量问题不要提交动作，交人工拆分到其他分镜；任何情况下都不得删字、改字或丢标点。`)
   lines.push('- 过渡分镜插入由服务端内部完成；你不要提交或描述任何插卡动作，也不要改变分镜数量或分镜号。')
   lines.push('- 带「只读」的分镜不允许修改；检查 5 的资产问题不允许自动修复。')
   lines.push('- 同一分镜最多 3 条动作，同一字段只能修改一次。')

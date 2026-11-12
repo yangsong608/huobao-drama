@@ -244,6 +244,13 @@ function onScroll() {
 function onKeydown(e) {
   if (e.isComposing) return
   const ta = taEl.value
+  // Ctrl/Cmd+Enter 显式保存；普通 Enter 留给换行（@ 下拉打开时 Enter 仍用于选中）
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    e.preventDefault()
+    closeMention()
+    emit('commit', ta?.value ?? text.value)
+    return
+  }
   // @引用整体删除：光标在完整引用后按退格 / 在完整引用前按 Delete，整段一次删除
   if (ta && (e.key === 'Backspace' || e.key === 'Delete') && ta.selectionStart === ta.selectionEnd) {
     const hit = e.key === 'Backspace' ? mentionBeforeCaret() : mentionAfterCaret()

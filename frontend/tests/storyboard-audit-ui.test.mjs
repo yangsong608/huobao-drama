@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 const episode = readFileSync(new URL('../app/views/drama/episode.vue', import.meta.url), 'utf8')
+const auditBadge = readFileSync(new URL('../app/components/AuditStateBadge.vue', import.meta.url), 'utf8')
 const api = readFileSync(new URL('../app/composables/useApi.ts', import.meta.url), 'utf8')
 const detail = readFileSync(new URL('../app/views/drama/detail.vue', import.meta.url), 'utf8')
 const locales = ['zh', 'en', 'ja', 'ko'].map(lang => [
@@ -41,28 +42,31 @@ test('左侧每个镜头卡片在摄像头按钮右侧显示逐镜检验状态�
   const rowEnd = episode.indexOf('class="video-task-footer"')
   const row = episode.slice(rowStart, rowEnd)
   const cameraAt = row.indexOf('class="btn btn-icon btn-sm video-task-action"')
-  const auditAt = row.indexOf('class="btn btn-icon btn-sm video-task-audit"')
+  const auditAt = row.indexOf('<AuditStateBadge')
   const deleteAt = row.indexOf('class="btn btn-icon btn-sm video-task-delete"')
   assert.ok(cameraAt > 0, '镜头卡片应有摄像头按钮')
   assert.ok(auditAt > cameraAt, '检验图标应在摄像头按钮右侧')
   assert.ok(deleteAt > auditAt, '检验图标应在删除按钮之前')
-  assert.match(row, /@click\.stop="openAuditPanel\(task\.storyboard\.id\)"/)
-  assert.match(row, /auditShotState\(task\.storyboard\)/)
-  assert.match(row, /video-task-audit-badge/)
-  assert.match(row, /video-task-audit-stale/)
+  assert.match(row, /@open="openAuditPanel\(task\.storyboard\.id\)"/)
+  assert.match(row, /:state="auditShotDisplay\(task\.storyboard\)\.state"/)
+  assert.match(row, /:severity="auditShotDisplay\(task\.storyboard\)\.severity"/)
+  assert.match(row, /:count="auditShotDisplay\(task\.storyboard\)\.count"/)
   assert.match(episode, /function auditShotState\(sb\)/)
-  for (const state of ['pending', 'running', 'done', 'failed']) {
-    assert.match(episode, new RegExp(`is-\\$\\{shot\\.status\\}|audit-shot-${state}`), `缺少 ${state} 状态样式`)
+  assert.match(episode, /function auditShotDisplay\(sb\)/)
+  for (const state of ['pending', 'running', 'failed', 'pass', 'warning', 'error', 'stale', 'rule_only']) {
+    assert.match(episode, new RegExp(`state: '${state}'`), `缺少 ${state} 派生状态`)
+  }
+  for (const state of ['pending', 'running', 'warning', 'error', 'failed', 'rule_only', 'stale']) {
+    assert.match(auditBadge, new RegExp(`is-${state}`), `缺少 ${state} 状态样式`)
   }
 })
 
-test('检验完成后干净的镜头不再显示检验状态标识', () => {
+test('检验完成后干净的镜头不再显示检验状态标识（D12 干净就隐藏）', () => {
   assert.match(episode, /v-if="auditShotMarkerVisible\(task\.storyboard\)"/)
   assert.match(episode, /function auditShotMarkerVisible\(sb\) \{/)
-  assert.match(episode, /function auditShotMarkerVisible\(sb\) \{[\s\S]{0,360}if \(!job\) return true/)
-  assert.match(episode, /function auditShotMarkerVisible\(sb\) \{[\s\S]{0,360}if \(auditRunning\.value\) return true/)
-  assert.match(episode, /function auditShotMarkerVisible\(sb\) \{[\s\S]{0,420}shot\.stale \|\| shot\.status === 'running' \|\| shot\.status === 'failed'/)
-  assert.match(episode, /function auditShotMarkerVisible\(sb\) \{[\s\S]{0,480}errorCount \+ shot\.warningCount \+ shot\.infoCount > 0/)
+  assert.match(episode, /if \(!auditJob\.value\) return false/)
+  assert.match(episode, /view\.state !== 'pass' && view\.state !== 'none'/)
+  assert.match(episode, /if \(shot\.status === 'done'\) return \{ state: 'pass'/)
 })
 
 test('镜头行操作按钮收进同一容器，栅格固定三列避免删除按钮换行', () => {
@@ -276,8 +280,8 @@ test('四语言补齐动作检验、过渡类型与自动化阶段文案', () =>
 })
 
 test('平板端检验抽屉与过渡弹窗全屏适配，检验按钮触摸区域不小于 28px', () => {
-  assert.match(episode, /\.video-task-audit\s*\{[^}]*min-width:\s*28px/)
-  assert.match(episode, /\.video-task-audit\s*\{[^}]*min-height:\s*28px/)
+  assert.match(auditBadge, /\.audit-state-badge\s*\{[^}]*min-width:\s*28px/)
+  assert.match(auditBadge, /\.audit-state-badge\s*\{[^}]*min-height:\s*28px/)
   assert.match(episode, /@media \(max-width: 1180px\) \{[\s\S]{0,4000}\.audit-drawer\s*\{[^}]*width:\s*100%/)
   assert.match(episode, /@media \(max-width: 1180px\) \{[\s\S]{0,6000}\.transition-create-dialog\s*\{[^}]*width:\s*100%/)
 })

@@ -662,7 +662,8 @@
       "promptGenerator": "プロンプト生成",
       "langFallback": "中国語にフォールバック",
       "followContentLang": "編集言語：{lang}（「一般 → AI コンテンツ言語」で切替）",
-      "storyboardAuditor": "絵コンテ動作検査"
+      "storyboardAuditor": "絵コンテ動作検査",
+      "voiceDesigner": "音声設計"
     },
     "skills": {
       "agentList": "Agent 一覧",
@@ -681,6 +682,29 @@
       "descPlaceholder": "この Skill の用途を簡単に記述",
       "create": "作成",
       "created": "Skill を作成しました"
+    },
+    "knowledge": {
+      "tab": "知識ベース",
+      "desc": "各 Agent は自分に割り当てられた知識ベースだけを読みます。全員共通読み込みはしません。",
+      "assignedCount": "{n} 件割り当て",
+      "emptyTitle": "この Agent には知識ベースがありません",
+      "emptyDesc": "下の未割り当てリストから追加してください。",
+      "unassign": "割り当て解除",
+      "assign": "この Agent に割り当て",
+      "unassignedTitle": "この Agent に未割り当て",
+      "required": "必読",
+      "fileMissing": "ファイルなし",
+      "name": "名前",
+      "description": "説明",
+      "content": "知識ベース本文",
+      "add": "知識ベースを追加",
+      "addTitle": "知識ベースを追加 — {agent}",
+      "id": "知識ベース ID",
+      "idHint": "英語、一意",
+      "create": "作成",
+      "created": "知識ベースを作成しました",
+      "delete": "削除",
+      "deleteConfirm": "知識ベース「{name}」を削除しますか？"
     },
     "cfg": {
       "editTitle": "サービス設定を編集",
@@ -1207,6 +1231,8 @@
       "totalCount": "全 {n} 件",
       "duration": "長さ",
       "descSection": "分镜説明",
+      "legacyFields": "元の説明と旧フィールド（通常は編集不要）",
+      "legacyFieldsHint": "説明/雰囲気/トランジション/連続性は旧データと AI 生成用に保持されます。日常の編集は下の固定セクションの動画プロンプトを使用してください。",
       "descLabel": "画面説明",
       "descHint": "【ショット1】【ショット2】…と子ショットごとに記述。セリフは「キャラクター名のセリフ：「セリフ」」、ナレーションは「ナレーション：内容」",
       "descPlaceholder": "分镜の画面説明",
@@ -1221,11 +1247,21 @@
       "continuityPlaceholder": "前カットの終わりの動作・視線・立ち位置・環境音のつながり",
       "breakingElapsed": "分鏡を分解中…{s} 秒経過。生成済みカットは自動更新されます",
       "splitProgress": "分割分解中：{done}/{total} 段 · {shots} カット保存済み",
+      "pipelineStage": {
+        "skeleton": "スケルトン",
+        "repair": "カット別修正",
+        "sound": "音響設計"
+      },
+      "pipelineRepairProgress": "カット別修正/検証：{done}/{total} 通過 · 現在 {current} カット目",
+      "pipelineSoundProgress": "音響設計：{units} 音響ユニット",
+      "splitPause": "一時停止（現在のブロック完了後）",
+      "splitPauseRequested": "一時停止を要求しました。現在のブロック完了後に停止します",
       "splitFailed": "{chunk}/{total} 段目の分解に失敗：{error}",
       "splitDone": "分割分解が完了：全 {n} カット",
       "splitResumed": "残りの段の分解を再開しました",
       "splitAlreadyRunning": "分解タスクが実行中です。進捗を表示します",
       "resumeSplit": "残りの段の分解を続行",
+      "resumePipeline": "修正/検証を続行",
       "splitStartFailed": "分割分解を開始できませんでした。再試行してください",
       "splitActionFailed": "分解の続行に失敗しました。後でもう一度お試しください",
       "videoPromptSection": "動画プロンプト",
@@ -1251,6 +1287,24 @@
       "batchDoneFailed": "動画プロンプトの一括生成が完了しました（{n} 件失敗）",
       "batchFailed": "動画プロンプトの一括生成に失敗しました",
       "promptGenerated": "分镜 #{n} の動画プロンプトを生成しました"
+    },
+    "soundPanel": {
+      "button": "音響設計",
+      "title": "音響設計（シーン/物語単位）",
+      "version": "第 {v} 版",
+      "deliveryNative": "動画モデル原生の BGM/環境音",
+      "deliveryPost": "ポストプロダクション BGM",
+      "loading": "音響プランを読み込み中…",
+      "empty": "音響プランはまだありません。全カットの検証通過後に第4ステップが自動実行されます。",
+      "close": "閉じる",
+      "entry": "開始：",
+      "exit": "終了：",
+      "track": {
+        "bgm": "BGM",
+        "ambience": "環境音",
+        "sfx": "画面内効果音",
+        "silence": "静寂"
+      }
     },
     "ref": {
       "title": "参照素材",
@@ -1288,6 +1342,8 @@
       "emptyDesc": "動画タスクは分镜分解の結果から作られます。先に分镜説明と動画プロンプトを生成してから、動画を一括生成してください。",
       "lockedModel": "この話の動画モデル：",
       "listTitle": "動画タスク一覧",
+      "coverageMode": "カバレッジ",
+      "listMode": "リスト",
       "listMeta": "ショット順 · {n} 件のタスク",
       "metricPending": "{n} 生成中",
       "metricDone": "{n} 完了",
@@ -1375,7 +1431,8 @@
       "autoPromptHint": "生成時にプロンプトへ自動追加：「前のショットのラストフレーム：{'@'}{token}」",
       "firstFrameSetFailed": "先頭フレームの設定に失敗しました",
       "firstFrameClearFailed": "先頭フレームの解除に失敗しました",
-      "deleteFailed": "絵コンテ素材の削除に失敗しました"
+      "deleteFailed": "絵コンテ素材の削除に失敗しました",
+      "autoFirstFrame": "自動先頭フレーム"
     },
     "comfy": {
       "modelLabel": "ComfyUI 設定",
@@ -1422,6 +1479,7 @@
       "duration": "分镜の長さ",
       "durationUnit": "秒（2-{max}）",
       "durationHint": "変更すると分镜に即時保存され、リストとバッチ生成にも反映されます",
+      "durationAutoHint": "合計時間はプロンプト内の時間セグメントから自動計算されます",
       "durationLimitWarning": "この分镜は {dur} 秒で上限 {max} 秒を超えています。生成前に短縮するか解像度を変更してください",
       "effective": "{model} · {res} · {dur}秒",
       "boundRefs": "绑定参照画像",
@@ -1839,6 +1897,31 @@
       "statusReady": "準備完了",
       "statusFailed": "失敗",
       "referenceAudioHint": "キャラクター参照音声：動画生成時に口の動きと声色を合わせるために使用します。クリップをアップロードするか、音色バージョンから同期できます。"
+    },
+    "visualCheck": {
+      "title": "ビジュアル事前検査と受け入れ",
+      "hintTag": "L2 / L3",
+      "hint": "事前検査は既存のシーン/人物参考図と先頭フレームを契約と照合します。受け入れは完成映像から5フレーム抽出し、契約・参考図・前カット末尾フレームと照合します。抽出フレームでは音声内容は判定できません。",
+      "runPreflight": "生成前検査",
+      "runningPreflight": "検査中…",
+      "runAcceptance": "生成後受け入れ",
+      "runningAcceptance": "検査中…",
+      "preflightResult": "事前検査結果",
+      "acceptanceResult": "受け入れ結果",
+      "notRun": "未実行",
+      "stale": "期限切れ",
+      "verdictPass": "合格",
+      "verdictWarn": "警告",
+      "verdictBlock": "ブロック",
+      "verdictFail": "不合格",
+      "verdictSkipped": "スキップ",
+      "noIssues": "問題は見つかりません",
+      "preflightDone": "ビジュアル事前検査が完了しました",
+      "preflightFailed": "ビジュアル事前検査に失敗しました",
+      "acceptanceDone": "生成後受け入れが完了しました",
+      "acceptanceFailed": "生成後受け入れに失敗しました",
+      "needPrompt": "先に動画プロンプトを入力してください",
+      "needVideo": "先にカット動画を生成してください"
     }
   },
   "errors": {

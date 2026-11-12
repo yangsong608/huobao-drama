@@ -17,6 +17,7 @@ import {
   getMaxSegmentSeconds,
   type EpisodeCoverage,
 } from './breakdown-methods.js'
+import { buildSceneBindingBlock, getCanonicalSceneGroups } from './scene-canonical.js'
 import { createStoryboardAuditJob, interruptStoryboardAuditForEpisode } from './storyboard-audit-jobs.js'
 import { logTaskError, logTaskProgress, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
 import { buildAgentRequestContext, type AgentRequestContextValues } from '../agents/context.js'
@@ -59,6 +60,8 @@ export interface StoryboardSplitJobView {
   completed_chunks: number
   shot_count: number
   error: string | null
+  /** 已请求块间暂停，当前块完成后停止（D10） */
+  pause_requested: boolean
   chunks: StoryboardSplitChunkView[]
   coverage: EpisodeCoverage | null
   created_at: string
@@ -299,6 +302,7 @@ function toView(row: StoryboardSplitJobRow): StoryboardSplitJobView {
     completed_chunks: row.completedChunks || 0,
     shot_count: row.shotCount || 0,
     error: row.errorMsg || null,
+    pause_requested: Boolean(row.pauseRequested),
     chunks: chunks.map(chunk => ({
       index: chunk.index,
       label: chunk.label,
@@ -396,7 +400,7 @@ function persistChunks(
   }).where(eq(schema.storyboardSplitJobs.id, jobId)).run()
 }
 
-export function buildChunkMessage(input: SplitChunkRunnerInput): string {
+export function buildChunkMessage(input: SplitChunkRunnerInput, sceneBindingBlock = ''): string {
   const chunkChars = nonWsLength(input.chunk.script)
   const chunkFloor = chunkChars > 0
     ? Math.ceil((chunkChars * 0.12 / input.maxSegmentSeconds) * 0.9)
@@ -408,9 +412,11 @@ export function buildChunkMessage(input: SplitChunkRunnerInput): string {
     `整集剧本已按场次切成 ${input.totalChunks} 段，逐段调用并即时保存，避免单次请求过长。`,
     `- 本段范围：${input.chunk.label}，约 ${chunkChars} 字`,
     `- 只拆分下面给出的剧本片段，不要拆分或改写其它场次；read_storyboard_context 在本模式下也只返回本段。`,
-    `- 本段段落数下限：${chunkFloor} 段（按 0.12 秒/字、单段最长 ${input.maxSegmentSeconds} 秒、90% 折算）。`,
-    `- 直接调用 save_storyboards 保存本段全部分镜；shot_number 由系统跨段统一连续编号，按剧情顺序填写即可。`,
-    `- 不要传 replace_existing：旧分镜与跨段编号由系统处理。`,
+    `- 本段分镜数下限：${chunkFloor} 个（按 0.12 秒/字、单镜最长 ${input.maxSegmentSeconds} 秒、90% 折算）。`,
+    `- 直接调用 save_storyboards 保存本段全部分镜；一个分镜只能一个机位/一个主体/一个连续动作，禁止多个【镜头N】子镜头。shot_number 由系统跨段统一连续编号，按剧情顺序填写即可。`,
+    `- 时间帧必须从 0 连续写到 duration：例如 duration 9 秒要写 0-3、3-6、6-9，不能只写 0-4 就结束；最后一段结束必须等于 duration。`,
+    `- 每个分镜的 video_prompt 必须固定四区：信息头 → 「画面调度：画面左：…；画面右：…；过…肩；背景地标：窗在左后、门在右后；轴线A；动作起点：…；动作终点：…」→ 时间帧 → 负面约束。没有地标写「背景地标：无」；单人/空镜轴线写「轴线无」；双人及以上写「轴线A/B」。同一场戏的屏幕左右、轴线、地标侧先在第一镜定一次，后续同场分镜沿用，禁止交换人物左右或门窗侧；缺少任意一项保存会被拒绝。`,
+    `- 不要传 replace_existing：旧分镜与跨段编号由系统处理；第 1 块保存前旧分镜会被整体清空，不要把旧分镜当成参考。`,
     `- 本段必须覆盖片段内全部场次、台词与关键动作，不得删场、并场。`,
   ]
   if (input.previousSummary) {
@@ -421,6 +427,7 @@ export function buildChunkMessage(input: SplitChunkRunnerInput): string {
       '本段第一镜的 continuity 必须承接上一段尾镜的尾动作、视线与站位。',
     )
   }
+  if (sceneBindingBlock) lines.push('', sceneBindingBlock)
   lines.push('', `### 本段剧本片段（${input.chunk.label}）`, input.chunk.script)
   return lines.join('\n')
 }
@@ -444,9 +451,11 @@ async function defaultSplitChunkRunner(input: SplitChunkRunnerInput) {
   const { mastra } = await import('../mastra/index.js')
   const agent = mastra.getAgent('storyboard_breaker')
   if (!agent) throw new Error('拆分 Agent 不可用')
+  const groups = await getCanonicalSceneGroups(input.dramaId)
+  const sceneBindingBlock = buildSceneBindingBlock(input.chunk.script, groups)
   await agent.generate(
-    [{ role: 'user', content: buildChunkMessage(input) }],
-    { maxSteps: 20, requestContext: input.requestContext },
+    [{ role: 'user', content: buildChunkMessage(input, sceneBindingBlock) }],
+    { maxSteps: 40, requestContext: input.requestContext },
   )
 }
 
@@ -530,6 +539,26 @@ export async function createStoryboardSplitJob(
   return { job: toView(row), alreadyRunning: false }
 }
 
+/** 块间暂停：只标记请求，当前块完成后由 runner 在下一个块开始前停下（D10） */
+export function pauseStoryboardSplitJob(jobId: number): StoryboardSplitJobView {
+  const row = getJobRow(jobId)
+  if (!row) throw new Error('拆分任务不存在')
+  if (!['pending', 'running'].includes(String(row.status || ''))) {
+    throw new Error('当前拆分任务不在进行中，无法暂停')
+  }
+  db.update(schema.storyboardSplitJobs)
+    .set({ pauseRequested: 1, updatedAt: now() })
+    .where(eq(schema.storyboardSplitJobs.id, jobId))
+    .run()
+  logTaskProgress('StoryboardSplit', 'pause-requested', {
+    jobId,
+    episodeId: row.episodeId,
+    completedChunks: row.completedChunks || 0,
+    totalChunks: row.totalChunks || 0,
+  })
+  return toView(getJobRow(jobId)!)
+}
+
 export async function resumeStoryboardSplitJob(
   jobId: number,
   options: { autorun?: boolean; runner?: SplitChunkRunner } = {},
@@ -551,6 +580,10 @@ export async function resumeStoryboardSplitJob(
       chunk.shots = 0
     }
   }
+  db.update(schema.storyboardSplitJobs)
+    .set({ pauseRequested: 0, updatedAt: now() })
+    .where(eq(schema.storyboardSplitJobs.id, jobId))
+    .run()
   persistChunks(jobId, chunks, {
     status: 'pending',
     completedChunks: doneChunkCount(chunks),
@@ -600,6 +633,24 @@ export async function runStoryboardSplitJob(
 
     for (const chunk of chunks) {
       if (chunk.status === 'done') continue
+      // D10：块间暂停。当前块完成后，在下一块开始前停下；不中断正在进行的模型调用。
+      const pauseRow = getJobRow(jobId)
+      if (pauseRow?.pauseRequested) {
+        persistChunks(jobId, chunks, {
+          status: 'interrupted',
+          completedChunks: doneChunkCount(chunks),
+          shotCount: liveStoryboards(row.episodeId).length,
+          errorMsg: '已暂停，可继续',
+          finishedAt: null,
+        })
+        logTaskProgress('StoryboardSplit', 'paused', {
+          jobId,
+          episodeId: row.episodeId,
+          completedChunks: doneChunkCount(chunks),
+          totalChunks: chunks.length,
+        })
+        return
+      }
       chunk.status = 'running'
       chunk.startedAt = now()
       chunk.finishedAt = undefined

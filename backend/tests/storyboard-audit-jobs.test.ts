@@ -597,9 +597,9 @@ test('等待视频提示词期间被中断：任务保持中断且不继续检�
     },
     maxPromptWaitMs: 150,
     promptWaitIntervalMs: 5,
-    promptBatchProbe: () => {
+    promptBatchProbe: async () => {
       probeCalls += 1
-      if (probeCalls === 2) void svc.interruptStoryboardAuditForEpisode(episodeId, '重新拆分，检验作废')
+      if (probeCalls === 2) await svc.interruptStoryboardAuditForEpisode(episodeId, '重新拆分，检验作废')
       return { status: 'running', total: 1, completed: 0, failed: 0 }
     },
   })
