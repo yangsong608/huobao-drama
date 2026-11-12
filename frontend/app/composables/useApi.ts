@@ -134,7 +134,17 @@ export const storyboardSplitAPI = {
     api.post('/agent/storyboard_breaker/split-jobs', payload),
   latest: (episodeId: number) => api.get(`/agent/storyboard_breaker/split-jobs/latest/${episodeId}`),
   get: (jobId: number) => api.get(`/agent/storyboard_breaker/split-jobs/${jobId}`),
+  pause: (jobId: number) => api.post(`/agent/storyboard_breaker/split-jobs/${jobId}/pause`),
   resume: (jobId: number) => api.post(`/agent/storyboard_breaker/split-jobs/${jobId}/resume`),
+}
+
+export const storyboardPipelineAPI = {
+  create: (payload: { episode_id: number; drama_id: number; message: string; model?: string; config_id?: number }) =>
+    api.post('/agent/storyboard_director/pipeline-jobs', payload),
+  latest: (episodeId: number) => api.get(`/agent/storyboard_director/pipeline-jobs/latest/${episodeId}`),
+  get: (jobId: number) => api.get(`/agent/storyboard_director/pipeline-jobs/${jobId}`),
+  pause: (jobId: number) => api.post(`/agent/storyboard_director/pipeline-jobs/${jobId}/pause`, {}),
+  resume: (jobId: number) => api.post(`/agent/storyboard_director/pipeline-jobs/${jobId}/resume`, {}),
 }
 
 export const frameAssetAPI = {
@@ -250,6 +260,13 @@ export const storyboardAPI = {
   create: (data: any) => api.post('/storyboards', data),
   update: (id: number, data: any) => api.put(`/storyboards/${id}`, data),
   del: (id: number) => api.del(`/storyboards/${id}`),
+  generationGate: (id: number) => api.get(`/storyboards/${id}/generation-gate`),
+  preflight: (id: number) => api.get(`/storyboards/${id}/preflight`),
+  runPreflight: (id: number, data: any = {}) => api.post(`/storyboards/${id}/preflight`, data),
+  acceptance: (id: number) => api.get(`/storyboards/${id}/acceptance`),
+  runAcceptance: (id: number, data: any = {}) => api.post(`/storyboards/${id}/acceptance`, data),
+  syncContracts: (episodeId: number) => api.post('/storyboards/contracts/sync', { episode_id: episodeId }),
+  soundPlan: (episodeId: number) => api.get(`/storyboards/sound-plan/${episodeId}`),
 }
 
 export const characterAPI = {
@@ -1564,6 +1581,26 @@ export const skillsAPI = {
   create: (data: { id: string; name: string; description?: string }) => api.post('/skills', data),
   update: (id: string, content: string, lang?: string) => api.put(`/skills/${id}${langQ(lang)}`, { content }),
   del: (id: string) => api.del(`/skills/${id}`),
+}
+
+export const knowledgeAPI = {
+  list: (lang?: string) => api.get(`/knowledge${langQ(lang)}`),
+  get: (id: string, lang?: string) => api.get(`/knowledge/${id}${langQ(lang)}`),
+  create: (data: { id: string; name?: string; description?: string; agents?: string[]; required?: boolean; enabled?: boolean; content?: string }) => api.post('/knowledge', data),
+  update: (id: string, data: any, lang?: string) => api.put(`/knowledge/${id}${langQ(lang)}`, data),
+  setAgents: (id: string, agents: string[]) => api.put(`/knowledge/${id}/agents`, { agents }),
+  del: (id: string) => api.del(`/knowledge/${id}`),
+}
+
+export const planningAPI = {
+  sceneGeography: (sceneId: number) => api.get(`/planning/scenes/${sceneId}/geography`),
+  saveSceneGeography: (sceneId: number, data: Record<string, any>) => api.put(`/planning/scenes/${sceneId}/geography`, data),
+  coveragePlans: (episodeId: number) => api.get(`/planning/episodes/${episodeId}/coverage-plans`),
+  coveragePlan: (episodeId: number, sceneId: number) => api.get(`/planning/episodes/${episodeId}/coverage-plans/${sceneId}`),
+  saveCoveragePlan: (episodeId: number, sceneId: number, data: Record<string, any>) =>
+    api.put(`/planning/episodes/${episodeId}/coverage-plans/${sceneId}`, data),
+  deriveCoveragePlan: (episodeId: number, sceneId: number, data: Record<string, any> = {}) =>
+    api.post(`/planning/episodes/${episodeId}/coverage-plans/${sceneId}/derive`, data),
 }
 
 export const stylePresetAPI = {

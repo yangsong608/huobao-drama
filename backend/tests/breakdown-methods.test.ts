@@ -462,16 +462,20 @@ test('方案块尾部固定追加平台硬约束，任何方案不得覆盖 vide
     for (const word of [
       '### 平台硬约束',
       '任何方案不得覆盖',
+      '一个分镜 = 一个机位',
+      '禁止在一个分镜里切镜',
       '出场人物：@角色A、@角色B｜场景：@场景名',
-      '出场人物：无',
-      '场景：未指定',
+      '画面调度：画面左',
+      '动作起点',
+      '动作终点',
+      '负面约束：只出现画内人物',
       '0-3秒：',
-      '最后一段的结束时间等于本镜 duration',
+      '最后一段结束时间等于 duration',
       '@角色名说：「台词」',
       '旁白（画外音）：「台词」',
-      '不得写成台词或旁白',
-      'description 固定按',
-      'atmosphere',
+      '逐字复制',
+      '4 字/秒',
+      'canonical scene_id',
       '不要写「音频：」',
     ]) {
       assert.ok(block.includes(word), `硬约束块缺少 ${word}`)
@@ -528,15 +532,15 @@ test('composeAgentInstructions 固定顺序拼接并过滤空值', () => {
   assert.ok(!filtered.includes('\n\n\n'))
 })
 
-test('仅 storyboard_breaker 读取方案块，拼接顺序固定', () => {
+test('分镜 Agent（拆分/导演）读取方案块，拼接顺序固定', () => {
   const source = fs.readFileSync(new URL('../src/agents/index.ts', import.meta.url), 'utf8')
   assert.equal([...source.matchAll(/getEpisodeBreakdownBlock\(/g)].length, 1)
   assert.match(
     source,
-    /type === 'storyboard_breaker'[\s\S]{0,160}getEpisodeBreakdownBlock\(getEpisodeId\(requestContext\)\)/,
+    /\['storyboard_breaker', 'storyboard_director'\][\s\S]{0,160}getEpisodeBreakdownBlock\(getEpisodeId\(requestContext\)\)/,
   )
-  assert.match(source, /base: baseInstructions,\s*skills: skillInstructions,\s*breakdown,/)
-  assert.match(source, /breakdown,\s*voice: voiceInstructions,\s*language: languageDirective,/)
+  assert.match(source, /base: baseInstructions,\s*knowledge: knowledge\.text,\s*skills: skillInstructions,\s*breakdown,/)
+  assert.match(source, /breakdown,\s*unit: \['storyboard_breaker', 'storyboard_director'\][\s\S]{0,80}voice: voiceInstructions,\s*language: languageDirective,/)
 })
 
 test('剧集方案块经 composeAgentInstructions 注入，自动流程无新增方案参数', () => {
@@ -577,7 +581,7 @@ test('剧集方案块经 composeAgentInstructions 注入，自动流程无新增
   )
   const start = automationSource.indexOf('stepStoryboards')
   const body = automationSource.slice(start, start + 3000)
-  assert.match(body, /getAgent\('storyboard_breaker'\)/)
+  assert.match(body, /createStoryboardPipelineJob\(/)
   assert.doesNotMatch(body, /breakdownMethod|breakdown_method/)
 })
 
@@ -711,19 +715,26 @@ test('基础分镜提示词与技能写明统一的 description / video_prompt �
     'utf8',
   )
   for (const marker of [
+    '一个分镜 = 一个机位',
+    '禁止在一个分镜里写【镜头2】',
     '出场人物：@角色A、@角色B｜场景：@场景名',
-    '出场人物：无',
-    '场景：未指定',
+    '画面调度：画面左',
+    '动作起点',
+    '动作终点',
+    '负面约束：只出现画内人物',
     '0-3秒：',
-    '最后一段的结束时间等于本镜 duration',
+    '最后一段结束等于 duration',
     '@角色名说：「台词」',
     '旁白（画外音）：「台词」',
-    '不得写成台词',
+    '4 字/秒',
   ]) {
     assert.ok(prompt.includes(marker), `基础提示词缺少 ${marker}`)
   }
   for (const marker of [
     '【镜头1】',
+    '画面调度',
+    '动作起点',
+    '负面约束',
     '@角色名说：「台词」',
     '旁白（画外音）：「台词」',
   ]) {

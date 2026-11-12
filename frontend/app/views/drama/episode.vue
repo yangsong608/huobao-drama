@@ -359,12 +359,12 @@
                 <button class="btn btn-sm" :disabled="rn || methodSaving || splitRunning || splitStarting || auditRunning" :title="currentBreakdownMethodName" @click="doBreakdown">
                   <Loader2 v-if="splitRunning || splitStarting" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                  {{ splitRunning ? splitProgressText : (sbs.length ? t('episode.sb.rebreak') : t('episode.sb.startBreak')) }}
+                  {{ splitRunning ? t('episode.sb.title') : (sbs.length ? t('episode.sb.rebreak') : t('episode.sb.startBreak')) }}
                 </button>
-                <button v-if="canResumeSplit" class="btn btn-sm video-split-resume" :disabled="splitStarting || auditRunning" :title="splitJob?.error || t('episode.sb.resumeSplit')" @click="resumeSplit">
+                <button v-if="canResumeSplit" class="btn btn-sm video-split-resume" :disabled="splitStarting || auditRunning" :title="splitJob?.error || resumeSplitLabel" @click="resumeSplit">
                   <Loader2 v-if="splitStarting" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                  {{ t('episode.sb.resumeSplit') }}
+                  {{ resumeSplitLabel }}
                 </button>
                 <button class="btn btn-sm" :disabled="videoPromptBatch.running || !sbs.length || auditRunning" @click="batchVideoPrompts">
                   <Loader2 v-if="videoPromptBatch.running" :size="11" class="animate-spin" />
@@ -377,6 +377,10 @@
                   {{ auditButtonLabel }}
                 </button>
                 <button v-if="auditJob" type="button" class="episode-audit-status" :title="auditStatusText" @click="openAuditPanel()">{{ auditStatusText }}</button>
+                <button v-if="sbs.length" class="btn btn-sm" :title="t('episode.soundPanel.title')" @click="openSoundPlan">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                  {{ t('episode.soundPanel.button') }}
+                </button>
                 <button v-if="recoverableVideoCount && !isComfyVideoMode" class="btn btn-sm video-retry-failed" @click="retryFailedVideos">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   {{ t('episode.recovery.restoreFailed', { n: recoverableVideoCount }) }}
@@ -390,25 +394,65 @@
                 </button>
               </div>
             </div>
-            <div v-if="!sbs.length" class="step-empty video-task-empty-state">
+            <div v-if="splitRunning || (canResumeSplit && splitJob)" class="video-split-panel">
+              <div class="video-split-panel-head">
+                <div class="video-split-panel-copy">
+                  <div class="video-split-panel-title">{{ t('episode.sb.title') }} · {{ pipelineStageLabel }}</div>
+                  <div class="video-split-panel-sub">{{ splitProgressText }}</div>
+                  <div v-if="splitRunning" class="video-split-panel-elapsed">{{ t('episode.sb.breakingElapsed', { s: breakdownElapsed }) }}</div>
+                  <div v-else-if="splitJob?.error" class="video-split-panel-error">{{ splitJob.error }}</div>
+                </div>
+                <div class="video-split-panel-actions">
+                  <button v-if="splitRunning" type="button" class="btn btn-sm" :disabled="splitPausing" @click="pauseSplit">
+                    <Loader2 v-if="splitPausing" :size="11" class="animate-spin" />
+                    {{ t('episode.sb.splitPause') }}
+                  </button>
+                  <button v-if="canResumeSplit" type="button" class="btn btn-primary btn-sm" :disabled="splitStarting || auditRunning" @click="resumeSplit">
+                    <Loader2 v-if="splitStarting" :size="11" class="animate-spin" />
+                    {{ resumeSplitLabel }}
+                  </button>
+                </div>
+              </div>
+              <div class="video-split-progress-track">
+                <div class="video-split-progress-fill" :style="{ width: splitPercent + '%' }" />
+              </div>
+              <div v-if="(splitJob?.stage || 'skeleton') === 'skeleton'" class="video-split-chunk-list">
+                <div
+                  v-for="chunk in splitJob?.chunks || []"
+                  :key="chunk.index"
+                  :class="['video-split-chunk', 'is-' + chunk.status]"
+                  :title="chunk.error || chunk.status"
+                >
+                  <span class="video-split-chunk-dot" />
+                  <span class="video-split-chunk-label">{{ chunk.label }}</span>
+                  <span class="video-split-chunk-shots">{{ chunk.shots || 0 }}</span>
+                </div>
+              </div>
+              <div v-else class="video-split-chunk-list">
+                <div
+                  v-for="shot in splitJob?.shots || []"
+                  :key="shot.number"
+                  :class="['video-split-chunk', 'is-' + pipelineShotClass(shot.status)]"
+                  :title="(shot.issues || []).join('；') || shot.status"
+                >
+                  <span class="video-split-chunk-dot" />
+                  <span class="video-split-chunk-label">#{{ shot.number }} {{ shot.title }}</span>
+                  <span class="video-split-chunk-shots">{{ shot.status === 'validated' ? '✓' : (shot.attempts || 0) }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="!sbs.length" class="step-empty video-task-empty-state">
               <div class="empty-visual">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="2" y="2" width="20" height="20" rx="2.5"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="10" y1="8" x2="10" y2="16"/><line x1="13" y1="8" x2="13" y2="16"/></svg>
               </div>
               <div class="empty-title">{{ t('episode.sb.emptyTitle') }}</div>
-              <div class="empty-desc">{{ splitRunning ? t('episode.sb.breakingElapsed', { s: breakdownElapsed }) : t('episode.sb.emptyDesc') }}</div>
-              <div v-if="splitRunning" class="empty-desc video-split-progress">{{ splitProgressText }}</div>
-              <div v-if="canResumeSplit && splitJob" class="empty-desc video-split-failed">{{ t('episode.sb.splitFailed', { chunk: (splitJob.completed_chunks || 0) + 1, total: splitJob.total_chunks || 0, error: splitJob.error || '' }) }}</div>
+              <div class="empty-desc">{{ t('episode.sb.emptyDesc') }}</div>
               <div class="empty-desc">{{ t('episode.sb.methodCurrent', { method: currentBreakdownMethodName }) }}</div>
               <div class="locked-config-banner">{{ t('episode.vid.lockedModel') }}{{ effectiveVideoModelLabel }}</div>
-              <button v-if="canResumeSplit" class="btn btn-primary video-split-resume" :disabled="splitStarting || auditRunning || remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : undefined" @click="resumeSplit">
+              <button class="btn btn-primary" :disabled="rn || methodSaving || splitStarting || auditRunning || remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : currentBreakdownMethodName" @click="doBreakdown">
                 <Loader2 v-if="splitStarting" :size="13" class="animate-spin" />
-                <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                {{ t('episode.sb.resumeSplit') }}
-              </button>
-              <button class="btn btn-primary" :disabled="rn || methodSaving || splitRunning || splitStarting || auditRunning || remoteReadonly" :title="remoteReadonly ? t('remote.readonly.notice') : currentBreakdownMethodName" @click="doBreakdown">
-                <Loader2 v-if="splitRunning || splitStarting" :size="13" class="animate-spin" />
                 <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                {{ splitRunning ? splitProgressText : t('episode.sb.startBreak') }}
+                {{ t('episode.sb.startBreak') }}
               </button>
               <button class="btn btn-sm" :disabled="rn || addingStoryboard" @click="addStoryboard">
                 <Loader2 v-if="addingStoryboard" :size="11" class="animate-spin" />
@@ -417,11 +461,6 @@
               </button>
             </div>
             <div v-else class="video-task-workbench has-player" :class="{ 'is-comfy': isComfyVideoMode }" ref="videoWorkbenchEl" :data-pane="tabletPane" :style="{ '--vleft': videoLeftW + 'px', '--vright': videoRightW + 'px' }">
-              <div v-if="splitRunning || (canResumeSplit && splitJob)" class="video-split-banner">
-                <Loader2 v-if="splitRunning" :size="12" class="animate-spin" />
-                <span class="video-split-banner-text">{{ splitRunning ? splitProgressText : t('episode.sb.splitFailed', { chunk: (splitJob.completed_chunks || 0) + 1, total: splitJob.total_chunks || 0, error: splitJob.error || '' }) }}</span>
-                <button v-if="canResumeSplit" class="btn btn-sm video-split-resume" :disabled="splitStarting || auditRunning" @click="resumeSplit">{{ t('episode.sb.resumeSplit') }}</button>
-              </div>
               <div v-if="isCompact && !isComfyVideoMode" class="video-tablet-bar">
                 <div class="video-tablet-tabs" role="tablist">
                   <button
@@ -473,6 +512,7 @@
               </div>
 <EpisodeStoryboardList
                 :rows="videoTaskRows"
+                :storyboards="sbs"
                 :filter="videoListFilter"
                 :all-count="allVideoTaskRows.length"
                 :pending-count="pendingVideoIds.length"
@@ -500,8 +540,16 @@
                 :comfy-ui-error="comfyUiError"
                 :comfy-preview-error="comfyPreviewError"
                 :comfy-ui-frame-key="comfyUiFrameKey"
+                :episode-id="epId"
+                :scenes="scenes"
+                :characters="chars"
+                :coverage-mode="coverageMode"
+                :coverage-audit-for="coverageAuditFor"
                 @filter="toggleVideoFilter"
                 @add="addStoryboard"
+                @toggle-coverage="coverageMode = !coverageMode"
+                @select-coverage="onCoverageSelect"
+                @open-geography="openSceneGeography"
                 @stop-batch="stopBatchVideo"
                 @close-batch="videoBatch = null"
                 @select-all="toggleSelectAllVideos"
@@ -662,11 +710,20 @@
                   :action-label="videoTaskActionLabel(selectedSb)"
                   :action-disabled="videoTaskState(selectedSb) === 'pending' || remoteReadonly"
                   :readonly-title="remoteReadonly ? t('remote.readonly.notice') : undefined"
+                  :is-wan3-video="isWan3Video"
+                  :preflight-report="preflightReport"
+                  :preflight-stale="preflightStale"
+                  :preflight-busy="preflightBusy"
+                  :acceptance-report="acceptanceReport"
+                  :acceptance-stale="acceptanceStale"
+                  :acceptance-busy="acceptanceBusy"
+                  :verdict-label="visualVerdictLabel"
                   @open-viewer="openImageViewer"
                   @clear-first-frame="clearShotFirstFrame(selectedSb)"
                   @set-first-frame="setShotFirstFrame"
                   @remove-frame-asset="removeFrameAsset"
-                  @update-duration="onVideoDurationChange"
+                  @run-preflight="runShotPreflight(selectedSb)"
+                  @run-acceptance="runShotAcceptance(selectedSb)"
                   @generate="genVid(selectedSb)"
                 />
 
@@ -1051,6 +1108,49 @@
         @create-transition="openTransitionCreateFromIssue"
         @goto-assets="gotoAssetPage"
       />
+
+      <div v-if="soundPlanPanel.open" class="task-drawer-overlay" @click.self="closeSoundPlan">
+        <aside class="task-drawer sound-plan-drawer" role="dialog" aria-modal="true" :aria-label="t('episode.soundPanel.title')">
+          <header class="task-drawer-head">
+            <div>
+              <div class="video-task-title">{{ t('episode.soundPanel.title') }}</div>
+              <div class="video-task-meta">
+                <template v-if="soundPlanPanel.plan">
+                  {{ t('episode.soundPanel.version', { v: soundPlanPanel.plan.version }) }} ·
+                  {{ soundPlanPanel.plan.delivery === 'post' ? t('episode.soundPanel.deliveryPost') : t('episode.soundPanel.deliveryNative') }}
+                </template>
+                <template v-else>{{ t('episode.soundPanel.empty') }}</template>
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-icon" :aria-label="t('episode.soundPanel.close')" @click="closeSoundPlan"><X :size="14" /></button>
+          </header>
+          <div class="task-drawer-body">
+            <div v-if="soundPlanPanel.loading" class="step-empty">{{ t('episode.soundPanel.loading') }}</div>
+            <div v-else-if="!soundPlanPanel.plan" class="step-empty">{{ t('episode.soundPanel.empty') }}</div>
+            <div v-else class="sound-plan-body">
+              <p v-if="soundPlanPanel.plan.summary" class="sound-plan-summary">{{ soundPlanPanel.plan.summary }}</p>
+              <section v-for="unit in soundPlanUnits" :key="unit.key" class="sound-unit">
+                <div class="sound-unit-head">
+                  <b>{{ unit.label }}</b>
+                  <span>#{{ unit.from }}–#{{ unit.to }}</span>
+                </div>
+                <div v-for="track in soundTracks" :key="track.kind" class="sound-track">
+                  <div class="sound-track-label">{{ t(`episode.soundPanel.track.${track.kind}`) }}</div>
+                  <div class="sound-track-cues">
+                    <div v-for="cue in unit.cues.filter(item => item.kind === track.kind)" :key="cue.id" class="sound-cue">
+                      <span class="sound-cue-range">#{{ cue.from_shot_number }}–#{{ cue.to_shot_number }}</span>
+                      <span class="sound-cue-text">{{ cue.description }}</span>
+                      <span v-if="cue.entry" class="dim">{{ t('episode.soundPanel.entry') }}{{ cue.entry }}</span>
+                      <span v-if="cue.exit" class="dim">{{ t('episode.soundPanel.exit') }}{{ cue.exit }}</span>
+                    </div>
+                    <span v-if="!unit.cues.some(item => item.kind === track.kind)" class="dim">—</span>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </aside>
+      </div>
 
       <div v-if="assetDetail.open && assetDetailItem" class="overlay asset-detail-overlay" @click.self="closeAssetDetail">
         <section
@@ -2033,6 +2133,13 @@
       @close="deliveryOpen = false"
       @updated="refresh"
     />
+    <SceneGeographyDialog
+      :open="geoDialog.open"
+      :scene="geoDialog.scene"
+      :geography="geoDialog.geography"
+      @close="closeSceneGeography"
+      @saved="onSceneGeographySaved"
+    />
     <ContextMenu
       v-model:show="videoTaskMenu.show"
       :x="videoTaskMenu.x"
@@ -2049,7 +2156,7 @@ import {
   Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors, Ellipsis,
   Share2, AlertCircle,
 } from 'lucide-vue-next'
-import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, storyboardSplitAPI, storyboardAuditAPI } from '~/composables/useApi'
+import { api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, storyboardPipelineAPI, storyboardAuditAPI, planningAPI } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
 import { useAgent, coverageShortfall } from '~/composables/useAgent'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
@@ -2084,6 +2191,7 @@ import RemoteChangeNotice from '~/components/RemoteChangeNotice.vue'
 import RemoteStatusBadge from '~/components/RemoteStatusBadge.vue'
 import ContextMenu from '~/components/ContextMenu.vue'
 import StoryboardAuditDrawer from '~/components/StoryboardAuditDrawer.vue'
+import SceneGeographyDialog from '~/components/SceneGeographyDialog.vue'
 
 definePageMeta({ layout: 'studio' })
 
@@ -2140,29 +2248,155 @@ const storedPanel = (() => {
 let panelRestored = !!storedPanel
 const panel = ref(['production', 'export', 'dubbing'].includes(storedPanel?.panel) ? storedPanel.panel : 'script')
 const { running: rn, runningType: rt, run: runAgent } = useAgent()
-// ===== 分镜分块拆分任务 =====
-// 整集剧本在后端按场次切块、逐块调用模型并即时保存；前端只轮询进度，失败/重启后可续拆
+// ===== 四段式分镜管线：预拆 → 逐镜修补 → 逐镜校验 → 声音设计 =====
+// 后端严格逐镜修补/校验，前端只轮询阶段与逐镜进度，失败停在该镜等人工
 const splitJob = ref(null)
 const splitStarting = ref(false)
 const splitLastCompleted = ref(0)
 const splitRunning = computed(() => ['pending', 'running'].includes(String(splitJob.value?.status || '')))
 const canResumeSplit = computed(() => ['failed', 'interrupted'].includes(String(splitJob.value?.status || '')))
+const resumeSplitLabel = computed(() => (splitJob.value?.stage || 'skeleton') === 'skeleton'
+  ? t('episode.sb.resumeSplit')
+  : t('episode.sb.resumePipeline'))
+const pipelineStageLabel = computed(() => t(`episode.sb.pipelineStage.${splitJob.value?.stage || 'skeleton'}`))
 const splitProgressText = computed(() => {
   const job = splitJob.value
   if (!job) return ''
-  return t('episode.sb.splitProgress', {
-    done: job.completed_chunks || 0,
-    total: job.total_chunks || 0,
-    shots: job.shot_count || 0,
+  if ((job.stage || 'skeleton') === 'skeleton') {
+    return t('episode.sb.splitProgress', {
+      done: job.completed_chunks || 0,
+      total: job.total_chunks || 0,
+      shots: job.shot_count || 0,
+    })
+  }
+  if (job.stage === 'sound') {
+    return t('episode.sb.pipelineSoundProgress', { units: job.sound_units || 0 })
+  }
+  return t('episode.sb.pipelineRepairProgress', {
+    done: job.validated_shots || 0,
+    total: job.total_shots || 0,
+    current: job.current_shot_number || '-',
   })
 })
+const splitPausing = ref(false)
+const splitPercent = computed(() => {
+  const job = splitJob.value
+  if (!job) return 0
+  if ((job.stage || 'skeleton') === 'skeleton') {
+    const total = Number(job.total_chunks || 0)
+    return total ? Math.min(100, Math.round((Number(job.completed_chunks || 0) / total) * 100)) : 0
+  }
+  if (job.stage === 'sound') return job.sound_status === 'done' ? 100 : 92
+  const total = Number(job.total_shots || 0)
+  return total ? Math.min(90, Math.round((Number(job.validated_shots || 0) / total) * 90)) : 0
+})
+function pipelineShotClass(status) {
+  if (status === 'validated') return 'done'
+  if (status === 'manual') return 'failed'
+  if (status === 'repairing' || status === 'repaired') return 'running'
+  return 'pending'
+}
+
+// ===== 第四步声音计划（只读时间线） =====
+const soundPlanPanel = ref({ open: false, loading: false, plan: null, cues: [] })
+const soundTracks = [
+  { kind: 'bgm' },
+  { kind: 'ambience' },
+  { kind: 'sfx' },
+  { kind: 'silence' },
+]
+const soundPlanUnits = computed(() => {
+  const groups = new Map()
+  for (const cue of soundPlanPanel.value.cues || []) {
+    const key = cue.unit_key || 'default'
+    const group = groups.get(key) || { key, label: cue.unit_label || key, from: cue.from_shot_number, to: cue.to_shot_number, cues: [] }
+    group.from = Math.min(group.from ?? cue.from_shot_number, cue.from_shot_number)
+    group.to = Math.max(group.to ?? cue.to_shot_number, cue.to_shot_number)
+    group.cues.push(cue)
+    groups.set(key, group)
+  }
+  return [...groups.values()]
+})
+async function openSoundPlan() {
+  soundPlanPanel.value.open = true
+  soundPlanPanel.value.loading = true
+  try {
+    const result = await storyboardAPI.soundPlan(epId.value)
+    soundPlanPanel.value.plan = result?.plan || null
+    soundPlanPanel.value.cues = result?.cues || []
+  } catch (e) {
+    toastError(e)
+  } finally {
+    soundPlanPanel.value.loading = false
+  }
+}
+function closeSoundPlan() {
+  soundPlanPanel.value.open = false
+}
+
+async function pauseSplit() {
+  const job = splitJob.value
+  if (!job?.id || !splitRunning.value || splitPausing.value) return
+  splitPausing.value = true
+  try {
+    const result = await storyboardPipelineAPI.pause(job.id)
+    if (result?.job) applySplitJob(result.job, { silent: true })
+    toast.success(t('episode.sb.splitPauseRequested'))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.sb.splitActionFailed' })
+  } finally {
+    splitPausing.value = false
+  }
+}
+
+// ===== 覆盖板与场景地理卡 =====
+const coverageMode = ref(false)
+const geoDialog = ref({ open: false, scene: null, geography: null })
+
+function coverageAuditFor(sb) {
+  return auditShotDisplay(sb)
+}
+
+function onCoverageSelect(sb) {
+  if (!sb) return
+  selectedSb.value = sb
+  if (isCompact.value && !isComfyVideoMode.value) setTabletPane('edit')
+}
+
+async function openSceneGeography(scene) {
+  if (!scene?.id) {
+    toast.warning('该场景还没有绑定场景资产')
+    return
+  }
+  try {
+    const result = await planningAPI.sceneGeography(scene.id)
+    geoDialog.value = { open: true, scene, geography: result?.geography || null }
+  } catch (e) {
+    toastError(e)
+  }
+}
+
+function closeSceneGeography() {
+  geoDialog.value = { open: false, scene: null, geography: null }
+}
+
+function onSceneGeographySaved(geography) {
+  if (geography) {
+    geoDialog.value.updated = true
+  }
+  toast.success('场景地理卡已保存')
+}
 
 function applySplitJob(job, options = {}) {
   if (!job) return
   const prevStatus = splitJob.value?.status
+  const prevStage = splitJob.value?.stage
   splitJob.value = job
-  const completed = Number(job.completed_chunks || 0)
-  // 每完成一段先刷新，已保存的镜头能立即出现在列表里
+  if (prevStage !== job.stage) splitLastCompleted.value = 0
+  const completed = (job.stage || 'skeleton') === 'skeleton'
+    ? Number(job.completed_chunks || 0)
+    : Number(job.validated_shots || 0)
+  // 每完成一段/通过一镜先刷新，已保存的镜头能立即出现在列表里
   if (completed > splitLastCompleted.value) {
     splitLastCompleted.value = completed
     void refresh()
@@ -2186,11 +2420,15 @@ function applySplitJob(job, options = {}) {
   if (job.status === 'failed' || job.status === 'interrupted') {
     splitPoll.stop()
     if (!options.silent) {
-      toast.error(t('episode.sb.splitFailed', {
-        chunk: Number(job.completed_chunks || 0) + 1,
-        total: job.total_chunks || 0,
-        error: job.error || '',
-      }))
+      if ((job.stage || 'skeleton') === 'skeleton') {
+        toast.error(t('episode.sb.splitFailed', {
+          chunk: Number(job.completed_chunks || 0) + 1,
+          total: job.total_chunks || 0,
+          error: job.error || '',
+        }))
+      } else {
+        toast.error(job.error || t('episode.sb.splitActionFailed'))
+      }
     }
     void refresh()
   }
@@ -2200,7 +2438,7 @@ const splitPoll = useVisibilityPolling(async () => {
   const jobId = splitJob.value?.id
   if (!jobId || !splitRunning.value) return
   try {
-    const result = await storyboardSplitAPI.get(jobId)
+    const result = await storyboardPipelineAPI.get(jobId)
     if (result?.job) applySplitJob(result.job)
   } catch {
     // 网络抖动：保持轮询，等下一次
@@ -2216,7 +2454,7 @@ function startSplitPolling() {
 async function restoreSplitJob() {
   if (!epId.value) return
   try {
-    const result = await storyboardSplitAPI.latest(epId.value)
+    const result = await storyboardPipelineAPI.latest(epId.value)
     const job = result?.job
     if (!job) return
     applySplitJob(job, { silent: true })
@@ -2802,31 +3040,39 @@ function auditShotState(sb) {
     infoCount: Number(entry.infoCount ?? entry.info_count ?? 0) || 0,
   }
 }
-function auditShotClass(sb) {
+function auditShotDisplay(sb) {
   const shot = auditShotState(sb)
-  if (shot.stale) return 'audit-shot-stale'
-  return `audit-shot-${shot.status === 'ruleOnly' ? 'done' : shot.status}`
-}
-function auditShotTitle(sb) {
-  const shot = auditShotState(sb)
-  const statusKey = shot.ruleOnly ? 'ruleOnly' : shot.status
-  const label = t(`episode.audit.shotStatus.${statusKey}`)
-  const issues = shot.errorCount + shot.warningCount + shot.infoCount
-  return issues ? `${label} · ${t('episode.audit.issuesTitle', { n: issues })}` : label
-}
-function auditShotBadge(sb) {
-  const shot = auditShotState(sb)
+  const total = shot.errorCount + shot.warningCount + shot.infoCount
+  const severity = shot.errorCount > 0 ? 'error' : shot.warningCount > 0 ? 'warning' : shot.infoCount > 0 ? 'info' : ''
   const count = shot.errorCount + shot.warningCount
-  return count > 0 ? String(count) : ''
+  if (shot.stale) {
+    return {
+      state: 'stale',
+      severity,
+      count,
+      title: `${t('episode.audit.shotStatus.stale')}${total ? ` · ${t('episode.audit.issuesTitle', { n: total })}` : ''}`,
+    }
+  }
+  if (shot.status === 'running') return { state: 'running', severity: '', count: 0, title: t('episode.audit.shotStatus.running') }
+  if (shot.status === 'failed') return { state: 'failed', severity: '', count: 0, title: t('episode.audit.shotStatus.failed') }
+  if (shot.errorCount > 0) {
+    return { state: 'error', severity: 'error', count, title: `${t('episode.audit.severity.error')} · ${t('episode.audit.issuesTitle', { n: total })}` }
+  }
+  if (shot.warningCount > 0) {
+    return { state: 'warning', severity: 'warning', count, title: `${t('episode.audit.severity.warning')} · ${t('episode.audit.issuesTitle', { n: total })}` }
+  }
+  if (shot.infoCount > 0) {
+    return { state: 'warning', severity: 'info', count: 0, title: `${t('episode.audit.severity.info')} · ${t('episode.audit.issuesTitle', { n: total })}` }
+  }
+  if (shot.ruleOnly) return { state: 'rule_only', severity: '', count: 0, title: t('episode.audit.shotStatus.ruleOnly') }
+  if (shot.status === 'done') return { state: 'pass', severity: '', count: 0, title: t('episode.audit.cleanTitle') }
+  return { state: 'pending', severity: '', count: 0, title: t('episode.audit.shotStatus.pending') }
 }
-// 检验完成后干净的镜头不再挂状态标识，只保留进行中/失败/过期/有问题的提示
+// 已拍板 D12：通过的镜头干净就隐藏；只显示待检/排队/进行中/警告/错误/过期/失败/仅规则。
 function auditShotMarkerVisible(sb) {
-  const job = auditJob.value
-  if (!job) return true
-  if (auditRunning.value) return true
-  const shot = auditShotState(sb)
-  if (shot.stale || shot.status === 'running' || shot.status === 'failed') return true
-  return shot.errorCount + shot.warningCount + shot.infoCount > 0
+  if (!auditJob.value) return false
+  const view = auditShotDisplay(sb)
+  return view.state !== 'pass' && view.state !== 'none'
 }
 function storyboardTransitionKind(sb) {
   const kind = String(sb?.transition_kind || sb?.transitionKind || '')
@@ -3626,6 +3872,7 @@ const allVideoTaskRows = computed(() => sbs.value.map((sb, index) => {
     videoSrc: hasVid(sb) ? '/' + getVideoUrl(sb) : '',
     poster: hasVid(sb) ? posterOf('/' + getVideoUrl(sb)) || undefined : undefined,
     auditVisible: auditShotMarkerVisible(sb),
+    auditDisplay: auditShotDisplay(sb),
     auditClass: auditShotClass(sb),
     auditTitle: auditShotTitle(sb),
     auditStatus: audit.status,
@@ -4149,6 +4396,17 @@ async function confirmBatchVideos() {
   }
   const failedCount = targets.filter(sb => latestVideoTask(sb.id)?.status === 'failed').length
   if (failedCount && !window.confirm(t('episode.vid.batchFailedConfirm', { n: failedCount }))) return
+
+  const gateResults = await Promise.all(targets.map(async sb => ({ sb, gate: await fetchGenerationGate(sb) })))
+  const blocked = gateResults.filter(item => item.gate && item.gate.allowed === false)
+  if (blocked.length) {
+    const reasons = [...new Set(blocked.flatMap(item => (item.gate.blockers || []).map(issue => issue.message)))]
+    toast.error(`不能开始批量生成：${reasons.slice(0, 4).join('；')}${reasons.length > 4 ? '…' : ''}`, { duration: 9000 })
+    return
+  }
+  const warnings = [...new Set(gateResults.flatMap(item => (item.gate?.warnings || []).map(issue => issue.message)))]
+  if (warnings.length) toast.warning(`生成前提醒：${warnings.slice(0, 4).join('；')}${warnings.length > 4 ? '…' : ''}`, { duration: 7000 })
+
   batchVideoConfirm.value = { open: false, targets: [] }
   try {
     await episodeAPI.startVideoBatch(episode.value.id, {
@@ -5263,6 +5521,75 @@ const transitionOptions = computed(() => [
   { label: t('episode.sb.transitionWipe'), value: 'wipe' },
 ])
 const selectedSb = ref(null)
+const preflightReport = ref(null)
+const preflightStale = ref(false)
+const preflightBusy = ref(false)
+const acceptanceReport = ref(null)
+const acceptanceStale = ref(false)
+const acceptanceBusy = ref(false)
+
+function visualVerdictLabel(verdict) {
+  const key = String(verdict || '')
+  const labels = {
+    pass: t('episode.visualCheck.verdictPass'),
+    warn: t('episode.visualCheck.verdictWarn'),
+    block: t('episode.visualCheck.verdictBlock'),
+    fail: t('episode.visualCheck.verdictFail'),
+    skipped: t('episode.visualCheck.verdictSkipped'),
+  }
+  return labels[key] || key
+}
+
+async function loadVisualReports(storyboardId) {
+  preflightReport.value = null
+  preflightStale.value = false
+  acceptanceReport.value = null
+  acceptanceStale.value = false
+  if (!storyboardId) return
+  try {
+    const pre = await storyboardAPI.preflight(storyboardId)
+    preflightReport.value = pre?.report || null
+    preflightStale.value = Boolean(pre?.stale)
+  } catch { /* 旧数据无报告 */ }
+  try {
+    const acc = await storyboardAPI.acceptance(storyboardId)
+    acceptanceReport.value = acc?.report || null
+    acceptanceStale.value = Boolean(acc?.stale)
+  } catch { /* 旧数据无报告 */ }
+}
+
+watch(() => selectedSb.value?.id, (id) => { loadVisualReports(id) }, { immediate: true })
+
+async function runShotPreflight(sb) {
+  if (!sb?.id || preflightBusy.value) return
+  preflightBusy.value = true
+  try {
+    const report = await storyboardAPI.runPreflight(sb.id)
+    preflightReport.value = report || null
+    preflightStale.value = false
+    toast.success(t('episode.visualCheck.preflightDone'))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.visualCheck.preflightFailed' })
+  } finally {
+    preflightBusy.value = false
+  }
+}
+
+async function runShotAcceptance(sb) {
+  if (!sb?.id || acceptanceBusy.value) return
+  acceptanceBusy.value = true
+  try {
+    const report = await storyboardAPI.runAcceptance(sb.id)
+    acceptanceReport.value = report || null
+    acceptanceStale.value = false
+    toast.success(t('episode.visualCheck.acceptanceDone'))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.visualCheck.acceptanceFailed' })
+  } finally {
+    acceptanceBusy.value = false
+  }
+}
+
 const selectedVideoTaskNumber = computed(() => {
   const index = videoTaskRows.value.findIndex(task => String(task.id) === String(selectedSb.value?.id))
   return index >= 0 ? index + 1 : 0
@@ -5441,7 +5768,8 @@ function saveScr() { episodeAPI.update(epId.value, { script_content: localScript
 // 流水线任务规则（设置 → 流程规则 可编辑）：手动改写/拆分与全自动流程共用同一份文本
 const pipelineRules = ref({})
 const DEFAULT_REWRITE_RULE = '请读取剧本并改写为格式化剧本，然后保存'
-const DEFAULT_BREAKDOWN_RULE = `请基于当前集剧本拆分分镜，并为每个分镜段落同时生成 video_prompt（视频生成提示词）。
+const DEFAULT_BREAKDOWN_RULE = `请基于当前集剧本拆分分镜。
+一个分镜 = 一个机位 + 一个主体 + 一个连续动作；需要换机位、换主体、换动作/情绪节点时新开分镜，禁止在一个分镜里写多个【镜头N】子镜头。
 本次视频模型：{{videoModel}}，请按该模型的特性与时长限制生成 video_prompt。
 
 项目已有角色：{{characters}}
@@ -5450,10 +5778,11 @@ const DEFAULT_BREAKDOWN_RULE = `请基于当前集剧本拆分分镜，并为每
 
 绑定要求：
 - 每个镜头必须根据剧本内容，从上述项目已有角色中选出出场的角色绑定 character_ids（ID 必须来自上述列表；有角色出场就必须绑定，不要遗漏）
-- 每个镜头尽量匹配上述已有场景填写 scene_id（ID 必须来自上述列表），不要凭空创造新场景
+- 每个分镜必须使用 canonical 场景绑定里的 scene_id（同名场景只选主场景，禁止在 54/55/56 这类别名之间另选），不要凭空创造新场景
 - 每个镜头出现关键道具（被使用、交接、特写或在画面中明显可见）时，从上述项目已有道具中绑定 prop_ids（ID 必须来自上述列表）；没有道具出现可传空数组
 - 上述素材可能来自同项目其他剧集，可直接复用；保存时会自动关联到当前集
-- 只有纯环境空镜头才可以不绑定角色`
+- 只有纯环境空镜头才可以不绑定角色
+- 每个分镜 6-15 秒；只写一个连续镜头，禁止【镜头2】及以后`
 
 async function loadPipelineRules() {
   try {
@@ -5635,7 +5964,7 @@ async function doBreakdown() {
   // 分块拆分在后端逐段调用并即时保存；旧分镜替换、跨段镜头编号都由系统处理，无需在指令里声明
   splitStarting.value = true
   try {
-    const result = await storyboardSplitAPI.create({
+    const result = await storyboardPipelineAPI.create({
       episode_id: epId.value,
       drama_id: dramaId,
       message: rule,
@@ -5646,7 +5975,7 @@ async function doBreakdown() {
       toast.error(t('episode.sb.splitStartFailed'))
       return
     }
-    splitLastCompleted.value = Number(result.job.completed_chunks || 0)
+    splitLastCompleted.value = Number(result.job.stage === 'skeleton' ? (result.job.completed_chunks || 0) : (result.job.validated_shots || 0))
     applySplitJob(result.job, { silent: true })
     if (splitRunning.value) startSplitPolling()
     if (result.already_running) toast.info(t('episode.sb.splitAlreadyRunning'))
@@ -5664,7 +5993,7 @@ async function resumeSplit() {
   if (!job?.id || splitStarting.value || splitRunning.value) return
   splitStarting.value = true
   try {
-    const result = await storyboardSplitAPI.resume(job.id)
+    const result = await storyboardPipelineAPI.resume(job.id)
     if (result?.job) {
       applySplitJob(result.job, { silent: true })
       if (splitRunning.value) startSplitPolling()
@@ -6283,8 +6612,8 @@ function resolveVideoPromptRefs(sb) {
   })
 }
 
-// 分镜时长（视频生成参数区直接编辑并保存到分镜）：
-// 下限 2s，上限按当前模型/分辨率收紧（本地 H3 720p 为 8s），列表/批量/单次生成统一读取该值
+// 分镜时长由提示词时间帧分段自动计算；下限 2s、上限按当前模型/分辨率收紧（本地 H3 720p 为 8s），
+// 列表/批量/单次生成统一读取分镜 duration 字段。保留显式写入入口供未来批量/脚本场景复用。
 function onVideoDurationChange(e) {
   const sb = selectedSb.value
   if (!sb) return
@@ -6459,12 +6788,20 @@ function uploadAssetImage(kind, id) {
 }
 
 function buildVideoGenerationParams(sb) {
-  const referenceImages = getShotReferenceImages(sb)
   const audioMode = episodeVideoAudioMode.value
-  // 分镜若已生成首/尾帧则走 fl2v；尾帧必须与首帧成对，避免后端拒绝
-  const firstFrameImage = sb.first_frame_image || sb.firstFrameImage
+  const previous = getPreviousShotFrameRef(sb)
+  const explicitFirst = sb.first_frame_image || sb.firstFrameImage || ''
   const lastFrameImage = sb.last_frame_image || sb.lastFrameImage
-  // 参考素材完全来自分镜绑定的角色/场景/道具图片
+  // Wan 3.0 首帧不能和参考图混用：降级为参考图；其他模型优先用显式首帧，否则接上一镜末帧。
+  const autoTail = !explicitFirst && previous?.url ? previous.url : ''
+  const firstFrameImage = isWan3Video.value ? '' : (explicitFirst || autoTail)
+  let referenceImages = getShotReferenceImages(sb)
+  if (isWan3Video.value && explicitFirst) {
+    referenceImages = [explicitFirst, ...referenceImages.filter(url => url !== explicitFirst)]
+  } else if (firstFrameImage && previous?.url === firstFrameImage) {
+    // 上一镜末帧已经作为首帧，不再重复占参考图槽位
+    referenceImages = referenceImages.filter(url => url !== firstFrameImage)
+  }
   const params = {
     storyboard_id: sb.id,
     drama_id: dramaId,
@@ -6482,8 +6819,31 @@ function buildVideoGenerationParams(sb) {
   return params
 }
 
+async function fetchGenerationGate(sb) {
+  try {
+    return await storyboardAPI.generationGate(sb.id)
+  } catch {
+    // 门禁接口失败不阻断旧后端/网络抖动
+    return { allowed: true, blockers: [], warnings: [] }
+  }
+}
+
+async function ensureGenerationGate(sb, opts = {}) {
+  const gate = await fetchGenerationGate(sb)
+  if (gate?.warnings?.length && !opts.silent) {
+    toast.warning(`生成前提醒：${gate.warnings.map(item => item.message).join('；')}`, { duration: 7000 })
+  }
+  if (gate && gate.allowed === false) {
+    const reason = (gate.blockers || []).map(item => item.message).join('；') || '存在未修复的审计错误'
+    toast.error(`不能生成：${reason}`, { duration: 9000 })
+    return false
+  }
+  return true
+}
+
 async function genVid(sb, opts = {}) {
   if (auditRunning.value) { toast.warning(t('episode.audit.runningBlocked')); return }
+  if (!opts.skipGate && !(await ensureGenerationGate(sb, opts))) return
   if (isComfyVideoMode.value) {
     if (!opts.silent) toast.warning(t('episode.comfy.nativeOnly'))
     return
@@ -8008,17 +8368,53 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 }
 .video-method-select:disabled { opacity: .55; cursor: not-allowed; }
 .video-method-hint { font-size: 11px; color: var(--text-3); white-space: nowrap; }
-/* 分块拆分进度条：运行中显示已完成段数，失败/中断后提供断点续拆 */
-.video-split-banner {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; margin: 0 0 6px;
-  font-size: 12px; color: var(--text-2);
-  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
-}
-.video-split-banner-text { flex: 1; min-width: 0; }
-.video-split-progress { color: var(--accent); }
-.video-split-failed { color: var(--warning); }
+/* 拆分失败/中断后，顶部仍保留断点续拆按钮的强调色 */
 .video-split-resume { color: var(--accent); border-color: var(--accent); }
+/* 拆分进行中：唯一进度面板，占据中栏主体；不再用 banner + 空状态重复进度 */
+.video-split-panel {
+  width: min(860px, calc(100% - 32px));
+  margin: 18px auto;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.video-split-panel-head { display: flex; align-items: flex-start; gap: 16px; }
+.video-split-panel-copy { flex: 1; min-width: 0; }
+.video-split-panel-title { font-size: 15px; font-weight: 700; color: var(--text-0); }
+.video-split-panel-sub { margin-top: 3px; font-size: 12px; color: var(--text-2); }
+.video-split-panel-elapsed { margin-top: 3px; font-size: 11px; color: var(--text-3); }
+.video-split-panel-error { margin-top: 3px; font-size: 11px; color: var(--warning); }
+.video-split-panel-actions { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.video-split-progress-track {
+  height: 7px; margin: 14px 0 12px; overflow: hidden;
+  border-radius: 999px; background: var(--bg-2);
+}
+.video-split-progress-fill {
+  height: 100%; border-radius: inherit; background: var(--accent);
+  transition: width .25s ease;
+}
+.video-split-chunk-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 7px; max-height: 280px; overflow: auto;
+}
+.video-split-chunk {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-1); font-size: 11px; color: var(--text-2);
+}
+.video-split-chunk-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: var(--text-3);
+}
+.video-split-chunk.is-running .video-split-chunk-dot { background: var(--accent); animation: split-pulse 1s ease-in-out infinite; }
+.video-split-chunk.is-done .video-split-chunk-dot { background: var(--success); }
+.video-split-chunk.is-failed .video-split-chunk-dot { background: var(--danger); }
+.video-split-chunk.is-failed { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+.video-split-chunk-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.video-split-chunk-shots { color: var(--text-3); font-variant-numeric: tabular-nums; }
+@keyframes split-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 
 
 

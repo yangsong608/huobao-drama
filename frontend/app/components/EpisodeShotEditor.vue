@@ -135,13 +135,12 @@ function groupAssets(kind: string) {
             {{ (storyboard.video_prompt || storyboard.videoPrompt) ? t('episode.sb.regenPrompt') : t('episode.sb.aiGenerate') }}
           </button>
         </div>
-        <MentionTextarea
+        <PromptSectionEditor
           :model-value="storyboard.video_prompt || storyboard.videoPrompt || ''"
           :options="mentionOptions"
-          :rows="14"
-          input-class="textarea video-inspector-prompt"
-          :placeholder="t('episode.inspector.videoPromptPlaceholder')"
+          :duration="Number(storyboard.duration) || 10"
           @commit="v => emit('update-field', 'video_prompt', v)"
+          @duration="v => emit('update-field', 'duration', v)"
         />
         <p class="voice-reference-hint">{{ t('characterVoice.referenceHint') }}</p>
         <p v-if="previousShotFrameRef" class="voice-reference-hint">{{ t('episode.frameAssets.autoPromptHint', { token: previousShotFrameRef.token }) }}</p>
@@ -212,12 +211,6 @@ function groupAssets(kind: string) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-}
-/* MentionTextarea 内部元素需 :deep 穿透（scoped 样式默认到不了子组件内部） */
-:deep(.video-inspector-prompt) {
-  min-height: 176px;
-  font-size: 13px;
-  line-height: 1.6;
 }
 .storyboard-ref-list {
   min-height: 0;

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { Ellipsis, Loader2, Plus, Trash2 } from 'lucide-vue-next'
+import AuditStateBadge from '~/components/AuditStateBadge.vue'
+import CoverageBoard from '~/components/CoverageBoard.vue'
 
 const props = defineProps<{
   rows: any[]
+  storyboards: any[]
   filter: string
   allCount: number
   pendingCount: number
@@ -31,11 +34,19 @@ const props = defineProps<{
   comfyUiError: string
   comfyPreviewError: string
   comfyUiFrameKey: number
+  episodeId: number
+  scenes: any[]
+  characters: any[]
+  coverageMode: boolean
+  coverageAuditFor?: ((sb: any) => any) | null
 }>()
 
 const emit = defineEmits<{
   filter: [state: string]
   add: []
+  'toggle-coverage': []
+  'select-coverage': [sb: any]
+  'open-geography': [scene: any]
   'stop-batch': []
   'close-batch': []
   'select-all': []
@@ -84,6 +95,9 @@ function isSelected(id: number) {
         <button type="button" class="video-task-metric is-done" :class="{ on: filter === 'done' }" @click="emit('filter', 'done')">{{ t('episode.vid.metricDone', { n: doneCount }) }}</button>
         <button type="button" class="video-task-metric is-failed" :class="{ on: filter === 'failed' }" @click="emit('filter', 'failed')">{{ t('episode.vid.metricFailed', { n: failedCount }) }}</button>
       </div>
+      <button class="btn btn-sm" :class="{ 'is-on': coverageMode }" @click="emit('toggle-coverage')">
+        {{ coverageMode ? t('episode.vid.listMode') : t('episode.vid.coverageMode') }}
+      </button>
       <button class="btn btn-sm" :disabled="busy || adding" @click="emit('add')">
         <Loader2 v-if="adding" :size="11" class="animate-spin" />
         <Plus v-else :size="11" />
@@ -118,7 +132,7 @@ function isSelected(id: number) {
       <button class="shot-quick-btn" @click="emit('select-missing')">{{ t('episode.vid.selectMissing') }}</button>
       <button class="shot-quick-btn" @click="emit('clear-selection')">{{ t('episode.sb.clear') }}</button>
     </div>
-    <div class="video-task-table">
+    <div v-if="!coverageMode" class="video-task-table">
       <div
         v-for="task in rows"
         :key="task.id"
@@ -191,22 +205,14 @@ function isSelected(id: number) {
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
           </button>
-          <button
+          <AuditStateBadge
             v-if="task.auditVisible"
-            type="button"
-            class="btn btn-icon btn-sm video-task-audit"
-            :class="task.auditClass"
-            :title="task.auditTitle"
-            :aria-label="task.auditTitle"
-            @click.stop="emit('open-audit', task.storyboard.id)"
-          >
-            <Loader2 v-if="task.auditStatus === 'running'" :size="12" class="animate-spin" />
-            <svg v-else-if="task.auditStatus === 'done' || task.auditStatus === 'ruleOnly'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            <svg v-else-if="task.auditStatus === 'failed'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="7" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12" y2="16.6"/></svg>
-            <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            <span v-if="task.auditBadge" class="video-task-audit-badge">{{ task.auditBadge }}</span>
-            <span v-if="task.auditStale" class="video-task-audit-stale" aria-hidden="true" />
-          </button>
+            :state="task.auditDisplay.state"
+            :severity="task.auditDisplay.severity"
+            :count="task.auditDisplay.count"
+            :title="task.auditDisplay.title"
+            @open="emit('open-audit', task.storyboard.id)"
+          />
           <button
             v-if="!selectMode"
             type="button"
@@ -232,6 +238,17 @@ function isSelected(id: number) {
         </div>
       </div>
     </div>
+    <CoverageBoard
+      v-else
+      :episode-id="episodeId"
+      :storyboards="storyboards"
+      :scenes="scenes"
+      :characters="characters"
+      :selected-id="selectedSbId"
+      :audit-for="coverageAuditFor"
+      @select="sb => emit('select-coverage', sb)"
+      @open-geography="scene => emit('open-geography', scene)"
+    />
     <div v-if="isComfyVideoMode" class="video-task-footer">
       <div v-if="comfyPendingTaskId" class="video-task-footer-status">
         <span class="dot pending" />

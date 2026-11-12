@@ -1,10 +1,14 @@
 import { Hono } from 'hono'
-import { and, eq, isNull, or } from 'drizzle-orm'
+import { and, desc, eq, isNull, or } from 'drizzle-orm'
 import { db, getInsertId, schema } from '../db/index.js'
 import { success, created, now, badRequest } from '../utils/response.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 import { cleanupFrameAssetsForStoryboard } from '../services/storyboard-frame-assets.js'
+import { getStoryboardContract, syncEpisodeContracts, syncStoryboardContract } from '../services/storyboard-contract.js'
+import { evaluateStoryboardGenerationGate } from '../services/storyboard-generation-gate.js'
+import { getPreflightState, runVisualPreflight } from '../services/storyboard-visual-preflight.js'
+import { getAcceptanceState, runAcceptance } from '../services/storyboard-acceptance.js'
 
 const app = new Hono()
 const TRANSITIONS = new Set(['cut', 'fade', 'dissolve', 'wipe'])
@@ -90,6 +94,138 @@ async function ensureStoryboardBindings(episodeId: number, sceneId: number | nul
 }
 
 // POST /storyboards
+// GET /storyboards/:id/generation-gate — 生成前门禁：最新审计 error + 合同/覆盖警告
+// GET /storyboards/sound-plan/:episodeId — 第四步声音计划（只读时间线）
+app.get('/sound-plan/:episodeId', async (c) => {
+  const episodeId = Number(c.req.param('episodeId'))
+  if (!episodeId) return badRequest(c, '缺少 episodeId')
+  const plan = db.select().from(schema.soundPlans)
+    .where(eq(schema.soundPlans.episodeId, episodeId))
+    .orderBy(desc(schema.soundPlans.id))
+    .limit(1)
+    .get()
+  if (!plan) return success(c, { plan: null, cues: [] })
+  const cues = db.select().from(schema.soundCues)
+    .where(eq(schema.soundCues.planId, plan.id))
+    .orderBy(schema.soundCues.sortOrder)
+    .all()
+  return success(c, {
+    plan: {
+      id: plan.id,
+      version: plan.version,
+      status: plan.status,
+      delivery: (() => {
+        try { return JSON.parse(plan.planJson || '{}').delivery || 'native' } catch { return 'native' }
+      })(),
+      summary: (() => {
+        try { return JSON.parse(plan.planJson || '{}').summary || '' } catch { return '' }
+      })(),
+      created_at: plan.createdAt,
+    },
+    cues: cues.map(cue => ({
+      id: cue.id,
+      unit_key: cue.unitKey,
+      unit_label: cue.unitLabel || '',
+      kind: cue.kind,
+      from_shot_number: cue.fromShotNumber,
+      to_shot_number: cue.toShotNumber,
+      description: cue.description,
+      intensity: cue.intensity || '',
+      entry: cue.entry || '',
+      exit: cue.exit || '',
+      delivery: cue.delivery,
+    })),
+  })
+})
+
+app.get('/:id/generation-gate', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return badRequest(c, '分镜 id 无效')
+  const [storyboard] = await db.select({ episodeId: schema.storyboards.episodeId })
+    .from(schema.storyboards)
+    .where(eq(schema.storyboards.id, id))
+  if (!storyboard) return badRequest(c, '分镜不存在')
+  return success(c, await evaluateStoryboardGenerationGate(storyboard.episodeId, id))
+})
+
+// GET /storyboards/:id/contract — 读取镜头合同（画内人物/屏幕左右/过肩/时间帧等）
+app.get('/:id/contract', async (c) => {
+  const contract = await getStoryboardContract(Number(c.req.param('id')))
+  if (!contract) return badRequest(c, '分镜不存在')
+  return success(c, contract)
+})
+
+// POST /storyboards/:id/contract/sync — 从当前 video_prompt 重新解析合同
+app.post('/:id/contract/sync', async (c) => {
+  const id = Number(c.req.param('id'))
+  await syncStoryboardContract(id)
+  const contract = await getStoryboardContract(id)
+  if (!contract) return badRequest(c, '分镜不存在')
+  return success(c, contract)
+})
+
+// GET /storyboards/:id/preflight — 最新 L2 视觉预检报告；stale=true 表示合同/首帧已变
+app.get('/:id/preflight', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return badRequest(c, '分镜 id 无效')
+  return success(c, await getPreflightState(id))
+})
+
+// POST /storyboards/:id/preflight — 运行 L2 视觉预检（现有参考图/首帧/上一镜尾帧）
+app.post('/:id/preflight', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return badRequest(c, '分镜 id 无效')
+  let body: any = {}
+  try { body = await c.req.json() } catch { body = {} }
+  try {
+    const report = await runVisualPreflight(id, {
+      configId: body?.config_id ? Number(body.config_id) : undefined,
+      model: body?.model ? String(body.model) : undefined,
+    })
+    return success(c, report)
+  } catch (error: any) {
+    return badRequest(c, error?.message || '视觉预检失败')
+  }
+})
+
+// GET /storyboards/:id/acceptance — 最新 L3 生成后验收报告；stale=true 表示视频已重生成
+app.get('/:id/acceptance', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return badRequest(c, '分镜 id 无效')
+  return success(c, await getAcceptanceState(id))
+})
+
+// POST /storyboards/:id/acceptance — 从当前成片抽 5 帧做生成后验收
+app.post('/:id/acceptance', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return badRequest(c, '分镜 id 无效')
+  let body: any = {}
+  try { body = await c.req.json() } catch { body = {} }
+  try {
+    const report = await runAcceptance(id, {
+      configId: body?.config_id ? Number(body.config_id) : undefined,
+      model: body?.model ? String(body.model) : undefined,
+    })
+    return success(c, report)
+  } catch (error: any) {
+    return badRequest(c, error?.message || '生成后验收失败')
+  }
+})
+
+// POST /storyboards/contracts/sync — 回填一集所有分镜合同（旧数据升级）
+app.post('/contracts/sync', async (c) => {
+  let body: any
+  try {
+    body = await c.req.json()
+  } catch {
+    return badRequest(c, '请求体不是合法 JSON')
+  }
+  const episodeId = Number(body.episode_id)
+  if (!episodeId) return badRequest(c, 'episode_id 必填')
+  const count = await syncEpisodeContracts(episodeId)
+  return success(c, { episode_id: episodeId, synced: count })
+})
+
 app.post('/', async (c) => {
   const body = await c.req.json()
   const ts = now()
@@ -206,6 +342,9 @@ app.delete('/:id', async (c) => {
       .run()
     tx.delete(schema.storyboardCharacters).where(eq(schema.storyboardCharacters.storyboardId, id)).run()
     tx.delete(schema.storyboardProps).where(eq(schema.storyboardProps.storyboardId, id)).run()
+    // 视觉预检/生成后验收报告跟随分镜删除，避免悬挂报告继续参与门禁
+    tx.delete(schema.visualPreflightReports).where(eq(schema.visualPreflightReports.storyboardId, id)).run()
+    tx.delete(schema.acceptanceReports).where(eq(schema.acceptanceReports.storyboardId, id)).run()
     tx.delete(schema.videoTransitions)
       .where(or(
         eq(schema.videoTransitions.fromStoryboardId, id),

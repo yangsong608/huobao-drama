@@ -923,3 +923,47 @@ test('自动插入的空镜与场景过渡按断点轮换拍法，提示词保�
   assert.equal(textCopy.transition, 'fade')
   assert.match(textCopy.videoPrompt, /0-3秒：黑底画面中央出现「三日后」/)
 })
+
+test('修复提示词时以 description 为原文权威：缺字拒绝，逐字补回可通过', async () => {
+  seedAssets()
+  const episodeId = createEpisode()
+  const description = '【镜头1】@甲说：「这是一句完整的台词，不能少字！」'
+  const shot = createShot(episodeId, 1, {
+    duration: 9,
+    description,
+    videoPrompt: '出场人物：@甲｜场景：@房间A\n0-3秒：@甲说：「这是一句完整的台词」\n3-9秒：@甲点头。',
+  })
+  const item = issue(shot, {
+    severity: 'error',
+    code: 'prompt_dialogue_mismatch',
+    message: '视频提示词没有逐字保留画面描述中的台词。',
+    repairAction: 'normalize_video_prompt',
+    repairable: true,
+  })
+  const jobId = await createJob(episodeId, [item])
+  const clipped = '出场人物：@甲｜场景：@房间A\n0-3秒：@甲说：「这是一句完整的台词」\n3-9秒：@甲点头。'
+
+  const rejected = repair.applyAuditRepairActions(jobId, [{
+    issueId: item.id,
+    storyboardId: shot.id,
+    action: 'normalize_video_prompt',
+    videoPrompt: clipped,
+  }])
+  assert.equal(rejected.accepted.length, 0)
+  assert.equal(rejected.rejected.length, 1)
+  assert.match(rejected.rejected[0].reason, /未完整保留|缺少/)
+  assert.equal(shotRow(shot.id).videoPrompt, clipped)
+
+  // 首次拒绝会把问题转人工；重新打开后再验证逐字补回能被接受
+  prepareJob(jobId, episodeId, [item])
+  const restored = '出场人物：@甲｜场景：@房间A\n0-3秒：@甲说：「这是一句完整的台词，」\n3-9秒：@甲说：「不能少字！」'
+  const accepted = repair.applyAuditRepairActions(jobId, [{
+    issueId: item.id,
+    storyboardId: shot.id,
+    action: 'normalize_video_prompt',
+    videoPrompt: restored,
+  }])
+  assert.equal(accepted.accepted.length, 1)
+  assert.equal(accepted.rejected.length, 0)
+  assert.equal(shotRow(shot.id).videoPrompt, restored)
+})

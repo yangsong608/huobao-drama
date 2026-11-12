@@ -90,7 +90,7 @@ test('应用快照：覆盖同步表、保留不同步表、清理运行时表�
 
   const result = await applySyncSnapshot(snapshotPath(), expected, { requiredBytes: 0 })
   assert.ok(result.backupPath.includes(`${path.sep}sync${path.sep}backups${path.sep}`))
-  assert.equal(result.tables, 44)
+  assert.equal(result.tables, 52)
   assert.ok(result.rows >= 3)
 
   const dramas = await db.select().from(schema.dramas)
@@ -160,5 +160,5 @@ test('路径与磁盘：快照必须在 sync 内，空间不足拒绝应用', as
   )
   // 不使用只读连接做写入校验，确保当前库仍可用
   const rows = syncTableRowCounts()
-  assert.ok(rows.length === 44)
+  assert.ok(rows.length === 52)
 })

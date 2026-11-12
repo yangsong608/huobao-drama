@@ -58,10 +58,10 @@ after(async () => {
   await fs.rm(root, { recursive: true, force: true })
 })
 
-test('同步范围：55 张表 = 44 业务 + 11 不同步，运行时清理表在 non-sync 内', () => {
-  assert.equal(SYNC_TABLES.length, 44)
-  assert.equal(NON_SYNC_TABLES.length, 11)
-  assert.equal(new Set([...SYNC_TABLES, ...NON_SYNC_TABLES]).size, 55)
+test('同步范围：65 张表 = 52 业务 + 13 不同步，运行时清理表在 non-sync 内', () => {
+  assert.equal(SYNC_TABLES.length, 52)
+  assert.equal(NON_SYNC_TABLES.length, 13)
+  assert.equal(new Set([...SYNC_TABLES, ...NON_SYNC_TABLES]).size, 65)
   for (const table of RUNTIME_CLEAR_TABLES) {
     assert.ok(NON_SYNC_TABLES.includes(table), `${table} 应在不同步表内`)
   }
@@ -83,7 +83,7 @@ test('schema 指纹：64 位十六进制、稳定且与行数据无关', async (
 
 test('行数清单：覆盖全部业务表，可校验且能识别不一致', () => {
   const counts = syncTableRowCounts()
-  assert.equal(counts.length, 44)
+  assert.equal(counts.length, 52)
   assert.ok(counts.every(item => Number.isInteger(item.rows) && item.rows >= 0))
   assert.doesNotThrow(() => assertSyncTableRowCounts(counts))
   const bad = counts.map(item => item.table === 'dramas' ? { ...item, rows: item.rows + 1 } : item)

@@ -28,6 +28,24 @@ export interface AgentRequestContextValues {
   auditWindowIndex?: number
   /** 动作检验：成对连贯判定的当前配对键（P{fromId}-{toId}） */
   auditPairKey?: string
+  /** 四段式管线：阶段（skeleton / repair / sound）与当前任务 */
+  pipelineJobId?: number
+  pipelineStage?: 'skeleton' | 'repair' | 'sound'
+  /** 预拆：当前块剧本、块序号与起始镜号 */
+  pipelineChunkScript?: string
+  pipelineChunkIndex?: number
+  pipelineChunkTotal?: number
+  pipelineChunkLabel?: string
+  pipelineChunkShotStart?: number
+  pipelineChunkState?: { replaced: boolean; nextShot: number; saved: number; excerptCursor?: number }
+  /** 逐镜修补：目标骨架、已修补前镜、后续草稿、完整场景原文、校验问题 */
+  pipelineShotNumber?: number
+  pipelineSkeleton?: Record<string, unknown>
+  pipelinePreviousShots?: Array<Record<string, unknown>>
+  pipelineNextDrafts?: Array<Record<string, unknown>>
+  pipelineSceneText?: string
+  pipelineNovelSceneText?: string
+  pipelineIssues?: string[]
 }
 
 export function buildAgentRequestContext(values: AgentRequestContextValues): RequestContext<AgentRequestContextValues> {
@@ -46,6 +64,21 @@ export function buildAgentRequestContext(values: AgentRequestContextValues): Req
   if (values.auditPhase) rc.set('auditPhase', values.auditPhase)
   if (typeof values.auditWindowIndex === 'number') rc.set('auditWindowIndex', values.auditWindowIndex)
   if (values.auditPairKey) rc.set('auditPairKey', values.auditPairKey)
+  if (typeof values.pipelineJobId === 'number') rc.set('pipelineJobId', values.pipelineJobId)
+  if (values.pipelineStage) rc.set('pipelineStage', values.pipelineStage)
+  if (values.pipelineChunkScript) rc.set('pipelineChunkScript', values.pipelineChunkScript)
+  if (typeof values.pipelineChunkIndex === 'number') rc.set('pipelineChunkIndex', values.pipelineChunkIndex)
+  if (typeof values.pipelineChunkTotal === 'number') rc.set('pipelineChunkTotal', values.pipelineChunkTotal)
+  if (values.pipelineChunkLabel) rc.set('pipelineChunkLabel', values.pipelineChunkLabel)
+  if (typeof values.pipelineChunkShotStart === 'number') rc.set('pipelineChunkShotStart', values.pipelineChunkShotStart)
+  if (values.pipelineChunkState) rc.set('pipelineChunkState', values.pipelineChunkState)
+  if (typeof values.pipelineShotNumber === 'number') rc.set('pipelineShotNumber', values.pipelineShotNumber)
+  if (values.pipelineSkeleton) rc.set('pipelineSkeleton', values.pipelineSkeleton)
+  if (values.pipelinePreviousShots) rc.set('pipelinePreviousShots', values.pipelinePreviousShots)
+  if (values.pipelineNextDrafts) rc.set('pipelineNextDrafts', values.pipelineNextDrafts)
+  if (values.pipelineSceneText) rc.set('pipelineSceneText', values.pipelineSceneText)
+  if (values.pipelineNovelSceneText) rc.set('pipelineNovelSceneText', values.pipelineNovelSceneText)
+  if (values.pipelineIssues) rc.set('pipelineIssues', values.pipelineIssues)
   // 语言在构建处统一解析：4 条链路（chat/提取/图片提示词/视频提示词）都经过这里，
   // 全局设置一处生效；显式传入 values.language 可按请求覆盖
   rc.set('language', values.language ?? getContentLanguage())

@@ -17,6 +17,8 @@ import upload from './routes/upload.js'
 import aiConfigs, { aiProviders } from './routes/aiConfigs.js'
 import stylePresets from './routes/stylePresets.js'
 import prompts from './routes/prompts.js'
+import knowledge from './routes/knowledge.js'
+import planning from './routes/planning.js'
 import agent from './routes/agent.js'
 import merge from './routes/merge.js'
 import skills from './routes/skills.js'
@@ -64,6 +66,7 @@ import { initMcp, setMcpMainApp } from './services/mcp.js'
 import { markInterruptedAutomations, setAutomationApp } from './services/automation.js'
 import { markInterruptedNovelJobs } from './services/novel-job-runner.js'
 import { markInterruptedStoryboardSplits } from './services/storyboard-split-jobs.js'
+import { markInterruptedStoryboardPipelines } from './services/storyboard-pipeline.js'
 import { recoverInterruptedStoryboardAuditJobs } from './services/storyboard-audit-jobs.js'
 // 注册修复回滚钩子：中断修复/复查阶段前先按快照回滚本轮修复
 import './services/storyboard-audit-repair.js'
@@ -73,6 +76,7 @@ import { markInterruptedAudioJobs } from './services/audio-job-recovery.js'
 import { markInterruptedMerges } from './services/ffmpeg-merge.js'
 import { migrateUploadedVoices } from './services/voice-profile.js'
 import { ensureBreakdownMethodsSeeded } from './services/breakdown-methods.js'
+import { ensureKnowledgeIndex } from './agents/knowledge.js'
 import { startQueueWorker } from './services/queue-worker.js'
 import { resumeVideoBatches, setVideoBatchApp, startVideoBatchWorker } from './services/video-batch.js'
 import { logTaskWarn } from './utils/task-logger.js'
@@ -120,6 +124,8 @@ api.route('/ai-configs', aiConfigs)
 api.route('/ai-providers', aiProviders)
 api.route('/style-presets', stylePresets)
 api.route('/prompts', prompts)
+api.route('/knowledge', knowledge)
+api.route('/planning', planning)
 api.route('/agent', agent)
 api.route('/merge', merge)
 api.route('/skills', skills)
@@ -217,6 +223,7 @@ markInterruptedMerges()
 markInterruptedNovelJobs()
 // 分镜分块拆分：进程重启后 running 任务标为 interrupted，前端可从断点继续
 markInterruptedStoryboardSplits()
+markInterruptedStoryboardPipelines()
 // 分镜动作检验：进程重启后未完成任务标为中断，修复/复查阶段先按快照回滚
 await recoverInterruptedStoryboardAuditJobs()
 // V1 已上传的角色音色迁移为 character_voices（幂等，失败不影响启动）
@@ -226,6 +233,12 @@ try {
   await ensureBreakdownMethodsSeeded()
 } catch (error) {
   logTaskWarn('BreakdownMethod', '内置拆分方案播种失败，按标准规范运行', { error: String(error) })
+}
+// Agent 专用知识库索引：首次启动补齐；已有分配不覆盖
+try {
+  await ensureKnowledgeIndex()
+} catch (error) {
+  logTaskWarn('Knowledge', '知识库索引初始化失败', { error: String(error) })
 }
 
 // 应用设置中的自定义 FFmpeg 目录（db 已注入读取器），启动即生效

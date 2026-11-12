@@ -5,9 +5,9 @@
  *   1. AI 改写（script_rewriter）        → episodes.script_content
  *   2. 资产提取（extractor ×3）          → 角色 / 场景 / 道具
  *   3. 资产生图（按 角色 → 场景 → 道具）  → 每个资产轮流生成并等待完成
- *   4. 分镜拆分（storyboard_breaker）     → storyboards + video_prompt
+ *   4. 四段式分镜管线（storyboard_director）→ 骨架 / 逐镜修补 / 逐镜校验 / 声音设计
  *   5. 视频提示词补齐（prompt_generator） → 只补缺
- *   6. 动作检验（storyboard_auditor）     → 五项检验 + 自动修复
+ *   6. 动作检验（storyboard_auditor）     → 新管线已逐镜校验，旧数据才批量补检
  *   7. 视频生成（逐分镜串行）             → 等每个任务出片再下一个
  *
  * 设计要点：
@@ -16,7 +16,7 @@
  * - 进度落库（episodes.automation_*），项目页剧集卡片直接读，不必额外查任务表。
  * - 生成仍走内部 REST（app.fetch），复用资产生图/视频任务里的风格、背景、参考图与音色逻辑。
  */
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, isNull, lt } from 'drizzle-orm'
 import type { Hono } from 'hono'
 import { withInternalAppToken } from '../middleware/app-token.js'
 import { db, schema } from '../db/index.js'
@@ -25,6 +25,7 @@ import { mastra } from '../mastra/index.js'
 import { buildAgentRequestContext } from '../agents/context.js'
 import { getExtractionStatus, startExtraction, type ExtractTarget } from './extraction.js'
 import { getVideoPromptBatchStatus, startVideoPromptBatch } from './video-prompts.js'
+import { parsePromptCastNames } from './storyboard-contract.js'
 import {
   createStoryboardAuditJob,
   getStoryboardAuditJob,
@@ -32,6 +33,13 @@ import {
   type StoryboardAuditJobView,
 } from './storyboard-audit-jobs.js'
 import { renderPipelineRule } from './pipeline-rules.js'
+import {
+  createStoryboardPipelineJob,
+  getLatestStoryboardPipelineJob,
+  getStoryboardPipelineJob,
+  pauseStoryboardPipelineJob,
+  runStoryboardPipelineJob,
+} from './storyboard-pipeline.js'
 import { withStoryBible } from './drama-story-bible.js'
 import { getActiveConfig } from './ai.js'
 import { extractEpisodeLines } from './dialogue-extract.js'
@@ -261,7 +269,13 @@ async function videoConfigInfo(ep: typeof schema.episodes.$inferSelect) {
   try { model = effective?.model ? (JSON.parse(effective.model)[0] || '') : '' } catch { /* 忽略 */ }
   const label = effective ? `${effective.name} (${effective.provider})` : '默认'
   const isWan3 = effective?.provider === 'aliyun' || String(model).startsWith('wan3.0-video')
-  return { label, refLimit: isWan3 ? 10 : 9 }
+  return {
+    label,
+    refLimit: isWan3 ? 10 : 9,
+    provider: effective?.provider || '',
+    model,
+    isWan3,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -474,14 +488,14 @@ async function stepAssetImages(episodeId: number, opts: RunOptions) {
   }
 }
 
-/** 4. 分镜拆分：已有分镜则跳过 */
+/** 4. 四段式分镜管线：预拆 → 逐镜修补 → 逐镜校验 → 声音设计；已有分镜则跳过 */
 async function stepStoryboards(episodeId: number, dramaId: number, opts: RunOptions) {
   const existing = await episodeStoryboards(episodeId)
   if (existing.length) {
     logTaskProgress('Automation', 'skip-storyboards', { episodeId, count: existing.length })
     return
   }
-  // 分镜拆分绑定全剧资产：跨集场景/道具可直接绑定（保存分镜时自动关联到本集）
+  // 分镜管线绑定全剧资产：跨集场景/道具可直接绑定（保存分镜时自动关联到本集）
   const assets = await dramaAssets(dramaId)
   const ep = await loadEpisode(episodeId)
   if (!ep) throw new Error('剧集不存在')
@@ -496,28 +510,58 @@ async function stepStoryboards(episodeId: number, dramaId: number, opts: RunOpti
     ? assets.props.map(p => `${p.name}(ID:${p.id})`).join('、')
     : '（当前项目还没有道具）'
 
-  const agent = mastra.getAgent('storyboard_breaker')
-  if (!agent) throw new Error('分镜 Agent 不可用')
   assertRunning(episodeId)
-  const requestContext = buildAgentRequestContext({
+  const message = withStoryBible(renderPipelineRule('storyboards', {
+    videoModel: label,
+    characters: charList,
+    scenes: sceneList,
+    props: propList,
+  }), dramaId, 800)
+  const { job } = await createStoryboardPipelineJob({
     episodeId,
     dramaId,
-    modelOverride: opts.model || undefined,
-    textConfigId: opts.configId || undefined,
+    message,
+    model: opts.model || undefined,
+    configId: opts.configId || undefined,
+  }, { autorun: false })
+  await updateProgress(episodeId, 'storyboards', 0, 1, '预拆分镜骨架')
+  const running = runStoryboardPipelineJob(job.id).catch(error => {
+    throw error instanceof Error ? error : new Error(String(error))
   })
-  await updateProgress(episodeId, 'storyboards', 0, 1, '拆分分镜中')
-  await agent.generate([{
-    role: 'user',
-    content: withStoryBible(renderPipelineRule('storyboards', {
-      videoModel: label,
-      characters: charList,
-      scenes: sceneList,
-      props: propList,
-    }), dramaId, 800),
-  }], { maxSteps: 20, requestContext })
-
+  try {
+    while (true) {
+      assertRunning(episodeId)
+      const view = getStoryboardPipelineJob(job.id)
+      if (!view) break
+      if (view.status === 'done') {
+        await updateProgress(episodeId, 'storyboards', 1, 1, `逐镜修补完成：${view.validated_shots} 镜`)
+        break
+      }
+      if (view.status === 'failed' || view.status === 'interrupted') {
+        throw new Error(view.error || '分镜管线未完成')
+      }
+      const ratio = view.stage === 'skeleton'
+        ? Math.min(0.3, (view.completed_chunks || 0) / Math.max(1, view.total_chunks || 1) * 0.3)
+        : view.stage === 'repair'
+          ? 0.3 + Math.min(0.6, (view.validated_shots || 0) / Math.max(1, view.total_shots || 1) * 0.6)
+          : 0.95
+      const note = view.stage === 'skeleton'
+        ? `预拆骨架：第 ${view.completed_chunks || 0}/${view.total_chunks || 0} 段`
+        : view.stage === 'repair'
+          ? `逐镜修补：${view.validated_shots || 0}/${view.total_shots || 0} 镜通过，当前第 ${view.current_shot_number || '-'} 镜`
+          : '声音设计：按场景/剧情分配 BGM 与环境声'
+      await updateProgress(episodeId, 'storyboards', ratio, 1, note)
+      await sleep(POLL_INTERVAL_MS)
+    }
+  } catch (error) {
+    if (error instanceof StoppedError) {
+      try { pauseStoryboardPipelineJob(job.id) } catch {}
+    }
+    throw error
+  }
+  await running
   const fresh = await episodeStoryboards(episodeId)
-  if (!fresh.length) throw new Error('分镜拆分完成但没有生成分镜，请检查分镜规则或模型')
+  if (!fresh.length) throw new Error('分镜管线完成但没有生成分镜，请检查分镜规则或模型')
   await updateProgress(episodeId, 'storyboards', 1, 1, `分镜 ${fresh.length} 个`)
 }
 
@@ -558,9 +602,19 @@ function auditProgressNote(view: StoryboardAuditJobView): string {
   return '动作检验中'
 }
 
-/** 6. 动作检验：启动或复用该集检验任务并等待完成；问题与回滚不阻断流水线 */
+/** 6. 动作检验：四段式管线已完成逐镜校验时跳过批量检验；旧数据仍走批量补检 */
 export async function stepStoryboardAudit(episodeId: number, dramaId: number, opts: RunOptions) {
   assertRunning(episodeId)
+  const pipeline = getLatestStoryboardPipelineJob(episodeId)
+  if (pipeline?.status === 'done') {
+    await updateProgress(episodeId, 'storyboard_audit', 1, 1, '逐镜校验与声音设计已在分镜阶段完成')
+    logTaskSuccess('Automation', 'storyboard-audit-skip-pipeline', {
+      episodeId,
+      pipelineJobId: pipeline.id,
+      validatedShots: pipeline.validated_shots,
+    })
+    return
+  }
   let jobId: number
   try {
     const started = await createStoryboardAuditJob({
@@ -633,11 +687,51 @@ export async function stepStoryboardAudit(episodeId: number, dramaId: number, op
   await updateProgress(episodeId, 'storyboard_audit', 1, 1, '动作检验超时，已跳过')
 }
 
+function parseStoredIdList(value: string | null | undefined): number[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is number => typeof id === 'number' && Number.isFinite(id))
+      : []
+  } catch {
+    return []
+  }
+}
+
+async function resolvePreviousTailFrame(
+  episodeId: number,
+  sb: typeof schema.storyboards.$inferSelect,
+): Promise<{ url: string; token: string }> {
+  const [previous] = await db.select().from(schema.storyboards)
+    .where(and(
+      eq(schema.storyboards.episodeId, episodeId),
+      lt(schema.storyboards.storyboardNumber, sb.storyboardNumber),
+      isNull(schema.storyboards.deletedAt),
+    ))
+    .orderBy(desc(schema.storyboards.storyboardNumber))
+    .limit(1)
+  if (!previous) return { url: '', token: '' }
+  const token = `镜头${previous.storyboardNumber}末帧`
+  const explicit = String(previous.lastFrameImage || '').trim()
+  if (explicit) return { url: explicit, token }
+  const [frameAsset] = await db.select().from(schema.assets)
+    .where(and(
+      eq(schema.assets.episodeId, episodeId),
+      eq(schema.assets.storyboardId, previous.id),
+      eq(schema.assets.category, 'storyboard_frame'),
+      isNull(schema.assets.deletedAt),
+    ))
+    .orderBy(desc(schema.assets.id))
+    .limit(1)
+  return { url: String(frameAsset?.url || '').trim(), token }
+}
+
 /** 分镜 → 视频请求参数：绑定素材作参考图，@名字 替换为 @图片N名字（导出便于单测与 MCP 复用） */
 export async function buildVideoRequest(episodeId: number, sb: typeof schema.storyboards.$inferSelect) {
   const ep = await loadEpisode(episodeId)
   if (!ep) throw new Error('剧集不存在')
-  const { refLimit } = await videoConfigInfo(ep)
+  const { refLimit, isWan3 } = await videoConfigInfo(ep)
   // 画面比例固定在项目上（创建项目时选择），视频生成统一沿用
   const [drama] = await db.select().from(schema.dramas).where(eq(schema.dramas.id, ep.dramaId))
 
@@ -650,6 +744,21 @@ export async function buildVideoRequest(episodeId: number, sb: typeof schema.sto
   const allProps = await db.select().from(schema.props)
   const chars = allChars.filter(c => charLinks.some(l => l.characterId === c.id) && !c.deletedAt)
   const props = allProps.filter(p => propLinks.some(l => l.propId === p.id) && !p.deletedAt)
+  // 优先用合同落库的画内人物；旧数据回落信息头解析；都没有才送全部绑定角色。
+  const contractCastIds = parseStoredIdList(sb.castOnScreen)
+  const headerCastNames = parsePromptCastNames(sb.videoPrompt)
+  const onScreenChars = contractCastIds.length
+    ? chars.filter(c => contractCastIds.includes(c.id))
+    : headerCastNames.length
+      ? chars.filter(c => headerCastNames.some(name => name === c.name || name.includes(c.name) || c.name.includes(name)))
+      : chars
+
+  const explicitFirstFrame = String(sb.firstFrameImage || '').trim()
+  const previousTail = explicitFirstFrame ? { url: '', token: '' } : await resolvePreviousTailFrame(episodeId, sb)
+  const previousTailFrame = previousTail.url
+  // Wan 3.0 的首帧不能与参考图混用：降级为参考图；其他模型优先走首帧链。
+  const firstFrameUrl = isWan3 ? '' : (explicitFirstFrame || previousTailFrame)
+  const frameReference = isWan3 ? (explicitFirstFrame || previousTailFrame) : ''
 
   const ordered: { name: string; url: string }[] = []
   const seen = new Set<string>()
@@ -658,8 +767,9 @@ export async function buildVideoRequest(episodeId: number, sb: typeof schema.sto
     seen.add(url)
     ordered.push({ name: name || '', url })
   }
+  if (frameReference) push(explicitFirstFrame ? '首帧' : (previousTail.token || '上一镜尾帧'), frameReference)
   push(scene?.location, scene?.imageUrl)
-  for (const c of chars) push(c.name, c.imageUrl)
+  for (const c of onScreenChars) push(c.name, c.imageUrl)
   for (const p of props) push(p.name, p.imageUrl)
 
   const nameToIndex: Record<string, number> = {}
@@ -680,6 +790,7 @@ export async function buildVideoRequest(episodeId: number, sb: typeof schema.sto
   return {
     prompt,
     referenceImageUrls: ordered.map(item => item.url),
+    firstFrameUrl,
     duration: Number(sb.duration || 10),
     aspectRatio: drama?.aspectRatio || '16:9',
     // 后期配音的集：让模型只出环境声；静音集明确不要音轨
@@ -727,6 +838,7 @@ async function stepVideos(episodeId: number, dramaId: number) {
         generate_audio: request.generateAudio,
         audio_mode: request.audioMode,
         reference_image_urls: request.referenceImageUrls,
+        first_frame_url: request.firstFrameUrl || undefined,
       })
       const createdId = Number(created?.id)
       if (!Number.isInteger(createdId) || createdId <= 0) throw new Error(`分镜 #${sb.storyboardNumber} 没有返回视频任务`)

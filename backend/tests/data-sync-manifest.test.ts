@@ -45,13 +45,13 @@ function createApprovedRun(deviceId: string, fingerprint = syncSchemaFingerprint
   return run
 }
 
-test('清单：包含 44 张表行数、schema 指纹与媒体哈希', async () => {
+test('清单：包含 52 张表行数、schema 指纹与媒体哈希', async () => {
   await fs.mkdir(path.join(storage, 'videos'), { recursive: true })
   await fs.writeFile(path.join(storage, 'videos/a.mp4'), Buffer.from('media-a'))
   const manifest = await buildSyncManifest('4.0.35')
   assert.equal(manifest.version, '4.0.35')
   assert.equal(manifest.schemaFingerprint, syncSchemaFingerprint())
-  assert.equal(manifest.tables.length, 44)
+  assert.equal(manifest.tables.length, 52)
   assert.equal(manifest.media.length, 1)
   assert.equal(manifest.media[0].path, 'static/videos/a.mp4')
   assert.match(String(manifest.media[0].sha256), /^[0-9a-f]{64}$/)

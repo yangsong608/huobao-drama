@@ -5,6 +5,10 @@
  * 不读数据库、不调用模型；上下文与任务编排由 storyboard-audit 服务注入。
  */
 import { extractDrafts, type CastMember } from './dialogue-lines.js'
+import {
+  formatDialogueIntegrityIssue,
+  inspectDialogueIntegrity,
+} from './dialogue-integrity.js'
 
 export type AuditCheck = 1 | 2 | 3 | 4 | 5
 export type AuditSeverity = 'error' | 'warning' | 'info'
@@ -34,15 +38,30 @@ export const AUDIT_RULE_CODES_BY_CHECK: Record<AuditCheck, readonly string[]> = 
     'shot_missing_description',
     'shot_missing_video_prompt',
     'shot_missing_camera_fields',
-    'description_missing_subshots',
+    'description_multiple_subshots',
     'prompt_missing_header',
+    'prompt_blocking_missing',
+    'prompt_negative_missing',
     'prompt_timeline_broken',
+    'prompt_dialogue_mismatch',
     'prompt_segment_too_long',
+    'prompt_segment_duration_invalid',
     'prompt_action_in_dialogue',
     'speaker_unbound',
     'speaker_unknown',
   ],
-  2: ['continuity_missing', 'cross_scene_cut_without_continuity', 'adjacent_time_jump'],
+  2: [
+    'continuity_missing',
+    'cross_scene_cut_without_continuity',
+    'adjacent_time_jump',
+    'screen_direction_flip',
+    'set_mirror',
+    'axis_cross',
+    'scene_geography_mismatch',
+    'cast_presence_break',
+    'foreground_shoulder_missing',
+    'coverage_gap',
+  ],
   3: ['silent_shot_long', 'empty_shot_long'],
   4: [
     'line_insufficient_duration',
@@ -315,7 +334,10 @@ function isPlaceholderDescription(text: string): boolean {
 }
 
 export function parsePromptSegments(videoPrompt: string | null | undefined): ParsedPromptSegment[] {
-  const text = videoPrompt || ''
+  // 负面约束是独立分区，不属于任何时间帧；必须先截掉，否则会被算成台词/旁白
+  const raw = String(videoPrompt || '').replace(/\r\n?/g, '\n')
+  const negativeStart = raw.search(/\n\s*(?:负面约束|Negative constraints|ネガティブ制約|네거티브 제약)\s*[：:]/i)
+  const text = negativeStart >= 0 ? raw.slice(0, negativeStart) : raw
   const marks: { index: number; bodyStart: number; startSec: number; endSec: number }[] = []
   const re = new RegExp(PROMPT_TIME_RE.source, 'gi')
   let match: RegExpExecArray | null
@@ -333,6 +355,49 @@ export function parsePromptSegments(videoPrompt: string | null | undefined): Par
     endSec: mark.endSec,
     text: text.slice(mark.bodyStart, index + 1 < marks.length ? marks[index + 1].index : text.length).trim(),
   }))
+}
+
+export interface ParsedPromptSections {
+  hasBlockingMarker: boolean
+  blocking: string
+  hasSoundMarker: boolean
+  sound: string
+  hasNegativeMarker: boolean
+  negative: string
+}
+
+/** 解析固定分区里的「画面调度」「负面约束」；旧格式没有这两个标记时不报缺失。 */
+export function parsePromptSections(videoPrompt: string | null | undefined): ParsedPromptSections {
+  const lines = String(videoPrompt || '').replace(/\r\n?/g, '\n').split('\n')
+  const blockingRe = /^\s*(?:画面调度|Blocking|画面演出|화면 연출)\s*[：:]\s*(.*)$/i
+  const soundRe = /^\s*(?:声音|Sound|音響|사운드)\s*[：:]\s*(.*)$/i
+  const negativeRe = /^\s*(?:负面约束|Negative constraints|ネガティブ制約|네거티브 제약)\s*[：:]\s*(.*)$/i
+  let hasBlockingMarker = false
+  let blocking = ''
+  let hasSoundMarker = false
+  let sound = ''
+  let hasNegativeMarker = false
+  let negative = ''
+  for (const line of lines) {
+    const blockingMatch = blockingRe.exec(line)
+    if (blockingMatch) {
+      hasBlockingMarker = true
+      if (!blocking) blocking = blockingMatch[1].trim()
+      continue
+    }
+    const soundMatch = soundRe.exec(line)
+    if (soundMatch) {
+      hasSoundMarker = true
+      if (!sound) sound = soundMatch[1].trim()
+      continue
+    }
+    const negativeMatch = negativeRe.exec(line)
+    if (negativeMatch) {
+      hasNegativeMarker = true
+      if (!negative) negative = negativeMatch[1].trim()
+    }
+  }
+  return { hasBlockingMarker, blocking, hasSoundMarker, sound, hasNegativeMarker, negative }
 }
 
 export function hasVideoPromptHeader(videoPrompt: string | null | undefined): boolean {
@@ -437,14 +502,14 @@ function checkShotFields(
       suggestion: '补写谁在做什么、肢体细节、表情、视线和结果。',
       repairable: false,
     })
-  } else if (shot.duration > 3 && !SUB_SHOT_RE.test(shot.description || '')) {
+  } else if ((((shot.description || '').match(/【镜头\s*\d+】/g)) || []).length > 1) {
     pushIssue(issues, shot, {
       check: 1,
-      severity: 'warning',
-      code: 'description_missing_subshots',
-      message: `镜头时长 ${formatSeconds(shot.duration)} 秒，但画面描述没有【镜头N】子镜头结构。`,
+      severity: 'error',
+      code: 'description_multiple_subshots',
+      message: '一个分镜里出现了多个【镜头N】子镜头；新规则要求一个分镜 = 一个机位/一个主体/一个连续动作。',
       evidence: clip(shot.description || ''),
-      suggestion: '按【镜头1】【镜头2】…拆分画面描述，并与视频提示词时间段对齐。',
+      suggestion: '把每个【镜头N】拆成独立分镜，保留各自的机位、主体和连续动作；不要在一个分镜里切镜。',
       repairable: false,
     })
   }
@@ -503,14 +568,40 @@ function checkVideoPrompt(
     })
   }
 
+  const sections = parsePromptSections(prompt)
+  const fixedFormat = sections.hasBlockingMarker || sections.hasNegativeMarker
+  if (fixedFormat && (!sections.hasBlockingMarker || !sections.blocking)) {
+    pushIssue(issues, shot, {
+      check: 1,
+      severity: 'warning',
+      code: 'prompt_blocking_missing',
+      message: '固定分区提示词缺少「画面调度」：没有写清屏幕左右、过肩和背景地标。',
+      evidence: clip(prompt.split(/\r?\n/, 1)[0] || ''),
+      suggestion: '在提示词分区里补「画面调度：画面左…、画面右…、过谁的肩、窗/门/桌在哪」。',
+      repairable: false,
+    })
+  }
+  if (fixedFormat && (!sections.hasNegativeMarker || !sections.negative)) {
+    pushIssue(issues, shot, {
+      check: 1,
+      severity: 'warning',
+      code: 'prompt_negative_missing',
+      message: '固定分区提示词缺少「负面约束」：画内人物、加人、字幕和现代物品没有约束。',
+      evidence: clip(prompt.split(/\r?\n/, 1)[0] || ''),
+      suggestion: '在提示词分区里补「负面约束：只出现画内人物；不换脸/换装/加人；不生成字幕；不出现现代物品」。',
+      repairable: false,
+    })
+  }
+
   const segments = parsePromptSegments(prompt)
   const timelineProblems: string[] = []
   if (!segments.length) {
     timelineProblems.push('未找到从「0-3秒」开始的时间分段')
   } else {
     const first = segments[0]
-    if (first.startSec !== 0 || first.endSec !== 3) {
-      timelineProblems.push(`首段应为 0-3 秒，实际 ${formatSeconds(first.startSec)}-${formatSeconds(first.endSec)} 秒`)
+    const firstDuration = first.endSec - first.startSec
+    if (first.startSec !== 0 || firstDuration < 1 || firstDuration > 6) {
+      timelineProblems.push(`首段应从 0 秒开始、时长 1-6 秒，实际 ${formatSeconds(first.startSec)}-${formatSeconds(first.endSec)} 秒`)
     }
     for (let index = 1; index < segments.length; index += 1) {
       const previous = segments[index - 1]
@@ -538,7 +629,39 @@ function checkVideoPrompt(
       code: 'prompt_timeline_broken',
       message: `视频提示词时间轴不连续或与镜头时长不一致：${timelineProblems.join('；')}`,
       evidence: clip(timelineProblems.join('；')),
-      suggestion: '从 0-3 秒起连续分段，时间不重叠不留空，最后一段结束等于镜头时长。',
+      suggestion: '从 0 秒起连续分段，每段 1-6 秒，时间不重叠不留空，最后一段结束等于镜头时长。',
+      repairable: true,
+      repairAction: 'normalize_video_prompt',
+    })
+  }
+
+  const invalidDurations = segments.filter((segment) => {
+    const duration = segment.endSec - segment.startSec
+    return duration < 1 || duration > 6
+  })
+  if (invalidDurations.length) {
+    pushIssue(issues, shot, {
+      check: 1,
+      severity: 'warning',
+      code: 'prompt_segment_duration_invalid',
+      message: '视频提示词存在小于 1 秒或大于 6 秒的时间段。',
+      evidence: clip(invalidDurations
+        .map(segment => `${formatSeconds(segment.startSec)}-${formatSeconds(segment.endSec)} 秒（${formatSeconds(segment.endSec - segment.startSec)} 秒）`)
+        .join('；')),
+      suggestion: '把每段调到 1-6 秒；调整后保持时间轴连续，最后一段结束等于镜头时长。',
+      repairable: false,
+    })
+  }
+
+  const dialogueIntegrity = inspectDialogueIntegrity(shot.description, prompt)
+  if (dialogueIntegrity && !dialogueIntegrity.ok) {
+    pushIssue(issues, shot, {
+      check: 1,
+      severity: 'error',
+      code: 'prompt_dialogue_mismatch',
+      message: '视频提示词没有逐字保留画面描述中的台词/旁白：存在压缩、删字、改字或丢失标点。',
+      evidence: clip(`${formatDialogueIntegrityIssue(dialogueIntegrity, '')}；原文：${dialogueIntegrity.expected}`),
+      suggestion: '从 description 对应【镜头N】逐字复制台词和全部标点；3 秒分段只拆分、不压缩，长句在原文标点或语义停顿处拆到相邻段。',
       repairable: true,
       repairAction: 'normalize_video_prompt',
     })
@@ -546,11 +669,14 @@ function checkVideoPrompt(
 
   const overlongSegments: string[] = []
   const actionInDialogue: string[] = []
+  const charsPerSecond = thresholds.promptSegmentMaxChars / 3
   for (const segment of segments) {
     const drafts = extractDrafts(segment.text, cast)
     const spokenChars = drafts.reduce((sum, draft) => sum + countPronounceableChars(draft.text), 0)
-    if (spokenChars > thresholds.promptSegmentMaxChars) {
-      overlongSegments.push(`${formatSeconds(segment.startSec)}-${formatSeconds(segment.endSec)} 秒共 ${spokenChars} 字`)
+    const segmentSeconds = Math.max(0, segment.endSec - segment.startSec)
+    const capacity = Math.max(1, Math.round(segmentSeconds * charsPerSecond))
+    if (spokenChars > capacity) {
+      overlongSegments.push(`${formatSeconds(segment.startSec)}-${formatSeconds(segment.endSec)} 秒共 ${spokenChars} 字（容量 ${capacity} 字）`)
     }
     for (const draft of drafts) {
       if (HIGH_CONFIDENCE_ACTION_RE.test(draft.text)) {
@@ -563,10 +689,9 @@ function checkVideoPrompt(
       check: 1,
       severity: 'warning',
       code: 'prompt_segment_too_long',
-      message: `视频提示词单个 3 秒段中的台词/旁白超过 ${thresholds.promptSegmentMaxChars} 个可发音字符。`,
+      message: '视频提示词某个时间段的台词/旁白超过该段容量（4 字/秒）。',
       evidence: clip(unique(overlongSegments).join('；')),
-      // 缩短台词或跨段拆分必须改台词文本，受控修复不允许改台词，只能人工处理
-      suggestion: `人工压缩台词或把长句拆分到相邻时间段/分镜，每段不超过 ${thresholds.promptSegmentMaxChars} 字；自动修复不改台词。`,
+      suggestion: '在原文标点或语义停顿处把长句拆到相邻时间段/分镜，或延长该段时长；保留全部文字与标点；自动修复不改台词。',
       repairable: false,
     })
   }
@@ -743,22 +868,24 @@ function checkLineDurations(
     const shotLines = (linesByShot.get(shot.id) ?? [])
       .filter((line) => !isBlank(line.text))
       .sort((left, right) => (left.lineNo ?? 0) - (right.lineNo ?? 0) || (left.id ?? 0) - (right.id ?? 0))
-    let totalRequiredMs = 0
+    let totalChars = 0
     const lineSummary: string[] = []
 
     for (const line of shotLines) {
       const sourceText = lineSourceText(line)
       const chars = countPronounceableChars(sourceText)
       if (chars === 0) continue
+      totalChars += chars
       const requiredMs = requiredLineDurationMs(sourceText, thresholds)
-      totalRequiredMs += requiredMs
       const effectiveMs = effectiveLineDurationMs(line)
       const requiredSeconds = requiredMs / 1000
       const effectiveSeconds = effectiveMs == null ? null : effectiveMs / 1000
       lineSummary.push(`${line.speakerName || '未知'}：${requiredSeconds.toFixed(1)} 秒`)
       const textEvidence = clip(line.text || sourceText, 200)
 
-      if (effectiveMs != null) {
+      // 派生台词是按提示词标点拆出来的片段，不能逐片段套 1 秒气口；
+      // 片段级时长只对数据库中的真实台词行判断，整镜容量统一在下面按总字数计算。
+      if (line.id != null && effectiveMs != null) {
         const gapMs = requiredMs - effectiveMs
         if (gapMs > 0) {
           const gapSeconds = gapMs / 1000
@@ -789,7 +916,7 @@ function checkLineDurations(
         }
       }
 
-      if (requiredMs > thresholds.lineRequiredMaxSeconds * 1000) {
+      if (line.id != null && requiredMs > thresholds.lineRequiredMaxSeconds * 1000) {
         pushIssue(issues, shot, {
           check: 4,
           severity: 'warning',
@@ -803,12 +930,15 @@ function checkLineDurations(
       }
     }
 
+    const totalRequiredMs = totalChars > 0
+      ? Math.round((totalChars / thresholds.charsPerSecond + thresholds.lineBreathSeconds) * 1000)
+      : 0
     if (shot.duration > 0 && totalRequiredMs > Math.round(shot.duration * 1000)) {
       pushIssue(issues, shot, {
         check: 4,
         severity: 'error',
         code: 'shot_dialogue_over_capacity',
-        message: `本镜台词/旁白共需 ${(totalRequiredMs / 1000).toFixed(1)} 秒，超过镜头时长 ${formatSeconds(shot.duration)} 秒。`,
+        message: `本镜台词/旁白共需 ${(totalRequiredMs / 1000).toFixed(1)} 秒（${totalChars} 字，含 1 秒气口），超过镜头时长 ${formatSeconds(shot.duration)} 秒。`,
         evidence: clip(lineSummary.join('；')),
         suggestion: '延长镜头时长、减少台词或拆分到相邻分镜。',
         repairable: true,

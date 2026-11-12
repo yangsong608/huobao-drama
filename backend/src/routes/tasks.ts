@@ -18,6 +18,7 @@ import { durationSupportError, resolutionSupportError } from '../services/model-
 import { isLocalShimConfig } from '../services/adapters/minimax-video.js'
 import { normalizeVideoAudioMode } from '../services/video-audio.js'
 import { compileLocalH3Prompt, translateH3Text } from '../services/h3-prompt.js'
+import { evaluateStoryboardGenerationGate } from '../services/storyboard-generation-gate.js'
 import { stripLegacyAudioInstruction } from '../services/video-prompt-sanitize.js'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
 
@@ -175,6 +176,13 @@ app.post('/', async (c) => {
     if (body.storyboard_id) {
       const [sb] = await db.select().from(schema.storyboards).where(eq(schema.storyboards.id, Number(body.storyboard_id)))
       if (sb) {
+        if (type === 'video') {
+          const gate = await evaluateStoryboardGenerationGate(sb.episodeId, sb.id)
+          if (!gate.allowed) {
+            const reason = gate.blockers.map(issue => issue.message).join('；') || '存在未修复的审计错误'
+            return badRequest(c, `生成门禁未通过：${reason}`)
+          }
+        }
         const [ep] = await db.select().from(schema.episodes).where(eq(schema.episodes.id, sb.episodeId))
         const locked = type === 'image' ? ep?.imageConfigId : ep?.videoConfigId
         if (locked != null && configId == null) configId = locked

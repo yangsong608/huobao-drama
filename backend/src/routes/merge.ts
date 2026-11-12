@@ -18,6 +18,7 @@ import {
 import { toSnakeCase } from '../utils/transform.js'
 import { hasActiveStoryboardAudit } from '../services/storyboard-audit-jobs.js'
 import { outputGate } from '../utils/media-guard.js'
+import { evaluateEpisodeAcceptanceGate } from '../services/storyboard-acceptance.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 
 const app = new Hono()
@@ -56,6 +57,10 @@ app.post('/episodes/:id/merge', outputGate, async (c) => {
   } catch { /* 无 body 时拼接全部 */ }
 
   const mergeTitle = title || `第 ${ep.episodeNumber} 集成片`
+  const acceptanceGate = await evaluateEpisodeAcceptanceGate(episodeId, storyboardIds)
+  if (!acceptanceGate.allowed) {
+    return badRequest(c, `装配门禁未通过：${acceptanceGate.blockers.map(item => item.message).join('；')}。请重新生成或改合同后重跑验收。`)
+  }
 
   try {
     logTaskStart('MergeAPI', 'episode-merge', {
@@ -65,7 +70,7 @@ app.post('/episodes/:id/merge', outputGate, async (c) => {
       episodeId, ep.dramaId, storyboardIds, mergeTitle, { useAiTransitions },
     )
     logTaskSuccess('MergeAPI', 'episode-merge', { episodeId, mergeId })
-    return success(c, { merge_id: mergeId, status: 'processing' })
+    return success(c, { merge_id: mergeId, status: 'processing', warnings: acceptanceGate.warnings })
   } catch (err: any) {
     logTaskError('MergeAPI', 'episode-merge', { episodeId, error: err.message })
     return badRequest(c, err.message)

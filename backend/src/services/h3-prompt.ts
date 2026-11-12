@@ -134,9 +134,9 @@ export function compileH3Prompt(prompt: string, audioMode: VideoAudioMode = 'nat
 
   // 音频行：native 保留内容并换成英文标签；ambient/silent 整行移除
   if (audioMode === 'native') {
-    text = text.replace(/^音频\s*[：:]\s*/gm, 'Audio: ')
+    text = text.replace(/^(?:音频|声音|Sound|音響|사운드)\s*[：:]\s*/gmi, 'Audio: ')
   } else {
-    text = text.replace(/^\s*(?:音频|audio)\s*[：:].*(?:\n|$)/gim, '')
+    text = text.replace(/^\s*(?:音频|audio|声音|Sound|音響|사운드)\s*[：:].*(?:\n|$)/gim, '')
   }
 
   // 时间轴：0-3秒： → [0-3s]，单点时间同理

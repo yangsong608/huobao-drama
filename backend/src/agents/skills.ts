@@ -40,6 +40,7 @@ const AGENT_SKILL_MAP: Record<string, string[]> = {
   script_rewriter: ['script-rewriter'],
   extractor: ['extractor'],
   storyboard_breaker: ['storyboard-breaker'],
+  storyboard_director: ['storyboard-director'],
   prompt_generator: [
     'prompt-generator/character-prompt',
     'prompt-generator/scene-prompt',

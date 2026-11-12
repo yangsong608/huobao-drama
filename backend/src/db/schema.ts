@@ -222,6 +222,34 @@ export const storyboards = sqliteTable('storyboards', {
   transitionText: text('transition_text'),
   /** 文字过渡副标题 */
   transitionSubtitle: text('transition_subtitle'),
+  /** 镜头合同：覆盖类型/轴线/屏幕左右/过肩/画内画外人物/动作起止/视线/机位侧/负面约束 */
+  coverageType: text('coverage_type'),
+  axisSide: text('axis_side'),
+  screenLeft: text('screen_left'),
+  screenRight: text('screen_right'),
+  foregroundShoulder: text('foreground_shoulder'),
+  castOnScreen: text('cast_on_screen'),
+  castOffScreen: text('cast_off_screen'),
+  blockingStart: text('blocking_start'),
+  blockingEnd: text('blocking_end'),
+  /** 动作起点/终点：同场连续动作的成对匹配依据 */
+  actionStart: text('action_start'),
+  actionEnd: text('action_end'),
+  gazeTarget: text('gaze_target'),
+  cameraSide: text('camera_side'),
+  sceneGeographyId: integer('scene_geography_id'),
+  negativeConstraints: text('negative_constraints'),
+  /** JSON：[{ name, side }]；画面调度里可读的背景地标与屏幕侧 */
+  backgroundLandmarks: text('background_landmarks'),
+  /** JSON：[{ start, end, text }]；与 video_prompt 时间帧同源 */
+  segmentPlan: text('segment_plan'),
+  /** 0 = 旧数据未解析；1 = 已从固定分区/旧格式解析 */
+  contractVersion: integer('contract_version').notNull().default(0),
+  planUnitId: text('plan_unit_id'),
+  /** 第四步声音增量：{ plan_id, unit_key, cue_ids, delta_text }；不是完整 BGM 风格 */
+  soundCue: text('sound_cue'),
+  /** 声音单元键：同场景/剧情跨镜共享，用于检查 BGM 重启与风格重复 */
+  soundUnitKey: text('sound_unit_key'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   deletedAt: text('deleted_at'),
@@ -254,6 +282,108 @@ export const storyboardProps = sqliteTable('storyboard_props', {
 }, (table) => [
   primaryKey({ columns: [table.storyboardId, table.propId] }),
 ])
+
+/** 场景地理卡：俯视布局、地标、机位 A/B、轴线；一个 canonical 场景一张卡 */
+export const sceneGeographies = sqliteTable('scene_geographies', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  dramaId: integer('drama_id').notNull(),
+  sceneId: integer('scene_id').notNull(),
+  version: integer('version').notNull().default(1),
+  /** JSON：桌/窗/门/柜台/入口等俯视布局 */
+  layoutJson: text('layout_json'),
+  /** JSON：[{ name, screenSide }] */
+  landmarksJson: text('landmarks_json'),
+  /** JSON：{ A: [], B: [] } */
+  cameraSidesJson: text('camera_sides_json'),
+  axisLine: text('axis_line'),
+  canonicalSceneId: integer('canonical_scene_id'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** 覆盖计划：一场戏的镜头单元、覆盖类型、时长预算 */
+export const coveragePlans = sqliteTable('coverage_plans', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  sceneId: integer('scene_id'),
+  profileKey: text('profile_key'),
+  version: integer('version').notNull().default(1),
+  targetDuration: integer('target_duration').notNull().default(0),
+  /** JSON：[{ unitId, beatId, coverageType, castOnScreen, castOffScreen, screenLeft, screenRight, ... }] */
+  unitsJson: text('units_json'),
+  /** JSON：覆盖缺口/统计 */
+  summaryJson: text('summary_json'),
+  status: text('status').notNull().default('draft'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** 相邻镜头关系：正反打/动作匹配/视线匹配/时间跳/新场景 */
+export const shotRelations = sqliteTable('shot_relations', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  fromShotId: integer('from_shot_id').notNull(),
+  toShotId: integer('to_shot_id').notNull(),
+  relation: text('relation'),
+  axisSide: text('axis_side'),
+  expectedScreenDirection: text('expected_screen_direction'),
+  tailFrameRef: text('tail_frame_ref'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** L2 视觉预检报告：生成前用合同 + 参考图/首帧对照；verdict=block 时门禁阻断 */
+export const visualPreflightReports = sqliteTable('visual_preflight_reports', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  storyboardId: integer('storyboard_id').notNull(),
+  contractVersion: integer('contract_version').notNull().default(0),
+  /** 提示词内容指纹：合同/提示词变化后旧报告失效 */
+  promptHash: text('prompt_hash'),
+  verdict: text('verdict').notNull().default('warn'),
+  checksJson: text('checks_json'),
+  issuesJson: text('issues_json'),
+  evidenceJson: text('evidence_json'),
+  model: text('model'),
+  provider: text('provider'),
+  createdAt: text('created_at').notNull(),
+})
+
+/** L3 生成后验收：成片抽帧 + 合同/邻镜尾帧/参考图；verdict=fail 时禁止进入装配 */
+export const acceptanceReports = sqliteTable('acceptance_reports', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  storyboardId: integer('storyboard_id').notNull(),
+  taskId: integer('task_id'),
+  videoUrl: text('video_url'),
+  /** 视频路径/大小/mtime 指纹：重生成后旧报告失效 */
+  videoFingerprint: text('video_fingerprint'),
+  contractVersion: integer('contract_version').notNull().default(0),
+  verdict: text('verdict').notNull().default('warn'),
+  checksJson: text('checks_json'),
+  issuesJson: text('issues_json'),
+  evidenceJson: text('evidence_json'),
+  model: text('model'),
+  provider: text('provider'),
+  createdAt: text('created_at').notNull(),
+})
+
+/** 过渡分镜关系：时间/场景/人物/插入/文字；过渡分镜本身仍是 storyboards 行 */
+export const transitionShots = sqliteTable('transition_shots', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  fromShotId: integer('from_shot_id').notNull(),
+  toShotId: integer('to_shot_id').notNull(),
+  kind: text('kind').notNull(),
+  reason: text('reason'),
+  timeCue: text('time_cue'),
+  locationCue: text('location_cue'),
+  characterCue: text('character_cue'),
+  duration: integer('duration').notNull().default(2),
+  contractId: integer('contract_id'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
 
 export const aiServiceConfigs = sqliteTable('ai_service_configs', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -379,9 +509,113 @@ export const storyboardSplitJobs = sqliteTable('storyboard_split_jobs', {
   completedChunks: integer('completed_chunks').notNull().default(0),
   shotCount: integer('shot_count').notNull().default(0),
   errorMsg: text('error_msg'),
+  /** 块间暂停请求：当前块完成后不再启动下一块（D10） */
+  pauseRequested: integer('pause_requested').notNull().default(0),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   finishedAt: text('finished_at'),
+})
+
+// 四段式分镜管线：预拆骨架 → 逐镜修补 → 逐镜校验 → 声音设计
+export const storyboardPipelineJobs = sqliteTable('storyboard_pipeline_jobs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  /** pending / running / interrupted / done / failed */
+  status: text('status').default('pending'),
+  /** skeleton / repair / sound / done */
+  stage: text('stage').default('skeleton'),
+  message: text('message').notNull(),
+  model: text('model'),
+  configId: integer('config_id'),
+  totalShots: integer('total_shots').notNull().default(0),
+  repairedShots: integer('repaired_shots').notNull().default(0),
+  validatedShots: integer('validated_shots').notNull().default(0),
+  failedShots: integer('failed_shots').notNull().default(0),
+  currentShotNumber: integer('current_shot_number'),
+  soundUnits: integer('sound_units').notNull().default(0),
+  /** none / running / done / failed */
+  soundStatus: text('sound_status').notNull().default('none'),
+  /** JSON：预拆分段与每镜状态 */
+  stateJson: text('state_json'),
+  errorMsg: text('error_msg'),
+  pauseRequested: integer('pause_requested').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  finishedAt: text('finished_at'),
+})
+
+export const storyboardSkeletons = sqliteTable('storyboard_skeletons', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  jobId: integer('job_id').notNull(),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  chunkIndex: integer('chunk_index'),
+  storyboardNumber: integer('storyboard_number').notNull(),
+  sceneId: integer('scene_id'),
+  title: text('title'),
+  location: text('location'),
+  time: text('time'),
+  /** JSON number[] */
+  characterIds: text('character_ids'),
+  /** JSON number[] */
+  propIds: text('prop_ids'),
+  duration: integer('duration').default(0),
+  transition: text('transition').default('cut'),
+  continuity: text('continuity'),
+  /** 预拆动作摘要：只写谁做什么，不写最终台词/完整提示词 */
+  actionSummary: text('action_summary').notNull(),
+  /** 本镜覆盖的小说/剧本原文摘录，逐字截取；修补阶段据此补台词，禁止创作 */
+  sourceExcerpt: text('source_excerpt').notNull(),
+  /** draft / repairing / repaired / validated / manual */
+  status: text('status').notNull().default('draft'),
+  storyboardId: integer('storyboard_id'),
+  attempts: integer('attempts').notNull().default(0),
+  issuesJson: text('issues_json'),
+  repairLogJson: text('repair_log_json'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+// 第四步声音设计：一集一份计划，cue 可跨多个分镜甚至跨场
+export const soundPlans = sqliteTable('sound_plans', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  version: integer('version').notNull().default(1),
+  /** pending / running / done / failed */
+  status: text('status').notNull().default('pending'),
+  planJson: text('plan_json'),
+  validationJson: text('validation_json'),
+  fingerprint: text('fingerprint'),
+  model: text('model'),
+  configId: integer('config_id'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const soundCues = sqliteTable('sound_cues', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  planId: integer('plan_id').notNull(),
+  unitKey: text('unit_key').notNull(),
+  unitLabel: text('unit_label'),
+  /** bgm / ambience / sfx / silence */
+  kind: text('kind').notNull(),
+  fromShotId: integer('from_shot_id').notNull(),
+  toShotId: integer('to_shot_id').notNull(),
+  fromShotNumber: integer('from_shot_number'),
+  toShotNumber: integer('to_shot_number'),
+  startMs: integer('start_ms'),
+  endMs: integer('end_ms'),
+  description: text('description').notNull(),
+  intensity: text('intensity'),
+  entry: text('entry'),
+  exit: text('exit'),
+  /** native / post */
+  delivery: text('delivery').default('native'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
 })
 
 // 分镜动作检验任务：拆分完成/全自动/手动触发，一次任务保存问题、窗口、逐镜状态与修复快照

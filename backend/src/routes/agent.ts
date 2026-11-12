@@ -9,8 +9,16 @@ import {
   createStoryboardSplitJob,
   getLatestStoryboardSplitJob,
   getStoryboardSplitJob,
+  pauseStoryboardSplitJob,
   resumeStoryboardSplitJob,
 } from '../services/storyboard-split-jobs.js'
+import {
+  createStoryboardPipelineJob,
+  getLatestStoryboardPipelineJob,
+  getStoryboardPipelineJob,
+  pauseStoryboardPipelineJob,
+  resumeStoryboardPipelineJob,
+} from '../services/storyboard-pipeline.js'
 import {
   createStoryboardAuditJob,
   getLatestStoryboardAuditJob,
@@ -91,6 +99,18 @@ app.get('/:type/split-jobs/:id', async (c) => {
   return success(c, { job })
 })
 
+// POST /agent/:type/split-jobs/:id/pause — 块间暂停（当前块完成后停止，D10）
+app.post('/:type/split-jobs/:id/pause', async (c) => {
+  const guard = splitJobTypeGuard(c)
+  if (guard) return guard
+  try {
+    const job = pauseStoryboardSplitJob(Number(c.req.param('id')))
+    return success(c, { job })
+  } catch (err: any) {
+    return badRequest(c, err.message || '暂停拆分失败')
+  }
+})
+
 // POST /agent/:type/split-jobs/:id/resume — 从断点继续拆分
 app.post('/:type/split-jobs/:id/resume', async (c) => {
   const guard = splitJobTypeGuard(c)
@@ -100,6 +120,72 @@ app.post('/:type/split-jobs/:id/resume', async (c) => {
     return success(c, { job })
   } catch (err: any) {
     return badRequest(c, err.message || '继续拆分失败')
+  }
+})
+
+// ===== 四段式分镜管线：预拆 → 逐镜修补 → 逐镜校验 → 声音设计 =====
+function pipelineJobTypeGuard(c: any) {
+  const agentType = c.req.param('type')
+  if (agentType !== 'storyboard_director') {
+    return badRequest(c, `该 Agent 不支持四段式分镜管线：${agentType}`)
+  }
+  return null
+}
+
+app.post('/:type/pipeline-jobs', async (c) => {
+  const guard = pipelineJobTypeGuard(c)
+  if (guard) return guard
+  let body: any
+  try {
+    body = await c.req.json()
+  } catch {
+    return badRequest(c, '请求体不是合法 JSON')
+  }
+  try {
+    const result = await createStoryboardPipelineJob({
+      episodeId: Number(body.episode_id),
+      dramaId: Number(body.drama_id),
+      message: body.message,
+      model: body.model || undefined,
+      configId: body.config_id || undefined,
+    })
+    return success(c, { job: result.job, already_running: result.alreadyRunning })
+  } catch (err: any) {
+    return badRequest(c, err.message || '创建分镜管线失败')
+  }
+})
+
+app.get('/:type/pipeline-jobs/latest/:episodeId', async (c) => {
+  const guard = pipelineJobTypeGuard(c)
+  if (guard) return guard
+  return success(c, { job: getLatestStoryboardPipelineJob(Number(c.req.param('episodeId'))) })
+})
+
+app.get('/:type/pipeline-jobs/:id', async (c) => {
+  const guard = pipelineJobTypeGuard(c)
+  if (guard) return guard
+  const job = getStoryboardPipelineJob(Number(c.req.param('id')))
+  if (!job) return notFound(c, '分镜管线任务不存在')
+  return success(c, { job })
+})
+
+app.post('/:type/pipeline-jobs/:id/pause', async (c) => {
+  const guard = pipelineJobTypeGuard(c)
+  if (guard) return guard
+  try {
+    return success(c, { job: pauseStoryboardPipelineJob(Number(c.req.param('id'))) })
+  } catch (err: any) {
+    return badRequest(c, err.message || '暂停分镜管线失败')
+  }
+})
+
+app.post('/:type/pipeline-jobs/:id/resume', async (c) => {
+  const guard = pipelineJobTypeGuard(c)
+  if (guard) return guard
+  try {
+    return success(c, { job: await resumeStoryboardPipelineJob(Number(c.req.param('id'))) })
+  } catch (err: any) {
+    return badRequest(c, err.message || '继续分镜管线失败')
   }
 })
 

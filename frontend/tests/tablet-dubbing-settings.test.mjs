@@ -344,13 +344,13 @@ test('长列表容器：三处 settings-table-scroll，900 内横向滚动', () 
   assert.match(cssBlock(settings, '.storage-breakdown {'), /display: flex;/)
 })
 
-test('设置弹窗契约：5 个 aria-labelledby / aria-modal / 返回层 / 焦点陷阱', () => {
-  for (const id of ['settings-cfg-title', 'settings-skill-title', 'settings-style-title', 'settings-style-ref-title', 'settings-migrate-title']) {
+test('设置弹窗契约：6 个 aria-labelledby / aria-modal / 返回层 / 焦点陷阱', () => {
+  for (const id of ['settings-cfg-title', 'settings-skill-title', 'settings-knowledge-title', 'settings-style-title', 'settings-style-ref-title', 'settings-migrate-title']) {
     assert.match(settings, new RegExp(`aria-labelledby="${id}"`), `aria-labelledby ${id}`)
     assert.match(settings, new RegExp(`id="${id}"`), `title id ${id}`)
   }
-  assert.equal((settings.match(/aria-modal="true"/g) || []).length, 5)
-  assert.equal((settings.match(/@keydown="onSettingsDialogKeydown"/g) || []).length, 5)
+  assert.equal((settings.match(/aria-modal="true"/g) || []).length, 6)
+  assert.equal((settings.match(/@keydown="onSettingsDialogKeydown"/g) || []).length, 6)
 
   assert.match(settings, /:class="\{ 'is-dialog-open': settingsDialogOpen \}"/)
   assert.match(settings, /const settingsDialogOpen = computed\(\(\) => Boolean\(/)
@@ -358,6 +358,7 @@ test('设置弹窗契约：5 个 aria-labelledby / aria-modal / 返回层 / 焦�
   const closeAll = functionBlock(settings, 'closeSettingsDialogs')
   assert.match(closeAll, /cfgDialog\.value = false/)
   assert.match(closeAll, /addSkillDialog\.value = false/)
+  assert.match(closeAll, /knowledgeDialog\.value = false/)
   assert.match(closeAll, /styleDialog\.value = false/)
   assert.match(closeAll, /styleRefDialog\.value = false/)
   assert.match(closeAll, /if \(!migrating\.value\) migrateDialog\.value = false/)

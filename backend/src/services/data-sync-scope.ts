@@ -1,7 +1,10 @@
 /**
  * A8 数据同步范围与 schema 指纹。
  *
- * 2026-11-12 校准：当前后端 schema 共 55 张表，44 张业务表同步、11 张设备/运行/主机表不同步。
+ * 2026-11-12 校准：当前后端 schema 共 65 张表，52 张业务表同步、13 张设备/运行/主机表不同步。
+ * 4.0.38 分镜管线新增 scene_geographies / coverage_plans / shot_relations /
+ * visual_preflight_reports / acceptance_reports / transition_shots / sound_plans / sound_cues
+ * 纳入业务同步；storyboard_pipeline_jobs / storyboard_skeletons 属于运行时中间态，不同步并在应用前清理。
  * 原设计中的 director_plans / agent_sessions / novel_annotations 等 7 张表尚未落地，
  * 不计入清单；表实际出现后再按同一规则纳入并更新设计。
  */
@@ -17,7 +20,13 @@ export const SYNC_TABLES = [
   'episode_scenes',
   'episode_props',
   'scenes',
+  'scene_geographies',
   'storyboards',
+  'coverage_plans',
+  'shot_relations',
+  'visual_preflight_reports',
+  'acceptance_reports',
+  'transition_shots',
   'breakdown_methods',
   'storyboard_characters',
   'storyboard_props',
@@ -44,6 +53,8 @@ export const SYNC_TABLES = [
   'dubbing_jobs',
   'episode_audio_tracks',
   'episode_audio_clips',
+  'sound_plans',
+  'sound_cues',
   'grid_sheets',
   'script_imports',
   'script_chapters',
@@ -67,6 +78,8 @@ export const NON_SYNC_TABLES = [
   'video_batch_items',
   'storyboard_split_jobs',
   'storyboard_audit_jobs',
+  'storyboard_pipeline_jobs',
+  'storyboard_skeletons',
   'episode_locks',
 ] as const
 
@@ -77,6 +90,8 @@ export const RUNTIME_CLEAR_TABLES = [
   'video_batch_items',
   'storyboard_split_jobs',
   'storyboard_audit_jobs',
+  'storyboard_pipeline_jobs',
+  'storyboard_skeletons',
   'episode_locks',
 ] as const
 
