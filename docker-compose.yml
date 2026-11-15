@@ -18,6 +18,15 @@ services:
     ports:
       - "5679:5679"
     environment:
+      # 服务器/Docker 必须通过 HOST 显式开放；默认回环仅在桌面版使用
+      HOST: 0.0.0.0
+      # 强烈建议配置 API 鉴权；留空则启动日志会警告无鉴权暴露
+      HUOBAO_API_USER: ${HUOBAO_API_USER:-}
+      HUOBAO_API_PASSWORD: ${HUOBAO_API_PASSWORD:-}
+      HUOBAO_API_TOKEN: ${HUOBAO_API_TOKEN:-}
+      MCP_HOST: ${MCP_HOST:-127.0.0.1}
+      MCP_ALLOW_REMOTE: ${MCP_ALLOW_REMOTE:-0}
+      MCP_READONLY: ${MCP_READONLY:-0}
       # 配置后设置页「关于更新」出现「立即更新」按钮；删除这两行则退化为手动更新提示
       HUOBAO_WATCHTOWER_URL: http://watchtower:8080
       HUOBAO_WATCHTOWER_TOKEN: ${WATCHTOWER_TOKEN:-please-change-me}

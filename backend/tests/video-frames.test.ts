@@ -41,6 +41,20 @@ function makeVideo(relativePath: string, size = '640x360', seconds = 1): string 
   return relativePath
 }
 
+/** 音频尾巴比视频长：容器时长 > 视频流时长，复现按容器时长定位末帧越过最后一帧 */
+function makeVideoWithAudioTail(relativePath: string, videoSeconds = 2, audioSeconds = 2.2): string {
+  const absolute = path.join(root, relativePath)
+  fsSync.mkdirSync(path.dirname(absolute), { recursive: true })
+  execFileSync(ffmpegBin, [
+    '-hide_banner', '-loglevel', 'error', '-y',
+    '-f', 'lavfi', '-i', `testsrc=size=320x180:rate=24:duration=${videoSeconds}`,
+    '-f', 'lavfi', '-i', `sine=frequency=440:sample_rate=44100:duration=${audioSeconds}`,
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', absolute,
+  ])
+  return relativePath
+}
+
 test('项目存储子目录包含 transitions', () => {
   assert.ok((PROJECT_SUBDIRS as readonly string[]).includes('transitions'))
 })
@@ -87,6 +101,12 @@ test('长边超过 1280 时等比缩小，不放大', { skip: !suite.ffmpeg }, a
   const frame = await extractVideoFrame(source, 'first', { dramaId: 1 })
   const meta = await sharp(frame.absolutePath).metadata()
   assert.ok(Math.max(meta.width || 0, meta.height || 0) <= 1280)
+})
+
+test('容器时长比视频流长时仍能抽到末帧', { skip: !suite.ffmpeg }, async () => {
+  const source = makeVideoWithAudioTail('static/projects/1/videos/audio-tail.mp4')
+  const last = await extractVideoFrame(source, 'last', { dramaId: 1 })
+  assert.ok((await fs.stat(last.absolutePath)).size > 0)
 })
 
 test('缺失源文件返回可操作错误', async () => {

@@ -99,7 +99,39 @@ ssh -L 8193:127.0.0.1:8193 <服务器>
 ```
 
 一个输入写多个目标时用 `"targets": [{"node": "2", "input": "text"}, …]`。
-类型支持 `text / number / integer / boolean / json / image`。
+类型支持 `text / number / integer / boolean / json / image / video`。
+
+视频输入先通过 `POST /v1/uploads` 上传，返回 `{"name": "...", "kind": "video"}`，再把 `name` 作为 `video` 类型输入传给 `/v1/jobs`；也接受视频 data URL 或公网 http(s) 地址。视频大小由 `H3_MAX_VIDEO_BYTES` 和 `H3_MAX_BODY_BYTES` 限制。
+
+### 独立换人实例
+
+`deploy/install-swap.sh` 安装独立的换人网关：
+
+| 项目 | 值 |
+|---|---|
+| 代理端口 | 8194 |
+| 管理端 | 127.0.0.1:8195 |
+| ComfyUI | 127.0.0.1:8189 |
+| 数据目录 | /data/huobao-h3-gateway-swap |
+| 服务名 | huobao-h3-gateway-swap / huobao-h3-admin-swap |
+
+该脚本不修改生产 `/opt/huobao-h3-gateway`、8192、8193 或 8188。
+
+### 换人工作流种子
+
+`install-swap.sh` 会把 `seed/swap/` 复制到 `/opt/huobao-h3-gateway-swap/seed-swap/`，并在首次安装时导入：
+
+| slug | 用途 | 依赖 |
+|---|---|---|
+| `h3-face-swap` | H3 单脸换脸，单人 | REF2VA 主模型、`SS_FaceSwap_MiniMax_H3_REF2VA.safetensors`、ComfyUI 原生视频栈（LoadVideo/GetVideoComponents/MiniMaxH3ReferenceToVideo），20 步无 Turbo |
+| `h3-recast` | H3 Recast 角色替换，单人 | REF2VA 主模型、Turbo 4step、`h3_character_swap_v1.5.safetensors`、ComfyUI 0.43 原生 H3 节点 |
+| `h3-recast-relay` | H3 Relay 2.0 长视频角色替换，单人 | ComfyUI-H3Relay、SAM3.1 `sam3.1_multiplex_fp16.safetensors`、`h3_character_swap_v1.5.safetensors`、Turbo 8step、ffmpeg/ffprobe |
+
+种子只登记命名工作流，前端不接触工作流 JSON。FaceSwap 的输入映射为 `source_video`、`reference_face_1`、`prompt`、`seed`；Recast 为 `source_video`、`scene_reference`、`prompt`、`seed`；Relay 为 `source_video`、`scene_reference` 或 `reference_face_1`、`prompt`、`seed`，建议单次 20 秒。视频先走 `/v1/uploads`。
+
+Relay 依赖 8189 内的 `ffmpeg`/`ffprobe`。持久化部署把静态 ffmpeg 与带依赖库的 ffprobe wrapper 放在 `/data/comfyui-whaletrans/ComfyUI/bin`，并在 compose 的 `PATH` 前加入 `/opt/ComfyUI/bin`；容器重建后已用 2 秒 Relay 任务验证。
+
+许可：FaceSwap LoRA 仓库标注 Apache-2.0；Character Swap V1.5 继承 MiniMax H3 Community License（排除欧盟、英国、韩国、美国）；CRT-Nodes 为 MIT；VHS 为 GPL-3.0。部署前需按项目实际使用地域和商用条件复核。
 
 ## 旧接口
 

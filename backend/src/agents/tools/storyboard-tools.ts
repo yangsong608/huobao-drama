@@ -14,9 +14,11 @@ import { resolveVoiceMentions } from '../../services/character-voice-references.
 import { getDramaBackground } from '../../services/drama-background.js'
 import { cleanupFrameAssetsForEpisode } from '../../services/storyboard-frame-assets.js'
 import { parseContractFromPrompt, syncStoryboardContract } from '../../services/storyboard-contract.js'
-import { ensureNoDialogueNegativeConstraint } from '../../services/storyboard-negative.js'
+import { ensureNegativeConsistency } from '../../services/storyboard-negative.js'
 import { stripPlaceholderDialogue, validateStoryboardUnit } from '../../services/storyboard-unit-contract.js'
 import { validateRepairedShot } from '../../services/storyboard-shot-validation.js'
+import { intentPlanFromRow, narrationLinesFromText } from '../../services/shot-intent-plan.js'
+import { serializeStoryboardTags } from '../../services/storyboard-tags.js'
 import { buildShotSoundDelta, parseSoundSection, setSoundSection, type SoundSection, type ShotSoundCue } from '../../services/storyboard-sound.js'
 import { applyAssetAliases, buildAssetAliasMap } from '../../services/asset-aliases.js'
 import { getCanonicalSceneGroups, resolveCanonicalSceneByName, resolveCanonicalSceneId } from '../../services/scene-canonical.js'
@@ -216,6 +218,13 @@ function getPipelineRuntime(context: ToolContext): StoryboardPipelineRuntime {
     actionEnd: rawSkeleton.actionEnd ?? rawSkeleton.action_end ?? '',
     shotType: rawSkeleton.shotType ?? rawSkeleton.shot_type ?? '',
     sourceExcerpt: rawSkeleton.sourceExcerpt ?? rawSkeleton.source_excerpt ?? '',
+    intentType: rawSkeleton.intentType ?? rawSkeleton.intent_type ?? null,
+    narrationJson: rawSkeleton.narrationJson
+      ?? (rawSkeleton.narration ? JSON.stringify(rawSkeleton.narration) : null),
+    actionPlanJson: rawSkeleton.actionPlanJson
+      ?? (rawSkeleton.action_plan ? JSON.stringify(rawSkeleton.action_plan) : null),
+    narrativeRunJson: rawSkeleton.narrativeRunJson
+      ?? (rawSkeleton.narrative_run ? JSON.stringify(rawSkeleton.narrative_run) : null),
     attempts: rawSkeleton.attempts ?? 0,
   } : undefined
   return {
@@ -557,7 +566,7 @@ function normalizeVideoPrompt(
   while (bodyLines.length && !bodyLines[bodyLines.length - 1].trim()) bodyLines.pop()
   const body = normalizeVideoPromptBody(bodyLines).join('\n')
   const normalized = body.trim() ? `${header}\n${body}` : header
-  return ensureNoDialogueNegativeConstraint(normalized)
+  return ensureNegativeConsistency(normalized)
 }
 
 const saveStoryboards = createTool({
@@ -1351,6 +1360,7 @@ const saveStoryboardSkeletons = createTool({
         beatPlanJson: planned?.beats ? JSON.stringify(planned.beats) : null,
         actionArcJson: planned?.actionArc ? JSON.stringify(planned.actionArc) : null,
         speechRequirementJson: planned?.speechRequirement ? JSON.stringify(planned.speechRequirement) : null,
+        narrativeRunJson: planned?.narrativeRun ? JSON.stringify(planned.narrativeRun) : null,
         speechSegmentsJson: JSON.stringify(speechSegments),
         boundaryType,
         boundaryWord: planned?.boundaryWord || skeleton.boundary_word?.trim() || null,
@@ -1381,6 +1391,7 @@ const saveStoryboardSkeletons = createTool({
         beatCount: planned?.beatCount,
         actionArc: planned?.actionArc,
         speechRequirement: planned?.speechRequirement,
+        narrativeRun: planned?.narrativeRun ?? null,
         boundaryType,
         boundaryWord: planned?.boundaryWord || skeleton.boundary_word?.trim() || null,
         ...sides,
@@ -1679,9 +1690,11 @@ const saveRepairedStoryboard = createTool({
       }
       return extractPlanSpeechSegments(skeleton.sourceExcerpt).map(item => ({ speaker: item.speaker, text: item.text }))
     })()
+    const intentPlan = intentPlanFromRow(skeleton as any)
     const validation = validateRepairedShot({
       sourceExcerpt: skeleton.sourceExcerpt,
       planSpeechSegments,
+      intentPlan,
       expectedActionStart: skeleton.actionStart,
       expectedActionEnd: skeleton.actionEnd,
       expectedShotType: skeleton.shotType,
@@ -1720,12 +1733,29 @@ const saveRepairedStoryboard = createTool({
     }
 
     const storyboardId = await persistCandidate()
+    const planTags = serializeStoryboardTags(intentPlan?.tags || [])
+    if (planTags) {
+      const [tagRow] = await db.select({ tags: schema.storyboards.tags })
+        .from(schema.storyboards)
+        .where(eq(schema.storyboards.id, storyboardId))
+      if (!tagRow?.tags) {
+        db.update(schema.storyboards).set({ tags: planTags, updatedAt: ts })
+          .where(eq(schema.storyboards.id, storyboardId)).run()
+      }
+    }
     const skeletonUpdate = db.update(schema.storyboardSkeletons).set({
       status: 'repaired',
       storyboardId,
       attempts: (skeleton.attempts || 0) + 1,
       issuesJson: validation.warnings.length ? JSON.stringify(validation.warnings) : null,
       repairLogJson: JSON.stringify({ at: ts, warnings: validation.warnings }),
+      // 改写式旁白落库后，计划 lines 同步为成稿实际旁白，保持计划与成稿同源。
+      ...(intentPlan?.narration.mode === 'adapted' ? (() => {
+        const actualLines = narrationLinesFromText(videoPrompt)
+        if (!actualLines.length) return {}
+        const chars = actualLines.join('').replace(/[\s\u3000，。！？；：、“”‘’（）《》【】…—,.!?;:"'()\[\]]/g, '').length
+        return { narrationJson: JSON.stringify({ ...intentPlan.narration, lines: actualLines, overflow: chars > intentPlan.narration.budgetChars }) }
+      })() : {}),
       updatedAt: ts,
     }).where(eq(schema.storyboardSkeletons.id, Number(skeleton.id))).run()
     if (!skeletonUpdate.changes) {
@@ -1966,7 +1996,7 @@ const saveSoundPlan = createTool({
           exit: cue.exit,
         })),
       })
-      const prompt = ensureNoDialogueNegativeConstraint(setSoundSection(
+      const prompt = ensureNegativeConsistency(setSoundSection(
         shot.videoPrompt || '',
         section,
         getContentLanguageFromRC(context?.requestContext),

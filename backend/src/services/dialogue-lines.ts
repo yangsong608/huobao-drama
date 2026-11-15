@@ -62,10 +62,12 @@ const CROWD_LABEL_TAIL_RE = /(接|说道|说|道|喊|叫|问|答|嘟囔)$/
 
 /** 切段时间码：0-3秒： / 3–6秒: */
 export function splitSegments(videoPrompt: string, fallbackDurationMs = 0): Segment[] {
-  // 负面约束是独立分区，不能算进最后一段的台词/旁白
+  // 负面约束与声音分区不是台词/旁白，不能算进最后一段
   const raw = String(videoPrompt || '').replace(/\r\n?/g, '\n')
   const negativeStart = raw.search(/\n\s*(?:负面约束|Negative constraints|ネガティブ制約|네거티브 제약)\s*[：:]/i)
-  const text = negativeStart >= 0 ? raw.slice(0, negativeStart) : raw
+  const soundStart = raw.search(/\n\s*(?:声音|Sound|音频|Audio|音響|사운드)\s*[：:]/i)
+  const cuts = [negativeStart, soundStart].filter(index => index >= 0)
+  const text = cuts.length ? raw.slice(0, Math.min(...cuts)) : raw
   const re = /^(\d+)\s*[-–—]\s*(\d+)\s*秒\s*[：:]\s*/gm
   const marks: { index: number; startMs: number; endMs: number; textStart: number }[] = []
   let m: RegExpExecArray | null
@@ -288,6 +290,12 @@ export function extractDrafts(segmentText: string, cast: CastMember[]): Draft[] 
   let m: RegExpExecArray | null
   while ((m = narrationRe.exec(masked))) {
     const from = m.index + m[0].length
+    // 引号旁白已由引号扫描计入：跳过裸捕获，仅登记区间供冒号对白挖空，避免重复台词。
+    const quoted = spans.find(s => s.start >= from && s.start <= from + 2)
+    if (quoted) {
+      narrationSpans.push({ start: m.index, end: quoted.end })
+      continue
+    }
     let to = masked.length
     // 截到下一个 @角色 之前（避免把后续画面描述一起吞进来）
     if (cast.length) {

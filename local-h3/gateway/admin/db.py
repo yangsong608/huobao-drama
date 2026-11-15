@@ -15,7 +15,7 @@ import time
 SCHEMA_VERSION = 1
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 KINDS = ("video", "image", "audio")
-INPUT_TYPES = ("text", "number", "integer", "boolean", "json", "image")
+INPUT_TYPES = ("text", "number", "integer", "boolean", "json", "image", "video")
 SCRYPT_N = 2 ** 14
 SCRYPT_R = 8
 SCRYPT_P = 1

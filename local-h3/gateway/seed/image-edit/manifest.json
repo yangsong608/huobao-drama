@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "workflows": [
+    {
+      "slug": "qwen-image-edit-1",
+      "name": "Qwen-Image-Edit 单人物场景参考帧",
+      "kind": "image",
+      "description": "源帧 + 1 张参考人脸，生成换人后的场景参考帧。",
+      "file": "qwen-image-edit-1.json",
+      "input_map": {
+        "source_frame": {"node": "4", "input": "image", "type": "image"},
+        "reference_face_1": {"node": "5", "input": "image", "type": "image"},
+        "prompt": {"node": "6", "input": "prompt", "type": "text"},
+        "width": {"node": "8", "input": "width", "type": "integer"},
+        "height": {"node": "8", "input": "height", "type": "integer"},
+        "seed": {"node": "9", "input": "seed", "type": "integer"}
+      },
+      "output_node": "11",
+      "output_key": "images",
+      "output_exts": ["png", "jpg", "jpeg", "webp"],
+      "example": {"source_frame": "", "reference_face_1": "", "prompt": "Replace the person with the reference face, keep pose and background.", "width": 1024, "height": 576, "seed": 1}
+    },
+    {
+      "slug": "qwen-image-edit-2",
+      "name": "Qwen-Image-Edit 双人物场景参考帧",
+      "kind": "image",
+      "description": "源帧 + 2 张参考人脸，生成换人后的场景参考帧。",
+      "file": "qwen-image-edit-2.json",
+      "input_map": {
+        "source_frame": {"node": "4", "input": "image", "type": "image"},
+        "reference_face_1": {"node": "5", "input": "image", "type": "image"},
+        "reference_face_2": {"node": "6", "input": "image", "type": "image"},
+        "prompt": {"node": "7", "input": "prompt", "type": "text"},
+        "width": {"node": "9", "input": "width", "type": "integer"},
+        "height": {"node": "9", "input": "height", "type": "integer"},
+        "seed": {"node": "10", "input": "seed", "type": "integer"}
+      },
+      "output_node": "12",
+      "output_key": "images",
+      "output_exts": ["png", "jpg", "jpeg", "webp"],
+      "example": {"source_frame": "", "reference_face_1": "", "reference_face_2": "", "prompt": "Replace both people with the reference faces, keep pose and background.", "width": 1024, "height": 576, "seed": 1}
+    },
+    {
+      "slug": "qwen-image-edit-3",
+      "name": "Qwen-Image-Edit 三人物场景参考帧",
+      "kind": "image",
+      "description": "源帧 + 3 张参考人脸，configs 链式多图生成换人后的场景参考帧。",
+      "file": "qwen-image-edit-3.json",
+      "input_map": {
+        "source_frame": {"node": "4", "input": "image", "type": "image"},
+        "reference_face_1": {"node": "5", "input": "image", "type": "image"},
+        "reference_face_2": {"node": "6", "input": "image", "type": "image"},
+        "reference_face_3": {"node": "7", "input": "image", "type": "image"},
+        "prompt": {"node": "12", "input": "prompt", "type": "text"},
+        "width": {"node": "14", "input": "width", "type": "integer"},
+        "height": {"node": "14", "input": "height", "type": "integer"},
+        "seed": {"node": "15", "input": "seed", "type": "integer"}
+      },
+      "output_node": "17",
+      "output_key": "images",
+      "output_exts": ["png", "jpg", "jpeg", "webp"],
+      "example": {"source_frame": "", "reference_face_1": "", "reference_face_2": "", "reference_face_3": "", "prompt": "Replace all three people with the reference faces, keep pose and background.", "width": 1024, "height": 576, "seed": 1}
+    }
+  ]
+}

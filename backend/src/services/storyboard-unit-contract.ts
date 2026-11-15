@@ -93,8 +93,8 @@ export function validateStoryboardUnit(input: StoryboardUnitInput): string[] {
       errors.push(`${label}画面调度缺少「背景地标：」；没有地标写「背景地标：无」。`)
     } else {
       const bg = bgMatch[1].trim()
-      if (bg && !/^(?:无|none|なし|없음)$/i.test(bg) && !/(?:左|右|left|right|왼쪽|오른쪽)/i.test(bg)) {
-        errors.push(`${label}背景地标缺少屏幕侧；写成「背景地标：窗在左后、门在右后」或「背景地标：无」。`)
+      if (bg && !/^(?:无|none|なし|없음)$/i.test(bg) && !/(?:左|右|上方|下方|中央|中间|前景|后景|left|right|top|bottom|center|middle|foreground|background|왼쪽|오른쪽|위|아래|중앙)/i.test(bg)) {
+        errors.push(`${label}背景地标缺少屏幕位置；写成「背景地标：窗在左后、门在右后」「背景地标：唐记招牌位于画面上方」或「背景地标：无」。`)
       }
     }
     if ((input.characterIds?.length || 0) >= 2 && !/(?:轴线|axis|軸線|축선)\s*[：:]?\s*[AB](?![A-Za-z])/i.test(blocking)) {

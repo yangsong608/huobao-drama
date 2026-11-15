@@ -256,6 +256,11 @@ app.put('/:id', async (c) => {
     updates.visualBackground = raw ? raw : null
   }
   if (body.aspect_ratio !== undefined) updates.aspectRatio = body.aspect_ratio
+  if (body.narration_form !== undefined) {
+    const form = String(body.narration_form || '')
+    if (form !== 'dialogue' && form !== 'narration') return badRequest(c, '旁白形态只能是 dialogue 或 narration')
+    updates.narrationForm = form
+  }
   if (body.status !== undefined) updates.status = body.status
   if (body.tags !== undefined) updates.tags = JSON.stringify(body.tags)
   if (body.metadata !== undefined) updates.metadata = body.metadata

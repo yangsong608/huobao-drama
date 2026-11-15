@@ -17,6 +17,8 @@ export type PipelineStepKind = 'deterministic' | 'llm' | 'validate' | 'human' | 
 export type PipelineStepScope = 'episode' | 'chunk' | 'shot'
 export type PipelineStepStatus = 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'manual'
 export type PipelineOverrideScope = 'global' | 'project' | 'episode'
+/** 旁白形态：对白驱动短剧 / 旁白驱动小说改编；项目级决策，运行启动时冻结进快照 */
+export type NarrationForm = 'dialogue' | 'narration'
 
 export interface PipelineStepDefinition {
   key: string
@@ -87,8 +89,14 @@ export interface PipelineRunParameters {
   soundMaxAttempts: number
   maxWallClockMinutes: number
   splitPresetKey: string
+  /** 对白场景允许的连续无声镜数量上限 */
+  maxSilentRun: number
+  /** 无台词/无发声要求镜头的目标时长（不低于 minDuration） */
+  silentShotSeconds: number
   /** 0 = 关闭；连续失败达到次数后自动跳过并标记 */
   autoSkipAfterAttempts: number
+  /** 旁白形态；运行启动时从项目冻结，运行中不随项目设置变化 */
+  narrationForm: NarrationForm
 }
 
 export interface PipelineOverrides {
@@ -115,6 +123,7 @@ export const BASE_STEP_KEYS = [
   'prepare',
   'skeleton-split',
   'skeleton-gate',
+  'shot-intent-plan',
   'shot-repair',
   'shot-validate',
   'sound-design',
@@ -126,6 +135,7 @@ export const REQUIRED_STEP_KEYS = new Set([
   'prepare',
   'skeleton-split',
   'skeleton-gate',
+  'shot-intent-plan',
   'shot-repair',
   'shot-validate',
   'sound-design',
@@ -144,12 +154,17 @@ const DEFAULT_PARAMETERS: PipelineRunParameters = {
   maxWallClockMinutes: 60,
   splitPresetKey: 'inherit',
   autoSkipAfterAttempts: 0,
+  maxSilentRun: 2,
+  silentShotSeconds: 6,
+  narrationForm: 'dialogue',
 }
 
 const PARAMETER_DEFS: PipelineParameterDefinition[] = [
   { key: 'shotMaxAttempts', label: '逐镜最大尝试', type: 'number', default: 3, min: 2, max: 5, step: 1, stepKey: 'shot-repair', description: '初始 + 重试的总次数；用完进入人工队列。' },
 
   { key: 'autoSkipAfterAttempts', label: '连续失败自动跳过', type: 'number', default: 0, min: 0, max: 10, step: 1, stepKey: 'shot-repair', description: '0=关闭；连续失败达到次数后自动跳过并标记，继续下一镜。' },
+  { key: 'maxSilentRun', label: '连续无声镜上限', type: 'number', default: 2, min: 1, max: 4, step: 1, stepKey: 'shot-intent-plan', description: '对白场景中最多允许多少个连续无台词、无旁白的镜头；超过则阻断并提示合并或补旁白。' },
+  { key: 'silentShotSeconds', label: '无声镜时长', type: 'number', default: 6, min: 6, max: 8, step: 1, stepKey: 'shot-intent-plan', description: '无台词、无发声要求镜头的目标时长；默认 6 秒，最高 8 秒（对齐 h3-compact 单段上限）。' },
   { key: 'blockMaxAttempts', label: '块级最大尝试', type: 'number', default: 2, min: 1, max: 3, step: 1, stepKey: 'skeleton-split', description: '单块骨架覆盖率不足或调用失败时的重拆次数。' },
   { key: 'excerptRejectRatio', label: '摘录拒收阈值', type: 'number', default: 0.25, min: 0.2, max: 0.35, step: 0.01, stepKey: 'skeleton-gate', description: '单块摘录覆盖率低于此值判失败。' },
   { key: 'excerptWarnRatio', label: '摘录警告阈值', type: 'number', default: 0.6, min: 0.5, max: 0.8, step: 0.01, stepKey: 'skeleton-gate', description: '低于此值记录警告但继续。' },
@@ -178,6 +193,11 @@ const PLUGIN_SEEDS: PipelineStepDefinition[] = [
     key: 'skeleton-gate', name: '骨架覆盖门禁', version: '1', kind: 'validate', scope: 'chunk',
     description: '校验单块摘录覆盖率与整集分镜数下限。', required: true, defaultEnabled: true, available: true,
     rulePacks: ['coverage'],
+  },
+  {
+    key: 'shot-intent-plan', name: '意图与旁白计划', version: '1', kind: 'deterministic', scope: 'shot',
+    description: '逐镜裁定对白/叙述/战斗/比拼/动作等意图，生成旁白与动作计划；单个动作/反应镜禁旁白，压缩过渡镜可用原文叙述。', required: true, defaultEnabled: true, available: true,
+    rulePacks: ['shot-intent'],
   },
   {
     key: 'shot-repair', name: '逐镜修补', version: '1', kind: 'llm', scope: 'shot',
@@ -290,6 +310,22 @@ const RULE_PACK_SEEDS: PipelineRulePackDefinition[] = [
       { key: 'shot-floor', name: '整集分镜数下限', severity: 'error', locked: false, scope: 'episode', description: '低于方案下限可阻断完成。' },
       { key: 'scene-binding', name: '场景绑定', severity: 'warning', locked: false, scope: 'shot', description: '镜头应绑定 canonical 场景。' },
       { key: 'asset-binding', name: '资产绑定', severity: 'warning', locked: false, scope: 'shot', description: '出场角色/道具应绑定既有资产。' },
+    ],
+  },
+  {
+    key: 'shot-intent', name: '意图与旁白', version: '2',
+    rules: [
+      { key: 'content-based-intent', name: '意图只看镜头内容', severity: 'error', locked: true, scope: 'shot', description: '战斗/比拼/动作判定基于镜头内容，题材只影响特效风格；旁白形态不影响意图判定。' },
+      { key: 'action-no-narration', name: '动作镜禁旁白（对白驱动）', severity: 'error', locked: true, scope: 'shot', description: '对白驱动形态：战斗、比拼和单个动作/反应镜没有原文旁白依据时禁止旁白、画外音与内心独白；压缩过渡镜除外。旁白驱动形态不适用本条。' },
+      { key: 'narration-source', name: '旁白必须有原文依据', severity: 'error', locked: true, scope: 'shot', description: '对白驱动形态：旁白只能逐字来自原文明确标注的旁白/画外音，或开场/压缩过渡镜的原文叙述。旁白驱动形态：旁白以原文叙述为素材改写，仍须有原文依据。' },
+      { key: 'narration-budget', name: '旁白字数预算', severity: 'warning', locked: true, scope: 'shot', description: '旁白按 4 字/秒 + 1 秒气口计算；对白驱动形态开场/压缩过渡旁白不超过 24 字；旁白驱动形态按本镜时长预算，超预算延长时长或按标点拆到相邻镜。' },
+      { key: 'narration-form-adapted', name: '改写式旁白（旁白驱动）', severity: 'error', locked: true, scope: 'shot', description: '旁白驱动形态：任意镜可配第三人称改写式画外旁白，可写情绪/心理/前因；称呼用项目规范名；不得逐字复述对白；旁白与画面同步，人物嘴唇闭合。' },
+      { key: 'narration-form-dialogue-coexist', name: '旁白与对白分时', severity: 'error', locked: true, scope: 'shot', description: '旁白驱动形态：旁白可出现在对白镜，但同一时间帧内不得既有台词又有旁白；按时间帧分段，旁白在标点处断开，禁止词中断开。' },
+      { key: 'narration-form-opening', name: '开场旁白钩子', severity: 'error', locked: true, scope: 'episode', description: '旁白驱动形态：第 1 镜必须有开场画外旁白，交代时间/地点/氛围或悬念钩子。' },
+      { key: 'silent-run', name: '连续无声上限', severity: 'error', locked: true, scope: 'episode', description: '对白场景连续无声镜不得超过参数上限；超过需合并压缩过渡镜或补原文旁白。有旁白的镜头不算无声镜。' },
+      { key: 'silent-duration', name: '无声镜时长', severity: 'error', locked: true, scope: 'shot', description: '无台词、无发声要求镜头不得超过参数设定的目标时长。' },
+      { key: 'intro-first', name: '角色介绍仅首次', severity: 'warning', locked: true, scope: 'episode', description: '角色介绍镜只在角色首次出现时成立。' },
+      { key: 'no-mouth', name: '旁白不张嘴', severity: 'error', locked: true, scope: 'shot', description: '旁白只作为画外音，画面人物不张口说话。' },
     ],
   },
   {

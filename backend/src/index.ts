@@ -30,6 +30,8 @@ import pipelineRules from './routes/pipelineRules.js'
 import breakdownMethods from './routes/breakdownMethods.js'
 import serverUpdate from './routes/serverUpdate.js'
 import projectFiles from './routes/project-files.js'
+import videoProjectFiles from './routes/video-project-files.js'
+import videoProjects from './routes/videoProjects.js'
 import voices, { characterVoices } from './routes/voices.js'
 import ttsRoute from './routes/tts.js'
 import lines, { episodeLines } from './routes/lines.js'
@@ -58,8 +60,9 @@ import { startPresenceCleanup } from './services/presence.js'
 import { getRemoteBridgeStatus, setRemoteBridgeFetch } from './services/remote-bridge.js'
 import { requestLogger, errorHandler } from './middleware/logger.js'
 import { syncEventMiddleware } from './middleware/sync-events.js'
+import { createGuardedFetch, hasApiGuard, isLoopbackHost, resolveApiGuardConfig } from './middleware/api-guard.js'
 import { resumeInterruptedTasks } from './services/generation.js'
-import { initMcp, setMcpMainApp } from './services/mcp.js'
+import { initMcp, getMcpStatus, setMcpMainApp } from './services/mcp.js'
 import { markInterruptedAutomations, setAutomationApp } from './services/automation.js'
 import { markInterruptedNovelJobs } from './services/novel-job-runner.js'
 import { markInterruptedStoryboardSplits } from './services/storyboard-split-jobs.js'
@@ -77,9 +80,11 @@ import { ensureKnowledgeIndex, ensureDirectorKnowledgeAssignment } from './agent
 import { ensurePipelineSeeds } from './services/pipeline-chain.js'
 import { startQueueWorker } from './services/queue-worker.js'
 import { resumeVideoBatches, setVideoBatchApp, startVideoBatchWorker } from './services/video-batch.js'
+import { recoverInterruptedVideoSwapRuns } from './services/video-swap-runner.js'
 import { logTaskWarn } from './utils/task-logger.js'
 import { refreshFfmpegConfig } from './utils/ffmpeg.js'
 import { DATA_ROOT } from './utils/paths.js'
+import { writeRuntimeDescriptor } from './services/runtime-descriptor.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '../..')
@@ -106,6 +111,7 @@ const api = new Hono()
 // 写请求成功后广播同步事件（远程/同步/在线状态自身接口除外）
 api.use('*', syncEventMiddleware)
 api.route('/dramas', dramas)
+api.route('/video-projects', videoProjects)
 api.route('/episodes', episodes)
 api.route('/storyboards', storyboards)
 // 分镜末帧资产：/episodes/:id/frame-assets、/storyboards/:id/frame-assets/last、/storyboards/:id/first-frame
@@ -176,6 +182,7 @@ app.route('/api/v1', api)
 // Serve static files (storage)
 // 项目媒体先走自定义解析（支持任意磁盘 + Range）；未命中再回落到历史全局目录。
 app.route('/static/projects', projectFiles)
+app.route('/static/video-projects', videoProjectFiles)
 // 生成的图片/视频按 uuid 命名、内容不变，标记为 immutable 让浏览器长缓存
 app.use('/static/*', async (c, next) => {
   await next()
@@ -199,8 +206,8 @@ process.on('unhandledRejection', (reason) => {
 })
 
 const port = Number(process.env.PORT || 5679)
-// 桌面版只监听回环（无鉴权，绝不能暴露到局域网）；服务器/Docker 默认仍为 0.0.0.0
-const hostname = process.env.HOST || (process.env.HUOBAO_DESKTOP === '1' ? '127.0.0.1' : '0.0.0.0')
+// 默认只监听回环；服务器/Docker 必须显式设置 HOST=0.0.0.0，并建议配置 API 鉴权。
+const hostname = process.env.HOST || '127.0.0.1'
 console.log(`🚀 Huobao Drama TS server on http://${hostname === '0.0.0.0' ? 'localhost' : hostname}:${port}`)
 
 await resumeInterruptedTasks()
@@ -248,6 +255,13 @@ try {
 
 // 应用设置中的自定义 FFmpeg 目录（db 已注入读取器），启动即生效
 refreshFfmpegConfig()
+// 视频换人：重启后接管未完成的运行；已完成片段跳过，处理中片段按网关任务继续
+try {
+  const recovered = await recoverInterruptedVideoSwapRuns()
+  if (recovered) logTaskWarn('VideoSwap', '视频换人运行已恢复', { runs: recovered })
+} catch (error) {
+  logTaskWarn('VideoSwap', '视频换人运行恢复失败', { error: String(error) })
+}
 
 // MCP / 自动化 / 批量视频都通过内部 app.fetch 调 REST，先注入实例
 setMcpMainApp(app)
@@ -275,4 +289,17 @@ startQueueWorker()
 await resumeVideoBatches()
 startVideoBatchWorker()
 
-serve({ fetch: app.fetch, port, hostname })
+const apiGuard = resolveApiGuardConfig()
+if (!hasApiGuard(apiGuard) && !isLoopbackHost(hostname)) {
+  logTaskWarn('Security', 'remote-api-without-auth', {
+    hint: '监听非回环地址但未配置 HUOBAO_API_USER/HUOBAO_API_PASSWORD 或 HUOBAO_API_TOKEN；请限制网络访问或启用桌面版',
+  })
+}
+const guardedFetch = createGuardedFetch(app.fetch as any, apiGuard)
+serve({ fetch: guardedFetch as any, port, hostname })
+
+try {
+  writeRuntimeDescriptor({ port, mcpPort: getMcpStatus().port })
+} catch (error) {
+  console.warn('[runtime] runtime.json 写入失败：', error instanceof Error ? error.message : String(error))
+}

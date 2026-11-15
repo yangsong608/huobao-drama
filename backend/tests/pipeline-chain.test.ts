@@ -91,11 +91,13 @@ test('内置链、插件与规则包幂等播种', async () => {
   await chain.ensurePipelineSeeds()
   await chain.ensurePipelineSeeds()
   assert.equal(chain.listPipelineChains().length, 3)
-  assert.equal(chain.listPipelinePlugins().length, 8)
-  assert.equal(chain.listPipelineRulePacks().length, 6)
+  assert.equal(chain.listPipelinePlugins().length, 9)
+  assert.equal(chain.listPipelineRulePacks().length, 7)
   const view = chain.getPipelineChainView('standard-four-stage', 'global', 0)!
-  assert.equal(view.steps.length, 8)
-  assert.equal(view.parameters.length, 10)
+  assert.equal(view.steps.length, 9)
+  assert.equal(view.parameters.length, 12)
+  assert.equal(view.parameters.find(param => param.key === 'maxSilentRun')?.value, 2)
+  assert.equal(view.parameters.find(param => param.key === 'silentShotSeconds')?.value, 6)
   const split = view.steps.find(step => step.key === 'skeleton-split')!
   assert.ok(split.required)
   assert.ok(split.knowledgeRefs?.includes('storyboard-direction'))
@@ -160,6 +162,7 @@ test('创建运行固化快照与链参数，步骤级知识绑定进入 trace',
   assert.ok(keys.includes('prepare'))
   assert.ok(keys.includes('skeleton-split'))
   assert.ok(keys.includes('skeleton-gate'))
+  assert.ok(keys.includes('shot-intent-plan'))
   assert.ok(keys.includes('shot-repair'))
   assert.equal(trace.job.status, 'failed')
   assert.ok(trace.job.error?.includes('第 1 镜'))
@@ -169,6 +172,33 @@ test('创建运行固化快照与链参数，步骤级知识绑定进入 trace',
   assert.equal(split.status, 'passed')
   const gate = trace.steps.find(step => step.step_key === 'skeleton-gate' && step.scope === 'episode')!
   assert.equal(gate.status, 'passed')
+  const intentSteps = trace.steps.filter(step => step.step_key === 'shot-intent-plan' && step.scope === 'shot')
+  assert.equal(intentSteps.length, 2)
+  assert.ok(intentSteps.every(step => step.status === 'passed'))
+  const silentGate = trace.steps.find(step => step.step_key === 'shot-intent-plan' && step.scope === 'episode')
+  assert.equal(silentGate?.status, 'passed')
+  const planned = db.select().from(schema.storyboardSkeletons)
+    .where(eq(schema.storyboardSkeletons.jobId, job.id))
+    .all()
+  assert.ok(planned.every(row => Boolean(row.intentType)))
+  assert.ok(planned.every(row => Boolean(row.narrationJson)))
+  assert.ok(planned.every(row => Boolean(row.actionPlanJson)))
+})
+
+test('自动跳过开关写入运行参数与快照', async () => {
+  await chain.ensurePipelineSeeds()
+  const episodeId = newEpisode()
+  const created = await pipeline.createStoryboardPipelineJob({
+    episodeId,
+    dramaId: 1,
+    message: '自动跳过测试',
+    chainKey: 'standard-four-stage',
+  }, { autorun: false })
+  const updated = pipeline.setStoryboardPipelineAutoSkip(created.job.id, 2)
+  assert.equal(updated.parameters?.autoSkipAfterAttempts, 2)
+  assert.equal((updated.snapshot?.parameters as any)?.autoSkipAfterAttempts, 2)
+  const off = pipeline.setStoryboardPipelineAutoSkip(created.job.id, 0)
+  assert.equal(off.parameters?.autoSkipAfterAttempts, 0)
 })
 
 test('拆分预设 inherit 跟随剧集，显式 key 覆盖方案块与覆盖计算', async () => {

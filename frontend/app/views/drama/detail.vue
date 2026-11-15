@@ -733,6 +733,14 @@
             />
             <span class="field-hint">{{ t('detail.background.visualHint') }}</span>
           </label>
+          <label class="field">
+            <span class="field-label">{{ t('detail.narrationForm.field') }}</span>
+            <select v-model="narrationFormDraft" class="input" :disabled="backgroundSaving">
+              <option value="dialogue">{{ t('detail.narrationForm.dialogue') }}</option>
+              <option value="narration">{{ t('detail.narrationForm.narration') }}</option>
+            </select>
+            <span class="field-hint">{{ t('detail.narrationForm.hint') }}</span>
+          </label>
           <p class="field-hint">{{ t('detail.background.note') }}</p>
         </div>
         <div class="dialog-foot">
@@ -941,12 +949,14 @@ async function resetStorage() {
 const backgroundDialog = ref(false)
 const backgroundDraft = ref('')
 const visualBackgroundDraft = ref('')
+const narrationFormDraft = ref('dialogue')
 const backgroundSaving = ref(false)
 
 function openBackground() {
   if (!drama.value) return
   backgroundDraft.value = drama.value.background || ''
   visualBackgroundDraft.value = drama.value.visual_background || ''
+  narrationFormDraft.value = drama.value.narration_form === 'narration' ? 'narration' : 'dialogue'
   backgroundDialog.value = true
 }
 
@@ -961,10 +971,11 @@ async function saveBackground() {
   const visualValue = visualBackgroundDraft.value.trim()
   backgroundSaving.value = true
   try {
-    await dramaAPI.update(dramaId, { background: value, visual_background: visualValue })
+    await dramaAPI.update(dramaId, { background: value, visual_background: visualValue, narration_form: narrationFormDraft.value })
     if (drama.value) {
       drama.value.background = value || null
       drama.value.visual_background = visualValue || null
+      drama.value.narration_form = narrationFormDraft.value
     }
     backgroundDialog.value = false
     toast.success(t('detail.background.saved'))

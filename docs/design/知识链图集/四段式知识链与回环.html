@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>四段式知识链与回环</title>
+<style>html,body{margin:0;padding:0;background:#f7f8fa;}</style>
+</head>
+<body>
+<div id="kchain-flow-viz">
+  <style>
+    #kchain-flow-viz {
+      --paper: #f5f5f5;
+      --ink: #2d3142;
+      --muted: #4f5d75;
+      --soft: #5a6580;
+      --rule: rgba(45, 49, 66, 0.12);
+      --accent: #bf4520;
+      --sans: 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', 'Geist', system-ui, sans-serif;
+      --mono: 'SF Mono', 'Geist Mono', Menlo, ui-monospace, monospace;
+      --serif: 'Songti SC', 'Noto Serif SC', 'Instrument Serif', Georgia, serif;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      padding: 24px 20px 18px;
+      line-height: 1.4;
+    }
+    #kchain-flow-viz *, #kchain-flow-viz *::before, #kchain-flow-viz *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    #kchain-flow-viz .frame { max-width: 1360px; margin: 0 auto; min-width: 0; }
+    #kchain-flow-viz .eyebrow {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    #kchain-flow-viz h1 {
+      font-family: var(--serif);
+      font-size: clamp(24px, 2.4vw + 12px, 32px);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      margin-bottom: 20px;
+    }
+    #kchain-flow-viz .diagram-container { width: 100%; overflow-x: auto; }
+    #kchain-flow-viz svg { width: 100%; min-width: 1280px; display: block; }
+    #kchain-flow-viz .n-name { font-family: var(--sans); font-size: 12px; font-weight: 600; fill: #2d3142; }
+    #kchain-flow-viz .n-sub { font-family: var(--mono); font-size: 9px; fill: #5a6580; }
+    #kchain-flow-viz .al-cn { font-family: var(--sans); font-size: 12px; font-weight: 500; fill: #4f5d75; }
+    #kchain-flow-viz .band-cn { font-family: var(--sans); font-size: 12px; fill: #4f5d75; }
+    #kchain-flow-viz .band-title { font-family: var(--mono); font-size: 9px; font-weight: 500; letter-spacing: 0.14em; fill: #2d3142; }
+    #kchain-flow-viz .callout { font-family: var(--serif); font-size: 12px; font-style: italic; fill: #4f5d75; }
+    #kchain-flow-viz .legend-cn { font-family: var(--sans); font-size: 12px; font-weight: 500; fill: #4f5d75; }
+    #kchain-flow-viz .note {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--rule);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    #kchain-flow-viz .note strong { color: var(--ink); font-weight: 600; }
+    @media print {
+      #kchain-flow-viz .diagram-container { overflow-x: visible; }
+      #kchain-flow-viz svg { min-width: 0; }
+    }
+  </style>
+
+  <div class="frame">
+    <p class="eyebrow">Flowchart · Stage Knowledge Chain</p>
+    <h1>四段式分镜知识链：快照、阶段包与回环</h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="kchain-title kchain-desc">
+        <title id="kchain-title">四段式分镜知识链与回环</title>
+        <desc id="kchain-desc">任务创建时编译不可变快照与四阶段知识包，依次进入预拆骨架、逐镜修补、逐镜校验、声音设计与生成前门禁；校验失败只回修当前镜与相邻镜，修补重试耗尽进入人工队列，每个阶段写入决策与知识 trace。</desc>
+        <defs>
+          <marker id="kchain-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- priority band -->
+        <rect x="64" y="76" width="1172" height="48" rx="6" fill="#ececec" stroke="rgba(45,49,66,0.12)" stroke-width="1"/>
+        <text class="band-title" x="88" y="96">KNOWLEDGE PRIORITY</text>
+        <text class="band-cn" x="88" y="114">锁定硬规则 › 项目/剧集覆盖 › 已发布校验方案 › 已发布拆分方案 › 阶段知识 › 上游决策 › 全局默认</text>
+
+        <!-- connectors -->
+        <line x1="256" y1="180" x2="464" y2="180" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kchain-arrow)"/>
+        <line x1="656" y1="180" x2="864" y2="180" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kchain-arrow)"/>
+        <line x1="960" y1="220" x2="960" y2="400" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kchain-arrow)"/>
+        <line x1="864" y1="440" x2="656" y2="440" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kchain-arrow)"/>
+        <line x1="464" y1="440" x2="256" y2="440" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kchain-arrow)"/>
+        <line x1="1008" y1="400" x2="1008" y2="220" stroke="#4f5d75" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#kchain-arrow)"/>
+        <path d="M1056,180 L1132,180 Q1140,180 1140,188 L1140,270" fill="none" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kchain-arrow)"/>
+        <line x1="160" y1="480" x2="160" y2="560" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#kchain-arrow)"/>
+        <line x1="560" y1="480" x2="560" y2="560" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#kchain-arrow)"/>
+        <line x1="960" y1="480" x2="960" y2="560" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#kchain-arrow)"/>
+
+        <!-- arrow labels -->
+        <rect x="316" y="170" width="88" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="360" y="184" text-anchor="middle">四阶段知识包</text>
+        <rect x="708" y="170" width="104" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="760" y="184" text-anchor="middle">场景映射 · 节拍</text>
+        <rect x="894" y="300" width="64" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="926" y="314" text-anchor="middle">镜头合同</text>
+        <rect x="740" y="430" width="40" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="760" y="444" text-anchor="middle">通过</text>
+        <rect x="328" y="430" width="64" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="360" y="444" text-anchor="middle">声音单元</text>
+        <rect x="1010" y="240" width="64" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="1042" y="254" text-anchor="middle">失败回修</text>
+        <rect x="1066" y="170" width="64" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="1098" y="184" text-anchor="middle">重试耗尽</text>
+        <rect x="566" y="510" width="76" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="604" y="524" text-anchor="middle">每阶段写入</text>
+
+        <!-- N1 snapshot (focal) -->
+        <rect x="64" y="140" width="192" height="80" fill="#f5f5f5"/>
+        <rect x="64" y="140" width="192" height="80" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.4"/>
+        <text class="n-name" x="160" y="168" text-anchor="middle">任务创建 · 快照</text>
+        <text class="n-sub" x="160" y="186" text-anchor="middle">pack_hash · versions</text>
+        <text class="n-sub" x="160" y="202" text-anchor="middle">runtime reads snapshot</text>
+
+        <!-- N2 skeleton -->
+        <rect x="464" y="140" width="192" height="80" fill="#f5f5f5"/>
+        <rect x="464" y="140" width="192" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.2"/>
+        <text class="n-name" x="560" y="168" text-anchor="middle">预拆骨架</text>
+        <text class="n-sub" x="560" y="186" text-anchor="middle">skeleton · LLM</text>
+        <text class="n-sub" x="560" y="202" text-anchor="middle">pacing · directing</text>
+
+        <!-- N3 repair -->
+        <rect x="864" y="140" width="192" height="80" fill="#f5f5f5"/>
+        <rect x="864" y="140" width="192" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.2"/>
+        <text class="n-name" x="960" y="168" text-anchor="middle">逐镜修补</text>
+        <text class="n-sub" x="960" y="186" text-anchor="middle">shot-repair · LLM</text>
+        <text class="n-sub" x="960" y="202" text-anchor="middle">directing · continuity</text>
+
+        <!-- N4 validate (focal) -->
+        <rect x="864" y="400" width="192" height="80" fill="#f5f5f5"/>
+        <rect x="864" y="400" width="192" height="80" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.4"/>
+        <text class="n-name" x="960" y="428" text-anchor="middle">逐镜校验</text>
+        <text class="n-sub" x="960" y="446" text-anchor="middle">shot-validate · no LLM</text>
+        <text class="n-sub" x="960" y="462" text-anchor="middle">scheme + locked rules</text>
+
+        <!-- N5 sound -->
+        <rect x="464" y="400" width="192" height="80" fill="#f5f5f5"/>
+        <rect x="464" y="400" width="192" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.2"/>
+        <text class="n-name" x="560" y="428" text-anchor="middle">声音设计</text>
+        <text class="n-sub" x="560" y="446" text-anchor="middle">sound-design · LLM</text>
+        <text class="n-sub" x="560" y="462" text-anchor="middle">sound · continuity</text>
+
+        <!-- N6 gate -->
+        <rect x="64" y="400" width="192" height="80" fill="#f5f5f5"/>
+        <rect x="64" y="400" width="192" height="80" rx="20" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1.2"/>
+        <text class="n-name" x="160" y="428" text-anchor="middle">生成前门禁</text>
+        <text class="n-sub" x="160" y="446" text-anchor="middle">gate · finalize</text>
+        <text class="n-sub" x="160" y="462" text-anchor="middle">error blocks render</text>
+
+        <!-- N7 manual queue -->
+        <rect x="1044" y="270" width="192" height="80" fill="#f5f5f5"/>
+        <rect x="1044" y="270" width="192" height="80" rx="6" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1.2"/>
+        <text class="n-name" x="1140" y="298" text-anchor="middle">人工队列</text>
+        <text class="n-sub" x="1140" y="316" text-anchor="middle">manual queue</text>
+        <text class="n-sub" x="1140" y="332" text-anchor="middle">current shot only</text>
+
+        <!-- trace band -->
+        <rect x="64" y="560" width="1172" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="rgba(45,49,66,0.12)" stroke-width="1"/>
+        <text class="band-title" x="88" y="584">KNOWLEDGE TRACE</text>
+        <text class="band-cn" x="88" y="606">每个阶段结束写入：Stage Decision（七字段）· 文档 id/版本/哈希 · 方案版本 · pack_hash；下一次任务可按 trace 复现同一版本。</text>
+
+        <!-- callouts -->
+        <line x1="560" y1="220" x2="560" y2="276" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text class="callout" x="464" y="294">预拆失败：任务停止，旧分镜保留，</text>
+        <text class="callout" x="464" y="312">可续拆，不进入修补。</text>
+
+        <line x1="1140" y1="350" x2="1140" y2="362" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text class="callout" x="1064" y="378">error 阻断生成；</text>
+        <text class="callout" x="1064" y="396">warning 留人工确认。</text>
+
+        <!-- legend -->
+        <line x1="40" y1="664" x2="1240" y2="664" stroke="rgba(45,49,66,0.12)" stroke-width="1"/>
+        <line x1="64" y1="688" x2="104" y2="688" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kchain-arrow)"/>
+        <text class="legend-cn" x="116" y="692">主链路</text>
+        <line x1="220" y1="688" x2="260" y2="688" stroke="#4f5d75" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#kchain-arrow)"/>
+        <text class="legend-cn" x="272" y="692">回环 / 写入</text>
+        <rect x="420" y="680" width="16" height="16" rx="3" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.4"/>
+        <text class="legend-cn" x="448" y="692">关键控制点</text>
+        <rect x="600" y="680" width="16" height="16" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1.2"/>
+        <text class="legend-cn" x="628" y="692">注入知识正文（LLM）</text>
+        <rect x="820" y="680" width="16" height="16" rx="3" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1.2"/>
+        <text class="legend-cn" x="848" y="692">只读规则口径 / 落库</text>
+      </svg>
+    </div>
+
+    <p class="note">
+      <strong>注入差异</strong>：预拆、修补、声音设计注入知识正文；骨架门禁、逐镜校验、声音校验是确定性步骤，只读取校验方案与证据口径，不注入模型，也不复活已下线的批量动作检验。
+      <strong>回环边界</strong>：校验失败只回传当前镜与相邻镜；声音失败只重跑声音阶段；人工队列修改后只重跑当前镜。
+      <strong>范围</strong>：小说改编知识服务上游剧本改写，本期不进入分镜阶段包；sound 阶段不加载拆分/校验方案。
+      <strong>快照一致性</strong>：快照与运行时共用同一个绑定解析函数，空绑定不回退步骤默认或 Agent 分配，哈希按运行语言计算。
+    </p>
+  </div>
+</div>
+</body>
+</html>

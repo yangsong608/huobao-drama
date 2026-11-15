@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设置页知识库线框</title>
+<style>html,body{margin:0;padding:0;background:#f7f8fa;}</style>
+</head>
+<body>
+<div id="kb-settings-ui">
+  <style>
+    #kb-settings-ui {
+      --bg-base:#f7f8fa; --bg-1:#ffffff; --bg-2:#f1f3f6; --border:#e7e9ee; --border-strong:#d6dae1;
+      --text-0:#17181a; --text-1:#3a3f47; --text-2:#5c6370; --text-3:#9aa1ad;
+      --accent:#f97316; --accent-bg:rgba(249,115,22,0.10); --accent-text:#ea580c;
+      --success:#16a34a; --success-bg:rgba(22,163,74,0.10); --error:#dc2626; --error-bg:rgba(220,38,38,0.10);
+      --info:#2563eb; --info-bg:rgba(37,99,235,0.10); --warning:#d97706; --warning-bg:rgba(217,119,6,0.12);
+      --font-body:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue','PingFang SC','Microsoft YaHei',sans-serif;
+      --font-mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+      background:var(--bg-base); color:var(--text-0); font-family:var(--font-body);
+      padding:24px 20px 20px; line-height:1.45;
+    }
+    #kb-settings-ui *,#kb-settings-ui *::before,#kb-settings-ui *::after{box-sizing:border-box;margin:0;padding:0;}
+    #kb-settings-ui .frame{max-width:1400px;margin:0 auto;min-width:0;}
+    #kb-settings-ui .eyebrow{font:500 10px/1 var(--font-mono);letter-spacing:.18em;text-transform:uppercase;color:var(--text-2);margin-bottom:6px;}
+    #kb-settings-ui h1{font-size:24px;font-weight:650;letter-spacing:-.02em;margin-bottom:4px;}
+    #kb-settings-ui .lede{font-size:13px;color:var(--text-2);margin-bottom:16px;}
+    #kb-settings-ui .app{display:flex;border:1px solid var(--border-strong);border-radius:14px;background:var(--bg-1);overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,.05),0 4px 14px rgba(16,24,40,.08);}
+    #kb-settings-ui .nav{width:220px;flex-shrink:0;border-right:1px solid var(--border);padding:16px 12px;background:var(--bg-base);}
+    #kb-settings-ui .nav-label{font-size:11px;font-weight:650;color:var(--text-3);letter-spacing:.06em;padding:8px 12px 4px;}
+    #kb-settings-ui .nav-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:13px;font-weight:550;border-radius:10px;color:var(--text-1);width:100%;text-align:left;}
+    #kb-settings-ui .nav-item.active{background:var(--accent-bg);color:var(--accent-text);font-weight:650;}
+    #kb-settings-ui .nav-item .dot{width:6px;height:6px;border-radius:50%;background:var(--text-3);flex-shrink:0;}
+    #kb-settings-ui .nav-item.active .dot{background:var(--accent);}
+    #kb-settings-ui .nav-new{margin-left:auto;font:600 9px var(--font-mono);letter-spacing:.08em;color:var(--accent-text);background:var(--accent-bg);border-radius:980px;padding:2px 6px;}
+    #kb-settings-ui .content{flex:1;min-width:0;padding:20px 28px 28px;}
+    #kb-settings-ui .head{display:flex;align-items:flex-start;gap:16px;margin-bottom:12px;}
+    #kb-settings-ui .head h2{font-size:18px;font-weight:650;}
+    #kb-settings-ui .head p{font-size:12.5px;color:var(--text-2);margin-top:3px;max-width:640px;}
+    #kb-settings-ui .head-actions{margin-left:auto;display:flex;gap:8px;flex-shrink:0;}
+    #kb-settings-ui .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 18px;border-radius:980px;background:#e8eaee;color:var(--text-0);font:600 13px/1 var(--font-body);white-space:nowrap;border:none;}
+    #kb-settings-ui .btn-sm{min-height:30px;padding:0 14px;font-size:12px;}
+    #kb-settings-ui .btn-primary{background:linear-gradient(135deg,#f97316 0%,#fb923c 100%);color:#fff;}
+    #kb-settings-ui .btn-ghost{background:transparent;color:var(--accent-text);}
+    #kb-settings-ui .btn-danger{background:var(--error-bg);color:var(--error);}
+    #kb-settings-ui .btn[disabled]{opacity:.45;}
+    #kb-settings-ui .banner{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--warning-bg);color:#92400e;font-size:12.5px;margin-bottom:14px;}
+    #kb-settings-ui .banner.info{background:var(--info-bg);color:#1d4ed8;}
+    #kb-settings-ui .banner.err{background:var(--error-bg);color:var(--error);}
+    #kb-settings-ui .card{border:1px solid var(--border);border-radius:14px;background:var(--bg-1);box-shadow:0 1px 2px rgba(16,24,40,.05);margin-bottom:14px;overflow:hidden;}
+    #kb-settings-ui .card-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);}
+    #kb-settings-ui .card-head h3{font-size:14px;font-weight:650;}
+    #kb-settings-ui .card-head .sub{font-size:11.5px;color:var(--text-3);}
+    #kb-settings-ui .card-head .right{margin-left:auto;display:flex;align-items:center;gap:8px;}
+    #kb-settings-ui .card-body{padding:14px 16px;}
+    #kb-settings-ui .tag{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:980px;background:rgba(23,24,26,.06);color:var(--text-2);font:550 11px var(--font-body);white-space:nowrap;}
+    #kb-settings-ui .tag-accent{background:var(--accent-bg);color:var(--accent-text);}
+    #kb-settings-ui .tag-success{background:var(--success-bg);color:#15803d;}
+    #kb-settings-ui .tag-error{background:var(--error-bg);color:var(--error);}
+    #kb-settings-ui .tag-info{background:var(--info-bg);color:#1d4ed8;}
+    #kb-settings-ui .tag-warning{background:var(--warning-bg);color:#b45309;}
+    #kb-settings-ui .mono{font-family:var(--font-mono);font-size:11.5px;color:var(--text-2);}
+    #kb-settings-ui .field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;}
+    #kb-settings-ui .field label{font-size:12px;font-weight:600;color:var(--text-1);}
+    #kb-settings-ui .field .hint{font-size:11.5px;color:var(--text-3);}
+    #kb-settings-ui .input{width:100%;padding:9px 14px;border:1px solid var(--border-strong);border-radius:10px;background:var(--bg-1);color:var(--text-0);font:13.5px var(--font-body);}
+    #kb-settings-ui .input.ro{background:var(--bg-2);color:var(--text-2);}
+    #kb-settings-ui .row{display:flex;gap:10px;align-items:center;}
+    #kb-settings-ui .row.wrap{flex-wrap:wrap;}
+    #kb-settings-ui .grow{flex:1;min-width:0;}
+    #kb-settings-ui .grid2{display:grid;grid-template-columns:1.15fr .85fr;gap:14px;}
+    #kb-settings-ui .stats{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr 1fr;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+    #kb-settings-ui .stat{background:var(--bg-1);padding:10px 14px;}
+    #kb-settings-ui .stat b{display:block;font-size:18px;font-weight:650;}
+    #kb-settings-ui .stat span{font-size:11.5px;color:var(--text-2);}
+    #kb-settings-ui table{width:100%;border-collapse:collapse;}
+    #kb-settings-ui th{font:600 11px var(--font-body);color:var(--text-3);text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);letter-spacing:.02em;white-space:nowrap;}
+    #kb-settings-ui td{font-size:12.5px;color:var(--text-1);padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:top;}
+    #kb-settings-ui tr:last-child td{border-bottom:none;}
+    #kb-settings-ui td .mono{display:block;margin-top:2px;}
+    #kb-settings-ui .tabs{margin-bottom:14px;}
+    #kb-settings-ui .tabs input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;}
+    #kb-settings-ui .seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;padding:3px;background:var(--bg-1);border:1px solid var(--border);border-radius:10px;max-width:520px;}
+    #kb-settings-ui .seg label{padding:6px 18px;border-radius:7px;background:transparent;color:var(--text-2);font:600 12px var(--font-body);text-align:center;cursor:pointer;white-space:nowrap;}
+    #kb-settings-ui .panel{display:none;}
+    #kb-settings-ui #kbt1:checked ~ .seg label[for="kbt1"],
+    #kb-settings-ui #kbt2:checked ~ .seg label[for="kbt2"],
+    #kb-settings-ui #kbt3:checked ~ .seg label[for="kbt3"]{background:var(--accent-bg);color:var(--accent-text);}
+    #kb-settings-ui #kbt1:checked ~ .panels .p1,
+    #kb-settings-ui #kbt2:checked ~ .panels .p2,
+    #kb-settings-ui #kbt3:checked ~ .panels .p3{display:block;}
+    #kb-settings-ui .caps{display:flex;flex-wrap:wrap;gap:8px;}
+    #kb-settings-ui .cap{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:10px;padding:8px 12px;background:var(--bg-1);}
+    #kb-settings-ui .cap.off{background:var(--bg-2);color:var(--text-3);}
+    #kb-settings-ui .cap b{font-size:12.5px;font-weight:600;}
+    #kb-settings-ui .cap small{display:block;font-size:11px;color:var(--text-3);}
+    #kb-settings-ui .tree{display:flex;flex-direction:column;gap:2px;}
+    #kb-settings-ui .tree-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;font-size:12.5px;color:var(--text-1);}
+    #kb-settings-ui .tree-item.active{background:var(--accent-bg);color:var(--accent-text);font-weight:600;}
+    #kb-settings-ui .tree-item .n{margin-left:auto;font:500 11px var(--font-mono);color:var(--text-3);}
+    #kb-settings-ui .tree-sub{padding-left:18px;}
+    #kb-settings-ui .specimens{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px;}
+    #kb-settings-ui .spec{border:1px dashed var(--border-strong);border-radius:12px;padding:12px;background:var(--bg-base);}
+    #kb-settings-ui .spec h4{font:600 11px var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-2);margin-bottom:8px;}
+    #kb-settings-ui .spec .card{margin-bottom:0;box-shadow:none;}
+    #kb-settings-ui .notes{margin-top:18px;padding-top:14px;border-top:1px solid var(--border-strong);}
+    #kb-settings-ui .notes h3{font-size:14px;font-weight:650;margin-bottom:8px;}
+    #kb-settings-ui .notes ol{padding-left:20px;display:flex;flex-direction:column;gap:6px;}
+    #kb-settings-ui .notes li{font-size:12.5px;color:var(--text-1);line-height:1.65;}
+    #kb-settings-ui .notes code{font-family:var(--font-mono);font-size:11.5px;background:var(--bg-2);border-radius:5px;padding:1px 5px;color:var(--text-1);}
+    @media (max-width:1100px){
+      #kb-settings-ui .app{flex-direction:column;}
+      #kb-settings-ui .nav{width:100%;border-right:none;border-bottom:1px solid var(--border);}
+      #kb-settings-ui .grid2,#kb-settings-ui .specimens{grid-template-columns:1fr;}
+      #kb-settings-ui .stats{grid-template-columns:1fr 1fr;}
+    }
+  </style>
+
+  <div class="frame">
+    <p class="eyebrow">UI Wireframe · Settings / Knowledge</p>
+    <h1>设置 → 知识库（新增顶级页签）</h1>
+    <p class="lede">复用现有 settings-nav + settings-scroll + card + 分段子页签控件；知识在 Obsidian 中编辑，应用只读。三个子页签：Obsidian、研究采集、分类目录。</p>
+
+    <div class="app">
+      <aside class="nav">
+        <div class="nav-label">基础</div>
+        <div class="nav-item"><span class="dot"></span>AI 服务</div>
+        <div class="nav-item"><span class="dot"></span>配音</div>
+        <div class="nav-item"><span class="dot"></span>小说</div>
+        <div class="nav-item"><span class="dot"></span>通用</div>
+        <div class="nav-item"><span class="dot"></span>手机接力</div>
+        <div class="nav-item"><span class="dot"></span>风格预设</div>
+        <div class="nav-item"><span class="dot"></span>流程规则</div>
+        <div class="nav-item active"><span class="dot"></span>知识库<span class="nav-new">NEW</span></div>
+        <div class="nav-item"><span class="dot"></span>分镜拆分</div>
+        <div class="nav-item"><span class="dot"></span>分镜流水线</div>
+        <div class="nav-item"><span class="dot"></span>Agent 配置</div>
+        <div class="nav-item"><span class="dot"></span>任务队列</div>
+        <div class="nav-item"><span class="dot"></span>存储位置</div>
+        <div class="nav-item"><span class="dot"></span>MCP</div>
+        <div class="nav-item"><span class="dot"></span>关于更新</div>
+      </aside>
+
+      <div class="content">
+        <div class="head">
+          <div>
+            <h2>知识库</h2>
+            <p>短剧与小说的创作知识、拆分方案、校验方案都在 Obsidian 里写。应用只负责扫描、检查、发布和记录版本。</p>
+          </div>
+          <div class="head-actions">
+            <span class="btn btn-sm">打开 Vault</span>
+            <span class="btn btn-sm">扫描（只检查）</span>
+            <span class="btn btn-sm btn-primary">同步并发布</span>
+          </div>
+        </div>
+
+        <div class="banner info">
+          <span>只读说明：正文、必读标记、Agent 分配都在 Obsidian 的 frontmatter 里改；应用内不提供编辑、删除和分配按钮。同步成功后知识直接发布，拆分/校验方案需要在「分镜拆分 → 方案候选」里确认。</span>
+        </div>
+
+        <div class="tabs">
+          <input type="radio" name="kbt" id="kbt1" checked>
+          <input type="radio" name="kbt" id="kbt2">
+          <input type="radio" name="kbt" id="kbt3">
+          <div class="seg">
+            <label for="kbt1">Obsidian</label>
+            <label for="kbt2">研究采集</label>
+            <label for="kbt3">分类目录</label>
+          </div>
+
+          <div class="panels" style="margin-top:14px;">
+            <!-- ===== 子页签 1：Obsidian ===== -->
+            <section class="panel p1">
+              <div class="card">
+                <div class="card-head"><h3>Vault 连接</h3><span class="sub">作者源目录</span>
+                  <div class="right"><span class="tag tag-success">已连接</span><span class="tag">只读扫描</span></div>
+                </div>
+                <div class="card-body">
+                  <div class="field">
+                    <label>Vault 目录</label>
+                    <div class="row">
+                      <span class="input ro grow mono">/Users/…/Obsidian/短剧知识库</span>
+                      <span class="btn btn-sm">选择目录</span>
+                      <span class="btn btn-sm">打开 Vault</span>
+                    </div>
+                    <span class="hint">扫描范围：00-索引、10-共享、20-小说、30-短剧、40-方案。90-模板、_assets、_inbox 不发布。</span>
+                  </div>
+                  <div class="stats">
+                    <div class="stat"><b>42</b><span>文档总数 · 最近同步 11-13 10:24</span></div>
+                    <div class="stat"><b>3</b><span>本次发布</span></div>
+                    <div class="stat"><b>2 / 3</b><span>新增 / 更新</span></div>
+                    <div class="stat"><b>2</b><span>冲突（该文档未发布）</span></div>
+                    <div class="stat"><b>1</b><span>缺失文件</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="banner err">
+                <span>本次同步 2 份文档有冲突，<b>这 2 份未发布</b>，其余 3 份已正常发布。请在 Obsidian 中按下面位置修改后重新同步。冲突只阻断对应文档，不阻断整次同步；应用不会自动改你的文件。</span>
+              </div>
+
+              <div class="card">
+                <div class="card-head"><h3>冲突与缺失</h3><span class="sub">定位到文件与行</span>
+                  <div class="right"><span class="btn btn-sm">复制清单</span><span class="btn btn-sm">重新扫描</span></div>
+                </div>
+                <table>
+                  <thead><tr><th style="width:34%">位置</th><th style="width:14%">级别</th><th>问题</th><th style="width:26%">怎么办</th></tr></thead>
+                  <tbody>
+                    <tr>
+                      <td>分镜与导演语法<span class="mono">30-短剧/20-分镜导演/…md:27</span></td>
+                      <td><span class="tag tag-error">冲突</span></td>
+                      <td>正文出现「镜头2」子镜头编号，与单机位硬规则不一致</td>
+                      <td>在 Obsidian 改成单镜头描述后重新同步</td>
+                    </tr>
+                    <tr>
+                      <td>H3 紧凑段<span class="mono">40-方案/10-拆分方案/h3-compact.md:12</span></td>
+                      <td><span class="tag tag-error">冲突</span></td>
+                      <td>正文写「5–10 秒」，数值策略是 6–8 秒，两者矛盾</td>
+                      <td>正文与数值统一为 6–8 秒；方案改动会生成候选</td>
+                    </tr>
+                    <tr>
+                      <td>分镜校验清单<span class="mono">knowledge/index.json 引用</span></td>
+                      <td><span class="tag tag-warning">缺失</span></td>
+                      <td>索引引用了该文档，但 Vault 中找不到文件</td>
+                      <td>补回文件，或在索引中移除引用</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="grid2">
+                <div class="card">
+                  <div class="card-head"><h3>最近同步</h3><span class="sub">每次扫描/发布都留痕</span></div>
+                  <table>
+                    <thead><tr><th>时间</th><th>类型</th><th>结果</th><th>摘要</th></tr></thead>
+                    <tbody>
+                      <tr><td class="mono">11-13 10:24</td><td>同步并发布</td><td><span class="tag tag-warning">部分发布</span></td><td>发布 3 · 冲突未发布 2 · 缺失 1</td></tr>
+                      <tr><td class="mono">11-13 09:58</td><td>只扫描</td><td><span class="tag tag-info">已检查</span></td><td>文档 42 · 待确认方案 2</td></tr>
+                      <tr><td class="mono">11-12 21:07</td><td>同步并发布</td><td><span class="tag tag-success">成功</span></td><td>知识版本 +3 · 方案候选 +1</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="card">
+                  <div class="card-head"><h3>导出到 Vault</h3><span class="sub">仅此两处会写文件</span></div>
+                  <div class="card-body">
+                    <div class="field">
+                      <label>初始化导出（Vault 为空时才可用）</label>
+                      <span class="hint">把现有 8 份知识、3 套启用方案、3 套归档方案和基线校验方案写入正式目录；已存在的文件不覆盖。</span>
+                      <div class="row"><span class="btn btn-sm" disabled>导出初始知识</span><span class="tag">当前 Vault 非空</span></div>
+                    </div>
+                    <div class="field" style="margin-bottom:0;">
+                      <label>导出索引 / 主题地图</label>
+                      <span class="hint">默认只在应用内展示；点按钮才写入 00-索引，同样不覆盖已有文件。</span>
+                      <div class="row"><span class="btn btn-sm">导出索引到 Vault</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ===== 子页签 2：研究采集 ===== -->
+            <section class="panel p2">
+              <div class="card">
+                <div class="card-head"><h3>采集能力</h3><span class="sub">缺哪项就置灰哪项，不静默降级</span>
+                  <div class="right"><span class="btn btn-sm">重新检测</span></div>
+                </div>
+                <div class="card-body">
+                  <div class="caps">
+                    <div class="cap"><span class="tag tag-success">可用</span><div><b>公开文章</b><small>正文抽取 · L1</small></div></div>
+                    <div class="cap"><span class="tag tag-success">可用</span><div><b>GitHub</b><small>API / raw · L1</small></div></div>
+                    <div class="cap"><span class="tag tag-success">可用</span><div><b>公开字幕</b><small>视频字幕 · L1</small></div></div>
+                    <div class="cap off"><span class="tag">不可用</span><div><b>授权浏览器</b><small>知乎 / 小红书 · L2 · 仅桌面</small></div></div>
+                    <div class="cap off"><span class="tag">不可用</span><div><b>本地转写</b><small>无字幕视频 · L3 · 需安装</small></div></div>
+                  </div>
+                  <div class="banner" style="margin:12px 0 0;">
+                    <span>授权浏览器：需要在桌面端启用专用采集窗口并自行登录，应用不保存账号密码。本地转写：需要安装转写组件与模型，未安装前视频来源置灰，接口返回 503 并说明缺哪项。</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-head"><h3>开始采集</h3><span class="sub">搜索结果先给你选，不会自动入库</span></div>
+                <div class="card-body">
+                  <div class="row wrap" style="margin-bottom:10px;">
+                    <div class="grow field" style="margin-bottom:0;"><label>搜索词</label><span class="input">短剧 钩子 节拍 结构</span></div>
+                    <div class="field" style="margin-bottom:0;width:180px;"><label>来源类型</label><span class="input">全部 ▾</span></div>
+                    <span class="btn btn-sm" style="margin-top:20px;">搜索来源</span>
+                  </div>
+                  <div class="row wrap">
+                    <div class="grow field" style="margin-bottom:0;"><label>或直接粘贴文章 / 视频 / 仓库地址</label><span class="input mono">https://…</span></div>
+                    <span class="btn btn-sm btn-primary" style="margin-top:20px;">分析并生成候选</span>
+                  </div>
+                  <span class="hint" style="display:block;margin-top:8px;">只提取结论与短引用，保留原文链接与时间戳；不绕过登录、验证码和付费墙，不整篇复制。</span>
+                </div>
+              </div>
+
+              <div class="grid2">
+                <div class="card">
+                  <div class="card-head"><h3>采集任务</h3><span class="sub">每次抓取一条版本记录</span></div>
+                  <table>
+                    <thead><tr><th>来源</th><th>状态</th><th>结果</th></tr></thead>
+                    <tbody>
+                      <tr><td>知乎 · 短剧节奏回答<span class="mono">L2 · 授权会话</span></td><td><span class="tag">置灰</span></td><td><span class="mono">503 缺授权浏览器</span></td></tr>
+                      <tr><td>GitHub · 分镜方法仓库<span class="mono">L1 · README + docs</span></td><td><span class="tag tag-success">完成</span></td><td><span class="btn btn-sm btn-ghost">看抽取文本</span></td></tr>
+                      <tr><td>视频 · 导演拉片<span class="mono">L3 · 无字幕</span></td><td><span class="tag">置灰</span></td><td><span class="mono">503 缺本地转写</span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="card">
+                  <div class="card-head"><h3>研究候选</h3><span class="sub">采集只存数据库；点「写入收件箱」才落 _inbox</span>
+                    <div class="right"><span class="tag tag-accent">待审 3</span></div>
+                  </div>
+                  <table>
+                    <thead><tr><th>候选</th><th>分类 / 证据</th><th>操作</th></tr></thead>
+                    <tbody>
+                      <tr><td>开场 2 秒冲突前置<span class="mono">pending · 未写入</span></td><td>short-drama/pacing<span class="mono">证据 C · 2 来源</span></td><td><span class="btn btn-sm">预览草稿</span> <span class="btn btn-sm">写入收件箱</span> <span class="btn btn-sm btn-danger">拒绝</span></td></tr>
+                      <tr><td>章节钩子与伏笔回收<span class="mono">pending · _inbox/…md</span></td><td>novel/structure<span class="mono">证据 D · 灵感</span></td><td><span class="btn btn-sm">在 Obsidian 中打开</span> <span class="btn btn-sm">重新写入</span> <span class="btn btn-sm btn-danger">拒绝</span></td></tr>
+                      <tr><td>平台审核红线清单<span class="mono">approved · 已发布</span></td><td>shared/platform<span class="mono">证据 B · 官方</span></td><td><span class="btn btn-sm btn-ghost">看文档</span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-head"><h3>来源库</h3><span class="sub">证据等级与新鲜度</span>
+                  <div class="right"><span class="tag tag-warning">到期复查 2</span><span class="btn btn-sm">批量复查</span></div>
+                </div>
+                <table>
+                  <thead><tr><th>来源</th><th>类型</th><th>证据</th><th>最近抓取</th><th>最近检查</th><th>状态</th></tr></thead>
+                  <tbody>
+                    <tr><td>短剧叙事节奏 · 专业文章<span class="mono">https://…</span></td><td>文章</td><td><span class="tag tag-info">C</span></td><td class="mono">11-10</td><td class="mono">11-10</td><td><span class="tag tag-success">有效</span></td></tr>
+                    <tr><td>平台审核规范<span class="mono">https://…</span></td><td>官方文档</td><td><span class="tag tag-success">B</span></td><td class="mono">08-02</td><td class="mono">08-02</td><td><span class="tag tag-warning">30 天到期</span></td></tr>
+                    <tr><td>小红书 · 爆款笔记合集<span class="mono">https://…</span></td><td>笔记</td><td><span class="tag">D</span></td><td class="mono">07-21</td><td class="mono">10-21</td><td><span class="tag tag-error">链接失效</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <!-- ===== 子页签 3：分类目录 ===== -->
+            <section class="panel p3">
+              <div class="grid2">
+                <div class="card">
+                  <div class="card-head"><h3>知识域</h3><span class="sub">分类是稳定标识，目录名可改</span></div>
+                  <div class="card-body">
+                    <div class="tree">
+                      <div class="tree-item">10-共享<span class="n">6</span></div>
+                      <div class="tree-item">20-小说<span class="n">9</span></div>
+                      <div class="tree-sub tree-item">创作方法 / 世界观 / 人物关系<span class="n">3</span></div>
+                      <div class="tree-sub tree-item">情节结构 / 章节场景 / 文风叙述<span class="n">3</span></div>
+                      <div class="tree-sub tree-item">连贯时间线 / 审校 / 改编短剧<span class="n">3</span></div>
+                      <div class="tree-item active">30-短剧<span class="n">18</span></div>
+                      <div class="tree-sub tree-item active">分镜导演<span class="n">4</span></div>
+                      <div class="tree-sub tree-item">叙事节奏 / 连贯过渡 / 提示词<span class="n">7</span></div>
+                      <div class="tree-sub tree-item">声音 / 校验 / 资产提取<span class="n">7</span></div>
+                      <div class="tree-item">40-方案<span class="n">9</span></div>
+                      <div class="tree-item">_inbox 收件箱<span class="n">3</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-head"><h3>30-短剧 · 分镜导演</h3><span class="sub">只读展示</span>
+                    <div class="right"><span class="tag">stages: skeleton · repair</span></div>
+                  </div>
+                  <table>
+                    <thead><tr><th>文档</th><th>版本</th><th>状态</th></tr></thead>
+                    <tbody>
+                      <tr><td>分镜与导演语法<span class="mono">short-drama/directing</span></td><td class="mono">v7 · 11-12</td><td><span class="tag tag-error">冲突 1</span></td></tr>
+                      <tr><td>轴线与屏幕左右<span class="mono">short-drama/directing</span></td><td class="mono">v3 · 11-08</td><td><span class="tag tag-success">已发布</span></td></tr>
+                      <tr><td>场景地理与地标<span class="mono">short-drama/directing</span></td><td class="mono">v2 · 10-30</td><td><span class="tag tag-warning">90 天到期</span></td></tr>
+                    </tbody>
+                  </table>
+                  <div class="card-body" style="border-top:1px solid var(--border);">
+                    <div class="field" style="margin-bottom:0;">
+                      <label>主题地图（MOC）预览</label>
+                      <span class="hint">由同步器生成并存数据库，这里只读；写入 Vault 需显式点导出。</span>
+                      <div class="row"><span class="btn btn-sm">导出索引到 Vault</span><span class="tag">不覆盖已有文件</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-head"><h3>分类注册表</h3><span class="sub">未注册的 domain + category 组合会判为冲突</span>
+                  <div class="right"><span class="tag tag-warning">未分类候选 1</span></div>
+                </div>
+                <table>
+                  <thead><tr><th>知识域</th><th>分类标识</th><th>推荐目录</th><th>可用阶段</th><th>文档</th><th>到期</th><th>候选</th></tr></thead>
+                  <tbody>
+                    <tr><td>short-drama</td><td class="mono">short-drama/pacing</td><td>30-短剧/10-叙事节奏</td><td class="mono">skeleton · repair</td><td>4</td><td>0</td><td>1</td></tr>
+                    <tr><td>short-drama</td><td class="mono">short-drama/continuity</td><td>30-短剧/30-连贯过渡</td><td class="mono">repair · validate · sound</td><td>3</td><td>1</td><td>0</td></tr>
+                    <tr><td>novel</td><td class="mono">novel/structure</td><td>20-小说/40-情节结构</td><td class="mono">structure</td><td>2</td><td>0</td><td>1</td></tr>
+                    <tr><td>shared</td><td class="mono">shared/platform</td><td>10-共享</td><td class="mono">applies_to: short-drama</td><td>2</td><td>1</td><td>0</td></tr>
+                  </tbody>
+                </table>
+                <div class="card-body" style="border-top:1px solid var(--border);">
+                  <span class="hint">小说域本期只做分类、目录、候选与发布，不进入分镜阶段包，也不改变小说/剧本改写流水线。</span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="specimens">
+      <div class="spec">
+        <h4>空态 · 未设置 Vault</h4>
+        <div class="card">
+          <div class="card-head"><h3>还没连接知识库</h3></div>
+          <div class="card-body">
+            <span class="hint">选一个 Obsidian 目录作为作者源。目录为空时可以把应用现有的 8 份知识和 6 套方案一次性导出进去。</span>
+            <div class="row" style="margin-top:10px;"><span class="btn btn-sm btn-primary">选择 Vault 目录</span><span class="btn btn-sm">导出初始知识</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="spec">
+        <h4>成功态 · 同步完成</h4>
+        <div class="card">
+          <div class="card-head"><h3>同步完成</h3><div class="right"><span class="tag tag-success">无冲突</span></div></div>
+          <div class="card-body">
+            <span class="hint">知识版本 +3（已直接发布）；拆分方案候选 +1、校验方案候选 +1，等待你在「分镜拆分 → 方案候选」确认。</span>
+            <div class="row" style="margin-top:10px;"><span class="btn btn-sm btn-primary">去确认方案候选</span><span class="btn btn-sm">看同步详情</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="spec">
+        <h4>错误态 · 能力缺失 503</h4>
+        <div class="card">
+          <div class="card-head"><h3>无法采集该来源</h3><div class="right"><span class="tag tag-error">503</span></div></div>
+          <div class="card-body">
+            <span class="hint">缺少「本地转写」能力：无字幕视频需要安装转写组件与模型。已保留你的输入，安装后重试即可；不会用假数据代替。</span>
+            <div class="row" style="margin-top:10px;"><span class="btn btn-sm">查看启用方式</span><span class="btn btn-sm" disabled>重试采集</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="notes">
+      <h3>设计说明</h3>
+      <ol>
+        <li><strong>新增顶级页签 <code>knowledge</code></strong>：插在 <code>rules</code>（流程规则）与 <code>breakdown</code>（分镜拆分）之间，同步加入 <code>SETTINGS_TABS</code> 白名单与 <code>GUEST_HIDDEN_TABS</code>（手机接力访客不可见，与 ai/storage/mcp/agents 一致）。知识不再只藏在 Agent 配置里。</li>
+        <li><strong>复用控件</strong>：外壳沿用 <code>settings-nav</code>（220px）+ <code>settings-scroll</code>；子页签沿用 <code>agent-pane-tabs-nav</code> 分段样式，不新造页签组件、不做无关重构（D18：本轮只新增一个轻量 diff 组件）。</li>
+        <li><strong>只读边界</strong>：全页无「保存正文 / 删除 / 分配 Agent / 必读勾选」；旧写接口返回 409 时，界面只展示只读说明，不弹可编辑表单。写 Vault 只有初始化导出与导出索引两个按钮，且都标注「不覆盖已有文件」。</li>
+        <li><strong>冲突可定位、按文档阻断</strong>：冲突表给出文件相对路径 + 行号 + 问题 + 怎么办，并提供「复制清单」，方便粘进 Obsidian 修改；冲突只让对应文档不发布，其余照常发布，摘要写清「发布 N · 冲突未发布 M」（D20），「同步并发布」不因冲突置灰。</li>
+        <li><strong>能力门禁</strong>：沿用 FFmpeg 能力卡的置灰范式（<code>tag</code> + 说明 + <code>btn[disabled]</code>），新增 503 <code>RESEARCH_UNAVAILABLE</code> 的界面处理：保留输入、指明缺哪项能力、给出启用方式，不静默降级。</li>
+        <li><strong>候选与方案分开</strong>：研究候选在本页处理（未写入：预览草稿 / 写入收件箱 / 拒绝；已写入：在 Obsidian 中打开 / 重新写入 / 拒绝）；拆分与校验方案的批准在「分镜拆分 → 方案候选」，本页只给跳转，不做第二套审批。</li>
+        <li><strong>分类目录只读</strong>：分类树、注册表、MOC 预览都只读；未注册组合与未分类候选以徽标提示，点击跳到冲突清单。小说域明确标注「本期不接入分镜运行时」。</li>
+        <li><strong>不新增旧入口</strong>：不出现 <code>storyboard_breaker</code>，不恢复已下线的批量动作检验页签与文案。</li>
+      </ol>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -174,6 +174,59 @@ test('planner splits an outdoor shot when an action enters the shop', () => {
   assert.ok(result.shots.some(shot => shot.location === '室内（待绑定）'))
 })
 
+test('consecutive silent narrative beats are compressed into one 6s shot', () => {
+  const script = `## S01 | 内景 · 唐记食铺 | 清晨
+
+唐奕：（抬头）这是一段很长的台词，用来占满当前镜头的时间容量，避免后续无台词动作被并进同一个镜头里，所以这里继续多说几句。
+
+他起身走向柜台，拿起木条。
+
+他低头看着木纹。
+
+他抬手擦去木屑。
+
+他转身看向门外。
+
+孙郎中：（催促）这也是一段很长的台词，同样用来占满当前镜头的时间容量，避免前面的无台词动作被并进这一镜里，所以这里也继续多说几句。`
+  const result = planStoryboardShots({
+    script,
+    shotStart: 1,
+    characters: [{ name: '唐奕' }, { name: '孙郎中' }],
+    maxDuration: 15,
+  })
+  const silentShots = result.shots.filter(shot => shot.speechSegments.length === 0 && !shot.speechRequirement)
+  assert.equal(silentShots.length, 1)
+  const compressed = silentShots[0]
+  assert.equal(compressed.duration, 6)
+  assert.equal(compressed.narrativeRun?.compressed, true)
+  assert.match(compressed.sourceExcerpt, /拿起木条/)
+  assert.match(compressed.sourceExcerpt, /看向门外/)
+})
+
+test('combat beats stay out of silent-run compression', () => {
+  const script = `## S01 | 外景 · 演武场 | 日
+
+唐奕：（抬头）这是一段很长的台词，用来占满当前镜头的时间容量，避免后续战斗动作被并进同一个镜头里，所以这里继续多说几句。
+
+他拔剑冲向对方。
+
+对方挥剑格挡。
+
+两人剑锋相撞，火花四溅。
+
+孙郎中：（催促）这也是一段很长的台词，同样用来占满当前镜头的时间容量，避免前面的战斗动作被并进这一镜里，所以这里也继续多说几句。`
+  const result = planStoryboardShots({
+    script,
+    shotStart: 1,
+    characters: [{ name: '唐奕' }, { name: '孙郎中' }],
+    maxDuration: 15,
+    silentDuration: 6,
+  })
+  const combatShots = result.shots.filter(shot => /拔剑|挥剑|剑锋/.test(shot.sourceExcerpt))
+  assert.ok(combatShots.length > 0)
+  assert.ok(combatShots.every(shot => !shot.narrativeRun?.compressed))
+})
+
 test('document title is never treated as a shot', () => {
   const script = `# 唐记食铺
 
@@ -189,23 +242,23 @@ test('document title is never treated as a shot', () => {
   assert.ok(result.shots.every(shot => shot.shotType))
 })
 
-test('establishing scene and character action stay in separate shots', () => {
+test('establishing scene and character action are compressed into one continuous silent run', () => {
   const script = `## S01 | 外景 · 邓州西市街 | 清晨
 
 卯时未过，街面人声鼎沸，商铺林立。
 
-贾婆子站在自家店前扯着嗓子揽客。`
+贾婆子站在自家店前，望向长街。`
   const result = planStoryboardShots({
     script,
     shotStart: 1,
     characters: [{ name: '贾婆子' }],
     maxDuration: 15,
   })
-  const establishing = result.shots.find(shot => shot.shotType === 'establishing')
-  const action = result.shots.find(shot => shot.subject === '贾婆子')
-  assert.ok(establishing)
-  assert.ok(action)
-  assert.notEqual(establishing!.storyboardNumber, action!.storyboardNumber)
+  const compressed = result.shots.find(shot => shot.narrativeRun?.compressed)
+  assert.ok(compressed)
+  assert.match(compressed!.sourceExcerpt, /卯时未过/)
+  assert.match(compressed!.sourceExcerpt, /贾婆子站在自家店前/)
+  assert.equal(compressed!.duration, 6)
 })
 
 test('vocal action becomes an inferred speech requirement and title block exposes it', () => {
@@ -252,4 +305,70 @@ test('planned shot block locks count, excerpts and durations for the model', () 
   assert.match(block, new RegExp(`固定 ${result.shots.length} 个骨架`))
   assert.match(block, new RegExp(`第 ${result.shots[0].storyboardNumber} 镜`))
   assert.match(block, /锁定摘录/)
+})
+
+const effectiveChars = (value: string) => String(value || '').replace(/[\s，。！？；：、“”‘’（）《》【】…—,.!?;:"'()\[\]]/g, '').length
+
+const LONG_PROSE = `## S01 | 内景 · 唐记食铺 | 清晨
+
+唐奕回到柜台里，望向店外马老三守着锅灶、店内马婶前后支应，一切井然有序，他嘴角牵起一个弧度，拿起柜下一块两尺多长的半弧木条，用小刀继续雕琢吉他琴头，神情踏实宁静。`
+
+test('旁白驱动形态：长叙述按标点拆到相邻镜，每镜旁白不超预算', () => {
+  const result = planStoryboardShots({ script: LONG_PROSE, shotStart: 1, maxDuration: 15, narrationForm: 'narration' })
+  assert.ok(result.shots.length >= 2, `应拆成多镜，实际 ${result.shots.length}`)
+  for (const shot of result.shots) {
+    assert.ok(shot.duration >= 6 && shot.duration <= 15)
+    const chars = effectiveChars(shot.sourceExcerpt)
+    assert.ok(chars <= (shot.duration - 1) * 4, `镜${shot.storyboardNumber} 旁白 ${chars} 字超预算 ${(shot.duration - 1) * 4}`)
+  }
+  const prose = LONG_PROSE.split('\n').filter(line => line.trim() && !line.startsWith('##')).join('')
+  const covered = result.shots.reduce((sum, shot) => sum + effectiveChars(shot.sourceExcerpt), 0)
+  assert.equal(covered, effectiveChars(prose))
+})
+
+test('旁白驱动形态：prose 镜时长由字数决定，不再固定无声镜时长', () => {
+  const script = `## S01 | 内景 · 唐记食铺 | 清晨
+
+唐奕坐在柜台后雕琢琴头，神情踏实宁静。`
+  const narration = planStoryboardShots({ script, shotStart: 1, maxDuration: 15, silentDuration: 6, narrationForm: 'narration' })
+  const dialogue = planStoryboardShots({ script, shotStart: 1, maxDuration: 15, silentDuration: 6, narrationForm: 'dialogue' })
+  const chars = effectiveChars(script.split('\n').filter(line => line.trim() && !line.startsWith('##')).join(''))
+  const expected = Math.ceil(chars / 4) + 1
+  assert.ok(narration.shots[0].duration >= expected, `旁白形态时长 ${narration.shots[0].duration} 应 ≥ ${expected}`)
+  assert.equal(dialogue.shots[0].duration, 6)
+})
+
+test('旁白驱动形态：携带 prose 的镜头不被静默压缩', () => {
+  const script = `## S01 | 内景 · 唐记食铺 | 清晨
+
+唐奕坐在柜台后雕琢琴头。马老三在灶前守着锅灶。马婶在店堂前后支应。`
+  const result = planStoryboardShots({ script, shotStart: 1, maxDuration: 15, narrationForm: 'narration' })
+  assert.ok(result.shots.every(shot => !shot.narrativeRun?.compressed))
+})
+
+test('旁白驱动形态：h3-compact 8 秒上限下单镜旁白不超 28 字', () => {
+  const result = planStoryboardShots({ script: LONG_PROSE, shotStart: 1, maxDuration: 8, narrationForm: 'narration' })
+  assert.ok(result.shots.length >= 3)
+  for (const shot of result.shots) {
+    assert.ok(shot.duration <= 8)
+    assert.ok(effectiveChars(shot.sourceExcerpt) <= (shot.duration - 1) * 4)
+  }
+})
+
+test('旁白驱动形态：锁定清单标注每镜旁白预算', () => {
+  const result = planStoryboardShots({ script: LONG_PROSE, shotStart: 1, maxDuration: 15, narrationForm: 'narration' })
+  const block = buildPlannedShotsBlock(result.shots, 'narration')
+  assert.match(block, /旁白驱动形态/)
+  assert.match(block, /旁白预算：\d+ 字/)
+  const dialogueBlock = buildPlannedShotsBlock(result.shots, 'dialogue')
+  assert.ok(!dialogueBlock.includes('旁白预算'))
+})
+
+test('对白驱动形态：静默压缩与时长逻辑零回归', () => {
+  const script = `## S01 | 内景 · 唐记食铺 | 清晨
+
+唐奕坐在柜台后雕琢琴头。马老三在灶前守着锅灶。马婶在店堂前后支应。`
+  const result = planStoryboardShots({ script, shotStart: 1, maxDuration: 15, silentDuration: 6 })
+  assert.ok(result.shots.some(shot => shot.narrativeRun?.compressed))
+  assert.ok(result.shots.every(shot => shot.duration === 6))
 })

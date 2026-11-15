@@ -43,6 +43,8 @@ DEFAULT_RATIO = 16 / 9
 FRAME_GRID = [5 + 17 * k for k in range(22)]
 MAX_REF_IMAGES = 9
 MAX_REFERENCE_BYTES = 32 * 1024 * 1024
+MAX_VIDEO_BYTES = 256 * 1024 * 1024
+VIDEO_EXTS = (".mp4", ".mov", ".webm", ".mkv", ".avi")
 
 RESOLUTION_SHORT_EDGE = {
     "480p": 480, "480": 480, "sd": 480,
@@ -128,6 +130,7 @@ class Settings:
         self.workers = 1
         self.queue_limit = 32
         self.max_body_bytes = 64 * 1024 * 1024
+        self.max_video_bytes = MAX_VIDEO_BYTES
         self.sign_ttl = 3600
         self.ui_session_ttl = 43200
         self.retention_days = 7
@@ -175,6 +178,7 @@ class Settings:
             workers=number("H3_WORKERS", 1, 0),
             queue_limit=number("H3_QUEUE_LIMIT", 32, 0),
             max_body_bytes=number("H3_MAX_BODY_BYTES", 64 * 1024 * 1024, 1024),
+            max_video_bytes=number("H3_MAX_VIDEO_BYTES", MAX_VIDEO_BYTES, 1024),
             sign_ttl=number("H3_SIGN_TTL", 3600, 1),
             ui_session_ttl=number("H3_UI_SESSION_TTL", 43200, 60),
             retention_days=number("H3_RETENTION_DAYS", 7, 0),
@@ -546,7 +550,7 @@ def assert_public_url(url):
             raise ValueError("参考素材地址不允许访问内网或本机地址")
 
 
-def decode_data_url(raw):
+def decode_data_url(raw, max_bytes=MAX_REFERENCE_BYTES, media="image"):
     if not isinstance(raw, str) or not raw.startswith("data:"):
         raise ValueError("不是合法的 data URL")
     header, sep, payload = raw.partition(",")
@@ -555,15 +559,18 @@ def decode_data_url(raw):
     meta = header[5:]
     parts = meta.split(";")
     content_type = (parts[0] or "application/octet-stream").strip().lower()
-    if not content_type.startswith("image/"):
+    if media == "video":
+        if not (content_type.startswith("video/") or content_type == "application/octet-stream"):
+            raise ValueError("data URL 不是视频")
+    elif not content_type.startswith("image/"):
         raise ValueError("data URL 不是图片")
     is_base64 = any(part.strip().lower() == "base64" for part in parts[1:])
     try:
         data = base64.b64decode(payload, validate=False) if is_base64 else urllib.parse.unquote_to_bytes(payload)
     except Exception as exc:
         raise ValueError("data URL 解码失败") from exc
-    if len(data) > MAX_REFERENCE_BYTES:
-        raise ValueError("参考图片过大")
+    if len(data) > max_bytes:
+        raise ValueError("参考视频过大" if media == "video" else "参考图片过大")
     return data, content_type
 
 
@@ -577,6 +584,42 @@ def is_image_bytes(data):
     if data.startswith(b"BM"):
         return True
     return data[:6] in (b"GIF87a", b"GIF89a")
+
+
+def is_video_bytes(data):
+    if len(data) >= 12 and data[4:8] == b"ftyp":
+        return True
+    if data.startswith(b"\x1aE\xdf\xa3"):
+        return True
+    if data.startswith(b"RIFF") and data[8:12] == b"AVI ":
+        return True
+    return False
+
+
+def video_extension(data, content_type="", fallback_url=""):
+    if len(data) >= 12 and data[4:8] == b"ftyp":
+        brand = data[8:12]
+        return ".mov" if brand == b"qt  " else ".mp4"
+    if data.startswith(b"\x1aE\xdf\xa3"):
+        return ".webm" if "webm" in (content_type or "").lower() else ".mkv"
+    if data.startswith(b"RIFF") and data[8:12] == b"AVI ":
+        return ".avi"
+    ctype = (content_type or "").split(";")[0].strip().lower()
+    mapping = {
+        "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm",
+        "video/x-matroska": ".mkv", "video/x-msvideo": ".avi",
+    }
+    if ctype in mapping:
+        return mapping[ctype]
+    suffix = os.path.splitext(urllib.parse.urlsplit(fallback_url or "").path)[1].lower()
+    return suffix if suffix in (".mp4", ".mov", ".webm", ".mkv", ".avi") else ".mp4"
+
+
+def content_type_for_video_extension(ext):
+    return {
+        ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+        ".mkv": "video/x-matroska", ".avi": "video/x-msvideo",
+    }.get(ext.lower(), "video/mp4")
 
 
 def image_extension(data, content_type="", fallback_url=""):
@@ -682,8 +725,22 @@ def input_targets(spec):
     return [{"node": (spec or {}).get("node"), "input": (spec or {}).get("input")}]
 
 
+def is_uploaded_video_name(value):
+    if not isinstance(value, str):
+        return False
+    name = os.path.basename(value)
+    return (
+        name == value
+        and not value.startswith(".")
+        and value.lower().endswith(VIDEO_EXTS)
+        and len(value) <= 255
+    )
+
+
 def coerce_input_value(kind, value):
     if kind == "text":
+        return str(value)
+    if kind == "video":
         return str(value)
     if kind == "json":
         if not isinstance(value, (dict, list)):
@@ -733,13 +790,25 @@ def validate_job_inputs(row, inputs):
             if not isinstance(value, str):
                 raise BadRequest(f"输入 {name} 必须是图片 data URL 或 http(s) 地址")
             continue
+        if kind == "video":
+            if not isinstance(value, str):
+                raise BadRequest(f"输入 {name} 必须是视频文件名、data URL 或 http(s) 地址")
+            text = value.strip()
+            if text.startswith("data:"):
+                if not (text.startswith("data:video/") or text.startswith("data:application/octet-stream")):
+                    raise BadRequest(f"输入 {name} 不是视频 data URL")
+            elif text.lower().startswith(("http://", "https://")):
+                pass
+            elif not is_uploaded_video_name(text):
+                raise BadRequest(f"输入 {name} 必须是已上传的视频文件名、data URL 或 http(s) 地址")
+            continue
         try:
             coerce_input_value(kind, value)
         except (TypeError, ValueError) as exc:
             raise BadRequest(f"输入 {name} {exc}") from exc
 
 
-def build_job_graph(row, inputs, upload_image):
+def build_job_graph(row, inputs, upload_image, upload_video=None):
     try:
         graph = json.loads(json.dumps(row.get("workflow") or {}, ensure_ascii=False))
     except (TypeError, ValueError) as exc:
@@ -756,6 +825,12 @@ def build_job_graph(row, inputs, upload_image):
         kind = str(spec.get("type") or "text")
         if kind == "image":
             value = upload_image(value)
+        elif kind == "video":
+            if is_uploaded_video_name(value):
+                pass
+            else:
+                uploader = upload_video or upload_image
+                value = uploader(value)
         else:
             try:
                 value = coerce_input_value(kind, value)
@@ -1010,22 +1085,32 @@ class Gateway:
             raise ComfyError(f"ComfyUI 不可达: {getattr(exc, 'reason', exc)}") from exc
         stored = result.get("name") if isinstance(result, dict) else None
         if not stored:
-            raise ComfyError("ComfyUI 上传参考图失败：响应缺少文件名")
+            raise ComfyError("ComfyUI 上传素材失败：响应缺少文件名")
         return stored
 
-    def _upload_bytes(self, data, content_type):
+    def _upload_bytes(self, data, content_type, kind="image"):
         if not data:
-            raise ValueError("参考图片为空")
-        ext = image_extension(data, content_type)
-        name = f"h3_{hashlib.sha256(data).hexdigest()[:20]}{ext}"
+            raise ValueError("参考素材为空")
+        if kind == "video":
+            ext = video_extension(data, content_type)
+            prefix = "h3v_"
+            upload_type = content_type_for_video_extension(ext) or content_type or "video/mp4"
+        else:
+            ext = image_extension(data, content_type)
+            prefix = "h3_"
+            upload_type = content_type_for_extension(ext) or content_type or "image/png"
+        name = f"{prefix}{hashlib.sha256(data).hexdigest()[:20]}{ext}"
         with self._upload_lock:
             if name in self._uploaded:
                 return name
-            self._post_upload(data, name, content_type_for_extension(ext) or content_type or "image/png")
+            self._post_upload(data, name, upload_type)
             self._uploaded.add(name)
             if len(self._uploaded) > 500:
                 self._uploaded = set(list(self._uploaded)[-500:])
         return name
+
+    def _upload_video_bytes(self, data, content_type):
+        return self._upload_bytes(data, content_type, kind="video")
 
     def _upload_source(self, source):
         if isinstance(source, str) and source.startswith("data:"):
@@ -1038,19 +1123,39 @@ class Gateway:
             raise ValueError("参考素材不是图片")
         return self._upload_bytes(data, content_type)
 
-    def _fetch_public(self, url):
+    def _upload_video_source(self, source):
+        if not isinstance(source, str):
+            raise ValueError("视频素材必须是文件名、data URL 或公网 http(s) 地址")
+        text = source.strip()
+        if is_uploaded_video_name(text):
+            return text
+        if text.startswith("data:"):
+            data, content_type = decode_data_url(
+                text, max_bytes=self.settings.max_video_bytes, media="video",
+            )
+        elif text.lower().startswith(("http://", "https://")):
+            data, content_type = self._fetch_public(text, max_bytes=self.settings.max_video_bytes)
+        else:
+            raise ValueError("视频素材必须是已上传文件名、data URL 或公网 http(s) 地址")
+        if not is_video_bytes(data):
+            raise ValueError("参考素材不是视频")
+        if len(data) > self.settings.max_video_bytes:
+            raise ValueError("参考视频过大")
+        return self._upload_video_bytes(data, content_type)
+
+    def _fetch_public(self, url, max_bytes=MAX_REFERENCE_BYTES):
         assert_public_url(url)
         request = urllib.request.Request(url, headers={"User-Agent": f"{SERVICE}/{VERSION}"})
         try:
             with self._ref_opener.open(request, timeout=120) as response:
                 content_type = response.headers.get("Content-Type", "")
-                data = response.read(MAX_REFERENCE_BYTES + 1)
+                data = response.read(max_bytes + 1)
         except urllib.error.HTTPError as exc:
-            raise ValueError(f"参考图片下载失败: HTTP {exc.code}") from exc
+            raise ValueError(f"参考素材下载失败: HTTP {exc.code}") from exc
         except urllib.error.URLError as exc:
-            raise ValueError(f"参考图片下载失败: {exc.reason}") from exc
-        if len(data) > MAX_REFERENCE_BYTES:
-            raise ValueError("参考图片过大")
+            raise ValueError(f"参考素材下载失败: {exc.reason}") from exc
+        if len(data) > max_bytes:
+            raise ValueError("参考素材过大")
         return data, content_type
 
     def _wait_history(self, prompt_id, should_stop=None):
@@ -1308,7 +1413,7 @@ class Gateway:
         inputs = payload.get("inputs") or {}
         if self._is_cancelled(task_id):
             raise Cancelled()
-        graph = build_job_graph(row, inputs, self._upload_source)
+        graph = build_job_graph(row, inputs, self._upload_source, self._upload_video_source)
         result = self._comfy_json("/prompt", {"prompt": graph})
         prompt_id = result.get("prompt_id") if isinstance(result, dict) else None
         if not prompt_id:
@@ -1961,14 +2066,22 @@ def make_handler(gateway):
                 return
             raw = self._read_body()
             _, files = parse_multipart(raw, self.headers.get("Content-Type") or "")
-            image = next((item for item in files if item.get("field") in ("image", "file")), None)
-            if not image:
-                raise BadRequest("image required")
-            data = image.get("data") or b""
-            if not is_image_bytes(data):
-                raise BadRequest("上传内容不是有效图片")
-            name = gateway._upload_bytes(data, image.get("content_type") or "image/png")
-            self._json(200, {"name": name, "subfolder": ""})
+            item = next((f for f in files if f.get("field") in ("image", "video", "file")), None)
+            if not item:
+                raise BadRequest("image or video required")
+            data = item.get("data") or b""
+            content_type = item.get("content_type") or ""
+            if is_image_bytes(data):
+                name = gateway._upload_bytes(data, content_type or "image/png")
+                kind = "image"
+            elif is_video_bytes(data):
+                if len(data) > gateway.settings.max_video_bytes:
+                    raise PayloadTooLarge("视频超过大小上限")
+                name = gateway._upload_video_bytes(data, content_type or "video/mp4")
+                kind = "video"
+            else:
+                raise BadRequest("上传内容不是有效图片或视频")
+            self._json(200, {"name": name, "subfolder": "", "kind": kind})
 
         # -- 文件 ---------------------------------------------------------
 

@@ -30,16 +30,28 @@ import {
   setCurrentStep,
   startStepRun,
   validatePipelineOverrides,
+  type NarrationForm,
   type PipelineRunParameters,
   type PipelineStepDefinition,
 } from './pipeline-chain.js'
 import { extractPlanSpeechSegments } from './storyboard-plan-contract.js'
+import {
+  buildShotIntentPlan,
+  formatIntentPlanBlock,
+  intentLabel,
+  intentPlanFromRow,
+  parseActionPlan,
+  parseNarrationPlan,
+  validateSilentRuns,
+  type ShotIntentPlan,
+  type SilentRunEntry,
+} from './shot-intent-plan.js'
 import { parseSoundSection, setSoundSection } from './storyboard-sound.js'
 import { logTaskError, logTaskProgress, logTaskSuccess, logTaskWarn } from '../utils/task-logger.js'
 import { emitChange } from './sync-events.js'
 
 export type StoryboardPipelineStatus = 'pending' | 'running' | 'interrupted' | 'done' | 'failed'
-export type StoryboardPipelineStage = 'skeleton' | 'repair' | 'sound'
+export type StoryboardPipelineStage = 'skeleton' | 'intent' | 'repair' | 'sound'
 
 export interface PipelineChunkRecord {
   index: number
@@ -131,6 +143,7 @@ export interface SkeletonRunnerInput {
   maxSegmentSeconds: number
   previousDrafts: Array<Record<string, any>>
   plannedShots: PlannedStoryboardShot[]
+  narrationForm?: NarrationForm
   requestContext: RequestContext<AgentRequestContextValues>
 }
 
@@ -221,6 +234,14 @@ function skeletonSpeechSegments(skeleton: SkeletonRow): Array<{ speaker?: string
     // 旧骨架没有计划台词字段，从原文摘录补算
   }
   return extractPlanSpeechSegments(skeleton.sourceExcerpt).map(item => ({ speaker: item.speaker, text: item.text }))
+}
+
+function skeletonHasSpeechRequirement(skeleton: SkeletonRow): boolean {
+  try {
+    return Boolean(JSON.parse(skeleton.speechRequirementJson || 'null'))
+  } catch {
+    return false
+  }
 }
 
 function runStepInput(row: PipelineJobRow, stepKey: string, scope: 'episode' | 'chunk' | 'shot', itemKey: string, input?: unknown) {
@@ -538,6 +559,106 @@ function findNovelSceneText(novel: string, excerpt: string): string {
   return findSceneTextForExcerpt(text, excerpt).slice(0, 12000)
 }
 
+function skeletonCharacterIds(skeleton: SkeletonRow): number[] {
+  return parseJsonArray(skeleton.characterIds)
+}
+
+function intentPlanFromSkeleton(skeleton: SkeletonRow): ShotIntentPlan | null {
+  return intentPlanFromRow(skeleton)
+}
+
+async function projectStyleText(dramaId: number): Promise<string> {
+  const row = db.select({
+    title: schema.dramas.title,
+    genre: schema.dramas.genre,
+    background: schema.dramas.background,
+    tags: schema.dramas.tags,
+  }).from(schema.dramas).where(eq(schema.dramas.id, dramaId)).get()
+  return [row?.title, row?.genre, row?.background, row?.tags].filter(Boolean).join(' ')
+}
+
+function computeIntentPlan(
+  skeleton: SkeletonRow,
+  styleText: string,
+  previousCharacterIds: number[],
+  isOpeningShot = false,
+  narrationForm: NarrationForm = 'dialogue',
+): ShotIntentPlan {
+  const speechRequirement = (() => {
+    try { return JSON.parse(skeleton.speechRequirementJson || 'null') } catch { return null }
+  })()
+  const narrativeRun = (() => {
+    try { return JSON.parse(skeleton.narrativeRunJson || 'null') } catch { return null }
+  })()
+  return buildShotIntentPlan({
+    storyboardNumber: skeleton.storyboardNumber,
+    duration: skeleton.duration,
+    transition: skeleton.transition,
+    shotType: skeleton.shotType,
+    actionSummary: skeleton.actionSummary,
+    actionStart: skeleton.actionStart,
+    actionEnd: skeleton.actionEnd,
+    sourceExcerpt: skeleton.sourceExcerpt,
+    speechSegments: skeletonSpeechSegments(skeleton),
+    speechRequirement,
+    characterCount: skeletonCharacterIds(skeleton).length,
+    characterIds: skeletonCharacterIds(skeleton),
+    previousCharacterIds,
+    projectStyleText: styleText,
+    isOpeningShot,
+    compressedSilent: Boolean(narrativeRun?.compressed),
+    narrationForm,
+  })
+}
+
+function persistIntentPlan(skeleton: SkeletonRow, plan: ShotIntentPlan) {
+  db.update(schema.storyboardSkeletons).set({
+    intentType: plan.intent,
+    narrationJson: JSON.stringify(plan.narration),
+    actionPlanJson: JSON.stringify(plan.action),
+    updatedAt: now(),
+  }).where(eq(schema.storyboardSkeletons.id, skeleton.id)).run()
+}
+
+/** 旧任务/单镜优化没有跑过新增意图步骤时，按需补算并落库。 */
+function ensureSkeletonIntentPlan(
+  skeleton: SkeletonRow,
+  styleText: string,
+  previousCharacterIds: number[],
+  isOpeningShot = false,
+  narrationForm: NarrationForm = 'dialogue',
+): ShotIntentPlan {
+  const existing = intentPlanFromSkeleton(skeleton)
+  if (existing) return existing
+  const plan = computeIntentPlan(skeleton, styleText, previousCharacterIds, isOpeningShot, narrationForm)
+  persistIntentPlan(skeleton, plan)
+  return plan
+}
+
+/** 统一生成连续无声门禁输入；意图阶段与续跑修补共用同一套口径。 */
+function buildSilentRunEntries(skeletons: SkeletonRow[], styleText: string, narrationForm: NarrationForm = 'dialogue'): SilentRunEntry[] {
+  const openingShotNumber = skeletons[0]?.storyboardNumber
+  const seenCharacterIds: number[] = []
+  return skeletons.map(skeleton => {
+    const plan = ensureSkeletonIntentPlan(
+      skeleton,
+      styleText,
+      seenCharacterIds,
+      skeleton.storyboardNumber === openingShotNumber,
+      narrationForm,
+    )
+    seenCharacterIds.push(...skeletonCharacterIds(skeleton))
+    return {
+      storyboardNumber: skeleton.storyboardNumber,
+      intent: plan.intent,
+      duration: skeleton.duration || 0,
+      speechCount: skeletonSpeechSegments(skeleton).length,
+      speechRequirement: skeletonHasSpeechRequirement(skeleton),
+      narrationMode: plan.narration.mode,
+    }
+  })
+}
+
 function skeletonPayload(skeleton: SkeletonRow) {
   return {
     id: skeleton.id,
@@ -564,6 +685,9 @@ function skeletonPayload(skeleton: SkeletonRow) {
       try { return JSON.parse(skeleton.speechRequirementJson || 'null') } catch { return null }
     })(),
     speech_segments: skeletonSpeechSegments(skeleton),
+    narrative_run: (() => {
+      try { return JSON.parse(skeleton.narrativeRunJson || 'null') } catch { return null }
+    })(),
     boundary_type: skeleton.boundaryType || '',
     boundary_word: skeleton.boundaryWord || '',
     boundary_out: (() => {
@@ -573,6 +697,9 @@ function skeletonPayload(skeleton: SkeletonRow) {
     screen_right: skeleton.screenRight || '',
     axis_side: skeleton.axisSide || '',
     landmark_side: skeleton.landmarkSide || '',
+    intent_type: skeleton.intentType || '',
+    narration: parseNarrationPlan(skeleton.narrationJson),
+    action_plan: parseActionPlan(skeleton.actionPlanJson),
     plan_version: skeleton.planVersion || 1,
     source_excerpt: skeleton.sourceExcerpt,
     status: skeleton.status,
@@ -609,7 +736,7 @@ function buildSkeletonMessage(input: SkeletonRunnerInput, sceneBindingBlock: str
     `## 四段式管线 · 第一段：预拆骨架（第 ${input.chunk.index + 1}/${input.totalChunks} 段）`,
     `本段范围：${input.chunk.label}，约 ${chunkChars} 字；镜头号由系统从第 ${input.shotStart} 镜连续分配。`,
     '',
-    buildPlannedShotsBlock(input.plannedShots),
+    buildPlannedShotsBlock(input.plannedShots, input.narrationForm),
     '',
     '### 本段任务',
     `- 拆分主算法已经按「台词→场景→说话人→节拍→分镜」完成预拆分，本段固定 ${plannedCount} 个骨架；你的任务不是重新拆分，而是逐条补全语义字段后保存。`,
@@ -637,6 +764,7 @@ function buildSkeletonMessage(input: SkeletonRunnerInput, sceneBindingBlock: str
 async function buildRepairMessage(input: RepairRunnerInput) {
   const projectNegative = await deriveProjectNegativeConstraints(input.dramaId, input.episodeId)
   const skeleton = skeletonPayload(input.skeleton)
+  const intentPlan = intentPlanFromSkeleton(input.skeleton)
   const previousBlock = input.previousShots.length
     ? input.previousShots.map(shot => [
         `### 第 ${shot.storyboard_number} 镜（已修补成稿）`,
@@ -685,6 +813,7 @@ async function buildRepairMessage(input: RepairRunnerInput) {
     `- 本镜起状态：${boundary.toStartState || '未写'}`,
     `- 同场画面常量：画面左 ${skeleton.screen_left || '未写'}；画面右 ${skeleton.screen_right || '未写'}；轴线 ${skeleton.axis_side || '未写'}；地标侧 ${skeleton.landmark_side || '未写'}`,
     `- 原文摘录：\n${skeleton.source_excerpt}`,
+    ...(intentPlan ? ['', formatIntentPlanBlock(intentPlan)] : []),
     '',
     '### 完整场次原文（补台词、动作、调度的依据）',
     input.sceneText,
@@ -708,10 +837,24 @@ async function buildRepairMessage(input: RepairRunnerInput) {
     ] : []),
     '',
     '### 修补要求（最高优先级）',
-    '1. 计划层台词是唯一台词来源：计划有台词就逐字写进 description 和 video_prompt；计划没有台词就不得自行加台词。发声动作没有具体词时，只能在计划层补出原文依据后再使用，不能直接创作。',
+    '1. 镜头意图计划是唯一裁定：计划有台词就逐字写进 description 和 video_prompt；计划没有台词就不得自行加台词。发声动作没有具体词时，只能在计划层补出原文依据后再使用，不能直接创作。',
+    ...(intentPlan?.narration.mode === 'none' && intentPlan.action.category !== 'none' && intentPlan?.narration.form !== 'narration'
+      ? [`1.1 本镜意图为${intentLabel(intentPlan.intent)}：禁止旁白、画外音、内心独白；除计划台词与骨架发声要求外不得新增角色台词。按动作编排写连续动作、特效、机位与声音元素，画面不要出现张嘴说话。`]
+      : []),
+    ...(intentPlan?.narration.mode === 'source'
+      ? [`1.2 本镜旁白只能作为画外音逐字使用：${intentPlan.narration.lines.map(line => `「${line}」`).join('；')}；格式为「旁白（画外音）：「原文」」；画面人物嘴唇闭合，不张嘴。`]
+      : []),
+    ...(intentPlan?.narration.mode === 'adapted'
+      ? [`1.2 本镜旁白为改写式画外音：以计划素材改写为第三人称完整句，可写情绪/心理/前因，称呼用项目规范名，不得逐字复述对白；格式「旁白（画外音）：「改写旁白」」，逐字同时写入 description 和 video_prompt；旁白与对白不得在同一时间帧；旁白在标点处分段，禁止词中断开；旁白总字数不超过 ${intentPlan.narration.budgetChars} 字；画面人物嘴唇闭合，不张嘴。`]
+      : []),
+    ...(skeleton.narrative_run?.compressed
+      ? ['1.3 本镜由多个连续叙述节拍压缩而成：必须用一个连续机位完成，禁止切镜；按时间顺序压缩为连续运镜，删掉重复动作，不要写成多个子镜头。']
+      : []),
     '2. description 直接写一个连续镜头：谁 + 具体动作 + 肢体细节 + 表情 + 站位/视线；不要写【镜头1】这类编号，禁止子镜头切镜。',
     '3. video_prompt 固定四区：信息头 → 画面调度（画面左/右、过肩、背景地标屏幕侧、轴线、动作起点/终点）→ 时间帧 → 负面约束。',
-    '4. 时间帧从 0 连续写到 duration，每段 1-6 秒；台词按 4 字/秒 + 1 秒气口分配；台词逐字复制 description。',
+    intentPlan?.narration.form === 'narration'
+      ? '4. 时间帧从 0 连续写到 duration，每段 1-6 秒；台词与旁白按 4 字/秒 + 1 秒气口分配；台词逐字复制 description；旁白与台词分时不重叠。'
+      : '4. 时间帧从 0 连续写到 duration，每段 1-6 秒；台词按 4 字/秒 + 1 秒气口分配；台词逐字复制 description。',
     '5. 不写完整 BGM/环境声风格；声音由第四步统一设计。',
     '6. 不得改变计划层的边界：上一镜尾状态和本镜起状态必须接上；过渡词只允许出现一次，不能在本镜和上一镜重复。',
     '7. 同一场戏必须逐字沿用上一镜的画面左/右、地标侧、轴线；不得因为说话人变化交换左右；需要换边/越轴时先插中性镜头，不要在本镜硬翻。',
@@ -728,7 +871,7 @@ function buildSoundMessage(input: SoundRunnerInput) {
   const shots = input.shots.map(shot => [
     `- 第 ${shot.shot_number} 镜｜场景 ${shot.scene_id ?? '未绑定'}｜${shot.location || ''}｜${shot.time || ''}｜${shot.duration} 秒｜转场 ${shot.transition}`,
     `  description：${String(shot.description || '').replace(/\s+/g, ' ').slice(0, 180)}`,
-    `  有无台词：${shot.has_dialogue ? '有' : '无'}`,
+    `  有无台词：${shot.has_dialogue ? '有' : '无'}${shot.intent_type ? `｜意图：${shot.intent_type}` : ''}`,
   ].join('\n')).join('\n')
   return [
     '## 四段式管线 · 第四段：场景/剧情级声音设计',
@@ -742,7 +885,7 @@ function buildSoundMessage(input: SoundRunnerInput) {
     '2. 同一地点/时间/连续动作/同一情绪段落组成一个声音单元；单元内 BGM 只建立一次，后续镜头延续不重启。',
     '3. BGM 弧可以跨场：换场用淡出/淡入，不重新起一段同风格音乐。',
     '4. 环境声按地点/时间建立底噪；画内音效（门、脚步、锅灶、碗筷）只出现在对应动作镜头。',
-    '5. 静默是合法设计；无 BGM/环境声时明确写静默，不重复默认风格。',
+    '5. 静默是合法设计；无 BGM/环境声时明确写静默，不重复默认风格。战斗/比拼/动作镜只设计动作音效与环境声，不添加旁白或人声台词。',
     '6. 每个普通分镜必须被环境声或静默线索覆盖；BGM/环境声/静默同轨不能重叠。',
     '7. 同一单元只能有一条 BGM 线索；禁止每镜重新起 BGM。',
     '8. 单镜只写短增量（延续/本镜新增/淡出/静默），禁止重复完整 BGM 风格；完整主题只存在于声音计划。',
@@ -824,6 +967,9 @@ export async function createStoryboardPipelineJob(
     knowledgeRefs: chainResolution.overrides.knowledgeRefs,
   })
   const parameters = resolvePipelineParameters(chainResolution.chain, mergedOverrides)
+  // 旁白形态是项目级生产决策：启动时冻结进快照，运行中改项目不影响本次运行
+  const drama = db.select().from(schema.dramas).where(eq(schema.dramas.id, dramaId)).get()
+  parameters.narrationForm = drama?.narrationForm === 'narration' ? 'narration' : 'dialogue'
   const snapshot = await buildRunSnapshot({
     chain: chainResolution.chain,
     parameters,
@@ -911,6 +1057,32 @@ export function pauseStoryboardPipelineJob(jobId: number): PipelineJobView {
     .set({ pauseRequested: 1, updatedAt: now() })
     .where(eq(schema.storyboardPipelineJobs.id, jobId))
     .run()
+  return toView(getJobRow(jobId)!)
+}
+
+export function setStoryboardPipelineAutoSkip(jobId: number, attempts: number): PipelineJobView {
+  const row = getJobRow(jobId)
+  if (!row) throw new Error('分镜管线任务不存在')
+  if (row.status === 'done') throw new Error('任务已完成，不能再调整自动跳过')
+  if (runningJobs.has(jobId)) throw new Error('流水线正在运行，请先暂停后再调整自动跳过')
+  const value = Math.max(0, Math.min(10, Math.round(Number(attempts) || 0)))
+  const nextParameters = { ...runParameters(row), autoSkipAfterAttempts: value }
+  const snapshot = parseJsonObject(row.snapshotJson)
+  if (Object.keys(snapshot).length) {
+    const snapshotParameters = snapshot.parameters && typeof snapshot.parameters === 'object' && !Array.isArray(snapshot.parameters)
+      ? snapshot.parameters as Record<string, unknown>
+      : {}
+    snapshot.parameters = { ...snapshotParameters, autoSkipAfterAttempts: value }
+  }
+  db.update(schema.storyboardPipelineJobs).set({
+    parametersJson: JSON.stringify(nextParameters),
+    ...(Object.keys(snapshot).length ? { snapshotJson: JSON.stringify(snapshot) } : {}),
+    updatedAt: now(),
+  }).where(eq(schema.storyboardPipelineJobs.id, jobId)).run()
+  logTaskProgress('StoryboardPipeline', 'auto-skip-updated', {
+    jobId,
+    attempts: value,
+  })
   return toView(getJobRow(jobId)!)
 }
 
@@ -1061,9 +1233,21 @@ export async function optimizeStoryboardShot(
     throw new Error('流水线正在运行，请稍后再优化')
   }
   if (optimizingEpisodes.has(episode.id)) throw new Error('已有分镜正在优化，请稍后再试')
-  const initialSkeleton = skeletonShots(row.id)
+  const optimizeSkeletons = skeletonShots(row.id)
+  const initialSkeleton = optimizeSkeletons
     .find(item => item.storyboardNumber === storyboard.storyboardNumber)
   if (!initialSkeleton) throw new Error('该分镜没有拆分计划，请先重新拆分分镜')
+  const optimizeStyleText = await projectStyleText(row.dramaId)
+  const previousCharacterIds = optimizeSkeletons
+    .filter(item => item.storyboardNumber < storyboard.storyboardNumber)
+    .flatMap(item => skeletonCharacterIds(item))
+  const initialIntentPlan = ensureSkeletonIntentPlan(
+    initialSkeleton,
+    optimizeStyleText,
+    previousCharacterIds,
+    initialSkeleton.storyboardNumber === optimizeSkeletons[0]?.storyboardNumber,
+    runParameters(row).narrationForm,
+  )
 
   const previousStoryboard = liveStoryboards(episode.id)
     .filter(item => item.storyboardNumber < storyboard.storyboardNumber)
@@ -1094,6 +1278,7 @@ export async function optimizeStoryboardShot(
   const splitPresetKey = params.splitPresetKey && params.splitPresetKey !== 'inherit'
     ? params.splitPresetKey
     : (episode.breakdownMethod || null)
+  const schemeMaxSeconds = getMaxSegmentSeconds(splitPresetKey)
   const previousSound = parseSoundSection(storyboard.videoPrompt)
   const hasPreviousSound = Boolean(previousSound && [
     previousSound.bgm, previousSound.ambience, previousSound.sfx, previousSound.silence,
@@ -1209,6 +1394,8 @@ export async function optimizeStoryboardShot(
       const validation = validateRepairedShot({
         sourceExcerpt: current.sourceExcerpt,
         planSpeechSegments: skeletonSpeechSegments(current),
+        intentPlan: intentPlanFromSkeleton(current) || initialIntentPlan,
+        maxAllowedSeconds: schemeMaxSeconds,
         expectedActionStart: current.actionStart,
         expectedActionEnd: current.actionEnd,
         expectedShotType: current.shotType,
@@ -1450,6 +1637,8 @@ async function runSkeletonStage(
       sceneContracts,
       minDuration: 6,
       maxDuration: maxSegmentSeconds,
+      silentDuration: params.silentShotSeconds,
+      narrationForm: params.narrationForm,
     })
     if (!planned.shots.length) {
       persistState(row.id, state, {
@@ -1524,6 +1713,7 @@ async function runSkeletonStage(
           maxSegmentSeconds,
           previousDrafts,
           plannedShots: planned.shots,
+          narrationForm: params.narrationForm,
           requestContext,
         })
         if (chunkState.saved <= 0) throw new Error('本段没有保存任何分镜骨架（模型可能只回复了文字）')
@@ -1638,10 +1828,10 @@ async function runSkeletonStage(
     return false
   }
   finishStepRun(coverageGateRun, { status: 'passed', output: { coverage } })
-  setCurrentStep(row.id, 'shot-repair')
+  setCurrentStep(row.id, 'shot-intent-plan')
   persistState(row.id, state, {
     status: 'running',
-    stage: 'repair',
+    stage: 'intent',
     totalShots: skeletons.length,
     repairedShots: skeletons.filter(item => ['repaired', 'validated'].includes(item.status)).length,
     validatedShots: skeletons.filter(item => item.status === 'validated').length,
@@ -1651,6 +1841,78 @@ async function runSkeletonStage(
     jobId: row.id,
     shots: skeletons.length,
     coverage: coverage ? { actual: coverage.actual, floor: coverage.floor, ok: coverage.ok } : null,
+  })
+  return true
+}
+
+async function runIntentPlanStage(
+  row: PipelineJobRow,
+  state: PipelineState,
+) {
+  const skeletons = skeletonShots(row.id)
+  if (!skeletons.length) {
+    persistState(row.id, state, { status: 'failed', errorMsg: '意图计划没有可处理的骨架' })
+    return false
+  }
+  setCurrentStep(row.id, 'shot-intent-plan')
+  persistState(row.id, state, { status: 'running', stage: 'intent', errorMsg: null })
+  const styleText = await projectStyleText(row.dramaId)
+  const params = runParameters(row)
+  const seenCharacterIds: number[] = []
+  const openingShotNumber = skeletons[0]?.storyboardNumber
+  for (const skeleton of skeletons) {
+    if (!['validated', 'skipped'].includes(skeleton.status)) {
+      const plan = computeIntentPlan(
+        skeleton,
+        styleText,
+        seenCharacterIds,
+        skeleton.storyboardNumber === openingShotNumber,
+        params.narrationForm,
+      )
+      const runId = startStepRun(runStepInput(row, 'shot-intent-plan', 'shot', `shot-${skeleton.storyboardNumber}`, {
+        intent: plan.intent,
+        narrationMode: plan.narration.mode,
+        actionCategory: plan.action.category,
+      }))
+      try {
+        const issues: string[] = []
+        if (plan.narration.overflow) {
+          issues.push(`第 ${skeleton.storyboardNumber} 镜原文旁白超出 ${plan.narration.budgetChars} 字预算，修补时需按原文标点拆到相邻镜。`)
+        }
+        persistIntentPlan(skeleton, plan)
+        finishStepRun(runId, { status: 'passed', issues, output: { intent: plan.intent, tags: plan.tags } })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        finishStepRun(runId, { status: 'failed', issues: [message] })
+        persistState(row.id, state, { status: 'failed', errorMsg: `意图计划失败：${message}` })
+        return false
+      }
+    }
+    seenCharacterIds.push(...skeletonCharacterIds(skeleton))
+  }
+  const silentEntries = buildSilentRunEntries(skeletons, styleText, params.narrationForm)
+  const silentGateRunId = startStepRun(runStepInput(row, 'shot-intent-plan', 'episode', 'silent-run-gate', {
+    shots: silentEntries.length,
+  }))
+  const silentIssues = validateSilentRuns(silentEntries, params.maxSilentRun, params.silentShotSeconds)
+  if (silentIssues.length) {
+    finishStepRun(silentGateRunId, { status: 'failed', issues: silentIssues })
+    persistState(row.id, state, {
+      status: 'failed',
+      errorMsg: `连续无声门禁未通过：${silentIssues.join('；')}`,
+    })
+    return false
+  }
+  finishStepRun(silentGateRunId, { status: 'passed' })
+  setCurrentStep(row.id, 'shot-repair')
+  persistState(row.id, state, {
+    status: 'running',
+    stage: 'repair',
+    errorMsg: null,
+  })
+  logTaskSuccess('StoryboardPipeline', 'intent-plan-stage-done', {
+    jobId: row.id,
+    shots: skeletons.length,
   })
   return true
 }
@@ -1675,6 +1937,8 @@ async function runRepairStage(
   const splitPresetKey = params.splitPresetKey && params.splitPresetKey !== 'inherit'
     ? params.splitPresetKey
     : (episode.breakdownMethod || null)
+  const schemeMaxSeconds = getMaxSegmentSeconds(splitPresetKey)
+  const styleText = await projectStyleText(row.dramaId)
   if (!state.storyboardsCleared) {
     clearEpisodeStoryboards(row.episodeId)
     state.storyboardsCleared = true
@@ -1683,6 +1947,21 @@ async function runRepairStage(
   }
 
   const skeletons = skeletonShots(row.id)
+  const openingShotNumber = skeletons[0]?.storyboardNumber
+  const gateEntries = buildSilentRunEntries(skeletons, styleText, params.narrationForm)
+  const gateIssues = validateSilentRuns(gateEntries, params.maxSilentRun, params.silentShotSeconds)
+  if (gateIssues.length) {
+    persistState(row.id, state, {
+      status: 'failed',
+      errorMsg: `连续无声门禁未通过，需要重新拆分：${gateIssues.join('；')}`,
+    })
+    logTaskError('StoryboardPipeline', 'silent-run-gate-failed', {
+      jobId: row.id,
+      episodeId: row.episodeId,
+      issues: gateIssues,
+    })
+    return false
+  }
   for (const skeleton of skeletons) {
     if (['validated', 'skipped'].includes(skeleton.status)) continue
     const fresh = getJobRow(row.id)
@@ -1702,6 +1981,16 @@ async function runRepairStage(
     })
     const sceneText = findSceneTextForExcerpt(script, skeleton.sourceExcerpt)
     const novelSceneText = hasSeparateNovel ? findNovelSceneText(novelContent, skeleton.sourceExcerpt) : ''
+    const previousCharacterIds = skeletons
+      .filter(item => item.storyboardNumber < skeleton.storyboardNumber)
+      .flatMap(item => skeletonCharacterIds(item))
+    const skeletonIntentPlan = ensureSkeletonIntentPlan(
+      skeleton,
+      styleText,
+      previousCharacterIds,
+      skeleton.storyboardNumber === openingShotNumber,
+      params.narrationForm,
+    )
     let attempt = skeleton.attempts || 0
     let lastIssues: string[] = []
     let passed = false
@@ -1718,6 +2007,8 @@ async function runRepairStage(
         const validation = validateRepairedShot({
           sourceExcerpt: skeleton.sourceExcerpt,
           planSpeechSegments: skeletonSpeechSegments(skeleton),
+          intentPlan: skeletonIntentPlan,
+          maxAllowedSeconds: schemeMaxSeconds,
           expectedActionStart: skeleton.actionStart,
           expectedActionEnd: skeleton.actionEnd,
           expectedShotType: skeleton.shotType,
@@ -1766,6 +2057,7 @@ async function runRepairStage(
       const current = db.select().from(schema.storyboardSkeletons)
         .where(eq(schema.storyboardSkeletons.id, skeleton.id))
         .get()!
+      const currentIntentPlan = intentPlanFromSkeleton(current) || skeletonIntentPlan
       const previousShots = liveStoryboards(row.episodeId)
         .filter(item => item.storyboardNumber < skeleton.storyboardNumber)
         .slice(-2)
@@ -1868,6 +2160,8 @@ async function runRepairStage(
         const validation = validateRepairedShot({
           sourceExcerpt: skeleton.sourceExcerpt,
           planSpeechSegments: skeletonSpeechSegments(skeleton),
+          intentPlan: currentIntentPlan,
+          maxAllowedSeconds: schemeMaxSeconds,
           expectedActionStart: skeleton.actionStart,
           expectedActionEnd: skeleton.actionEnd,
           expectedShotType: skeleton.shotType,
@@ -2053,6 +2347,7 @@ async function runSoundStage(
   const splitPresetKey = params.splitPresetKey && params.splitPresetKey !== 'inherit'
     ? params.splitPresetKey
     : (episode?.breakdownMethod || null)
+  const intentByShot = new Map(skeletonShots(row.id).map(item => [item.storyboardNumber, item.intentType]))
   const shotsPayload = shots.map(shot => ({
     shot_number: shot.storyboardNumber,
     storyboard_id: shot.id,
@@ -2063,6 +2358,7 @@ async function runSoundStage(
     transition: shot.transition || 'cut',
     description: shot.description || '',
     has_dialogue: Boolean(String(shot.description || '').match(/「[^」]+」/)),
+    intent_type: intentByShot.get(shot.storyboardNumber) || '',
     sound_effect: shot.soundEffect || '',
   }))
   const knowledgeIds = stepKnowledgeIds(row, 'sound-design')
@@ -2193,6 +2489,14 @@ export async function runStoryboardPipelineJob(
     if (stage === 'skeleton') {
       setCurrentStep(jobId, 'skeleton-split')
       const ok = await runSkeletonStage(row, state, resolved as any)
+      if (!ok) return
+      stage = 'intent'
+      const next = getJobRow(jobId)
+      if (!next) return
+      row = next
+    }
+    if (stage === 'intent') {
+      const ok = await runIntentPlanStage(row, state)
       if (!ok) return
       stage = 'repair'
       const next = getJobRow(jobId)

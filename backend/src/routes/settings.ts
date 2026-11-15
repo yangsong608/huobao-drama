@@ -16,14 +16,56 @@ import {
   setMediaSettings,
   getStoryboardAuditPolicy,
   setStoryboardAuditPolicy,
+  getDshBridgeEnabled,
+  setDshBridgeEnabled,
   CONTENT_LANGUAGES,
   type ContentLanguage,
 } from '../services/app-settings.js'
 import { getFfmpegStatus } from '../utils/ffmpeg.js'
 import { MediaPathValidationError } from '../utils/media-paths.js'
+import { readDshBridgeDescriptor } from '../services/dsh-bridge.js'
 import { success, badRequest } from '../utils/response.js'
 
 const app = new Hono()
+
+// GET /dsh-bridge — DSH 文本桥状态（不回传桥接令牌）
+app.get('/dsh-bridge', async (c) => {
+  const descriptor = readDshBridgeDescriptor()
+  let health: unknown = null
+  let error: string | null = null
+  if (descriptor) {
+    try {
+      const response = await fetch(`${descriptor.bridgeBaseUrl}/health`, {
+        headers: { authorization: `Bearer ${descriptor.token}` },
+        signal: AbortSignal.timeout(2_000),
+      })
+      if (response.ok) health = await response.json()
+      else error = `HTTP ${response.status}`
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause)
+    }
+  }
+  return success(c, {
+    enabled: getDshBridgeEnabled(),
+    envEnabled: process.env.DSH_BRIDGE_ENABLE === '1'
+      || (typeof process.env.DSH_BRIDGE_URL === 'string' && process.env.DSH_BRIDGE_URL.trim() !== ''),
+    descriptorPresent: descriptor !== null,
+    bridgeBaseUrl: descriptor?.bridgeBaseUrl,
+    pluginVersion: descriptor?.pluginVersion,
+    dshVersion: descriptor?.dshVersion,
+    health,
+    error,
+  })
+})
+
+// PUT /dsh-bridge — 文本 AI 是否交给 DSH 桥（body: { enabled: boolean }）
+app.put('/dsh-bridge', async (c) => {
+  const body = await c.req.json().catch(() => null)
+  if (!body || typeof body !== 'object' || typeof body.enabled !== 'boolean') {
+    return badRequest(c, 'enabled 必须是布尔值')
+  }
+  return success(c, { enabled: setDshBridgeEnabled(body.enabled) })
+})
 
 // GET /content-language — 当前 AI 内容语言
 app.get('/content-language', async (c) => {

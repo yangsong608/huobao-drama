@@ -18,6 +18,7 @@ sys.path.insert(0, HERE)
 import h3_gateway as gw  # noqa: E402
 from admin import db as admin_db  # noqa: E402
 from test_gateway import (  # noqa: E402
+    MP4_HEADER,
     PNG_1X1,
     TOKEN,
     FakeComfy,
@@ -60,6 +61,33 @@ AUDIO_INPUT_MAP = {
     },
     "seed": {"node": "6", "input": "seed", "type": "integer"},
 }
+
+
+VIDEO_WORKFLOW = {
+    "1": {"class_type": "VHS_LoadVideo", "inputs": {"video": ""}},
+    "8": {"class_type": "SaveVideo", "inputs": {"filename_prefix": "swap/test"}},
+}
+
+VIDEO_INPUT_MAP = {
+    "source_video": {"node": "1", "input": "video", "type": "video"},
+}
+
+
+def seed_video_workflow(db_path, slug="h3-face-swap-test", active=True):
+    return admin_db.upsert_workflow(db_path, {
+        "slug": slug,
+        "name": "H3 单脸测试",
+        "kind": "video",
+        "description": "视频输入映射测试",
+        "workflow": VIDEO_WORKFLOW,
+        "input_map": VIDEO_INPUT_MAP,
+        "output_node": "8",
+        "output_key": "",
+        "output_exts": ["mp4"],
+        "example": {"source_video": "h3v_example.mp4"},
+        "source": "manual",
+        "is_active": active,
+    })
 
 
 def seed_audio_workflow(db_path, slug="stable-audio", active=True):
@@ -212,6 +240,29 @@ class TestGatewayNamedWorkflows(AdminCase):
         status, _, body = self.h.request("GET", url)
         self.assertEqual(status, 200)
         self.assertTrue(body.startswith(b"FAKE-WAV-"))
+
+    def test_video_job_accepts_uploaded_video_and_returns_signed_file(self):
+        seed_video_workflow(self.db_path)
+        upload_body, upload_type = multipart_body(
+            {}, [("video", ("clip.mp4", "video/mp4", MP4_HEADER))],
+        )
+        status, _, uploaded = self.h.json(
+            "POST", "/v1/uploads", body=upload_body, ctype=upload_type, headers=self.h.auth,
+        )
+        self.assertEqual(status, 200, uploaded)
+        self.assertEqual(uploaded["kind"], "video")
+        status, _, created = self.h.json("POST", "/v1/jobs", {
+            "workflow": "h3-face-swap-test",
+            "inputs": {"source_video": uploaded["name"]},
+        }, headers=self.h.auth)
+        self.assertEqual(status, 200, created)
+        payload = self.wait_job(created["job_id"])
+        self.assertEqual(payload["status"], "succeeded", payload)
+        self.assertEqual(payload["kind"], "video")
+        self.assertEqual(self.fake.graphs[-1]["1"]["inputs"]["video"], uploaded["name"])
+        status, _, body = self.h.request("GET", payload["file_url"])
+        self.assertEqual(status, 200)
+        self.assertTrue(body.startswith(b"FAKE-MP4-"))
 
     def test_unknown_and_inactive_workflow_rejected(self):
         status, _, payload = self.h.json("POST", "/v1/jobs", {

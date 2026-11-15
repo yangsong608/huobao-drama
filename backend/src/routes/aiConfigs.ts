@@ -7,6 +7,11 @@ import { joinProviderUrl } from '../services/adapters/url.js'
 import { isOfficialProvider, parseConfigSettings, parseConfigTemperature } from '../services/ai.js'
 import { buildCloudSpeechRequest, type CloudTtsSettings } from '../services/adapters/cloud-tts.js'
 import { redactUrl, logTaskError, logTaskProgress, logTaskSuccess } from '../utils/task-logger.js'
+import {
+  CHARACTER_RELAY_WARMUP_SECONDS_MAX,
+  CHARACTER_SHORT_MAX_SECONDS_MAX,
+  CHARACTER_SHORT_MAX_SECONDS_MIN,
+} from '../services/video-swap-workflow.js'
 
 const app = new Hono()
 
@@ -55,6 +60,68 @@ function readWorkflowSlugSetting(settings: Record<string, any>): string | null {
 /** 各 provider 的最低配置要求（在保存时拦截，避免生成时才报错） */
 function validateProviderSettings(serviceType: string, provider: string, settings: Record<string, any>) {
   if (provider !== 'comfyui') return
+  if (serviceType === 'video-swap') {
+    if (settings.workflow) throw new Error('视频换人只登记网关工作流名称，不接受工作流 JSON')
+    if (settings.face_engine !== undefined && settings.face_engine !== null && settings.face_engine !== ''
+      && settings.face_engine !== 'h3' && settings.face_engine !== 'facefusion') {
+      throw new Error('face_engine 必须是 h3 或 facefusion')
+    }
+    for (const key of ['facefusion_dir', 'facefusion_python', 'facefusion_model', 'facefusion_execution_providers', 'facefusion_pixel_boost']) {
+      if (settings[key] === undefined || settings[key] === null || settings[key] === '') continue
+      if (typeof settings[key] !== 'string' || !settings[key].trim()) throw new Error(`${key} 必须是非空字符串`)
+      settings[key] = settings[key].trim()
+    }
+    if (settings.facefusion_timeout_seconds !== undefined
+      && settings.facefusion_timeout_seconds !== null
+      && settings.facefusion_timeout_seconds !== '') {
+      const value = Number(settings.facefusion_timeout_seconds)
+      if (!Number.isFinite(value) || value < 60 || value > 7200) throw new Error('facefusion_timeout_seconds 必须在 60–7200 秒')
+      settings.facefusion_timeout_seconds = value
+    }
+    for (const key of ['face_workflow_slug', 'character_workflow_slug', 'character_short_workflow_slug']) {
+      const raw = settings[key]
+      if (raw === undefined || raw === null || raw === '') continue
+      if (typeof raw !== 'string' || !WORKFLOW_SLUG_PATTERN.test(raw.trim())) {
+        throw new Error(`${key} 格式无效：只能包含小写字母、数字、连字符与下划线，且以字母或数字开头`)
+      }
+      settings[key] = raw.trim()
+    }
+    const prefix = settings.scene_ref_workflow_prefix
+    if (prefix !== undefined && prefix !== null && prefix !== '') {
+      if (typeof prefix !== 'string' || !WORKFLOW_SLUG_PATTERN.test(prefix.trim())) {
+        throw new Error('scene_ref_workflow_prefix 格式无效')
+      }
+      settings.scene_ref_workflow_prefix = prefix.trim()
+    }
+    if (settings.character_short_max_seconds !== undefined
+      && settings.character_short_max_seconds !== null
+      && settings.character_short_max_seconds !== '') {
+      const value = Number(settings.character_short_max_seconds)
+      if (!Number.isInteger(value)
+        || value < CHARACTER_SHORT_MAX_SECONDS_MIN
+        || value > CHARACTER_SHORT_MAX_SECONDS_MAX) {
+        throw new Error(`character_short_max_seconds 必须是 ${CHARACTER_SHORT_MAX_SECONDS_MIN}–${CHARACTER_SHORT_MAX_SECONDS_MAX} 的整数`)
+      }
+      settings.character_short_max_seconds = value
+    }
+    if (settings.character_relay_warmup_seconds !== undefined
+      && settings.character_relay_warmup_seconds !== null
+      && settings.character_relay_warmup_seconds !== '') {
+      const value = Number(settings.character_relay_warmup_seconds)
+      if (!Number.isFinite(value) || value < 0 || value > CHARACTER_RELAY_WARMUP_SECONDS_MAX) {
+        throw new Error(`character_relay_warmup_seconds 必须是 0–${CHARACTER_RELAY_WARMUP_SECONDS_MAX} 秒`)
+      }
+      settings.character_relay_warmup_seconds = value
+    }
+    for (const key of ['analysis_config_id', 'scene_ref_candidates']) {
+      if (settings[key] === undefined || settings[key] === null || settings[key] === '') continue
+      const value = Number(settings[key])
+      if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${key} 必须是非负整数`)
+      if (key === 'scene_ref_candidates' && (value < 1 || value > 4)) throw new Error('scene_ref_candidates 必须在 1–4 之间')
+      settings[key] = value
+    }
+    return
+  }
   if (serviceType !== 'image' && serviceType !== 'video' && serviceType !== 'audio-gen') return
   // 网关模式：工作流保存在网关管理端，这里只登记名称
   if (settings.workflow_slug !== undefined && settings.workflow_slug !== null && settings.workflow_slug !== '') {
@@ -272,7 +339,7 @@ function buildProbe(
 
   if (p === 'comfyui') {
     // 网关模式：/v1/workflows 同时验证地址、Token 与工作流注册表
-    if (readWorkflowSlugSetting(settings)) {
+    if (serviceType === 'video-swap' || readWorkflowSlugSetting(settings)) {
       return {
         method: 'GET',
         url: joinProviderUrl(baseUrl, '', '/v1/workflows'),

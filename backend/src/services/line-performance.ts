@@ -175,6 +175,7 @@ export async function analyzeLinePerformance(
   try {
     const call = options.deps?.callTextJson ?? callTextJson
     const { data } = await call({
+      role: 'storyboard_auditor',
       system: DEEP_SYSTEM,
       prompt: deepPrompt(context),
       responseFormat: 'json',

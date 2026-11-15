@@ -26,6 +26,8 @@ export const dramas = sqliteTable('dramas', {
   storageDir: text('storage_dir'),
   /** 旁白音色（character_voices.id，V2） */
   narratorVoiceId: integer('narrator_voice_id'),
+  /** 旁白形态：dialogue=对白驱动短剧；narration=旁白驱动小说改编 */
+  narrationForm: text('narration_form').default('dialogue'),
   /** 项目默认 BGM（V2） */
   bgmUrl: text('bgm_url'),
   /** 来源小说（V3） */
@@ -241,6 +243,8 @@ export const storyboards = sqliteTable('storyboards', {
   cameraSide: text('camera_side'),
   sceneGeographyId: integer('scene_geography_id'),
   negativeConstraints: text('negative_constraints'),
+  /** 卡片标签 JSON 数组；与自动标签合并展示 */
+  tags: text('tags'),
   /** JSON：[{ name, side }]；画面调度里可读的背景地标与屏幕侧 */
   backgroundLandmarks: text('background_landmarks'),
   /** JSON：[{ start, end, text }]；与 video_prompt 时间帧同源 */
@@ -594,6 +598,8 @@ export const storyboardSkeletons = sqliteTable('storyboard_skeletons', {
   actionArcJson: text('action_arc_json'),
   /** JSON：{ speaker, basis }；原文发声动作推导台词要求 */
   speechRequirementJson: text('speech_requirement_json'),
+  /** JSON：{ compressed, sourceBeatCount }；连续无台词节拍压缩标记 */
+  narrativeRunJson: text('narrative_run_json'),
   /** JSON：[{ speaker, text, sourceQuote, order }] */
   speechSegmentsJson: text('speech_segments_json'),
   /** speech / action / reaction / scene / time */
@@ -606,6 +612,12 @@ export const storyboardSkeletons = sqliteTable('storyboard_skeletons', {
   screenRight: text('screen_right'),
   axisSide: text('axis_side'),
   landmarkSide: text('landmark_side'),
+  /** 镜头意图：dialogue / exposition / character_intro / combat / competition / action / transition / empty */
+  intentType: text('intent_type'),
+  /** JSON：NarrationPlan；战斗/比拼/动作镜默认 none */
+  narrationJson: text('narration_json'),
+  /** JSON：ActionPlan；动作编排、特效、机位、声音与题材风格 */
+  actionPlanJson: text('action_plan_json'),
   planVersion: integer('plan_version').notNull().default(1),
   /** 预拆动作摘要：只写谁做什么，不写最终台词/完整提示词 */
   actionSummary: text('action_summary').notNull(),
@@ -1595,4 +1607,122 @@ export const pipelineJobs = sqliteTable('pipeline_jobs', {
   createdAt: text('created_at').notNull(),
   startedAt: text('started_at'),
   finishedAt: text('finished_at'),
+})
+
+/** 视频换人项目：独立于短剧/小说项目，媒体在 static/video-projects/<id> */
+export const videoProjects = sqliteTable('video_projects', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  title: text('title').notNull(),
+  /** face | character */
+  mode: text('mode').notNull().default('face'),
+  /** draft | analyzing | ready | generating | completed | failed */
+  status: text('status').notNull().default('draft'),
+  sourceVideoPath: text('source_video_path'),
+  sourceVideoMeta: text('source_video_meta'), // JSON
+  referenceFacePaths: text('reference_face_paths').notNull().default('[]'), // JSON
+  prompt: text('prompt').notNull().default(''),
+  configId: integer('config_id'),
+  latestRunId: integer('latest_run_id'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  deletedAt: text('deleted_at'),
+})
+
+/** 一次换人运行：镜头/片段/接缝/合并的父记录 */
+export const videoSwapRuns = sqliteTable('video_swap_runs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  projectId: integer('project_id').notNull().references(() => videoProjects.id, { onDelete: 'cascade' }),
+  mode: text('mode').notNull(),
+  configId: integer('config_id'),
+  status: text('status').notNull().default('uploaded'),
+  stage: text('stage').notNull().default('uploaded'),
+  progress: integer('progress').notNull().default(0),
+  analysisJson: text('analysis_json'),
+  finalPromptJson: text('final_prompt_json'),
+  sceneReferencePath: text('scene_reference_path'),
+  maxGenerationSeconds: real('max_generation_seconds').default(8),
+  chunkOverlapMs: integer('chunk_overlap_ms').default(1000),
+  minChunkSeconds: real('min_chunk_seconds').default(5),
+  maxChunks: integer('max_chunks').default(50),
+  audioMasterPath: text('audio_master_path'),
+  proxyPath: text('proxy_path'),
+  totalChunks: integer('total_chunks').notNull().default(0),
+  completedChunks: integer('completed_chunks').notNull().default(0),
+  mergePath: text('merge_path'),
+  outputMeta: text('output_meta'), // JSON
+  paramsJson: text('params_json'), // JSON：冻结的工作流/seed/阈值
+  edlJson: text('edl_json'), // JSON：最终剪辑决策表
+  gatewayJobId: text('gateway_job_id'),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  startedAt: text('started_at'),
+  finishedAt: text('finished_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** 镜头：0-based shot_index；一个镜头可拆多个片段 */
+export const videoSwapShots = sqliteTable('video_swap_shots', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  runId: integer('run_id').notNull().references(() => videoSwapRuns.id, { onDelete: 'cascade' }),
+  shotIndex: integer('shot_index').notNull(),
+  startMs: integer('start_ms').notNull(),
+  endMs: integer('end_ms').notNull(),
+  durationMs: integer('duration_ms').notNull(),
+  chunkCount: integer('chunk_count').notNull().default(1),
+  sourcePath: text('source_path'),
+  sceneReferencePath: text('scene_reference_path'),
+  sceneReferenceCandidates: text('scene_reference_candidates'), // JSON
+  finalPromptJson: text('final_prompt_json'),
+  status: text('status').notNull().default('pending'),
+  outputPath: text('output_path'),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** 片段：0-based chunk_index；重叠与接缝指标用于连续性 */
+export const videoSwapChunks = sqliteTable('video_swap_chunks', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  runId: integer('run_id').notNull().references(() => videoSwapRuns.id, { onDelete: 'cascade' }),
+  shotId: integer('shot_id').notNull().references(() => videoSwapShots.id, { onDelete: 'cascade' }),
+  chunkIndex: integer('chunk_index').notNull(),
+  sourceStartMs: integer('source_start_ms').notNull(),
+  sourceEndMs: integer('source_end_ms').notNull(),
+  overlapBeforeMs: integer('overlap_before_ms').notNull().default(0),
+  overlapAfterMs: integer('overlap_after_ms').notNull().default(0),
+  warmupFrames: integer('warmup_frames').notNull().default(0),
+  targetFrames: integer('target_frames'),
+  cutPointConfidence: real('cut_point_confidence'),
+  sourcePath: text('source_path'),
+  outputPath: text('output_path'),
+  trimmedPath: text('trimmed_path'),
+  trimStartMs: integer('trim_start_ms'),
+  trimEndMs: integer('trim_end_ms'),
+  status: text('status').notNull().default('queued'),
+  gatewayJobId: text('gateway_job_id'),
+  seamSsim: real('seam_ssim'),
+  seamColorDelta: real('seam_color_delta'),
+  seamFaceSimilarity: real('seam_face_similarity'),
+  seamVerdict: text('seam_verdict'),
+  seamJson: text('seam_json'), // JSON：prev/next、阈值、裁切与淡化记录
+  retryCount: integer('retry_count').notNull().default(0),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/** 运行日志：run 级必填，shot/chunk 可选 */
+export const videoSwapRunLogs = sqliteTable('video_swap_run_logs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  runId: integer('run_id').notNull().references(() => videoSwapRuns.id, { onDelete: 'cascade' }),
+  shotId: integer('shot_id'),
+  chunkId: integer('chunk_id'),
+  level: text('level').notNull().default('info'),
+  stage: text('stage').notNull(),
+  message: text('message').notNull(),
+  detailJson: text('detail_json'),
+  createdAt: text('created_at').notNull(),
 })

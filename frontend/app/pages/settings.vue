@@ -1213,6 +1213,35 @@
           <section class="card svc-group">
             <div class="svc-group-head">
               <div class="svc-group-heading">
+                <span class="svc-group-title">{{ t('settings.dsh.title') }}</span>
+                <div class="svc-group-sub">
+                  {{ dshBridgeStatus.enabled ? t('settings.dsh.enabled') : t('settings.dsh.disabled') }}
+                </div>
+              </div>
+              <label class="config-switch ml-auto">
+                <input type="checkbox" class="sr-only" :checked="dshBridgeStatus.enabled" :disabled="dshBridgeBusy" @change="toggleDshBridge">
+                <span class="switch" :class="{ on: dshBridgeStatus.enabled }"></span>
+              </label>
+            </div>
+            <p class="config-empty">{{ t('settings.dsh.desc') }}</p>
+            <div class="config-row">
+              <div class="provider-badge" style="background:var(--accent-bg);color:var(--accent)"><Plug :size="15" /></div>
+              <div class="config-main">
+                <div class="config-line">
+                  <span class="config-name">{{ t('settings.dsh.endpoint') }}</span>
+                  <span class="tag mono">{{ dshBridgeStatus.descriptorPresent ? t('settings.dsh.connected') : t('settings.dsh.notFound') }}</span>
+                </div>
+                <div class="config-sub mono truncate">{{ dshBridgeStatus.bridgeBaseUrl || t('settings.dsh.noEndpoint') }}</div>
+                <div class="config-sub">{{ t('settings.dsh.version', { plugin: dshBridgeStatus.pluginVersion || '-', dsh: dshBridgeStatus.dshVersion || '-' }) }}</div>
+              </div>
+            </div>
+            <p v-if="dshBridgeStatus.error" class="config-empty mcp-error">{{ t('settings.dsh.error', { msg: dshBridgeStatus.error }) }}</p>
+            <p v-else class="config-empty">{{ t('settings.dsh.hint') }}</p>
+          </section>
+
+          <section class="card svc-group">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
                 <span class="svc-group-title">{{ t('settings.mcp.clientConfig') }}</span>
                 <div class="svc-group-sub">{{ t('settings.mcp.clientConfigSub', { n: mcpStatus.tool_count || 0 }) }}</div>
               </div>
@@ -1697,6 +1726,175 @@
               <span class="field-hint">{{ t('settings.cfg.audioTimeoutHint') }}</span>
             </section>
           </template>
+          <template v-else-if="cfgForm.provider === 'comfyui' && cfgForm.service_type === 'video-swap'">
+            <section class="cfg-settings">
+              <div class="cfg-settings-head">{{ t('settings.cfg.videoSwap.title') }}</div>
+              <p class="field-hint">{{ t('settings.cfg.videoSwap.hint') }}</p>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.faceEngine') }}</span>
+                  <BaseSelect
+                    v-model="cfgForm.provider_settings.face_engine"
+                    :options="faceEngineOptions"
+                  />
+                  <span v-if="cfgForm.provider_settings.face_engine === 'facefusion'" class="field-hint">
+                    {{ t('settings.cfg.videoSwap.facefusionHint') }}
+                  </span>
+                  <span v-else class="field-hint">
+                    {{ t('settings.cfg.videoSwap.faceEngineH3Hint') }}
+                  </span>
+                </label>
+                <label v-if="cfgForm.provider_settings.face_engine !== 'facefusion'" class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.faceWorkflow') }}</span>
+                  <input v-model="cfgForm.provider_settings.face_workflow_slug" class="input mono" placeholder="h3-face-swap" />
+                </label>
+                <label v-else class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.facefusionDir') }}</span>
+                  <input v-model="cfgForm.provider_settings.facefusion_dir" class="input mono" placeholder="data/tools/facefusion" />
+                </label>
+              </div>
+              <div v-if="cfgForm.provider_settings.face_engine === 'facefusion'" class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.facefusionPython') }}</span>
+                  <input v-model="cfgForm.provider_settings.facefusion_python" class="input mono" placeholder="data/tools/facefusion/.venv/bin/python" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.facefusionModel') }}</span>
+                  <input v-model="cfgForm.provider_settings.facefusion_model" class="input mono" placeholder="hyperswap_1a_256" />
+                </label>
+              </div>
+              <div v-if="cfgForm.provider_settings.face_engine === 'facefusion'" class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.facefusionProvider') }}</span>
+                  <input v-model="cfgForm.provider_settings.facefusion_execution_providers" class="input mono" placeholder="cpu" />
+                  <span class="field-hint">{{ t('settings.cfg.videoSwap.facefusionHint') }}</span>
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.facefusionTimeout') }}</span>
+                  <input v-model="cfgForm.provider_settings.facefusion_timeout_seconds" class="input" type="number" min="60" max="7200" step="60" />
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.characterWorkflow') }}</span>
+                  <input v-model="cfgForm.provider_settings.character_workflow_slug" class="input mono" placeholder="h3-recast-relay" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.shortWorkflow') }}</span>
+                  <input v-model="cfgForm.provider_settings.character_short_workflow_slug" class="input mono" placeholder="h3-recast" />
+                  <span class="field-hint">{{ t('settings.cfg.videoSwap.shortWorkflowHint') }}</span>
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.shortMax') }}</span>
+                  <input v-model="cfgForm.provider_settings.character_short_max_seconds" class="input" type="number" min="2" max="10" step="1" />
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.relayWarmup') }}</span>
+                  <input v-model="cfgForm.provider_settings.character_relay_warmup_seconds" class="input" type="number" min="0" max="10" step="0.01" />
+                  <span class="field-hint">{{ t('settings.cfg.videoSwap.relayWarmupHint') }}</span>
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.analysisConfig') }}</span>
+                  <BaseSelect
+                    v-model="cfgForm.provider_settings.analysis_config_id"
+                    :options="textConfigOptions"
+                    :placeholder="t('settings.cfg.videoSwap.analysisConfigPlaceholder')"
+                  />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.sceneBaseUrl') }}</span>
+                  <input v-model="cfgForm.provider_settings.scene_ref_base_url" class="input mono" placeholder="http://127.0.0.1:8192" />
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.sceneApiKey') }}</span>
+                  <input v-model="cfgForm.provider_settings.scene_ref_api_key" class="input mono" type="password" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.scenePrefix') }}</span>
+                  <input v-model="cfgForm.provider_settings.scene_ref_workflow_prefix" class="input mono" placeholder="qwen-image-edit" />
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.candidates') }}</span>
+                  <input v-model="cfgForm.provider_settings.scene_ref_candidates" class="input" type="number" min="1" max="4" step="1" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.timeout') }}</span>
+                  <input v-model="cfgForm.provider_settings.timeout_seconds" class="input" type="number" min="60" step="60" />
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.faceMax') }}</span>
+                  <input v-model="cfgForm.provider_settings.face_max_generation_seconds" class="input" type="number" min="2" max="60" step="1" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.characterMax') }}</span>
+                  <input v-model="cfgForm.provider_settings.character_max_generation_seconds" class="input" type="number" min="2" max="60" step="1" />
+                  <span class="field-hint">{{ t('settings.cfg.videoSwap.relayHint') }}</span>
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.overlap') }}</span>
+                  <input v-model="cfgForm.provider_settings.chunk_overlap_seconds" class="input" type="number" min="0" max="5" step="0.5" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.minChunk') }}</span>
+                  <input v-model="cfgForm.provider_settings.min_chunk_seconds" class="input" type="number" min="1" max="60" step="1" />
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.maxChunks') }}</span>
+                  <input v-model="cfgForm.provider_settings.max_chunks" class="input" type="number" min="1" max="200" step="1" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.defaultSteps') }}</span>
+                  <input v-model="cfgForm.provider_settings.default_steps" class="input" type="number" min="1" max="80" step="1" />
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.pollInterval') }}</span>
+                  <input v-model="cfgForm.provider_settings.poll_interval_ms" class="input" type="number" min="250" step="250" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.maxRetries') }}</span>
+                  <input v-model="cfgForm.provider_settings.max_auto_retries" class="input" type="number" min="0" max="2" step="1" />
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.crossfade') }}</span>
+                  <input v-model="cfgForm.provider_settings.crossfade_frames" class="input" type="number" min="0" max="4" step="1" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.ssim') }}</span>
+                  <input v-model="cfgForm.provider_settings.seam_ssim_threshold" class="input" type="number" min="0" max="1" step="0.01" />
+                </label>
+              </div>
+              <div class="cfg-setting-grid">
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.colorDelta') }}</span>
+                  <input v-model="cfgForm.provider_settings.seam_color_delta_threshold" class="input" type="number" min="0" max="255" step="1" />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t('settings.cfg.videoSwap.faceSimilarity') }}</span>
+                  <input v-model="cfgForm.provider_settings.seam_face_similarity_threshold" class="input" type="number" min="0" max="1" step="0.01" />
+                </label>
+              </div>
+            </section>
+          </template>
           <template v-else-if="cfgForm.provider === 'comfyui' && (cfgForm.service_type === 'image' || cfgForm.service_type === 'video')">
             <section class="cfg-settings">
               <div class="cfg-settings-head">{{ t('settings.cfg.providerSettings') }}</div>
@@ -2176,7 +2374,7 @@ import RemoteDeviceList from '~/components/RemoteDeviceList.vue'
 import { toast } from 'vue-sonner'
 import { toastError } from '~/composables/useToast'
 import { useI18n } from 'vue-i18n'
-import { aiConfigAPI, promptAPI, skillsAPI, knowledgeAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, uploadAPI, pipelineRuleAPI, breakdownMethodAPI, dubbingAPI, bgmAPI } from '~/composables/useApi'
+import { aiConfigAPI, promptAPI, skillsAPI, knowledgeAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, dshBridgeAPI, uploadAPI, pipelineRuleAPI, breakdownMethodAPI, dubbingAPI, bgmAPI } from '~/composables/useApi'
 import { useRemoteRole, remoteErrorMessage } from '~/composables/useRemoteGuest'
 import { useRemotePairing } from '~/composables/useRemotePairing'
 import { presenceState, refreshPresenceEntries, safePresenceRelayPath } from '~/composables/usePresence'
@@ -2469,6 +2667,47 @@ async function copyText(text, messageKey) {
   }
 }
 
+// ===== DSH 文本桥 =====
+const dshBridgeStatus = ref({
+  enabled: false,
+  envEnabled: false,
+  descriptorPresent: false,
+  bridgeBaseUrl: '',
+  pluginVersion: '',
+  dshVersion: '',
+  health: null,
+  error: null,
+})
+const dshBridgeBusy = ref(false)
+
+async function loadDshBridge() {
+  try {
+    const status = await dshBridgeAPI.status()
+    if (status) dshBridgeStatus.value = { ...dshBridgeStatus.value, ...status }
+  } catch (e) {
+    toastError(e)
+  }
+}
+
+async function applyDshBridge(enabled) {
+  dshBridgeBusy.value = true
+  try {
+    const saved = await dshBridgeAPI.update(enabled)
+    dshBridgeStatus.value = { ...dshBridgeStatus.value, enabled: Boolean(saved?.enabled) }
+    toast.success(t('settings.dsh.saved'))
+    await loadDshBridge()
+  } catch (e) {
+    toastError(e, { fallback: 'settings.dsh.saveFailed' })
+    await loadDshBridge()
+  } finally {
+    dshBridgeBusy.value = false
+  }
+}
+
+function toggleDshBridge(event) {
+  applyDshBridge(Boolean(event?.target?.checked))
+}
+
 function copyMcpToken() {
   if (!mcpStatus.value.token) return
   copyText(mcpStatus.value.token, 'settings.mcp.copied')
@@ -2532,7 +2771,11 @@ async function loadGatewayWorkflows(options = {}) {
   gwLoading.value = true
   gwError.value = ''
   try {
-    const kind = cfgForm.service_type === 'audio-gen' ? 'audio' : cfgForm.service_type
+    const kind = cfgForm.service_type === 'audio-gen'
+      ? 'audio'
+      : cfgForm.service_type === 'video-swap'
+        ? 'video'
+        : cfgForm.service_type
     const result = await aiConfigAPI.comfyWorkflows({ base_url: baseUrl, api_key: cfgForm.api_key, kind })
     const workflows = Array.isArray(result) ? result : (Array.isArray(result?.workflows) ? result.workflows : [])
     gwWorkflows.value = workflows
@@ -2552,6 +2795,20 @@ async function loadGatewayWorkflows(options = {}) {
   }
 }
 /** 表单可编辑的 provider 专属字段；保存时只覆盖这些键，保留后端写入的其它字段 */
+const CFG_VIDEO_SWAP_NUMBERS = new Set([
+  'analysis_config_id', 'scene_ref_candidates', 'timeout_seconds', 'poll_interval_ms', 'max_auto_retries',
+  'crossfade_frames', 'face_max_generation_seconds', 'character_max_generation_seconds', 'character_short_max_seconds', 'character_relay_warmup_seconds',
+  'chunk_overlap_seconds', 'min_chunk_seconds', 'max_chunks', 'default_steps',
+  'seam_ssim_threshold', 'seam_color_delta_threshold', 'seam_face_similarity_threshold',
+  'facefusion_timeout_seconds',
+])
+const faceEngineOptions = computed(() => [
+  { label: t('settings.cfg.videoSwap.faceEngineH3'), value: 'h3' },
+  { label: t('settings.cfg.videoSwap.faceEngineFacefusion'), value: 'facefusion' },
+])
+const textConfigOptions = computed(() => cfgs.value
+  .filter(c => c.service_type === 'text')
+  .map(c => ({ label: `${c.name || c.provider} (#${c.id})`, value: c.id })))
 const CFG_SETTING_KEYS = computed(() => {
   const type = cfgForm.service_type
   const provider = cfgForm.provider
@@ -2565,6 +2822,18 @@ const CFG_SETTING_KEYS = computed(() => {
       return ['workflow_slug', 'negative_prompt', 'seed', 'timeout_ms', 'normalize_loudness', 'model_license']
     }
     return ['workflow', 'output_node', 'output_key', 'negative_prompt', 'seed', 'timeout_ms', 'normalize_loudness', 'model_license']
+  }
+  if (type === 'video-swap') {
+    return [
+      'face_engine', 'face_workflow_slug', 'facefusion_dir', 'facefusion_python', 'facefusion_model',
+      'facefusion_execution_providers', 'facefusion_pixel_boost', 'facefusion_timeout_seconds',
+      'character_workflow_slug', 'character_short_workflow_slug', 'character_relay_warmup_seconds', 'analysis_config_id',
+      'scene_ref_base_url', 'scene_ref_api_key', 'scene_ref_workflow_prefix', 'scene_ref_candidates',
+      'timeout_seconds', 'poll_interval_ms', 'max_auto_retries', 'crossfade_frames',
+      'face_max_generation_seconds', 'character_max_generation_seconds', 'character_short_max_seconds', 'character_relay_warmup_seconds',
+      'chunk_overlap_seconds', 'min_chunk_seconds', 'max_chunks', 'default_steps',
+      'seam_ssim_threshold', 'seam_color_delta_threshold', 'seam_face_similarity_threshold',
+    ]
   }
   if (provider === 'comfyui') {
     if (cfgComfyMode.value === 'gateway') {
@@ -2609,6 +2878,7 @@ const serviceTypes = computed(() => [
   { type: 'video', label: t('common.serviceType.video') },
   { type: 'audio', label: t('common.serviceType.audio') },
   { type: 'audio-gen', label: t('common.serviceType.audioGen') },
+  { type: 'video-swap', label: t('common.serviceType.videoSwap') },
 ])
 const providers = ['gemini', 'openai', 'volcengine', 'minimax', 'aliyun', 'qwen3-tts', 'openai-compatible', 'comfyui']
 const providerSelectOptions = computed(() => providers.map(p => ({ label: p, value: p })))
@@ -2634,6 +2904,7 @@ const serviceMeta = computed(() => ({
   video: { label: t('common.serviceType.video'), desc: t('settings.ai.meta.video') },
   audio: { label: t('common.serviceType.audio'), desc: t('settings.ai.meta.audio') },
   'audio-gen': { label: t('common.serviceType.audioGen'), desc: t('settings.ai.meta.audioGen') },
+  'video-swap': { label: t('common.serviceType.videoSwap'), desc: t('settings.ai.meta.videoSwap') },
 }))
 function emptyProviderSettings() {
   return {
@@ -2672,6 +2943,37 @@ function emptyProviderSettings() {
     // 本地 H3 质量档 / 自建网关标识
     quality: 'preview',
     h3_gateway: false,
+    // 视频换人网关
+    face_engine: 'h3',
+    face_workflow_slug: 'h3-face-swap',
+    facefusion_dir: '',
+    facefusion_python: '',
+    facefusion_model: 'hyperswap_1a_256',
+    facefusion_execution_providers: 'cpu',
+    facefusion_pixel_boost: '512x512',
+    facefusion_timeout_seconds: 1800,
+    character_workflow_slug: 'h3-recast-relay',
+    character_short_workflow_slug: 'h3-recast',
+    character_short_max_seconds: 6,
+    character_relay_warmup_seconds: 5.17,
+    analysis_config_id: '',
+    scene_ref_base_url: 'http://127.0.0.1:8192',
+    scene_ref_api_key: '',
+    scene_ref_workflow_prefix: 'qwen-image-edit',
+    scene_ref_candidates: 2,
+    timeout_seconds: 3600,
+    poll_interval_ms: 2000,
+    max_auto_retries: 1,
+    crossfade_frames: 0,
+    face_max_generation_seconds: 8,
+    character_max_generation_seconds: 10,
+    chunk_overlap_seconds: 1,
+    min_chunk_seconds: 5,
+    max_chunks: 50,
+    default_steps: 8,
+    seam_ssim_threshold: 0.92,
+    seam_color_delta_threshold: 12,
+    seam_face_similarity_threshold: 0.75,
   }
 }
 
@@ -2708,6 +3010,16 @@ function collectProviderSettings() {
       if (key === 'maxInputChars' && (!Number.isInteger(n) || n <= 0)) throw new Error(t('settings.cfg.numberInvalid'))
       if (key === 'maxNewTokens' && (!Number.isInteger(n) || n < 64 || n > 2048)) throw new Error(t('settings.cfg.numberInvalid'))
       if (key === 'timeout_ms' && (!Number.isInteger(n) || n <= 0)) throw new Error(t('settings.cfg.numberInvalid'))
+      outgoing[key] = n
+      continue
+    }
+    if (CFG_VIDEO_SWAP_NUMBERS.has(key)) {
+      if (value === '' || value === null || value === undefined) continue
+      const n = Number(value)
+      if (!Number.isFinite(n)) throw new Error(t('settings.cfg.numberInvalid'))
+      if (['analysis_config_id', 'scene_ref_candidates', 'poll_interval_ms', 'max_auto_retries', 'crossfade_frames', 'max_chunks', 'default_steps'].includes(key) && !Number.isInteger(n)) {
+        throw new Error(t('settings.cfg.numberInvalid'))
+      }
       outgoing[key] = n
       continue
     }
@@ -2758,6 +3070,9 @@ const providerPresets = {
   },
   'audio-gen': {
     comfyui: { label: 'ComfyUI 本地音频工作流', baseUrl: 'http://127.0.0.1:8188', models: ['stable-audio-open-1.0'] },
+  },
+  'video-swap': {
+    comfyui: { label: 'ComfyUI 换人网关', baseUrl: 'http://127.0.0.1:8194', models: ['h3-face-swap', 'h3-recast'] },
   },
 }
 const huobaoQuickConfigs = computed(() => {
@@ -3861,6 +4176,7 @@ function loadHostSettingsOnce() {
   loadKnowledge()
   loadAgentPrompt(selectedAgent.value)
   loadMcp()
+  loadDshBridge()
   loadMediaSettings()
   if (tab.value === 'remote') void loadRemoteTab()
 }

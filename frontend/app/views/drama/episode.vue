@@ -594,9 +594,19 @@
                   <option v-for="chain in chainTemplates" :key="chain.key" :value="chain.key">{{ chain.name }}</option>
                 </select>
               </label>
+              <label class="video-auto-skip" :title="t('episode.sb.autoSkipHint')">
+                <input
+                  v-model="autoSkipEnabled"
+                  type="checkbox"
+                  :disabled="rn || splitRunning || splitStarting || autoSkipSaving"
+                  @change="persistAutoSkip"
+                />
+                <span>{{ t('episode.sb.autoSkip') }}</span>
+              </label>
               <span class="dim" style="font-size:12px">{{ t('episode.prod.videos') }}</span>
               <span class="tag mono">{{ t('episode.sb.segmentStat', { n: sbs.length, dur: totalDuration }) }}</span>
               <span class="tag mono" :title="t('episode.vid.aspectRatio')">{{ dramaAspectRatio }}</span>
+              <span class="tag mono" :title="t('episode.sb.narrationFormHint')">{{ dramaNarrationFormLabel }}</span>
               <div class="ml-auto flex gap-1">
                 <button class="btn btn-sm" :disabled="rn || methodSaving || splitRunning || splitStarting" :title="currentBreakdownMethodName" @click="doBreakdown">
                   <Loader2 v-if="splitRunning || splitStarting" :size="11" class="animate-spin" />
@@ -891,13 +901,40 @@
                     <div v-else class="video-task-empty">
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
                     </div>
-                    <span class="video-task-index">#{{ String(task.index + 1).padStart(2, '0') }}</span>
+                    <span class="video-task-index" :title="t('episode.vid.dbShotNumber')">#S{{ String(task.shotNumber).padStart(2, '0') }}</span>
                   </div>
                   <div class="video-task-main">
                     <div class="video-task-line">
                       <strong class="video-task-name">{{ task.title }}</strong>
                       <span v-if="isSkippedShot(task.storyboard)" class="tag">{{ t('episode.sb.skippedTag') }}</span>
                       <span v-if="task.transitionKind" class="video-task-transition-tag">{{ task.transitionLabel }}</span>
+                    </div>
+                    <div class="video-task-tags">
+                      <span
+                        v-for="tag in storyboardTagList(task.storyboard).slice(0, 3)"
+                        :key="tag"
+                        class="storyboard-tag"
+                        :class="'is-' + tag"
+                      >{{ storyboardTagLabel(tag) }}</span>
+                      <span v-if="storyboardTagList(task.storyboard).length > 3" class="storyboard-tag is-more">
+                        +{{ storyboardTagList(task.storyboard).length - 3 }}
+                      </span>
+                      <button
+                        type="button"
+                        class="storyboard-tag-add"
+                        :title="t('episode.sb.tags.edit')"
+                        :aria-label="t('episode.sb.tags.edit')"
+                        @click.stop="toggleStoryboardTagMenu(task.storyboard)"
+                      >+</button>
+                      <div v-if="tagMenuSbId === task.id" class="storyboard-tag-menu" @click.stop>
+                        <button
+                          v-for="tag in STORYBOARD_TAG_PRESETS"
+                          :key="tag"
+                          type="button"
+                          :class="{ on: storyboardTagList(task.storyboard).includes(tag) }"
+                          @click="toggleStoryboardTag(task.storyboard, tag)"
+                        >{{ storyboardTagLabel(tag) }}</button>
+                      </div>
                     </div>
                     <div class="video-task-meta-line">
                       <span :class="['video-task-state', 'is-' + videoTaskState(task.storyboard)]">
@@ -1198,6 +1235,27 @@
                         spellcheck="false"
                         @blur="commitFinalPrompt"
                       />
+                      <div v-if="selectedPipelineIssues.length" class="video-final-prompt-issues" role="alert">
+                        <strong>{{ t('episode.sb.finalPromptIssues', { n: selectedPipelineIssues.length }) }}</strong>
+                        <ul>
+                          <li v-for="(issue, index) in selectedPipelineIssues" :key="index">{{ issue }}</li>
+                        </ul>
+                      </div>
+                      <div v-if="selectedSb" class="video-recalc-timing">
+                        <button type="button" class="btn btn-sm" :disabled="recalcBusy" :title="t('episode.sb.recalcTimingHint')" @click="previewRecalcTiming">
+                          <Loader2 v-if="recalcBusy" :size="11" class="animate-spin" />
+                          {{ t('episode.sb.recalcTiming') }}
+                        </button>
+                        <div v-if="recalcPreview" class="video-recalc-preview">
+                          <p>{{ t('episode.sb.recalcTimingSummary', { narration: recalcPreview.narrationChars, required: recalcPreview.requiredSeconds, current: recalcPreview.currentDuration, suggested: recalcPreview.suggestedDuration }) }}</p>
+                          <p v-if="recalcPreview.needsSplit">{{ t('episode.sb.recalcTimingSplit', { n: recalcPreview.segments.length }) }}</p>
+                          <p v-if="recalcPreview.descriptionOutOfSync || recalcPreview.negativeConflict">{{ t('episode.sb.recalcTimingSync') }}</p>
+                          <div class="flex gap-1">
+                            <button type="button" class="btn btn-sm btn-primary" :disabled="recalcBusy || !recalcPreview.changed" @click="applyRecalcTiming">{{ t('episode.sb.recalcTimingApply') }}</button>
+                            <button type="button" class="btn btn-sm" :disabled="recalcBusy" @click="recalcPreview = null">{{ t('common.cancel') }}</button>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </section>
               </div>
@@ -3176,6 +3234,9 @@ const { running: rn, runningType: rt, run: runAgent } = useAgent()
 // 后端严格逐镜修补/校验，前端只轮询阶段与逐镜进度，失败停在该镜等人工
 const splitJob = ref(null)
 const splitStarting = ref(false)
+const autoSkipEnabled = ref(false)
+const autoSkipAttempts = ref(2)
+const autoSkipSaving = ref(false)
 const splitLastCompleted = ref(0)
 const splitPanelCollapsed = ref(false)
 let splitPanelJobId = null
@@ -3220,6 +3281,9 @@ const splitProgressText = computed(() => {
   if (job.stage === 'sound') {
     return t('episode.sb.pipelineSoundProgress', { units: job.sound_units || 0 })
   }
+  if (job.stage === 'intent') {
+    return t('episode.sb.pipelineIntentProgress', { total: job.total_shots || 0 })
+  }
   return t('episode.sb.pipelineRepairProgress', {
     done: job.validated_shots || 0,
     total: job.total_shots || 0,
@@ -3235,6 +3299,7 @@ const splitPercent = computed(() => {
     return total ? Math.min(100, Math.round((Number(job.completed_chunks || 0) / total) * 100)) : 0
   }
   if (job.stage === 'sound') return job.sound_status === 'done' ? 100 : 92
+  if (job.stage === 'intent') return job.total_shots ? 5 : 0
   const total = Number(job.total_shots || 0)
   return total ? Math.min(90, Math.round((Number(job.validated_shots || 0) / total) * 90)) : 0
 })
@@ -3578,6 +3643,9 @@ function onSceneGeographySaved(geography) {
 
 function applySplitJob(job, options = {}) {
   if (!job) return
+  const jobAutoSkip = Number(job.parameters?.autoSkipAfterAttempts || 0)
+  autoSkipEnabled.value = jobAutoSkip > 0
+  if (jobAutoSkip > 0) autoSkipAttempts.value = jobAutoSkip
   syncSplitPanelState(job)
   const prevStatus = splitJob.value?.status
   const prevStage = splitJob.value?.stage
@@ -4832,11 +4900,13 @@ const allVideoTaskRows = computed(() => sbs.value.map((sb, index) => {
   const duration = Number(sb.duration || 5)
   const referenceCount = getShotReferenceImages(sb).length
   const sceneName = getSceneName(sb)
+  const shotNumber = storyboardNumberOf(sb) || index + 1
   return {
     id: sb.id,
     index,
+    shotNumber,
     storyboard: sb,
-    title: sb.description || t('episode.vid.shotN', { n: String(index + 1).padStart(2, '0') }),
+    title: sb.description || t('episode.vid.shotN', { n: String(shotNumber).padStart(2, '0') }),
     meta: sceneName,
     transitionKind: storyboardTransitionKind(sb),
     transitionLabel: storyboardTransitionLabel(sb),
@@ -4849,6 +4919,46 @@ const allVideoTaskRows = computed(() => sbs.value.map((sb, index) => {
 }))
 // 列表筛选：点击顶部统计徽章过滤（再点一次取消）
 const videoListFilter = ref('')
+const STORYBOARD_TAG_PRESETS = [
+  'transition', 'character', 'empty', 'dialogue', 'narration', 'combat', 'competition', 'memory',
+]
+const tagMenuSbId = ref(null)
+function parseStoryboardTagValue(value) {
+  if (Array.isArray(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {}
+  }
+  return []
+}
+function storyboardTagList(sb) {
+  const stored = parseStoryboardTagValue(sb?.tags)
+  if (stored.length) return stored
+  return parseStoryboardTagValue(sb?.auto_tags ?? sb?.autoTags)
+}
+function storyboardTagLabel(key) {
+  return t(`episode.sb.tags.${key}`)
+}
+function toggleStoryboardTagMenu(sb) {
+  tagMenuSbId.value = tagMenuSbId.value === sb?.id ? null : sb?.id
+}
+async function toggleStoryboardTag(sb, key) {
+  if (!sb?.id) return
+  const current = new Set(storyboardTagList(sb))
+  if (current.has(key)) current.delete(key)
+  else current.add(key)
+  const next = [...current]
+  try {
+    await storyboardAPI.update(sb.id, { tags: next })
+    sb.tags = next
+    sb.auto_tags = []
+    tagMenuSbId.value = null
+  } catch (e) {
+    toastError(e)
+  }
+}
 const videoTaskRows = computed(() => videoListFilter.value
   ? allVideoTaskRows.value.filter(task => task.state === videoListFilter.value)
   : allVideoTaskRows.value)
@@ -4916,11 +5026,12 @@ async function addStoryboard() {
   if (!ep?.id || rn.value || addingStoryboard.value) return
   const source = selectedSb.value || sbs.value[sbs.value.length - 1] || null
   const duration = Math.max(2, Math.min(10, videoDurationMax.value || 10))
+  const nextShotNumber = sbs.value.reduce((max, sb) => Math.max(max, Number(storyboardNumberOf(sb) || 0)), 0) + 1
   addingStoryboard.value = true
   try {
     const created = await storyboardAPI.create({
       episode_id: ep.id,
-      title: t('episode.vid.newShotTitle', { n: sbs.value.length + 1 }),
+      title: t('episode.vid.newShotTitle', { n: nextShotNumber }),
       description: '',
       duration,
       scene_id: source?.scene_id ?? source?.sceneId ?? null,
@@ -4951,7 +5062,7 @@ function deleteStoryboard(sb) {
     open: true,
     target: sb,
     title: row?.title || sb?.title || '',
-    number: row ? row.index + 1 : '',
+    number: storyboardNumberOf(sb) || (row ? row.index + 1 : ''),
     loading: false,
     nextId: successor?.id ?? null,
   }
@@ -6540,8 +6651,43 @@ const finalPromptSbId = ref(null)
 let lastFinalPromptAuto = ''
 const finalPromptAuto = computed(() => autoFinalPromptFor(selectedSb.value))
 const finalPromptOverrideActive = computed(() => Boolean(finalPromptOverrideValue(selectedSb.value)))
+const selectedPipelineIssues = computed(() => selectedPipelineShot.value?.issues || [])
+const dramaNarrationForm = computed(() => (drama.value?.narration_form === 'narration' ? 'narration' : 'dialogue'))
+const dramaNarrationFormLabel = computed(() => t(dramaNarrationForm.value === 'narration' ? 'episode.sb.narrationFormNarration' : 'episode.sb.narrationFormDialogue'))
+const recalcPreview = ref(null)
+const recalcBusy = ref(false)
+async function previewRecalcTiming() {
+  const sb = selectedSb.value
+  if (!sb || recalcBusy.value) return
+  recalcBusy.value = true
+  try {
+    const data = await storyboardAPI.recalcTimingPreview(sb.id)
+    recalcPreview.value = data
+    if (!data?.changed) toast.success(t('episode.sb.recalcTimingNoChange'))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.sb.recalcTimingFailed' })
+  } finally {
+    recalcBusy.value = false
+  }
+}
+async function applyRecalcTiming() {
+  const sb = selectedSb.value
+  if (!sb || recalcBusy.value) return
+  recalcBusy.value = true
+  try {
+    const result = await storyboardAPI.recalcTimingApply(sb.id)
+    recalcPreview.value = null
+    await resyncStoryboards()
+    toast.success(t('episode.sb.recalcTimingApplied', { n: result?.insertedStoryboardIds?.length || 0 }))
+  } catch (e) {
+    toastError(e, { fallback: 'episode.sb.recalcTimingFailed' })
+  } finally {
+    recalcBusy.value = false
+  }
+}
 watch([() => selectedSb.value?.id, finalPromptAuto], ([id, auto]) => {
   const sb = selectedSb.value
+  recalcPreview.value = null
   if (!sb || !id) {
     finalPromptSbId.value = null
     finalPromptDraft.value = ''
@@ -6972,6 +7118,7 @@ async function doBreakdown() {
       model: chatModelOverride(),
       config_id: chatConfigId(),
       chain_key: selectedChainKey.value,
+      parameters: { autoSkipAfterAttempts: autoSkipEnabled.value ? autoSkipAttempts.value : 0 },
     })
     if (!result?.job) {
       toast.error(t('episode.sb.splitStartFailed'))
@@ -6985,6 +7132,29 @@ async function doBreakdown() {
     toastError(e, { fallback: 'episode.sb.splitStartFailed' })
   } finally {
     splitStarting.value = false
+  }
+}
+
+/** 自动跳过：有任务时立即写运行参数；没有任务时由下一次拆分创建带入 */
+async function persistAutoSkip() {
+  const job = splitJob.value
+  if (!job?.id) return
+  if (splitRunning.value) {
+    toast.info(t('episode.sb.autoSkipRunning'))
+    autoSkipEnabled.value = Number(job.parameters?.autoSkipAfterAttempts || 0) > 0
+    return
+  }
+  autoSkipSaving.value = true
+  const attempts = autoSkipEnabled.value ? autoSkipAttempts.value : 0
+  try {
+    const result = await pipelineChainAPI.setAutoSkip(job.id, attempts)
+    if (result?.job) applySplitJob(result.job, { silent: true })
+    toast.success(t('episode.sb.autoSkipSaved'))
+  } catch (e) {
+    autoSkipEnabled.value = Number(job.parameters?.autoSkipAfterAttempts || 0) > 0
+    toastError(e)
+  } finally {
+    autoSkipSaving.value = false
   }
 }
 
@@ -9678,6 +9848,17 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   box-shadow: 0 0 0 3px var(--button-focus);
 }
 .video-method-pick { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; white-space: nowrap; }
+.video-auto-skip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.video-auto-skip input { width: 13px; height: 13px; accent-color: var(--accent); }
 .video-method-pick .video-method-select {
   width: auto; max-width: 200px; flex: 0 0 auto;
   height: 26px; padding: 0 22px 0 8px; font-size: 11px;
@@ -10683,6 +10864,7 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   .video-batch-strip-counts { width: 100%; }
 }
 .video-task-row {
+  position: relative;
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr) auto;
   align-items: center;
@@ -10773,6 +10955,73 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   font-size: 10px;
   line-height: 1.5;
   white-space: nowrap;
+}
+.video-task-tags {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+.storyboard-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 9.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.storyboard-tag.is-transition { background: #e0f2fe; color: #0369a1; }
+.storyboard-tag.is-character { background: #dcfce7; color: #15803d; }
+.storyboard-tag.is-empty { background: #f1f5f9; color: #64748b; }
+.storyboard-tag.is-dialogue { background: #fef3c7; color: #b45309; }
+.storyboard-tag.is-narration { background: #ede9fe; color: #6d28d9; }
+.storyboard-tag.is-combat { background: #fee2e2; color: #b91c1c; }
+.storyboard-tag.is-competition { background: #ffedd5; color: #c2410c; }
+.storyboard-tag.is-memory { background: #fae8ff; color: #a21caf; }
+.storyboard-tag.is-more { background: transparent; color: var(--text-3); }
+.storyboard-tag-add {
+  width: 16px;
+  height: 16px;
+  border: 1px dashed var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.storyboard-tag-add:hover { color: var(--accent); border-color: var(--accent); }
+.storyboard-tag-menu {
+  position: absolute;
+  top: 20px;
+  left: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(90px, 1fr));
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: var(--shadow-lg);
+}
+.storyboard-tag-menu button {
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.storyboard-tag-menu button.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
 }
 .video-task-meta-line {
   display: flex;
@@ -10949,6 +11198,23 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   line-height: 1.55;
   resize: vertical;
 }
+.video-final-prompt-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.video-final-prompt-issues strong { color: var(--warning); font-weight: 600; }
+.video-final-prompt-issues ul { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; }
+.video-recalc-timing { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.video-recalc-preview { display: flex; flex-direction: column; gap: 5px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-raised); font-size: 12px; }
+.video-recalc-preview p { margin: 0; line-height: 1.5; }
 .video-inspector-label-hero {
   color: var(--accent);
   font-size: 13px;

@@ -13,6 +13,7 @@ import { getDubbingDefaults, VIDEO_AUDIO_MODES } from '../services/app-settings.
 import { createComfyUiSession, previewEpisodeComfyRun, runEpisodeComfy } from '../services/comfyui-episode.js'
 import { getBreakdownMethod } from '../services/breakdown-methods.js'
 import { cleanupFrameAssetsForEpisode } from '../services/storyboard-frame-assets.js'
+import { deriveStoryboardTags, parseStoryboardTags } from '../services/storyboard-tags.js'
 import {
   SoundPlanError,
   attachSoundCue,
@@ -518,7 +519,7 @@ app.post('/:id/video-batch/stop', async (c) => {
 app.get('/:episode_id/storyboards', async (c) => {
   const episodeId = Number(c.req.param('episode_id'))
   const rows = await db.select().from(schema.storyboards)
-    .where(eq(schema.storyboards.episodeId, episodeId))
+    .where(and(eq(schema.storyboards.episodeId, episodeId), isNull(schema.storyboards.deletedAt)))
     .orderBy(schema.storyboards.storyboardNumber)
 
   const links = await db.select().from(schema.storyboardCharacters)
@@ -551,6 +552,14 @@ app.get('/:episode_id/storyboards', async (c) => {
 
   return success(c, rows.map((row) => ({
     ...toSnakeCase(row),
+    tags: parseStoryboardTags(row.tags),
+    auto_tags: deriveStoryboardTags({
+      transition: row.transition,
+      transitionKind: row.transitionKind,
+      characterCount: (charIdsByStoryboard.get(row.id) || []).length,
+      description: row.description,
+      videoPrompt: row.videoPrompt,
+    }),
     character_ids: charIdsByStoryboard.get(row.id) || [],
     prop_ids: propIdsByStoryboard.get(row.id) || [],
     characters: allChars

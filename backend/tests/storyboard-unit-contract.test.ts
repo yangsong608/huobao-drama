@@ -32,6 +32,21 @@ const FIXED_PROMPT = [
   '负面约束：只出现画内人物；不换脸/换装/加人；不生成字幕；不出现现代物品',
 ].join('\n')
 
+test('背景地标接受左/右、上方/中央和“无”，不接受没有位置的地标', () => {
+  const upper = FIXED_PROMPT.replace('背景地标：窗在左后、门在右后', '背景地标：唐记招牌位于画面上方')
+  assert.equal(validateStoryboardUnit({
+    description: '唐大郎起身，抬眼看向范仲淹。',
+    videoPrompt: upper,
+    duration: 10,
+  }).some(item => item.includes('背景地标')), false)
+  const missingPosition = FIXED_PROMPT.replace('背景地标：窗在左后、门在右后', '背景地标：唐记招牌')
+  assert.ok(validateStoryboardUnit({
+    description: '唐大郎起身，抬眼看向范仲淹。',
+    videoPrompt: missingPosition,
+    duration: 10,
+  }).some(item => item.includes('背景地标缺少屏幕位置')))
+})
+
 test('单机位/固定四区校验：合法通过，多子镜和缺调度被拒绝', () => {
   assert.deepEqual(validateStoryboardUnit({
     description: '唐大郎起身，抬眼看向范仲淹。',

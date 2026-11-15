@@ -11,6 +11,8 @@
  */
 import type { AIConfig } from './types'
 import { joinProviderUrl } from './url'
+import fs from 'node:fs/promises'
+import path from 'node:path'
 
 export interface GatewayWorkflowInput {
   type: string
@@ -153,6 +155,50 @@ export async function submitGatewayJob(
   const jobId = payload?.job_id || payload?.id
   if (!jobId) throw new Error('H3 网关提交响应缺少 job_id')
   return String(jobId)
+}
+
+/** 视频输入必须先上传到网关 input；返回网关文件名，后续作为 video 输入值。 */
+export async function uploadGatewayVideo(
+  config: AIConfig,
+  filePath: string,
+  options: GatewayRequestOptions = {},
+): Promise<string> {
+  const fetchImpl = options.fetchImpl ?? fetch
+  const data = await fs.readFile(filePath)
+  const form = new FormData()
+  form.append('video', new Blob([new Uint8Array(data)], { type: 'video/mp4' }), path.basename(filePath))
+  const timeoutMs = options.timeoutMs ?? 120_000
+  const timeout = AbortSignal.timeout(timeoutMs)
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`
+  let response: Response
+  try {
+    response = await fetchImpl(joinProviderUrl(config.baseUrl, '', '/v1/uploads'), {
+      method: 'POST',
+      headers,
+      body: form,
+      signal,
+    })
+  } catch (cause) {
+    throw new Error(`换人网关不可达：${cause instanceof Error ? cause.message : String(cause)}`)
+  }
+  const text = await response.text()
+  let payload: any = null
+  if (text) {
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      throw new Error(`H3 网关上传返回非 JSON（HTTP ${response.status}）`)
+    }
+  }
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || payload?.message || `H3 网关上传失败：HTTP ${response.status}`)
+  }
+  const name = typeof payload?.name === 'string' ? payload.name.trim() : ''
+  if (!name) throw new Error('H3 网关上传响应缺少文件名')
+  if (payload?.kind && payload.kind !== 'video') throw new Error(`H3 网关上传类型错误：${payload.kind}`)
+  return name
 }
 
 export async function fetchGatewayJob(

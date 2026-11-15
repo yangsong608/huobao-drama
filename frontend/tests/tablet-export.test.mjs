@@ -156,7 +156,7 @@ const episodeTemplate = episodeSource.slice(0, episodeSource.indexOf('<script'))
 const MQ_1180 = '@media (max-width: 1180px)'
 const MQ_744 = '@media (max-width: 744px)'
 
-const BASELINE_VIDEO_TAGS = 13
+const BASELINE_VIDEO_TAGS = 14
 const BASELINE_USE_API_IMPORT = "import { API_BASE, api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, planningAPI, pipelineChainAPI, soundPlanAPI } from '~/composables/useApi'"
 
 // ---------------------------------------------------------------------------
@@ -895,5 +895,5 @@ test('useApi 导入行与当前基线一致、无 fetch(、上传路径未增减
   const vueFiles = collectVueFiles(appDir)
   assert.ok(vueFiles.length > 0, '未找到任何 .vue 文件')
   const videoTags = vueFiles.reduce((sum, file) => sum + countOccurrences(readFileSync(file, 'utf8'), '<video'), 0)
-  assert.equal(videoTags, BASELINE_VIDEO_TAGS, '<video> 总数必须保持基线 13（覆盖板缩略图新增 1 个）')
+  assert.equal(videoTags, BASELINE_VIDEO_TAGS, '<video> 总数必须保持基线 14（视频换人工作台输出播放器新增 1 个）')
 })

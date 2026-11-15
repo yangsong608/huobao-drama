@@ -33,6 +33,7 @@ PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jX1cAAAAASUVORK5CYII="
 )
 PNG_DATA_URL = "data:image/png;base64," + base64.b64encode(PNG_1X1).decode()
+MP4_HEADER = b"\x00\x00\x00\x18ftypisom\x00\x00\x00\x00isomiso2"
 BLUE_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC"
 )
@@ -667,6 +668,39 @@ class TestImageSubmit(BaseCase):
         status, _, body = self.h.json("GET", "/v1/images/task/nope", headers=self.h.auth)
         self.assertEqual(status, 404)
         self.assertEqual(body["status"], "failed")
+
+
+class TestMediaUpload(BaseCase):
+    def test_video_upload_is_forwarded_and_typed(self):
+        body, ctype = multipart_body({}, [("video", ("clip.mp4", "video/mp4", MP4_HEADER))])
+        status, _, payload = self.h.json(
+            "POST", "/v1/uploads", body=body, ctype=ctype, headers=self.h.auth,
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["kind"], "video")
+        self.assertTrue(payload["name"].endswith(".mp4"))
+        self.assertTrue(any(u["name"] == payload["name"] for u in self.fake.uploads))
+
+    def test_upload_rejects_unknown_media(self):
+        body, ctype = multipart_body({}, [("file", ("notes.txt", "text/plain", b"hello"))])
+        status, _, payload = self.h.json(
+            "POST", "/v1/uploads", body=body, ctype=ctype, headers=self.h.auth,
+        )
+        self.assertEqual(status, 400, payload)
+        self.assertIn("图片或视频", payload["error"]["message"])
+
+    def test_video_input_accepts_uploaded_name_and_rejects_path(self):
+        row = {
+            "workflow": {"1": {"class_type": "VHS_LoadVideo", "inputs": {"video": ""}}},
+            "input_map": {"source_video": {"node": "1", "input": "video", "type": "video"}},
+        }
+        gw.validate_job_inputs(row, {"source_video": "h3v_abc.mp4"})
+        graph = gw.build_job_graph(row, {"source_video": "h3v_abc.mp4"}, lambda _v: "unused")
+        self.assertEqual(graph["1"]["inputs"]["video"], "h3v_abc.mp4")
+        with self.assertRaises(gw.BadRequest):
+            gw.validate_job_inputs(row, {"source_video": "../clip.mp4"})
+        with self.assertRaises(gw.BadRequest):
+            gw.validate_job_inputs(row, {"source_video": "clip.txt"})
 
 
 class TestSignedFiles(BaseCase):

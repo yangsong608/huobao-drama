@@ -8,6 +8,7 @@
 import { validateStoryboardUnit } from './storyboard-unit-contract.js'
 import { extractSpokenQuotes, extractScriptDialogueSegments, inspectDialogueIntegrity } from './dialogue-integrity.js'
 import { findQuotedSpans } from './dialogue-lines.js'
+import { validateIntentAdherence, type ShotIntentPlan } from './shot-intent-plan.js'
 import { parseContractFromPrompt, type ParsedContract } from './storyboard-contract.js'
 import { evaluateContractPairIssues } from './storyboard-contract-audit.js'
 
@@ -51,6 +52,13 @@ function normalizedQuotes(text: string) {
 
 const NON_SPEECH_PREFIX_RE = /(?:招牌|告示|字幕|标题|牌匾|匾额|书信|信上|榜文|写着|印着|刻着|上书)\s*[：:]?\s*$/
 
+/** 旁白/画外音引号不是角色台词：台词完整性检查前先剥离，由意图计划门禁单独裁定。 */
+const NARRATION_QUOTE_RE = /(?:旁白|画外音|解说词?|内心独白|心声)\s*(?:（[^）]*）|\([^)]*\))?\s*[：:]\s*[「“"][^」”"]*[」”"]/g
+
+function stripNarrationQuotes(text: string) {
+  return String(text || '').replace(NARRATION_QUOTE_RE, '')
+}
+
 /**
  * 原文台词引号（宽松）：小说里常见「张三：“快走！”」不带说话动词，也要算台词。
  * 只排除招牌/字幕/书信等非口白引号。
@@ -88,6 +96,10 @@ export interface RepairedShotInput {
   shotLabel?: string
   /** 计划层台词原子单元；渲染只能逐字使用，不能新增或删除 */
   planSpeechSegments?: Array<{ speaker?: string; text: string }>
+  /** 意图/旁白/动作计划；战斗、比拼、动作镜没有原文旁白依据时禁止旁白 */
+  intentPlan?: ShotIntentPlan | null
+  /** 当前拆分方案的单段上限；空表示只按平台 6–15 秒合同 */
+  maxAllowedSeconds?: number | null
   expectedActionStart?: string | null
   expectedActionEnd?: string | null
   expectedShotType?: string | null
@@ -115,6 +127,9 @@ export function validateRepairedShot(input: RepairedShotInput): RepairedShotVali
   const description = String(input.description || '')
   const prompt = String(input.videoPrompt || '')
   const source = String(input.sourceExcerpt || '')
+  if (input.maxAllowedSeconds && Number(input.duration) > input.maxAllowedSeconds) {
+    errors.push(`${label}时长 ${input.duration} 秒，超过当前拆分方案单段上限 ${input.maxAllowedSeconds} 秒。`)
+  }
 
   errors.push(...validateStoryboardUnit({
     description,
@@ -128,10 +143,10 @@ export function validateRepairedShot(input: RepairedShotInput): RepairedShotVali
 
   const sourceIntent = detectVocalIntent(source)
   const descriptionIntent = detectVocalIntent(description)
-  const sourceQuotes = extractSourceQuotes(source)
-  const descriptionQuotes = normalizedQuotes(description)
-  const promptQuotes = normalizedQuotes(prompt)
-  const allQuoted = (text: string) => findQuotedSpans(text || '')
+  const sourceQuotes = extractSourceQuotes(stripNarrationQuotes(source))
+  const descriptionQuotes = normalizedQuotes(stripNarrationQuotes(description))
+  const promptQuotes = normalizedQuotes(stripNarrationQuotes(prompt))
+  const allQuoted = (text: string) => findQuotedSpans(stripNarrationQuotes(text || ''))
     .map(span => span.inner.replace(/[（(][^）)]*[）)]/g, '').replace(/[\s\u3000]+/g, ''))
     .filter(Boolean)
   const planTexts = (input.planSpeechSegments || [])
@@ -297,6 +312,10 @@ export function validateRepairedShot(input: RepairedShotInput): RepairedShotVali
       }
     }
   }
+
+  const intentValidation = validateIntentAdherence(input.intentPlan, description, prompt)
+  errors.push(...intentValidation.errors)
+  warnings.push(...intentValidation.warnings)
 
   return { errors, warnings, parsedContract }
 }

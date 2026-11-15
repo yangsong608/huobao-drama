@@ -1,0 +1,22 @@
+[Unit]
+Description=Huobao H3 Swap Gateway Admin (127.0.0.1:8195)
+After=network-online.target huobao-h3-gateway-swap.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=huobao-h3
+Group=huobao-h3
+EnvironmentFile=/etc/huobao-h3-gateway-swap.env
+WorkingDirectory=/opt/huobao-h3-gateway-swap
+ExecStart=/opt/huobao-h3-gateway-swap/.venv-admin/bin/python -m admin.cli serve --host 127.0.0.1 --port 8195
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/data/huobao-h3-gateway-swap
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

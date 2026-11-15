@@ -38,6 +38,11 @@ export default defineNuxtConfig({
           path: '/novels/:id',
           file: fileURLToPath(new URL('./app/views/novel/detail.vue', import.meta.url)),
         },
+        {
+          name: 'video-detail',
+          path: '/videos/:id',
+          file: fileURLToPath(new URL('./app/views/video/detail.vue', import.meta.url)),
+        },
       )
     },
   },

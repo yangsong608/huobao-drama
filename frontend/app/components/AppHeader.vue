@@ -22,6 +22,10 @@
         <BookOpen :size="15" :stroke-width="1.8" />
         <span class="nav-label">{{ t('layout.nav.novels') }}</span>
       </NuxtLink>
+      <NuxtLink to="/videos" class="nav-link" :class="{ active: isVideoActive }" :title="t('layout.nav.videos')">
+        <Clapperboard :size="15" :stroke-width="1.8" />
+        <span class="nav-label">{{ t('layout.nav.videos') }}</span>
+      </NuxtLink>
       <NuxtLink to="/settings" class="nav-link" :class="{ active: isSettingsActive }" :title="t('layout.nav.settings')">
         <Settings :size="15" :stroke-width="1.8" />
         <span class="nav-label">{{ t('layout.nav.settings') }}</span>
@@ -85,7 +89,7 @@
 </template>
 
 <script setup>
-import { BookOpen, LayoutGrid, Settings, TriangleAlert, Github, Download, X } from 'lucide-vue-next'
+import { BookOpen, Clapperboard, LayoutGrid, Settings, TriangleAlert, Github, Download, X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { aiConfigAPI } from '~/composables/useApi'
 import { usePwa } from '~/composables/usePwa'
@@ -150,6 +154,7 @@ onBeforeUnmount(unbindHintDismiss)
 
 const isDramaActive = computed(() => route.path === '/' || route.path.startsWith('/drama/'))
 const isNovelActive = computed(() => route.path.startsWith('/novels'))
+const isVideoActive = computed(() => route.path.startsWith('/videos'))
 const isSettingsActive = computed(() => route.path === '/settings')
 
 // 渲染时求值，语言切换即时生效（不能模块级常量固化）

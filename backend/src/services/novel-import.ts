@@ -198,6 +198,7 @@ export async function buildBackground(
   if (!material.trim()) return ''
   try {
     const result = await callText({
+      role: 'extractor',
       system: '你是短剧项目策划，擅长把小说设定压缩成画面可用的项目背景。',
       prompt: `请把以下小说设定压缩成不超过 400 字的项目背景，保留时代、地域、核心人物关系与主线冲突。只输出背景正文，不要标题或解释。\n\n${material}`,
       maxTokens: 500,

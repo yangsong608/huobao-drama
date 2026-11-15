@@ -273,6 +273,7 @@ function defaultTranslate(text: string, attempt = 0): Promise<string> {
     ? `${H3_TRANSLATOR_SYSTEM}\nStrict retry: the previous output was rejected. The output must contain no Chinese characters outside the [[H3_DLG_N]] tokens.`
     : H3_TRANSLATOR_SYSTEM
   return callText({
+    role: 'translator',
     system,
     prompt: text,
     temperature: 0.2,

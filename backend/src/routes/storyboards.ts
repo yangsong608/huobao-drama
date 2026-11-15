@@ -12,6 +12,9 @@ import { getAcceptanceState, runAcceptance } from '../services/storyboard-accept
 import { optimizeStoryboardShot } from '../services/storyboard-pipeline.js'
 import { describeSoundPlan } from '../services/sound-plan-audio.js'
 import { getActiveConfig } from '../services/ai.js'
+import { serializeStoryboardTags } from '../services/storyboard-tags.js'
+import { ensureNegativeConsistency } from '../services/storyboard-negative.js'
+import { previewShotTimingRecalc, applyShotTimingRecalc } from '../services/storyboard-timing-recalc.js'
 
 const app = new Hono()
 const TRANSITIONS = new Set(['cut', 'fade', 'dissolve', 'wipe'])
@@ -278,16 +281,26 @@ app.put('/:id', async (c) => {
     time: 'time', atmosphere: 'atmosphere', result: 'result',
     bgm_prompt: 'bgmPrompt', sound_effect: 'soundEffect',
     transition: 'transition', continuity: 'continuity',
-    video_url: 'videoUrl',
+    video_url: 'videoUrl', tags: 'tags',
   }
 
   const updates: Record<string, any> = { updatedAt: now() }
   for (const [snakeKey, camelKey] of Object.entries(fieldMap)) {
-    if (snakeKey in body) updates[camelKey] = snakeKey === 'transition' ? normalizeTransition(body.transition) : body[snakeKey]
+    if (snakeKey in body) {
+      updates[camelKey] = snakeKey === 'transition'
+        ? normalizeTransition(body.transition)
+        : snakeKey === 'tags'
+          ? serializeStoryboardTags(body.tags)
+          : body[snakeKey]
+    }
   }
   // 上游提示词一变，旧的最终提示词覆盖自动失效，避免生成时继续用过期文本
   if ('video_prompt' in body && !('final_prompt_override' in body)) {
     updates.finalPromptOverride = null
+  }
+  // 手改旁白/对白后重评估负面约束：有旁白时移除/降级静音子句，避免正文与负面约束矛盾
+  if (typeof updates.videoPrompt === 'string' && updates.videoPrompt.trim()) {
+    updates.videoPrompt = ensureNegativeConsistency(updates.videoPrompt)
   }
 
   const bindingError = await ensureStoryboardBindings(
@@ -308,6 +321,28 @@ app.put('/:id', async (c) => {
     propIds: body.prop_ids,
   })
   return success(c)
+})
+
+// POST /storyboards/:id/recalc-timing/preview - 手改旁白后的时长重算预览（不落库）
+app.post('/:id/recalc-timing/preview', async (c) => {
+  const id = Number(c.req.param('id'))
+  const preview = previewShotTimingRecalc(id)
+  if (!preview) return badRequest(c, '镜头不存在')
+  return success(c, preview)
+})
+
+// POST /storyboards/:id/recalc-timing/apply - 应用重算：延时/拆镜+同步字段
+app.post('/:id/recalc-timing/apply', async (c) => {
+  const id = Number(c.req.param('id'))
+  logTaskStart('StoryboardAPI', 'recalc-timing', { storyboardId: id })
+  const result = applyShotTimingRecalc(id)
+  if (!result) return badRequest(c, '镜头不存在')
+  logTaskSuccess('StoryboardAPI', 'recalc-timing', {
+    storyboardId: id,
+    changed: result.changed,
+    inserted: result.insertedStoryboardIds.length,
+  })
+  return success(c, result)
 })
 
 // DELETE /storyboards/:id
@@ -339,6 +374,13 @@ app.delete('/:id', async (c) => {
       ))
       .run()
     tx.delete(schema.storyboards).where(eq(schema.storyboards.id, id)).run()
+    // 骨架不随分镜硬删除；按镜头号清理，避免拆分面板继续显示已删除分镜
+    if (storyboard.storyboardNumber != null) {
+      tx.delete(schema.storyboardSkeletons).where(and(
+        eq(schema.storyboardSkeletons.episodeId, episodeId),
+        eq(schema.storyboardSkeletons.storyboardNumber, storyboard.storyboardNumber),
+      )).run()
+    }
 
     const remaining = tx.select({ duration: schema.storyboards.duration, deletedAt: schema.storyboards.deletedAt })
       .from(schema.storyboards)

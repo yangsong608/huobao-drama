@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm'
 import { logTaskProgress, logTaskWarn } from '../utils/task-logger.js'
 import { joinProviderUrl } from './adapters/url.js'
 
-export type ServiceType = 'text' | 'image' | 'video' | 'audio' | 'audio-gen'
+export type ServiceType = 'text' | 'image' | 'video' | 'audio' | 'audio-gen' | 'video-swap'
 
 export interface AIConfig {
   id?: number
@@ -49,6 +49,8 @@ export const officialProviders: Record<ServiceType, readonly string[]> = {
   audio: ['qwen3-tts', 'aliyun', 'volcengine', 'openai-compatible'],
   /** 环境声/音效/群众声/BGM：本地 ComfyUI 音频工作流 */
   'audio-gen': ['comfyui'],
+  /** 视频换人：换人网关的命名 ComfyUI 工作流 */
+  'video-swap': ['comfyui'],
 }
 
 export function isOfficialProvider(serviceType?: string | null, provider?: string | null): boolean {

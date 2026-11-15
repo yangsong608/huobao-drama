@@ -683,3 +683,65 @@ export function restoreTransitionBatch(
       .where(eq(schema.videoTransitions.id, backup.id)).run()
   }
 }
+
+/**
+ * 手改重算拆镜用：把 >= insertedNumber 的镜号顺延 +1，重写 @镜头N末帧 引用与末帧资产名。
+ * 调用方在顺延后再把新镜插入 insertedNumber。返回旧→新镜号映射。
+ */
+export function shiftShotNumbersForInsertion(
+  tx: Tx,
+  episodeId: number,
+  insertedNumber: number,
+  ts: string,
+): Map<number, number> {
+  const shots = tx.select().from(schema.storyboards)
+    .where(and(eq(schema.storyboards.episodeId, episodeId), isNull(schema.storyboards.deletedAt)))
+    .all()
+  const oldToNew = new Map<number, number>()
+  const shiftedIds: number[] = []
+  for (const shot of shots) {
+    if (shot.storyboardNumber < insertedNumber) continue
+    const next = shot.storyboardNumber + 1
+    oldToNew.set(shot.storyboardNumber, next)
+    shiftedIds.push(shot.id)
+    tx.update(schema.storyboards).set({ storyboardNumber: next, updatedAt: ts })
+      .where(eq(schema.storyboards.id, shot.id)).run()
+  }
+  if (!oldToNew.size) return oldToNew
+  const fresh = tx.select().from(schema.storyboards)
+    .where(and(eq(schema.storyboards.episodeId, episodeId), isNull(schema.storyboards.deletedAt)))
+    .all()
+  for (const shot of fresh) {
+    const patch: Record<string, string> = {}
+    for (const field of REWRITE_FIELDS) {
+      const before = (shot as Record<string, unknown>)[field]
+      if (typeof before !== 'string' || !before) continue
+      const after = rewriteTokens(before, oldToNew)
+      if (after !== before) patch[field] = after
+    }
+    if (Object.keys(patch).length) {
+      tx.update(schema.storyboards).set({ ...patch, updatedAt: ts } as never)
+        .where(eq(schema.storyboards.id, shot.id)).run()
+    }
+  }
+  const frameAssets = tx.select().from(schema.assets)
+    .where(and(
+      eq(schema.assets.category, 'storyboard_frame'),
+      isNull(schema.assets.deletedAt),
+      inArray(schema.assets.storyboardId, shiftedIds),
+    ))
+    .all()
+  for (const asset of frameAssets) {
+    if (asset.storyboardId == null) continue
+    const nextNumber = oldToNew.get(asset.storyboardNum ?? 0)
+    if (nextNumber == null) continue
+    const matched = /^镜头(\d+)末帧$/.exec(asset.name || '')
+    const nextName = matched ? `镜头${nextNumber}末帧` : asset.name
+    tx.update(schema.assets).set({
+      storyboardNum: nextNumber,
+      ...(nextName !== asset.name ? { name: nextName } : {}),
+      updatedAt: ts,
+    } as never).where(eq(schema.assets.id, asset.id)).run()
+  }
+  return oldToNew
+}

@@ -52,7 +52,8 @@
       "image": "图片",
       "video": "视频",
       "audio": "语音",
-      "audioGen": "声音生成"
+      "audioGen": "声音生成",
+      "videoSwap": "视频换人"
     },
     "edit": "编辑"
   },
@@ -60,6 +61,7 @@
     "nav": {
       "projects": "短剧",
       "novels": "小说",
+      "videos": "视频",
       "settings": "设置"
     },
     "banner": {
@@ -326,6 +328,12 @@
       "saveFailed": "切换存储目录失败",
       "pickFailed": "选择目录失败"
     },
+    "narrationForm": {
+      "field": "旁白形态",
+      "dialogue": "对白驱动短剧（旁白仅开场/过渡镜，≤24 字）",
+      "narration": "旁白驱动小说改编（任意镜可配改写式旁白，时长随字数）",
+      "hint": "只影响之后的拆分与修补；切换后需重新拆分才生效。旁白驱动形态建议在旁白音色中绑定解说音色。"
+    },
     "background": {
       "label": "背景",
       "visualLabel": "视觉背景",
@@ -590,7 +598,8 @@
         "image": "角色图、场景图与镜头图等静态图像生成",
         "video": "镜头视频直出生成，默认 Seedance 2.0",
         "audio": "对白与旁白语音合成，本地部署的 Qwen3-TTS",
-        "audioGen": "环境声、音效、群众声与 BGM 的本地 ComfyUI 音频生成"
+        "audioGen": "环境声、音效、群众声与 BGM 的本地 ComfyUI 音频生成",
+        "videoSwap": "单脸换脸、Recast 与 Relay 长视频角色替换的本地换人服务"
       }
     },
     "styles": {
@@ -680,6 +689,7 @@
           "prepare": "准备上下文",
           "skeleton-split": "预拆骨架",
           "skeleton-gate": "骨架覆盖门禁",
+          "shot-intent-plan": "意图与旁白计划",
           "shot-repair": "逐镜修补",
           "shot-validate": "逐镜校验",
           "sound-design": "声音设计",
@@ -766,6 +776,47 @@
       "deleteConfirm": "确定删除知识库「{name}」？"
     },
     "cfg": {
+      "videoSwap": {
+        "title": "视频换人网关",
+        "hint": "只登记网关中的命名工作流；工作流 JSON 保存在网关管理端，前端不接触。",
+        "faceWorkflow": "单脸工作流",
+        "faceEngine": "换脸引擎",
+        "faceEngineH3": "H3 FaceSwap（网关）",
+        "faceEngineH3Hint": "网关换脸，覆盖脸和头发；长视频按单脸最大秒数拆分后合并。",
+        "faceEngineFacefusion": "FaceFusion（本地）",
+        "facefusionDir": "FaceFusion 目录",
+        "facefusionPython": "FaceFusion Python",
+        "facefusionModel": "FaceFusion 模型",
+        "facefusionProvider": "执行 Provider",
+        "facefusionHint": "本地 FaceFusion 只换脸，保留动作、服装和发型；CPU 较慢，可改用 coreml。",
+        "facefusionTimeout": "FaceFusion 超时（秒）",
+        "characterWorkflow": "角色长视频工作流",
+        "shortWorkflow": "角色短片段工作流",
+        "shortWorkflowHint": "片段不超过上限时使用短片段工作流；留空则沿用角色长视频工作流。",
+        "shortMax": "短片段上限（秒）",
+        "relayWarmup": "Relay 预卷（秒）",
+        "relayWarmupHint": "Relay 首窗口不换人：每段前加同源预卷，生成后自动裁掉。默认 5.17 秒（124 帧）。",
+        "analysisConfig": "视觉分析配置",
+        "analysisConfigPlaceholder": "选择支持图片输入的文本配置",
+        "sceneBaseUrl": "场景参考帧 Base URL",
+        "sceneApiKey": "场景参考图 Key",
+        "scenePrefix": "场景工作流前缀",
+        "candidates": "参考帧候选数",
+        "timeout": "任务超时（秒）",
+        "faceMax": "单脸单次最大秒数",
+        "characterMax": "角色替换单次最大秒数",
+        "relayHint": "长视频使用 h3-recast-relay；24GB 显卡建议单次 10 秒以内，20 秒素材会自动拆成多个重叠片段后合并。短片段使用 h3-recast，上限默认 6 秒。",
+        "overlap": "片段重叠（秒）",
+        "minChunk": "最短片段（秒）",
+        "maxChunks": "最大片段数",
+        "defaultSteps": "默认 Steps",
+        "pollInterval": "轮询间隔（毫秒）",
+        "maxRetries": "自动重试次数",
+        "crossfade": "交叉淡化帧",
+        "ssim": "SSIM 阈值",
+        "colorDelta": "色差阈值",
+        "faceSimilarity": "人脸相似度阈值"
+      },
       "editTitle": "编辑服务配置",
       "addTitle": "添加{type}服务",
       "sub": "推荐先选择模板，系统会自动填入更合理的 `Base URL` 与默认模型。",
@@ -925,13 +976,31 @@
       "clientConfig": "客户端配置",
       "clientConfigSub": "共 {n} 个工具，复制后粘贴到客户端的 MCP 配置中",
       "copyConfig": "复制配置",
-      "security": "token 等同于本机全部操作权限，请勿提交到仓库或分享给他人；服务默认只绑定 127.0.0.1。",
+      "security": "token 等同于本机全部操作权限，请勿提交到仓库或分享给他人；默认只绑定 127.0.0.1。远程暴露需设置 MCP_HOST 与 MCP_ALLOW_REMOTE=1，建议同时启用 MCP_READONLY=1 给只读客户端。",
       "toolsTitle": "可用工具",
       "saved": "MCP 配置已保存",
       "copied": "已复制到剪贴板",
       "copyFailed": "复制失败，请手动选择文本",
       "regenerated": "token 已更新，旧 token 立即失效",
       "badPort": "端口需在 1024-65535 之间"
+    },
+    "dsh": {
+      "title": "DSH 桥接",
+      "desc": "把火宝的文本 AI 交给 DeepSeek Harness 的 LLM/Agent。开关只影响文本调用；图片、视频、配音与 ComfyUI 生成不受影响。",
+      "enabled": "已启用",
+      "disabled": "未启用",
+      "endpoint": "桥接地址",
+      "connected": "插件已连接",
+      "notFound": "未发现插件",
+      "noEndpoint": "未写入桥接描述文件",
+      "version": "插件 {plugin} · DSH {dsh}",
+      "health": "健康状态",
+      "healthy": "正常",
+      "unhealthy": "异常",
+      "error": "桥接异常：{msg}",
+      "hint": "需先安装 dsh-moss-huobao 插件；修改后对后续文本任务生效。",
+      "saved": "DSH 桥接设置已保存",
+      "saveFailed": "DSH 桥接设置保存失败"
     },
     "rules": {
       "title": "流程规则",
@@ -1273,6 +1342,23 @@
       "manualSkip": "跳过并标记问题",
       "manualSkipDone": "已跳过第 {n} 镜并标记问题",
       "manualSkipFailed": "跳过失败，请重试",
+      "autoSkip": "失败自动跳过",
+      "autoSkipHint": "逐镜修补连续失败 2 次后自动跳过并继续下一镜；跳过的镜头保留问题，可在最终提示词下方查看。",
+      "autoSkipSaved": "自动跳过设置已保存",
+      "autoSkipRunning": "流水线运行中，请先暂停再调整自动跳过",
+      "finalPromptIssues": "该分镜有 {n} 个问题",
+      "narrationFormDialogue": "对白驱动",
+      "narrationFormNarration": "旁白驱动",
+      "narrationFormHint": "旁白形态：对白驱动=短剧规则，旁白仅开场/过渡镜；旁白驱动=小说改编规则，任意镜可配改写式旁白，时长随旁白字数。在项目背景设置中切换。",
+      "recalcTiming": "按旁白重算时长",
+      "recalcTimingHint": "以你改写的旁白为准，按 4 字/秒 + 1 秒气口重算时长；超上限按标点拆到相邻镜，并同步描述与负面约束。",
+      "recalcTimingSummary": "旁白 {narration} 字，需 {required} 秒；当前 {current} 秒，建议 {suggested} 秒。",
+      "recalcTimingSplit": "超出单段上限，将拆成 {n} 个相邻镜头（编号自动顺延）。",
+      "recalcTimingSync": "将同步 description 旁白并修正负面约束。",
+      "recalcTimingApply": "应用重算",
+      "recalcTimingNoChange": "该镜时长与旁白已一致，无需重算",
+      "recalcTimingApplied": "重算完成，新增 {n} 个镜头",
+      "recalcTimingFailed": "重算失败，请重试",
       "skippedSummary": "本次拆分完成，{n} 镜被跳过",
       "skippedTag": "跳过",
       "skippedNumbers": "问题镜：第 {numbers} 镜",
@@ -1346,9 +1432,11 @@
       "splitProgress": "分块拆分中：第 {done}/{total} 段 · 已保存 {shots} 个镜头",
       "pipelineStage": {
         "skeleton": "预拆骨架",
+        "intent": "意图与旁白计划",
         "repair": "逐镜修补",
         "sound": "声音设计"
       },
+      "pipelineIntentProgress": "意图与旁白计划：正在裁定 {total} 个分镜",
       "pipelineRepairProgress": "逐镜修补/校验：已通过 {done}/{total} 镜 · 当前第 {current} 镜",
       "pipelineSoundProgress": "声音设计：{units} 个声音单元",
       "splitPause": "暂停（当前块完成后）",
@@ -1385,7 +1473,18 @@
       "batchFailed": "视频提示词批量生成失败",
       "promptGenerated": "分镜 #{n} 视频提示词已生成",
       "splitPanelIssues": "拆分结果 · {n} 个问题镜",
-      "splitPanelRunning": "拆分进行中 {p}%"
+      "splitPanelRunning": "拆分进行中 {p}%",
+      "tags": {
+        "edit": "编辑标签",
+        "transition": "转场",
+        "character": "角色",
+        "empty": "空镜",
+        "dialogue": "对白",
+        "narration": "旁白",
+        "combat": "战斗",
+        "competition": "比拼",
+        "memory": "回忆"
+      }
     },
     "soundPanel": {
       "button": "声音计划",
@@ -1540,7 +1639,8 @@
       "batchFailedConfirm": "其中 {n} 个镜头此前生成失败，本批次会作为新任务重新计费，确定继续？",
       "batchFailedNote": "失败镜头不会自动重试；可单独使用「重试失败」恢复原任务。",
       "selectMissing": "选未生成",
-      "aspectRatio": "画面比例"
+      "aspectRatio": "画面比例",
+      "dbShotNumber": "数据库镜头号（删除后不重排）"
     },
     "frameAssets": {
       "title": "分镜资产",
@@ -4292,6 +4392,81 @@
       "enableFailed": "手机接力启动失败，请重试",
       "notRunning": "请先开启手机接力",
       "portLocked": "运行中不能修改端口，请先关闭手机接力"
+    }
+  },
+  "video": {
+    "title": "视频换人",
+    "subtitle": "保留原视频动作、场景与原声，只替换目标人物",
+    "projects": "视频项目",
+    "create": "新建项目",
+    "searchPlaceholder": "搜索项目",
+    "stats": { "total": "共 {n} 个", "ready": "待生成 {n}", "completed": "已完成 {n}" },
+    "filter": { "all": "全部" },
+    "mode": { "face": "单脸换脸", "character": "角色替换" },
+    "status": { "draft": "草稿", "analyzing": "分析中", "ready": "待生成", "generating": "生成中", "completed": "已完成", "failed": "失败" },
+    "runStatus": {
+      "uploaded": "已上传", "probing": "读取视频", "shot_detection": "检测镜头", "chunking": "生成片段计划",
+      "analyzing": "分析中", "analyzed": "分析完成", "prompt_ready": "提示词就绪", "scene_ref_ready": "待确认参考帧",
+      "pending": "待生成", "queued": "排队中", "submitting": "提交中", "generating": "生成中", "chunk_done": "片段完成",
+      "seam_check": "接缝检查", "shot_done": "镜头完成", "merging": "合并中", "postprocessing": "后处理",
+      "completed": "已完成", "failed": "失败", "cancelled": "已取消", "ready": "待生成", "draft": "草稿"
+    },
+    "empty": {
+      "title": "还没有视频换人项目", "desc": "上传参考视频和人脸，系统会分析镜头、生成提示词并逐片换人。",
+      "filteredTitle": "没有匹配的项目", "filteredDesc": "换个关键词或筛选条件试试。", "action": "新建项目", "reset": "清除筛选",
+      "loadFailed": "视频项目加载失败"
+    },
+    "card": { "updated": "更新于 {time}", "noPrompt": "未填写提示词" },
+    "menu": { "rename": "重命名", "duplicate": "复制项目", "delete": "删除项目", "duplicated": "项目已复制" },
+    "deleteDialog": { "title": "删除视频项目", "message": "删除「{title}」及其素材、片段和运行记录？此操作不可恢复。", "confirm": "删除", "deleted": "项目已删除" },
+    "renameDialog": { "title": "重命名项目" },
+    "createDialog": {
+      "title": "新建视频换人项目", "subtitle": "先选择换人模式，创建后可上传素材并分析。",
+      "titleLabel": "项目名称", "titlePlaceholder": "例如：雨夜街头换人", "modeLabel": "换人模式",
+      "configLabel": "视频换人配置", "configPlaceholder": "选择视频换人配置", "configMissing": "还没有视频换人配置，请先到设置页创建",
+      "routeUsing": "当前会走", "routeNoConfig": "未配置视频换人服务",
+      "modelHelpTitle": "模型说明",
+      "h3FaceSwapDesc": "网关换脸，脸和头发一起替换，长视频按单脸最大秒数拆片段。",
+      "facefusionDesc": "本地只换脸，保留动作、服装和发型；CPU 较慢。",
+      "characterDesc": "角色替换：短片段整体生成，长视频按重叠片段 Relay 后合并。",
+      "submit": "创建项目", "submitting": "创建中…", "titleRequired": "请输入项目名称", "failed": "创建失败"
+    },
+    "route": {
+      "loading": "读取当前配置…",
+      "workflowMissing": "未配置工作流",
+      "faceH3": "{workflow} · 网关换脸",
+      "faceFusion": "FaceFusion · {model} · {provider}",
+      "character": "≤{max} 秒 {short}；更长 {long} · 预卷 {warmup} 秒"
+    },
+    "faceIntro": "替换人脸；H3 会同时替换头发，FaceFusion 保留原发型。身体、服装、背景和原声保持不变。",
+    "characterIntro": "替换人脸、身体和服装，保留动作、场景和原声；需要逐镜确认场景参考帧。",
+    "workbench": {
+      "inputTitle": "输入与素材", "inputSub": "上传源视频和人脸，先做媒体分析，再让 AI 生成最终提示词。",
+      "prompt": "提示词", "promptPlaceholder": "描述要替换谁、目标外观和需要保持的内容", "promptHint": "默认提示词可直接生成；AI 分析是可选的提示词优化。",
+      "sourceVideo": "参考视频", "uploadVideo": "上传参考视频", "replaceVideo": "替换参考视频", "videoHint": "MP4 / MOV / WebM · 最大 256MB",
+      "referenceFaces": "参考人脸", "uploadFace": "上传参考人脸", "faceHint": "PNG / JPG / WebP · 至少 128px · 最多 4 张",
+      "config": "视频换人配置", "configPlaceholder": "选择视频换人配置", "goSettings": "前往设置", "configMissing": "请先在设置中创建 video-swap 配置", "routeUsing": "当前链路",
+      "preflight": "预检", "preflightOk": "预检通过", "preflightFailed": "预检未通过",
+      "analyze": "分析素材", "analyzing": "分析中…", "aiAnalysis": "AI 分析与提示词", "aiAnalyzing": "AI 分析中…",
+      "shots": "镜头与片段", "chunkCount": "{n} 个片段", "noShots": "还没有镜头计划，请先分析素材。",
+      "shot": "镜头 {n}", "chunk": "片段 {n}", "duration": "{s} 秒", "overlap": "重叠 {s}s",
+      "retry": "重试此片段", "retryStarted": "片段已重新排队",
+      "promptTitle": "最终提示词", "promptSub": "保存后冻结到当前运行；重新生成时使用冻结版本。",
+      "savePrompt": "保存提示词", "promptSaved": "提示词已保存", "noPrompt": "请先完成 AI 分析生成提示词",
+      "person": "人物 {n}", "caption": "人物 caption", "globalPrompt": "全局风格", "negativePrompt": "负面词",
+      "shotPrompt": "镜头提示词", "scenePrompt": "场景参考帧提示词", "finalPrompt": "最终生成提示词",
+      "sceneRef": "场景参考帧", "sceneRefHint": "等待 AI 生成参考帧候选", "confirmRef": "确认此帧", "confirmed": "已确认",
+      "referenceNeeded": "请确认所有场景参考帧", "seed": "Seed", "steps": "Steps",
+      "outputTitle": "生成结果", "outputSub": "逐片生成、接缝检查后合并，并回填原声。",
+      "generate": "开始生成", "generating": "生成中…", "cancel": "取消生成", "cancelled": "已取消生成",
+      "chunkProgress": "{done}/{total} 片段", "download": "下载视频",
+      "outputDuration": "{s} 秒", "outputFrames": "{n} 帧", "hasAudio": "有原声", "silent": "静音",
+      "noOutput": "还没有生成结果", "seams": "接缝检查", "noSeams": "暂无接缝", "seam_ok": "通过", "seam_warning": "警告",
+      "colorDelta": "色差", "faceSimilarity": "人脸相似度", "notDetected": "未检测", "retryCount": "重试 {n} 次",
+      "logs": "日志", "noLogs": "暂无日志",
+      "analysisStarted": "媒体分析已开始", "aiStarted": "AI 分析已开始", "generationStarted": "生成任务已排队",
+      "uploaded": "上传成功", "videoFormat": "请选择 MP4、MOV、WebM 或 M4V 视频", "videoTooLarge": "视频不能超过 256MB",
+      "faceFormat": "请选择 PNG、JPG 或 WebP 图片", "faceTooLarge": "人脸图片不能超过 20MB"
     }
   }
 }

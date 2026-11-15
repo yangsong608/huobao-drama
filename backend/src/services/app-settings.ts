@@ -75,8 +75,27 @@ export function setToursSeen(ids: unknown): string[] {
   return clean
 }
 
-const DUBBING_ENABLED_KEY = 'dubbing.enabled'
+const DSH_BRIDGE_ENABLED_KEY = 'dsh.bridge.enabled'
 
+/** 文本 AI 是否交给 DSH 桥；默认关闭，显式设置后长期生效。 */
+export function getDshBridgeEnabled(): boolean {
+  const row = db.select().from(schema.appSettings)
+    .where(eq(schema.appSettings.key, DSH_BRIDGE_ENABLED_KEY))
+    .get()
+  return row?.value === '1' || row?.value === 'true'
+}
+
+/** 设置页「DSH 桥接」开关；环境变量仍可覆盖（见 services/dsh-bridge.ts）。 */
+export function setDshBridgeEnabled(enabled: boolean): boolean {
+  const value = enabled ? '1' : '0'
+  db.insert(schema.appSettings)
+    .values({ key: DSH_BRIDGE_ENABLED_KEY, value, updatedAt: now() })
+    .onConflictDoUpdate({ target: schema.appSettings.key, set: { value, updatedAt: now() } })
+    .run()
+  return enabled
+}
+
+const DUBBING_ENABLED_KEY = 'dubbing.enabled'
 /**
  * 配音功能开关：
  * - 显式设置过就按设置值走；

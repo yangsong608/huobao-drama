@@ -408,6 +408,7 @@ export async function compileCuePrompts(
     let parsed: Record<number, { prompt: string; negativePrompt: string }> = {}
     try {
       const response = await callTextJson<{ cues?: unknown[] }>({
+        role: 'sound_designer',
         system: [
           '你是短剧声音设计师，为 Stable Audio Open 编写英文提示词。',
           '只输出 JSON，不要解释；所有 prompt 和 negativePrompt 必须是英文。',

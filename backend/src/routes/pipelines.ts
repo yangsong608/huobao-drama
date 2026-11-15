@@ -20,6 +20,7 @@ import {
   pauseStoryboardPipelineJob,
   resumeStoryboardPipelineJob,
   rerunStoryboardPipelineSound,
+  setStoryboardPipelineAutoSkip,
   skipStoryboardPipelineShot,
 } from '../services/storyboard-pipeline.js'
 
@@ -153,6 +154,20 @@ app.post('/runs/:id/resume', async (c) => {
 app.post('/runs/:id/continue', async (c) => {
   try {
     return success(c, { job: await resumeStoryboardPipelineJob(Number(c.req.param('id'))) })
+  } catch (error) {
+    return badRequest(c, errorMessage(error))
+  }
+})
+
+app.post('/runs/:id/auto-skip', async (c) => {
+  const body = await c.req.json().catch(() => ({} as Record<string, unknown>))
+  try {
+    return success(c, {
+      job: setStoryboardPipelineAutoSkip(
+        Number(c.req.param('id')),
+        Number(body.attempts || 0),
+      ),
+    })
   } catch (error) {
     return badRequest(c, errorMessage(error))
   }

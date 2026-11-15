@@ -98,8 +98,11 @@ data/       — 生成资源文件与 SQLite 数据库 / Generated assets and th
 - ✅ 小说改编短剧：按目标字数（600–5000，非硬上限）拆集、故事圣经注入、导入预览与增量同步<br>
   ✅ Novel-to-drama: target-word episode splitting (600–5000, not a hard cap), story-bible injection, import preview and incremental sync
 
-- ✅ MCP 61 个工具，覆盖小说的查询/写作/生成/导入同步，以及 `import_novel_to_drama` 自动化改编<br>
-  ✅ 61 MCP tools covering novel query/writing/generation/import-sync, plus `import_novel_to_drama` for automated adaptation
+- ✅ MCP 111 个工具，覆盖短剧项目/剧集/分镜、资产、图像视频任务、视频换人、链式流水线、批量视频、配音、小说查询/写作/生成/导入同步<br>
+  ✅ 112 MCP tools covering drama projects/episodes/storyboards, assets, image/video tasks, video swap, chain pipelines, video batches, dubbing, and novel query/writing/generation/import-sync
+
+> MCP 默认只监听 `127.0.0.1`，使用 Bearer token。未封装的能力可通过 `list_api_endpoints` + `api_request`（JSON，支持 GET/POST/PUT/PATCH/DELETE）调用；文件上传用 `api_upload`，媒体读取用 `api_download`。<br>
+> MCP listens on `127.0.0.1` with a bearer token by default. Unwrapped capabilities are available through `list_api_endpoints` + `api_request` (JSON, GET/POST/PUT/PATCH/DELETE); use `api_upload` for multipart files and `api_download` for media.
 
 ### 🎭 角色管理 / Character Management
 
@@ -206,6 +209,12 @@ No config files — everything is set via environment variables (all have defaul
 |---|---|---|
 | `SQLITE_PATH` |`<仓库根>/data/huobao.sqlite3`<br>`<repo>/data/huobao.sqlite3`|SQLite 数据库文件位置<br>SQLite database file location|
 | `PORT` | `5679` |后端服务端口<br>Backend service port|
+| `HOST` | `127.0.0.1` |监听地址；服务器/Docker 需显式设为 `0.0.0.0`<br>Listen address; set `0.0.0.0` explicitly for servers/Docker|
+| `HUOBAO_API_USER` / `HUOBAO_API_PASSWORD` | — |服务器主 API Basic Auth；两项必须同时设置<br>Basic Auth for the main API; set both together|
+| `HUOBAO_API_TOKEN` | — |服务器主 API Bearer Token（`Authorization: Bearer …` 或 `X-Api-Token`）<br>Bearer token for the main API|
+| `MCP_HOST` | `127.0.0.1` |MCP 监听地址；默认仅回环<br>MCP listen address; loopback by default|
+| `MCP_ALLOW_REMOTE` | `0` |设为 `1` 才允许 `MCP_HOST` 绑定非回环地址<br>Set `1` to allow a non-loopback `MCP_HOST`|
+| `MCP_READONLY` | `0` |设为 `1` 仅允许只读工具，拒绝写操作、`api_request`、`api_upload`<br>Set `1` to allow read-only tools only|
 | `STORAGE_PATH` |`<仓库根>/data/static`<br>`<repo>/data/static`|生成文件存储目录<br>Generated-file storage directory|
 | `HUOBAO_DATA_DIR` | — |桌面版由 Electron 主进程注入（userData 数据根）<br>Injected by the Electron main process (userData data root)|
 | `WORKSPACE_PATH` | `backend/workspace` |Agent 技能/提示词目录（桌面版指向 userData 可写副本）<br>Agent skills/prompts directory (desktop: writable copy under userData)|
@@ -578,10 +587,15 @@ docker pull huobao/huobao-drama:4.0.6
 docker run -d \
   --name huobao-drama \
   -p 5679:5679 \
+  -e HUOBAO_API_USER=admin \
+  -e HUOBAO_API_PASSWORD='change-me' \
   -v huobao-data:/app/data \
   --restart unless-stopped \
   huobao/huobao-drama:4.0.6
 ```
+
+> **安全提示**：服务器/Docker 会监听 `0.0.0.0`。请务必设置 `HUOBAO_API_USER` + `HUOBAO_API_PASSWORD`（浏览器 Basic Auth）或 `HUOBAO_API_TOKEN`（脚本 Bearer），并在前面加 HTTPS 反向代理；未配置鉴权时启动日志会告警。
+> **Security note**: server/Docker listens on `0.0.0.0`. Always set `HUOBAO_API_USER` + `HUOBAO_API_PASSWORD` (browser Basic Auth) or `HUOBAO_API_TOKEN` (bearer for scripts), and put HTTPS in front. Startup logs warn when auth is missing.
 
 **方式二：docker compose（源码构建 + Watchtower 应用内更新）**：根目录提供一体化 `Dockerfile`（前端 generate + 后端依赖/运行时三阶段，后端与服务器部署一致走 tsx）与 `docker-compose.yml`（应用 + Watchtower）：<br>
 **Option B — docker compose (source build + Watchtower in-app updates):** the repo root provides an all-in-one `Dockerfile` (three stages: frontend generate + backend dependencies + runtime; the backend runs via tsx just like server deployment) and `docker-compose.yml` (app + Watchtower):

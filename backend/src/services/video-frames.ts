@@ -48,7 +48,11 @@ function probeVideo(file: string): Promise<VideoMeta> {
     ffmpeg.ffprobe(file, (err, meta) => {
       if (err) return reject(new Error(`读取视频信息失败：${err.message}`))
       const stream = (meta?.streams || []).find(item => item.codec_type === 'video')
-      const duration = Number(meta?.format?.duration)
+      // 容器时长含音频尾巴（常比视频流长 0.06～0.1s），用它定位末帧会越过
+      // 最后一帧导致空输出；优先取视频流自身时长，缺失时才回退容器时长。
+      const streamDuration = Number(stream?.duration)
+      const formatDuration = Number(meta?.format?.duration)
+      const duration = Number.isFinite(streamDuration) && streamDuration > 0 ? streamDuration : formatDuration
       if (!stream || !stream.width || !stream.height || !Number.isFinite(duration) || duration <= 0) {
         return reject(new Error('无法读取视频宽高或时长'))
       }

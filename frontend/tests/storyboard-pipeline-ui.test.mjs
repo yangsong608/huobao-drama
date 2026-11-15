@@ -228,7 +228,7 @@ test('步骤追踪使用本地化步骤名、状态、范围与定位', () => {
   assert.doesNotMatch(episode, /\{\{ step\.step_key \}\}/)
   assert.doesNotMatch(episode, /\{\{ step\.status \}\}/)
   assert.match(episode, /Number\(chunk\[1\]\) \+ 1/)
-  const steps = ['prepare', 'skeleton-split', 'skeleton-gate', 'shot-repair', 'shot-validate', 'sound-design', 'sound-validate', 'finalize']
+  const steps = ['prepare', 'skeleton-split', 'skeleton-gate', 'shot-intent-plan', 'shot-repair', 'shot-validate', 'sound-design', 'sound-validate', 'finalize']
   const statuses = ['pending', 'running', 'passed', 'failed', 'skipped', 'manual', 'done', 'interrupted']
   const scopes = ['episode', 'chunk', 'shot']
   for (const [lang, bundle] of locales) {
@@ -238,6 +238,47 @@ test('步骤追踪使用本地化步骤名、状态、范围与定位', () => {
     for (const key of scopes) assert.equal(typeof labels.scope?.[key], 'string', `${lang} 缺少 traceLabels.scope.${key}`)
     for (const key of ['itemEpisode', 'itemChunk', 'itemShot', 'empty']) {
       assert.equal(typeof labels[key], 'string', `${lang} 缺少 traceLabels.${key}`)
+    }
+  }
+})
+
+test('拆分面板支持失败自动跳过，问题显示在最终提示词下方', () => {
+  assert.match(episode, /class="video-auto-skip"/)
+  assert.match(episode, /v-model="autoSkipEnabled"/)
+  assert.match(episode, /@change="persistAutoSkip"/)
+  assert.match(episode, /parameters: \{ autoSkipAfterAttempts: autoSkipEnabled\.value \? autoSkipAttempts\.value : 0 \}/)
+  assert.match(episode, /pipelineChainAPI\.setAutoSkip\(job\.id, attempts\)/)
+  assert.match(api, /setAutoSkip: \(runId: number, attempts: number\)/)
+  assert.match(episode, /const selectedPipelineIssues = computed\(\(\) => selectedPipelineShot\.value\?\.issues \|\| \[\]\)/)
+  assert.match(episode, /class="video-final-prompt-issues"/)
+  assert.match(episode, /t\('episode\.sb\.finalPromptIssues', \{ n: selectedPipelineIssues\.length \}\)/)
+  for (const [lang, bundle] of locales) {
+    for (const key of ['autoSkip', 'autoSkipHint', 'autoSkipSaved', 'autoSkipRunning', 'finalPromptIssues']) {
+      assert.equal(typeof bundle.episode?.sb?.[key], 'string', `${lang} 缺少 episode.sb.${key}`)
+    }
+  }
+})
+
+test('旁白形态双轨制：项目设置切换形态，拆分工具栏显示形态，最终提示词下方可按旁白重算时长', () => {
+  const detail = readFileSync(new URL('../app/views/drama/detail.vue', import.meta.url), 'utf8')
+  assert.match(detail, /v-model="narrationFormDraft"/)
+  assert.match(detail, /narration_form: narrationFormDraft\.value/)
+  assert.match(detail, /t\('detail\.narrationForm\.field'\)/)
+  assert.match(episode, /dramaNarrationFormLabel/)
+  assert.match(episode, /t\('episode\.sb\.narrationFormHint'\)/)
+  assert.match(episode, /class="video-recalc-timing"/)
+  assert.match(episode, /@click="previewRecalcTiming"/)
+  assert.match(episode, /@click="applyRecalcTiming"/)
+  assert.match(episode, /storyboardAPI\.recalcTimingPreview\(sb\.id\)/)
+  assert.match(episode, /storyboardAPI\.recalcTimingApply\(sb\.id\)/)
+  assert.match(api, /recalcTimingPreview: \(id: number\)/)
+  assert.match(api, /recalcTimingApply: \(id: number\)/)
+  for (const [lang, bundle] of locales) {
+    for (const key of ['field', 'dialogue', 'narration', 'hint']) {
+      assert.equal(typeof bundle.detail?.narrationForm?.[key], 'string', `${lang} 缺少 detail.narrationForm.${key}`)
+    }
+    for (const key of ['narrationFormDialogue', 'narrationFormNarration', 'narrationFormHint', 'recalcTiming', 'recalcTimingHint', 'recalcTimingSummary', 'recalcTimingSplit', 'recalcTimingSync', 'recalcTimingApply', 'recalcTimingNoChange', 'recalcTimingApplied', 'recalcTimingFailed']) {
+      assert.equal(typeof bundle.episode?.sb?.[key], 'string', `${lang} 缺少 episode.sb.${key}`)
     }
   }
 })

@@ -1,0 +1,19 @@
+{
+  "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "qwen_image_edit_2509_fp8_e4m3fn.safetensors", "weight_dtype": "default"}},
+  "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors", "type": "qwen_image", "device": "default"}},
+  "3": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_vae.safetensors"}},
+  "4": {"class_type": "LoadImage", "inputs": {"image": "", "upload": "image"}},
+  "5": {"class_type": "LoadImage", "inputs": {"image": "", "upload": "image"}},
+  "6": {"class_type": "LoadImage", "inputs": {"image": "", "upload": "image"}},
+  "7": {"class_type": "LoadImage", "inputs": {"image": "", "upload": "image"}},
+  "8": {"class_type": "QwenEditConfigPreparer", "inputs": {"image": ["4", 0], "to_ref": true, "ref_main_image": true, "ref_longest_edge": 1024, "ref_crop": "center", "ref_upscale": "lanczos", "to_vl": true, "vl_resize": true, "vl_target_size": 384, "vl_crop": "center", "vl_upscale": "bicubic"}},
+  "9": {"class_type": "QwenEditConfigPreparer", "inputs": {"image": ["5", 0], "configs": ["8", 0], "to_ref": true, "ref_main_image": false, "ref_longest_edge": 1024, "ref_crop": "center", "ref_upscale": "lanczos", "to_vl": true, "vl_resize": true, "vl_target_size": 384, "vl_crop": "center", "vl_upscale": "bicubic"}},
+  "10": {"class_type": "QwenEditConfigPreparer", "inputs": {"image": ["6", 0], "configs": ["9", 0], "to_ref": true, "ref_main_image": false, "ref_longest_edge": 1024, "ref_crop": "center", "ref_upscale": "lanczos", "to_vl": true, "vl_resize": true, "vl_target_size": 384, "vl_crop": "center", "vl_upscale": "bicubic"}},
+  "11": {"class_type": "QwenEditConfigPreparer", "inputs": {"image": ["7", 0], "configs": ["10", 0], "to_ref": true, "ref_main_image": false, "ref_longest_edge": 1024, "ref_crop": "center", "ref_upscale": "lanczos", "to_vl": true, "vl_resize": true, "vl_target_size": 384, "vl_crop": "center", "vl_upscale": "bicubic"}},
+  "12": {"class_type": "TextEncodeQwenImageEditPlusCustom_lrzjason", "inputs": {"clip": ["2", 0], "vae": ["3", 0], "configs": ["11", 0], "prompt": "", "return_full_refs_cond": true}},
+  "13": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["12", 0]}},
+  "14": {"class_type": "EmptyLatentImage", "inputs": {"width": 1024, "height": 576, "batch_size": 1}},
+  "15": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["12", 0], "negative": ["13", 0], "latent_image": ["14", 0], "seed": 20261114, "steps": 8, "cfg": 1.0, "sampler_name": "euler", "scheduler": "beta", "denoise": 1.0}},
+  "16": {"class_type": "VAEDecode", "inputs": {"samples": ["15", 0], "vae": ["3", 0]}},
+  "17": {"class_type": "SaveImage", "inputs": {"images": ["16", 0], "filename_prefix": "h3-scene-ref"}}
+}

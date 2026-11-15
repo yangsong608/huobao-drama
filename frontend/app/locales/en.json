@@ -52,7 +52,8 @@
       "image": "Image",
       "video": "Video",
       "audio": "Audio",
-      "audioGen": "Sound generation"
+      "audioGen": "Sound generation",
+      "videoSwap": "Video Face Swap"
     },
     "edit": "Edit"
   },
@@ -60,6 +61,7 @@
     "nav": {
       "projects": "Dramas",
       "novels": "Novels",
+      "videos": "Videos",
       "settings": "Settings"
     },
     "banner": {
@@ -326,6 +328,12 @@
       "saveFailed": "Could not switch storage folder",
       "pickFailed": "Could not choose folder"
     },
+    "narrationForm": {
+      "field": "Narration form",
+      "dialogue": "Dialogue-driven drama (VO only on opening/transition shots, ≤24 chars)",
+      "narration": "Narration-driven novel adaptation (rewritten VO on any shot, duration follows length)",
+      "hint": "Affects future splits and repairs only; re-split after switching. For narration form, bind a narrator voice in Narrator Voice."
+    },
     "background": {
       "label": "Background",
       "visualLabel": "Visual background",
@@ -590,7 +598,8 @@
         "image": "Static image generation: characters, scenes and shots",
         "video": "Direct video generation, Seedance 2.0 by default",
         "audio": "Dialogue and narration speech synthesis via a local Qwen3-TTS service",
-        "audioGen": "Local ComfyUI audio generation for ambience, SFX, crowd sound and BGM"
+        "audioGen": "Local ComfyUI audio generation for ambience, SFX, crowd sound and BGM",
+        "videoSwap": "Local face swap plus Recast and Relay long-video character replacement"
       }
     },
     "styles": {
@@ -680,6 +689,7 @@
           "prepare": "Prepare context",
           "skeleton-split": "Skeleton split",
           "skeleton-gate": "Skeleton coverage gate",
+          "shot-intent-plan": "Intent & narration plan",
           "shot-repair": "Shot repair",
           "shot-validate": "Shot validation",
           "sound-design": "Sound design",
@@ -766,6 +776,47 @@
       "deleteConfirm": "Delete knowledge \"{name}\"?"
     },
     "cfg": {
+      "videoSwap": {
+        "title": "Video swap gateway",
+        "hint": "Only named gateway workflows are registered here. Workflow JSON stays in the gateway admin.",
+        "faceWorkflow": "Single-face workflow",
+        "faceEngine": "Face engine",
+        "faceEngineH3": "H3 FaceSwap (gateway)",
+        "faceEngineH3Hint": "Gateway swap replaces face and hair; long videos are split by the single-face limit and merged.",
+        "faceEngineFacefusion": "FaceFusion (local)",
+        "facefusionDir": "FaceFusion directory",
+        "facefusionPython": "FaceFusion Python",
+        "facefusionModel": "FaceFusion model",
+        "facefusionProvider": "Execution provider",
+        "facefusionHint": "Local FaceFusion only swaps the face and keeps motion, clothing and hair. CPU is slower; coreml may be used.",
+        "facefusionTimeout": "FaceFusion timeout (seconds)",
+        "characterWorkflow": "Character long-video workflow",
+        "shortWorkflow": "Character short-clip workflow",
+        "shortWorkflowHint": "Used when a chunk is within the limit; leave empty to always use the long-video workflow.",
+        "shortMax": "Short-clip limit (seconds)",
+        "relayWarmup": "Relay warm-up (seconds)",
+        "relayWarmupHint": "Relay does not swap the first window: prepend source warm-up and trim it after generation. Default 5.17 seconds (124 frames).",
+        "analysisConfig": "Vision analysis config",
+        "analysisConfigPlaceholder": "Select an image-capable text config",
+        "sceneBaseUrl": "Scene reference Base URL",
+        "sceneApiKey": "Scene reference key",
+        "scenePrefix": "Scene workflow prefix",
+        "candidates": "Reference candidates",
+        "timeout": "Job timeout (seconds)",
+        "faceMax": "Single-face max seconds",
+        "characterMax": "Character swap max seconds",
+        "relayHint": "Use h3-recast-relay for long videos; on a 24GB GPU keep each chunk at 10 seconds or less. A 20-second source is split into overlapping chunks and merged. Use h3-recast for short clips (6-second default).",
+        "overlap": "Chunk overlap (seconds)",
+        "minChunk": "Minimum chunk (seconds)",
+        "maxChunks": "Max chunks",
+        "defaultSteps": "Default steps",
+        "pollInterval": "Poll interval (ms)",
+        "maxRetries": "Auto retries",
+        "crossfade": "Crossfade frames",
+        "ssim": "SSIM threshold",
+        "colorDelta": "Color delta threshold",
+        "faceSimilarity": "Face similarity threshold"
+      },
       "editTitle": "Edit Service Config",
       "addTitle": "Add {type} Service",
       "sub": "Pick a template first — a sensible `Base URL` and default models will be filled in automatically.",
@@ -925,13 +976,31 @@
       "clientConfig": "Client configuration",
       "clientConfigSub": "{n} tools available — copy and paste into your MCP client config",
       "copyConfig": "Copy config",
-      "security": "The token grants full local control. Never commit or share it. The server binds to 127.0.0.1 only.",
+      "security": "The token grants full local control. Never commit or share it. The server binds to 127.0.0.1 by default. Remote exposure requires MCP_HOST and MCP_ALLOW_REMOTE=1; enable MCP_READONLY=1 for read-only clients.",
       "toolsTitle": "Available tools",
       "saved": "MCP settings saved",
       "copied": "Copied to clipboard",
       "copyFailed": "Copy failed, please select the text manually",
       "regenerated": "Token updated; the old token is now invalid",
       "badPort": "Port must be between 1024 and 65535"
+    },
+    "dsh": {
+      "title": "DSH Bridge",
+      "desc": "Route Huobao text AI through DeepSeek Harness LLM/Agent. The switch affects text calls only; image, video, voice, and ComfyUI generation are unchanged.",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "endpoint": "Bridge endpoint",
+      "connected": "Plugin connected",
+      "notFound": "Plugin not found",
+      "noEndpoint": "Bridge descriptor not found",
+      "version": "Plugin {plugin} · DSH {dsh}",
+      "health": "Health",
+      "healthy": "Healthy",
+      "unhealthy": "Unhealthy",
+      "error": "Bridge error: {msg}",
+      "hint": "Install dsh-moss-huobao first; changes apply to subsequent text tasks.",
+      "saved": "DSH bridge setting saved",
+      "saveFailed": "Failed to save DSH bridge setting"
     },
     "rules": {
       "title": "Pipeline rules",
@@ -1273,6 +1342,23 @@
       "manualSkip": "Skip and mark issue",
       "manualSkipDone": "Skipped shot {n} and marked the issue",
       "manualSkipFailed": "Failed to skip, please retry",
+      "autoSkip": "Auto-skip failures",
+      "autoSkipHint": "After 2 consecutive repair failures, skip the shot and continue with the next one. Skipped shots keep their issues, shown below the final prompt.",
+      "autoSkipSaved": "Auto-skip setting saved",
+      "autoSkipRunning": "Pipeline is running; pause it before changing auto-skip",
+      "finalPromptIssues": "This shot has {n} issue(s)",
+      "narrationFormDialogue": "Dialogue-driven",
+      "narrationFormNarration": "Narration-driven",
+      "narrationFormHint": "Narration form: dialogue-driven = short-drama rules (VO only on opening/transition shots); narration-driven = novel-adaptation rules (rewritten VO on any shot, duration follows VO length). Switch in project background settings.",
+      "recalcTiming": "Recalc timing from narration",
+      "recalcTimingHint": "Uses your edited narration as-is: 4 chars/sec + 1s breath; over-cap text splits at punctuation into adjacent shots; syncs description and negative constraints.",
+      "recalcTimingSummary": "Narration {narration} chars needs {required}s; current {current}s, suggested {suggested}s.",
+      "recalcTimingSplit": "Over the per-shot cap; will split into {n} adjacent shots (numbers shift automatically).",
+      "recalcTimingSync": "Will sync description narration and fix negative constraints.",
+      "recalcTimingApply": "Apply recalc",
+      "recalcTimingNoChange": "Timing already matches narration; nothing to recalc",
+      "recalcTimingApplied": "Recalc done, {n} new shot(s) inserted",
+      "recalcTimingFailed": "Recalc failed, please retry",
       "skippedSummary": "Breakdown complete with {n} skipped shot(s)",
       "skippedTag": "Skipped",
       "skippedNumbers": "Issue shots: {numbers}",
@@ -1346,9 +1432,11 @@
       "splitProgress": "Chunked split: chunk {done}/{total} · {shots} shots saved",
       "pipelineStage": {
         "skeleton": "Skeleton",
+        "intent": "Intent & narration",
         "repair": "Per-shot repair",
         "sound": "Sound design"
       },
+      "pipelineIntentProgress": "Intent & narration: classifying {total} shots",
       "pipelineRepairProgress": "Repair/validate: {done}/{total} passed · current shot {current}",
       "pipelineSoundProgress": "Sound design: {units} sound units",
       "splitPause": "Pause after current chunk",
@@ -1385,7 +1473,18 @@
       "batchFailed": "Batch video prompt generation failed",
       "promptGenerated": "Video prompt for shot #{n} generated",
       "splitPanelIssues": "Split results · {n} issue(s)",
-      "splitPanelRunning": "Splitting {p}%"
+      "splitPanelRunning": "Splitting {p}%",
+      "tags": {
+        "edit": "Edit tags",
+        "transition": "Transition",
+        "character": "Character",
+        "empty": "Empty shot",
+        "dialogue": "Dialogue",
+        "narration": "Narration",
+        "combat": "Combat",
+        "competition": "Competition",
+        "memory": "Flashback"
+      }
     },
     "soundPanel": {
       "button": "Sound plan",
@@ -1540,7 +1639,8 @@
       "batchFailedConfirm": "{n} shot(s) failed previously. This batch submits them as new billable tasks. Continue?",
       "batchFailedNote": "Failed shots are not retried automatically; use \"Retry failed\" to recover the original tasks.",
       "selectMissing": "Select without video",
-      "aspectRatio": "Aspect Ratio"
+      "aspectRatio": "Aspect Ratio",
+      "dbShotNumber": "Database shot number (not renumbered after deletion)"
     },
     "frameAssets": {
       "title": "Storyboard assets",
@@ -4292,6 +4392,81 @@
       "enableFailed": "Phone relay failed to start. Try again.",
       "notRunning": "Turn on phone relay first.",
       "portLocked": "The port cannot change while running. Turn off phone relay first."
+    }
+  },
+  "video": {
+    "title": "Video Face Swap",
+    "subtitle": "Keep the original motion, scene and audio while replacing the target person",
+    "projects": "Video Projects",
+    "create": "New Project",
+    "searchPlaceholder": "Search projects",
+    "stats": { "total": "{n} total", "ready": "{n} ready", "completed": "{n} completed" },
+    "filter": { "all": "All" },
+    "mode": { "face": "Face swap", "character": "Character swap" },
+    "status": { "draft": "Draft", "analyzing": "Analyzing", "ready": "Ready", "generating": "Generating", "completed": "Completed", "failed": "Failed" },
+    "runStatus": {
+      "uploaded": "Uploaded", "probing": "Probing", "shot_detection": "Detecting shots", "chunking": "Planning chunks",
+      "analyzing": "Analyzing", "analyzed": "Analyzed", "prompt_ready": "Prompt ready", "scene_ref_ready": "Confirm scene refs",
+      "pending": "Pending", "queued": "Queued", "submitting": "Submitting", "generating": "Generating", "chunk_done": "Chunk done",
+      "seam_check": "Seam check", "shot_done": "Shot done", "merging": "Merging", "postprocessing": "Postprocessing",
+      "completed": "Completed", "failed": "Failed", "cancelled": "Cancelled", "ready": "Ready", "draft": "Draft"
+    },
+    "empty": {
+      "title": "No video swap projects yet", "desc": "Upload a reference video and faces, then analyze shots and generate prompts.",
+      "filteredTitle": "No matching projects", "filteredDesc": "Try another keyword or filter.", "action": "New Project", "reset": "Clear filters",
+      "loadFailed": "Failed to load video projects"
+    },
+    "card": { "updated": "Updated {time}", "noPrompt": "No prompt yet" },
+    "menu": { "rename": "Rename", "duplicate": "Duplicate", "delete": "Delete", "duplicated": "Project duplicated" },
+    "deleteDialog": { "title": "Delete video project", "message": "Delete “{title}” with its media, chunks and runs? This cannot be undone.", "confirm": "Delete", "deleted": "Project deleted" },
+    "renameDialog": { "title": "Rename project" },
+    "createDialog": {
+      "title": "New Video Swap Project", "subtitle": "Choose a mode first; media and analysis come next.",
+      "titleLabel": "Project name", "titlePlaceholder": "e.g. Rainy street swap", "modeLabel": "Swap mode",
+      "configLabel": "Video swap config", "configPlaceholder": "Select video swap config", "configMissing": "No video-swap config yet. Create one in Settings.",
+      "routeUsing": "Will use", "routeNoConfig": "No video-swap service configured",
+      "modelHelpTitle": "Model guide",
+      "h3FaceSwapDesc": "Gateway swap replaces face and hair; long videos are split by the single-face limit.",
+      "facefusionDesc": "Local face-only swap; keeps motion, clothing and hair. CPU is slower.",
+      "characterDesc": "Character swap: short clips generate whole; long videos use overlapping Relay chunks.",
+      "submit": "Create", "submitting": "Creating…", "titleRequired": "Enter a project name", "failed": "Create failed"
+    },
+    "route": {
+      "loading": "Reading current config…",
+      "workflowMissing": "No workflow configured",
+      "faceH3": "{workflow} · gateway face swap",
+      "faceFusion": "FaceFusion · {model} · {provider}",
+      "character": "≤{max}s {short}; longer {long} · {warmup}s warm-up"
+    },
+    "faceIntro": "Swap the face; H3 also replaces hair while FaceFusion keeps it. Body, clothing, background and audio stay unchanged.",
+    "characterIntro": "Replace face, body and clothing; keep motion, scene and audio. Confirm a scene reference per shot.",
+    "workbench": {
+      "inputTitle": "Input & Media", "inputSub": "Upload source video and faces, analyze media, then let AI write the final prompt.",
+      "prompt": "Prompt", "promptPlaceholder": "Describe who to replace, the target look and what must be preserved", "promptHint": "The default prompt can generate directly; AI analysis is an optional prompt refinement.",
+      "sourceVideo": "Source video", "uploadVideo": "Upload video", "replaceVideo": "Replace video", "videoHint": "MP4 / MOV / WebM · max 256MB",
+      "referenceFaces": "Reference faces", "uploadFace": "Upload face", "faceHint": "PNG / JPG / WebP · at least 128px · up to 4",
+      "config": "Video swap config", "configPlaceholder": "Select config", "goSettings": "Settings", "configMissing": "Create a video-swap config in Settings first", "routeUsing": "Current route",
+      "preflight": "Preflight", "preflightOk": "Preflight passed", "preflightFailed": "Preflight failed",
+      "analyze": "Analyze media", "analyzing": "Analyzing…", "aiAnalysis": "AI analysis & prompt", "aiAnalyzing": "AI analyzing…",
+      "shots": "Shots & chunks", "chunkCount": "{n} chunks", "noShots": "No shot plan yet. Analyze media first.",
+      "shot": "Shot {n}", "chunk": "Chunk {n}", "duration": "{s}s", "overlap": "Overlap {s}s",
+      "retry": "Retry chunk", "retryStarted": "Chunk queued again",
+      "promptTitle": "Final prompt", "promptSub": "Saving freezes this prompt to the run; regeneration uses the frozen version.",
+      "savePrompt": "Save prompt", "promptSaved": "Prompt saved", "noPrompt": "Run AI analysis to generate prompts",
+      "person": "Person {n}", "caption": "Caption", "globalPrompt": "Global style", "negativePrompt": "Negative prompt",
+      "shotPrompt": "Shot prompt", "scenePrompt": "Scene reference prompt", "finalPrompt": "Final generation prompt",
+      "sceneRef": "Scene reference", "sceneRefHint": "Waiting for AI candidates", "confirmRef": "Confirm", "confirmed": "Confirmed",
+      "referenceNeeded": "Confirm every scene reference first", "seed": "Seed", "steps": "Steps",
+      "outputTitle": "Output", "outputSub": "Chunks are generated, seam-checked and merged; original audio is restored.",
+      "generate": "Generate", "generating": "Generating…", "cancel": "Cancel", "cancelled": "Generation cancelled",
+      "chunkProgress": "{done}/{total} chunks", "download": "Download",
+      "outputDuration": "{s}s", "outputFrames": "{n} frames", "hasAudio": "Original audio", "silent": "Silent",
+      "noOutput": "No output yet", "seams": "Seam checks", "noSeams": "No seams yet", "seam_ok": "Passed", "seam_warning": "Warning",
+      "colorDelta": "Color delta", "faceSimilarity": "Face similarity", "notDetected": "Not detected", "retryCount": "Retries {n}",
+      "logs": "Logs", "noLogs": "No logs",
+      "analysisStarted": "Media analysis started", "aiStarted": "AI analysis started", "generationStarted": "Generation queued",
+      "uploaded": "Uploaded", "videoFormat": "Choose MP4, MOV, WebM or M4V", "videoTooLarge": "Video must be under 256MB",
+      "faceFormat": "Choose PNG, JPG or WebP", "faceTooLarge": "Face image must be under 20MB"
     }
   }
 }

@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>外部研究采集与候选审核</title>
+<style>html,body{margin:0;padding:0;background:#f7f8fa;}</style>
+</head>
+<body>
+<div id="kresearch-flow-viz">
+  <style>
+    #kresearch-flow-viz {
+      --paper: #f5f5f5;
+      --ink: #2d3142;
+      --muted: #4f5d75;
+      --soft: #5a6580;
+      --rule: rgba(45, 49, 66, 0.12);
+      --accent: #bf4520;
+      --sans: 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', 'Geist', system-ui, sans-serif;
+      --mono: 'SF Mono', 'Geist Mono', Menlo, ui-monospace, monospace;
+      --serif: 'Songti SC', 'Noto Serif SC', 'Instrument Serif', Georgia, serif;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      padding: 24px 20px 18px;
+      line-height: 1.4;
+    }
+    #kresearch-flow-viz *, #kresearch-flow-viz *::before, #kresearch-flow-viz *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    #kresearch-flow-viz .frame { max-width: 1360px; margin: 0 auto; min-width: 0; }
+    #kresearch-flow-viz .eyebrow {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    #kresearch-flow-viz h1 {
+      font-family: var(--serif);
+      font-size: clamp(24px, 2.4vw + 12px, 32px);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      margin-bottom: 20px;
+    }
+    #kresearch-flow-viz .diagram-container { width: 100%; overflow-x: auto; }
+    #kresearch-flow-viz svg { width: 100%; min-width: 1280px; display: block; }
+    #kresearch-flow-viz .n-name { font-family: var(--sans); font-size: 12px; font-weight: 600; fill: #2d3142; }
+    #kresearch-flow-viz .n-sub { font-family: var(--mono); font-size: 9px; fill: #5a6580; }
+    #kresearch-flow-viz .al-cn { font-family: var(--sans); font-size: 12px; font-weight: 500; fill: #4f5d75; }
+    #kresearch-flow-viz .callout { font-family: var(--serif); font-size: 12px; font-style: italic; fill: #4f5d75; }
+    #kresearch-flow-viz .legend-cn { font-family: var(--sans); font-size: 12px; font-weight: 500; fill: #4f5d75; }
+    #kresearch-flow-viz .note {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--rule);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    #kresearch-flow-viz .note strong { color: var(--ink); font-weight: 600; }
+    @media print {
+      #kresearch-flow-viz .diagram-container { overflow-x: visible; }
+      #kresearch-flow-viz svg { min-width: 0; }
+    }
+  </style>
+
+  <div class="frame">
+    <p class="eyebrow">Flowchart · External Research &amp; Review</p>
+    <h1>外部研究采集：能力门禁 → 收件箱候选 → 人工审核</h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="kres-title kres-desc">
+        <title id="kres-title">外部研究采集与候选审核流程</title>
+        <desc id="kres-desc">研究输入先过采集能力门禁，能力缺失返回 503 并置灰不降级；可用则读取或转写并落抓取版本，经分析分类生成收件箱候选，人工在 Obsidian 移入正式目录后同步发布并回写审核状态，最后按新鲜度复查，stale 可重新抓取。</desc>
+        <defs>
+          <marker id="kres-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- connectors -->
+        <line x1="260" y1="160" x2="368" y2="160" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kres-arrow)"/>
+        <line x1="480" y1="208" x2="480" y2="272" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kres-arrow)"/>
+        <line x1="592" y1="160" x2="688" y2="160" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kres-arrow)"/>
+        <line x1="912" y1="160" x2="1008" y2="160" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kres-arrow)"/>
+        <line x1="1120" y1="192" x2="1120" y2="408" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kres-arrow)"/>
+        <line x1="1008" y1="440" x2="912" y2="440" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kres-arrow)"/>
+        <line x1="688" y1="440" x2="592" y2="440" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kres-arrow)"/>
+        <line x1="368" y1="440" x2="260" y2="440" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kres-arrow)"/>
+        <path d="M112,408 L112,388 Q112,380 120,380 L792,380 Q800,380 800,372 L800,192" fill="none" stroke="#4f5d75" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#kres-arrow)"/>
+
+        <!-- arrow labels -->
+        <rect x="482" y="230" width="40" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="502" y="244" text-anchor="middle">缺失</text>
+        <rect x="620" y="150" width="40" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="640" y="164" text-anchor="middle">可用</text>
+        <rect x="928" y="150" width="64" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="960" y="164" text-anchor="middle">抓取版本</text>
+        <rect x="1122" y="290" width="64" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="1154" y="304" text-anchor="middle">生成候选</text>
+        <rect x="928" y="430" width="64" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="960" y="444" text-anchor="middle">人工审核</text>
+        <rect x="602" y="430" width="76" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="640" y="444" text-anchor="middle">移入后同步</text>
+        <rect x="282" y="430" width="64" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="314" y="444" text-anchor="middle">发布成功</text>
+        <rect x="424" y="370" width="64" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="456" y="384" text-anchor="middle">重新抓取</text>
+
+        <!-- N1 input -->
+        <rect x="60" y="128" width="200" height="64" fill="#f5f5f5"/>
+        <rect x="60" y="128" width="200" height="64" rx="20" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1.2"/>
+        <text class="n-name" x="160" y="156" text-anchor="middle">研究输入</text>
+        <text class="n-sub" x="160" y="176" text-anchor="middle">search · url · repo</text>
+
+        <!-- N2 capability gate (focal) -->
+        <polygon points="480,112 592,160 480,208 368,160" fill="#f5f5f5"/>
+        <polygon points="480,112 592,160 480,208 368,160" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.4"/>
+        <text class="n-name" x="480" y="158" text-anchor="middle">采集能力可用？</text>
+        <text class="n-sub" x="480" y="176" text-anchor="middle">L1 · L2 · L3</text>
+
+        <!-- N3 unavailable -->
+        <rect x="356" y="272" width="248" height="56" fill="#f5f5f5"/>
+        <rect x="356" y="272" width="248" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1.2"/>
+        <text class="n-name" x="480" y="298" text-anchor="middle">503 置灰 · 不降级</text>
+        <text class="n-sub" x="480" y="316" text-anchor="middle">RESEARCH_UNAVAILABLE</text>
+
+        <!-- N4 fetch -->
+        <rect x="688" y="128" width="224" height="64" fill="#f5f5f5"/>
+        <rect x="688" y="128" width="224" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.2"/>
+        <text class="n-name" x="800" y="148" text-anchor="middle">读取与转写</text>
+        <text class="n-sub" x="800" y="166" text-anchor="middle">research_jobs</text>
+        <text class="n-sub" x="800" y="182" text-anchor="middle">text · timestamps · frames</text>
+
+        <!-- N5 analyze -->
+        <rect x="1008" y="128" width="224" height="64" fill="#f5f5f5"/>
+        <rect x="1008" y="128" width="224" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.2"/>
+        <text class="n-name" x="1120" y="148" text-anchor="middle">分析与分类</text>
+        <text class="n-sub" x="1120" y="166" text-anchor="middle">domain · category · stages</text>
+        <text class="n-sub" x="1120" y="182" text-anchor="middle">evidence A-E · conflicts</text>
+
+        <!-- N6 inbox candidate -->
+        <rect x="1008" y="408" width="224" height="64" fill="#f5f5f5"/>
+        <rect x="1008" y="408" width="224" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1.2"/>
+        <text class="n-name" x="1120" y="428" text-anchor="middle">收件箱候选</text>
+        <text class="n-sub" x="1120" y="446" text-anchor="middle">_inbox/ · pending</text>
+        <text class="n-sub" x="1120" y="462" text-anchor="middle">draft_path · source_id</text>
+
+        <!-- N7 human move (focal) -->
+        <rect x="688" y="408" width="224" height="64" fill="#f5f5f5"/>
+        <rect x="688" y="408" width="224" height="64" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.4"/>
+        <text class="n-name" x="800" y="428" text-anchor="middle">人工移入正式目录</text>
+        <text class="n-sub" x="800" y="446" text-anchor="middle">Obsidian · id unchanged</text>
+        <text class="n-sub" x="800" y="462" text-anchor="middle">review · edit · merge</text>
+
+        <!-- N8 publish + writeback -->
+        <rect x="368" y="408" width="224" height="64" fill="#f5f5f5"/>
+        <rect x="368" y="408" width="224" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.2"/>
+        <text class="n-name" x="480" y="428" text-anchor="middle">同步发布与回写</text>
+        <text class="n-sub" x="480" y="446" text-anchor="middle">approved · published_doc_id</text>
+        <text class="n-sub" x="480" y="462" text-anchor="middle">knowledge version</text>
+
+        <!-- N9 recheck -->
+        <rect x="60" y="408" width="200" height="64" fill="#f5f5f5"/>
+        <rect x="60" y="408" width="200" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1.2"/>
+        <text class="n-name" x="160" y="428" text-anchor="middle">复查与 stale</text>
+        <text class="n-sub" x="160" y="446" text-anchor="middle">90d · 30d</text>
+        <text class="n-sub" x="160" y="462" text-anchor="middle">last_checked_at</text>
+
+        <!-- callouts -->
+        <line x1="604" y1="300" x2="640" y2="300" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text class="callout" x="648" y="296">能力缺失：来源置灰并返回 503，</text>
+        <text class="callout" x="648" y="314">说明启用方式，不静默降级。</text>
+
+        <line x1="1120" y1="472" x2="1120" y2="492" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text class="callout" x="1008" y="510">拒绝只留审计；在 _inbox 内改</text>
+        <text class="callout" x="1008" y="528">approved 无效，须移入正式目录。</text>
+
+        <!-- legend -->
+        <line x1="40" y1="664" x2="1240" y2="664" stroke="rgba(45,49,66,0.12)" stroke-width="1"/>
+        <line x1="64" y1="688" x2="104" y2="688" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kres-arrow)"/>
+        <text class="legend-cn" x="116" y="692">采集主路径</text>
+        <line x1="260" y1="688" x2="300" y2="688" stroke="#4f5d75" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#kres-arrow)"/>
+        <text class="legend-cn" x="312" y="692">复查后重新抓取</text>
+        <rect x="500" y="680" width="16" height="16" rx="3" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.4"/>
+        <text class="legend-cn" x="528" y="692">两道门：能力门禁 / 人工审核</text>
+        <rect x="800" y="680" width="16" height="16" rx="3" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1.2"/>
+        <text class="legend-cn" x="828" y="692">落库 / 收件箱</text>
+        <rect x="980" y="680" width="16" height="16" rx="8" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1.2"/>
+        <text class="legend-cn" x="1008" y="692">用户输入</text>
+      </svg>
+    </div>
+
+    <p class="note">
+      <strong>能力分层</strong>：L1 公开文章正文抽取 / GitHub API 与 raw / 公开字幕，无需新增运行时依赖，全平台；L2 知乎与小红书授权会话读取，需新增桌面专用采集窗口与独立 session，仅桌面；L3 无字幕视频本地 ASR 与关键帧 OCR，需引入 sidecar 与模型（需批准）。
+      <strong>采集边界</strong>：不绕过登录、验证码、付费墙与风控，不保存账号密码，不大规模爬取，只做分析与短引用，保留原文链接与时间戳。
+      <strong>证据与治理</strong>：D 级（知乎回答 / 小红书笔记 / 短视频）只作灵感与假设，不单独形成硬规则；外部来源默认 90 天复查，平台规则与模型能力类 30 天；每次抓取落一条 research_jobs 作为版本事实源。
+      <strong>小说域</strong>：分类注册表在 P0 一次建全（含小说 9 类），小说候选同样走收件箱与人工审核，本期不接入短剧运行时。
+    </p>
+  </div>
+</div>
+</body>
+</html>

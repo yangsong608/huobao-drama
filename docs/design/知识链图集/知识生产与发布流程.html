@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知识生产与发布流程</title>
+<style>html,body{margin:0;padding:0;background:#f7f8fa;}</style>
+</head>
+<body>
+<div id="kpub-flow-viz">
+  <style>
+    #kpub-flow-viz {
+      --paper: #f5f5f5;
+      --paper-2: #ececec;
+      --ink: #2d3142;
+      --muted: #4f5d75;
+      --soft: #5a6580;
+      --rule: rgba(45, 49, 66, 0.12);
+      --accent: #bf4520;
+      --sans: 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', 'Geist', system-ui, sans-serif;
+      --mono: 'SF Mono', 'Geist Mono', Menlo, ui-monospace, monospace;
+      --serif: 'Songti SC', 'Noto Serif SC', 'Instrument Serif', Georgia, serif;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      padding: 24px 20px 18px;
+      line-height: 1.4;
+    }
+    #kpub-flow-viz *, #kpub-flow-viz *::before, #kpub-flow-viz *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    #kpub-flow-viz .frame { max-width: 1360px; margin: 0 auto; min-width: 0; }
+    #kpub-flow-viz .eyebrow {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    #kpub-flow-viz h1 {
+      font-family: var(--serif);
+      font-size: clamp(24px, 2.4vw + 12px, 32px);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      margin-bottom: 20px;
+    }
+    #kpub-flow-viz .diagram-container { width: 100%; overflow-x: auto; }
+    #kpub-flow-viz svg { width: 100%; min-width: 1280px; display: block; }
+    #kpub-flow-viz .n-name { font-family: var(--sans); font-size: 12px; font-weight: 600; fill: #2d3142; }
+    #kpub-flow-viz .n-sub { font-family: var(--mono); font-size: 9px; fill: #5a6580; }
+    #kpub-flow-viz .al-cn { font-family: var(--sans); font-size: 12px; font-weight: 500; fill: #4f5d75; }
+    #kpub-flow-viz .callout { font-family: var(--serif); font-size: 12px; font-style: italic; fill: #4f5d75; }
+    #kpub-flow-viz .legend-cn { font-family: var(--sans); font-size: 12px; font-weight: 500; fill: #4f5d75; }
+    #kpub-flow-viz .note {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--rule);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    #kpub-flow-viz .note strong { color: var(--ink); font-weight: 600; }
+    @media print {
+      #kpub-flow-viz .diagram-container { overflow-x: visible; }
+      #kpub-flow-viz svg { min-width: 0; }
+    }
+  </style>
+
+  <div class="frame">
+    <p class="eyebrow">Flowchart · Knowledge Sync &amp; Publish</p>
+    <h1>知识生产与发布：Obsidian 作者源 → 运行时</h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="kpub-title kpub-desc">
+        <title id="kpub-title">知识生产与发布流程</title>
+        <desc id="kpub-desc">Obsidian 正式目录经扫描解析与契约校验后分流：知识文档同步即发布为不可变版本，拆分与校验方案生成候选并需人工批准，两者最终写入运行时投影；冲突阻断发布，拒绝退回候选。</desc>
+        <defs>
+          <marker id="kpub-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- connectors (behind nodes) -->
+        <line x1="200" y1="132" x2="200" y2="180" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kpub-arrow)"/>
+        <line x1="200" y1="236" x2="200" y2="280" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kpub-arrow)"/>
+        <line x1="312" y1="328" x2="488" y2="328" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kpub-arrow)"/>
+        <path d="M600,300 L600,204 Q600,196 592,196 L312,196" fill="none" stroke="#4f5d75" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#kpub-arrow)"/>
+        <line x1="200" y1="376" x2="200" y2="408" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kpub-arrow)"/>
+        <line x1="200" y1="504" x2="200" y2="548" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kpub-arrow)"/>
+        <line x1="312" y1="456" x2="488" y2="456" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kpub-arrow)"/>
+        <line x1="712" y1="456" x2="888" y2="456" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kpub-arrow)"/>
+        <line x1="1000" y1="504" x2="1000" y2="548" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kpub-arrow)"/>
+        <line x1="312" y1="576" x2="888" y2="576" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kpub-arrow)"/>
+        <path d="M944,432 L944,388 Q944,380 936,380 L608,380 Q600,380 600,388 L600,428" fill="none" stroke="#4f5d75" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#kpub-arrow)"/>
+
+        <!-- arrow labels -->
+        <rect x="380" y="318" width="40" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="400" y="332" text-anchor="middle">冲突</text>
+        <rect x="420" y="186" width="64" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="452" y="200" text-anchor="middle">修复重扫</text>
+        <rect x="212" y="382" width="40" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="232" y="396" text-anchor="middle">通过</text>
+        <rect x="212" y="516" width="40" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="232" y="530" text-anchor="middle">知识</text>
+        <rect x="380" y="446" width="40" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="400" y="460" text-anchor="middle">方案</text>
+        <rect x="1012" y="516" width="40" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="1032" y="530" text-anchor="middle">批准</text>
+        <rect x="568" y="566" width="64" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="600" y="580" text-anchor="middle">直接生效</text>
+        <rect x="780" y="370" width="40" height="20" fill="#f5f5f5"/>
+        <text class="al-cn" x="800" y="384" text-anchor="middle">拒绝</text>
+
+        <!-- N1 Vault -->
+        <rect x="88" y="76" width="224" height="56" fill="#f5f5f5"/>
+        <rect x="88" y="76" width="224" height="56" rx="20" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1.2"/>
+        <text class="n-name" x="200" y="102" text-anchor="middle">Obsidian Vault 作者源</text>
+        <text class="n-sub" x="200" y="120" text-anchor="middle">formal dirs · read-only</text>
+
+        <!-- N2 scan -->
+        <rect x="88" y="180" width="224" height="56" fill="#f5f5f5"/>
+        <rect x="88" y="180" width="224" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.2"/>
+        <text class="n-name" x="200" y="206" text-anchor="middle">扫描与解析</text>
+        <text class="n-sub" x="200" y="224" text-anchor="middle">vault/scan · vault/sync</text>
+
+        <!-- N3 lint decision -->
+        <polygon points="200,280 312,328 200,376 88,328" fill="#f5f5f5"/>
+        <polygon points="200,280 312,328 200,376 88,328" fill="#f5f5f5" stroke="#2d3142" stroke-width="1.2"/>
+        <text class="n-name" x="200" y="326" text-anchor="middle">契约校验通过？</text>
+        <text class="n-sub" x="200" y="344" text-anchor="middle">contract 2026-11-13.1</text>
+
+        <!-- N4 conflicts -->
+        <rect x="488" y="300" width="224" height="56" fill="#f5f5f5"/>
+        <rect x="488" y="300" width="224" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1.2"/>
+        <text class="n-name" x="600" y="326" text-anchor="middle">冲突清单 · 阻断发布</text>
+        <text class="n-sub" x="600" y="344" text-anchor="middle">file · line · reason</text>
+
+        <!-- N5 kind decision -->
+        <polygon points="200,408 312,456 200,504 88,456" fill="#f5f5f5"/>
+        <polygon points="200,408 312,456 200,504 88,456" fill="#f5f5f5" stroke="#2d3142" stroke-width="1.2"/>
+        <text class="n-name" x="200" y="454" text-anchor="middle">是方案文档？</text>
+        <text class="n-sub" x="200" y="472" text-anchor="middle">kind = *-scheme</text>
+
+        <!-- N6 knowledge publish (focal) -->
+        <rect x="88" y="548" width="224" height="56" fill="#f5f5f5"/>
+        <rect x="88" y="548" width="224" height="56" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.4"/>
+        <text class="n-name" x="200" y="574" text-anchor="middle">知识版本发布</text>
+        <text class="n-sub" x="200" y="592" text-anchor="middle">document_versions</text>
+
+        <!-- N7 scheme candidate -->
+        <rect x="488" y="428" width="224" height="56" fill="#f5f5f5"/>
+        <rect x="488" y="428" width="224" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.2"/>
+        <text class="n-name" x="600" y="454" text-anchor="middle">方案候选</text>
+        <text class="n-sub" x="600" y="472" text-anchor="middle">scheme_candidates</text>
+
+        <!-- N8 approve decision (focal) -->
+        <polygon points="1000,408 1112,456 1000,504 888,456" fill="#f5f5f5"/>
+        <polygon points="1000,408 1112,456 1000,504 888,456" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.4"/>
+        <text class="n-name" x="1000" y="454" text-anchor="middle">人工批准？</text>
+        <text class="n-sub" x="1000" y="472" text-anchor="middle">diff + approve</text>
+
+        <!-- N9 runtime projection -->
+        <rect x="888" y="548" width="224" height="56" fill="#f5f5f5"/>
+        <rect x="888" y="548" width="224" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1.2"/>
+        <text class="n-name" x="1000" y="574" text-anchor="middle">运行时投影</text>
+        <text class="n-sub" x="1000" y="592" text-anchor="middle">methods + validation_schemes</text>
+
+        <!-- callouts -->
+        <line x1="200" y1="604" x2="200" y2="616" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text class="callout" x="88" y="632">知识同步即发布，不走审批；</text>
+        <text class="callout" x="88" y="650">回滚按版本，不删中间版本。</text>
+
+        <line x1="1000" y1="360" x2="1000" y2="408" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text class="callout" x="888" y="316">批准前看 diff：来源文档、</text>
+        <text class="callout" x="888" y="334">基准版本、时长与覆盖策略。</text>
+        <text class="callout" x="888" y="352">拒绝只留审计，改在 Obsidian。</text>
+
+        <!-- legend -->
+        <line x1="40" y1="664" x2="1240" y2="664" stroke="rgba(45,49,66,0.12)" stroke-width="1"/>
+        <line x1="88" y1="688" x2="128" y2="688" stroke="#4f5d75" stroke-width="1.4" marker-end="url(#kpub-arrow)"/>
+        <text class="legend-cn" x="140" y="692">同步主路径</text>
+        <line x1="280" y1="688" x2="320" y2="688" stroke="#4f5d75" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#kpub-arrow)"/>
+        <text class="legend-cn" x="332" y="692">退回 / 重扫</text>
+        <rect x="480" y="680" width="16" height="16" rx="3" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.4"/>
+        <text class="legend-cn" x="508" y="692">关键控制点</text>
+        <polygon points="668,680 680,688 668,696 656,688" fill="#f5f5f5" stroke="#2d3142" stroke-width="1.2"/>
+        <text class="legend-cn" x="692" y="692">判定</text>
+        <text class="legend-cn" x="800" y="692">椭圆＝作者源 · 圆角矩形＝步骤 · 灰底＝落库</text>
+      </svg>
+    </div>
+
+    <p class="note">
+      <strong>扫描范围</strong>：00-索引、10-共享、20-小说、30-短剧、40-方案；90-模板、_assets、_inbox 不参与发布。
+      <strong>应用写 Vault 只有两个例外</strong>：一次性初始化导出、用户显式导出索引，且都不覆盖已有文件。
+      <strong>运行时接入</strong>：30-短剧全部 + 10-共享中 applies_to 含 short-drama 的文档；20-小说本期只做分类、目录、候选与发布。
+      <strong>旧知识写接口</strong>：PUT/POST/DELETE 返回 409 KNOWLEDGE_SOURCE_READONLY，GET 保留只读兼容。
+    </p>
+  </div>
+</div>
+</body>
+</html>

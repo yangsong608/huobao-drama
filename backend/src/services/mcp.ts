@@ -30,6 +30,7 @@ const MIN_MCP_PORT = 1024
 const MAX_MCP_PORT = 65535
 const MCP_PROTOCOL_VERSIONS = ['2024-11-05', '2025-03-26', '2025-06-18']
 const MCP_LATEST_PROTOCOL = MCP_PROTOCOL_VERSIONS[MCP_PROTOCOL_VERSIONS.length - 1]
+const MCP_MAX_BATCH_ITEMS = 20
 const SERVER_INFO = { name: 'huobao-drama', version: '1.0.0' }
 
 interface ServerTypeLike {
@@ -118,6 +119,13 @@ function mcpHost(): string {
   return process.env.MCP_HOST || '127.0.0.1'
 }
 
+function assertMcpHostAllowed(): void {
+  const host = mcpHost()
+  if (['127.0.0.1', '::1', 'localhost'].includes(host)) return
+  if (process.env.MCP_ALLOW_REMOTE === '1') return
+  throw new Error(`MCP_HOST=${host} 会暴露到非回环地址；如确认网络隔离，请显式设置 MCP_ALLOW_REMOTE=1`)
+}
+
 export function getMcpStatus(): McpStatus {
   const port = Number(readSetting(KEY_PORT)) || DEFAULT_MCP_PORT
   const token = getMcpToken()
@@ -180,9 +188,95 @@ async function callApiRaw(method: string, path: string, body: FormData): Promise
   return json && Object.prototype.hasOwnProperty.call(json, 'data') ? json.data : json
 }
 
-// --- 上传：base64 直传，复用 /upload/* 路由的格式与体积校验 ------------------
-
 const MCP_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+const MCP_API_UPLOAD_MAX_BYTES = 64 * 1024 * 1024
+const MCP_DOWNLOAD_MAX_BYTES = 32 * 1024 * 1024
+
+function normalizeApiPath(raw: unknown): string {
+  const target = String(raw ?? '').trim()
+  if (!target.startsWith('/api/v1/')) throw new Error('path 必须以 /api/v1/ 开头')
+  const url = new URL(target, 'http://internal')
+  if (url.search || url.hash) throw new Error('path 不要包含查询串或锚点，请通过 query 参数传递')
+  const rawPath = url.pathname
+  let decoded = rawPath
+  try {
+    decoded = decodeURIComponent(rawPath)
+  } catch {
+    throw new Error('path 编码不合法')
+  }
+  const normalized = decoded.replace(/\/+/g, '/')
+  if (!normalized.startsWith('/api/v1/')) throw new Error('path 必须以 /api/v1/ 开头')
+  if (normalized.includes('..')) throw new Error('path 不合法')
+  if (normalized === '/api/v1/mcp' || normalized.startsWith('/api/v1/mcp/')) {
+    throw new Error('MCP 自身配置不通过 MCP 暴露，请到设置页操作')
+  }
+  return rawPath
+}
+
+function sanitizeFilename(raw: unknown, fallbackExt = 'bin'): string {
+  const name = String(raw || '').split(/[\\/]/).pop()?.replace(/[\u0000-\u001f\u007f]/g, '').trim()
+  if (!name) return `mcp-${Date.now()}.${fallbackExt}`
+  const dot = name.lastIndexOf('.')
+  if (dot > 0) return name.slice(0, 120)
+  return `${name}.${fallbackExt}`.slice(0, 120)
+}
+
+async function callApiUpload(path: string, args: any): Promise<any> {
+  if (!mainApp) throw new Error('服务尚未就绪，请稍后重试')
+  const target = normalizeApiPath(path)
+  const field = String(args?.field || 'file').trim()
+  if (!/^[A-Za-z0-9_.-]+$/.test(field)) throw new Error('field 只能包含字母、数字、下划线、点和短横线')
+  const buffer = decodeBase64(args?.data_base64, MCP_API_UPLOAD_MAX_BYTES)
+  const filename = sanitizeFilename(args?.filename)
+  const ext = filename.slice(filename.lastIndexOf('.')).toLowerCase()
+  const form = new FormData()
+  form.append(field, new Blob([new Uint8Array(buffer)], { type: MIME_BY_EXT[ext] || 'application/octet-stream' }), filename)
+  if (args?.fields && typeof args.fields === 'object' && !Array.isArray(args.fields)) {
+    for (const [key, value] of Object.entries(args.fields)) {
+      if (!/^[A-Za-z0-9_.-]+$/.test(key)) throw new Error(`fields 字段名不合法：${key}`)
+      if (value !== undefined && value !== null) form.append(key, String(value))
+    }
+  }
+  return callApiRaw('POST', target, form)
+}
+
+function normalizeFileTarget(raw: unknown): string {
+  const target = String(raw ?? '').trim()
+  if (!target.startsWith('/static/') && !target.startsWith('/api/v1/')) {
+    throw new Error('path 必须以 /static/ 或 /api/v1/ 开头')
+  }
+  const url = new URL(target, 'http://internal')
+  if (url.hash) throw new Error('path 不要包含锚点')
+  const decoded = decodeURIComponent(url.pathname)
+  const normalized = decoded.replace(/\/+/g, '/')
+  if (!normalized.startsWith('/static/') && !normalized.startsWith('/api/v1/')) {
+    throw new Error('path 必须以 /static/ 或 /api/v1/ 开头')
+  }
+  if (normalized.includes('..')) throw new Error('path 不合法')
+  if (normalized === '/api/v1/mcp' || normalized.startsWith('/api/v1/mcp/')) {
+    throw new Error('MCP 自身配置不通过 MCP 暴露，请到设置页操作')
+  }
+  return url.pathname + url.search
+}
+
+async function callApiDownload(path: string, args: any): Promise<any> {
+  if (!mainApp) throw new Error('服务尚未就绪，请稍后重试')
+  const target = normalizeFileTarget(path)
+  const maxBytes = Math.max(1024, Math.min(MCP_DOWNLOAD_MAX_BYTES, Number(args?.max_bytes) || 8 * 1024 * 1024))
+  const res = await mainApp.fetch(new Request(`http://internal${target}`))
+  if (!res.ok) throw new Error(`下载失败（HTTP ${res.status}）`)
+  const length = Number(res.headers.get('content-length') || 0)
+  if (length && length > maxBytes) throw new Error(`文件超过下载上限 ${Math.round(maxBytes / 1048576)}MB`)
+  const buffer = Buffer.from(await res.arrayBuffer())
+  if (buffer.length > maxBytes) throw new Error(`文件超过下载上限 ${Math.round(maxBytes / 1048576)}MB`)
+  return {
+    content_type: res.headers.get('content-type') || 'application/octet-stream',
+    size: buffer.length,
+    data_base64: buffer.toString('base64'),
+  }
+}
+
+// --- 上传：base64 直传，复用 /upload/* 路由的格式与体积校验 ------------------
 
 const MIME_BY_EXT: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
@@ -197,14 +291,14 @@ const UPLOAD_EXTS: Record<'image' | 'video' | 'audio', string[]> = {
   audio: ['.mp3', '.wav', '.m4a', '.aac'],
 }
 
-function decodeBase64(input: unknown): Buffer {
+function decodeBase64(input: unknown, maxBytes = MCP_UPLOAD_MAX_BYTES): Buffer {
   const raw = String(input || '').replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '')
   if (!raw) throw new Error('data_base64 必填（可带 data:image/png;base64, 前缀）')
   if (!/^[A-Za-z0-9+/=_-]+$/.test(raw)) throw new Error('data_base64 不是合法的 base64 内容')
   const buffer = Buffer.from(raw, 'base64')
   if (!buffer.length) throw new Error('base64 解码后为空，请检查内容')
-  if (buffer.length > MCP_UPLOAD_MAX_BYTES) {
-    throw new Error(`文件超过 ${Math.round(MCP_UPLOAD_MAX_BYTES / 1048576)}MB，请压缩后重试，或在界面里直接上传`)
+  if (buffer.length > maxBytes) {
+    throw new Error(`文件超过 ${Math.round(maxBytes / 1048576)}MB，请压缩后重试，或在界面里直接上传`)
   }
   return buffer
 }
@@ -348,10 +442,25 @@ interface ToolDef {
   description: string
   inputSchema: Record<string, unknown>
   handler: (args: any) => Promise<any>
+  annotations?: Record<string, boolean>
 }
 
 export function getMcpTool(name: string): ToolDef | undefined {
   return TOOLS.find(t => t.name === name)
+}
+
+function toolAnnotations(tool: ToolDef): Record<string, boolean> {
+  if (tool.annotations) return tool.annotations
+  const name = tool.name
+  const readOnly = /^(list_|get_|preflight_)/.test(name)
+  const destructive = /^(delete_|clear_|stop_|cancel_)/.test(name)
+  const openWorld = /^(generate_|analyze_|ai_analyze_|start_|import_|synthesize_|clone_|render_|upload_|api_upload$|api_request$)/.test(name)
+  return {
+    readOnlyHint: readOnly,
+    destructiveHint: destructive,
+    idempotentHint: readOnly,
+    openWorldHint: openWorld,
+  }
 }
 
 function obj(properties: Record<string, unknown>, required: string[] = []) {
@@ -362,6 +471,7 @@ const int = (description: string) => ({ type: 'integer', description })
 const str = (description: string) => ({ type: 'string', description })
 const bool = (description: string) => ({ type: 'boolean', description })
 const intArray = (description: string) => ({ type: 'array', items: { type: 'integer' }, description })
+const enumStr = (values: string[], description: string) => ({ type: 'string', enum: values, description })
 
 /** 解析 "1-10" / "1,3,5" 形式的章节范围；留空返回 undefined（全部章节） */
 function parseChapterRange(raw: unknown): number[] | undefined {
@@ -1156,6 +1266,466 @@ const TOOLS: ToolDef[] = [
     ),
   },
   {
+    name: 'list_video_projects',
+    description: '列出视频换人项目（单脸换脸/角色替换），支持关键字、状态和分页。',
+    inputSchema: obj({
+      keyword: str('标题关键字（可选）'),
+      status: str('状态过滤（可选）'),
+      page: int('页码（可选）'),
+      page_size: int('每页数量（可选，最大 100）'),
+    }),
+    handler: args => callApi('GET', '/api/v1/video-projects', { query: args }),
+  },
+  {
+    name: 'get_video_project',
+    description: '读取视频换人项目详情（模式、素材、配置、当前运行）。',
+    inputSchema: obj({ project_id: int('视频项目 ID') }, ['project_id']),
+    handler: ({ project_id }) => callApi('GET', `/api/v1/video-projects/${Number(project_id)}`),
+  },
+  {
+    name: 'create_video_project',
+    description: '新建视频换人项目。mode=face 为单脸换脸，mode=character 为整角色替换；config_id 传视频换人服务配置 ID。',
+    inputSchema: obj({
+      title: str('项目标题'),
+      mode: enumStr(['face', 'character'], 'face=单脸换脸，character=角色替换'),
+      prompt: str('提示词（可选）'),
+      config_id: int('视频换人配置 ID（可选，默认当前启用配置）'),
+    }, ['title', 'mode']),
+    handler: args => callApi('POST', '/api/v1/video-projects', { body: args }),
+  },
+  {
+    name: 'update_video_project',
+    description: '修改视频换人项目标题、提示词或换人配置。',
+    inputSchema: obj({
+      project_id: int('视频项目 ID'),
+      title: str('新标题（可选）'),
+      prompt: str('新提示词（可选）'),
+      config_id: int('视频换人配置 ID（可选）'),
+    }, ['project_id']),
+    handler: ({ project_id, ...patch }) => callApi('PATCH', `/api/v1/video-projects/${Number(project_id)}`, { body: patch }),
+  },
+  {
+    name: 'delete_video_project',
+    description: '删除视频换人项目及素材（不可恢复）。',
+    inputSchema: obj({ project_id: int('视频项目 ID') }, ['project_id']),
+    handler: ({ project_id }) => callApi('DELETE', `/api/v1/video-projects/${Number(project_id)}`),
+  },
+  {
+    name: 'duplicate_video_project',
+    description: '复制视频换人项目。',
+    inputSchema: obj({ project_id: int('视频项目 ID') }, ['project_id']),
+    handler: ({ project_id }) => callApi('POST', `/api/v1/video-projects/${Number(project_id)}/duplicate`, { body: {} }),
+  },
+  {
+    name: 'upload_video_project_asset',
+    description: '上传视频换人项目素材：kind=source 上传源视频（≤64MB），kind=face 上传参考人脸（≤20MB）。data_base64 可带 data 前缀。',
+    inputSchema: obj({
+      project_id: int('视频项目 ID'),
+      kind: enumStr(['source', 'face'], 'source=源视频，face=参考人脸'),
+      data_base64: str('文件 base64 内容'),
+      filename: str('文件名（可选）'),
+    }, ['project_id', 'kind', 'data_base64']),
+    handler: async ({ project_id, kind, data_base64, filename }) => {
+      if (kind !== 'source' && kind !== 'face') throw new Error('kind 仅支持 source / face')
+      const path = kind === 'source'
+        ? `/api/v1/video-projects/${Number(project_id)}/source-video`
+        : `/api/v1/video-projects/${Number(project_id)}/reference-faces`
+      return callApiUpload(path, { field: kind === 'source' ? 'video' : 'image', data_base64, filename })
+    },
+  },
+  {
+    name: 'get_video_project_route',
+    description: '查看视频换人配置实际会走的链路：单脸引擎/工作流、角色长短工作流与 Relay 预卷。不传 config_id 使用当前启用配置。',
+    inputSchema: obj({ config_id: int('视频换人配置 ID（可选）') }),
+    handler: ({ config_id }) => callApi('GET', '/api/v1/video-projects/route-preview', {
+      query: config_id === undefined ? {} : { config_id },
+    }),
+  },
+  {
+    name: 'preflight_video_project',
+    description: '预检视频换人项目：源视频、参考人脸、配置、网关工作流/本地 FaceFusion、磁盘。',
+    inputSchema: obj({ project_id: int('视频项目 ID') }, ['project_id']),
+    handler: ({ project_id }) => callApi('POST', `/api/v1/video-projects/${Number(project_id)}/preflight`, { body: {} }),
+  },
+  {
+    name: 'analyze_video_project',
+    description: '启动视频换人媒体分析（镜头/片段/时长），返回运行信息。',
+    inputSchema: obj({ project_id: int('视频项目 ID') }, ['project_id']),
+    handler: ({ project_id }) => callApi('POST', `/api/v1/video-projects/${Number(project_id)}/analyze`, { body: {} }),
+  },
+  {
+    name: 'get_video_project_shots',
+    description: '读取视频换人镜头与片段计划；可指定 run_id 查看历史运行。',
+    inputSchema: obj({
+      project_id: int('视频项目 ID'),
+      run_id: int('运行 ID（可选）'),
+    }, ['project_id']),
+    handler: ({ project_id, run_id }) => callApi('GET', `/api/v1/video-projects/${Number(project_id)}/shots`, {
+      query: run_id === undefined ? {} : { run_id },
+    }),
+  },
+  {
+    name: 'ai_analyze_video_project',
+    description: '启动视频换人 AI 分析并生成提示词计划（通常需要视觉模型配置）。',
+    inputSchema: obj({ project_id: int('视频项目 ID') }, ['project_id']),
+    handler: ({ project_id }) => callApi('POST', `/api/v1/video-projects/${Number(project_id)}/ai-analysis`, { body: {} }),
+  },
+  {
+    name: 'save_video_project_prompt',
+    description: '保存视频换人最终提示词/提示词计划。payload 可包含 run_id、global_prompt、negative_prompt、shots 等字段。',
+    inputSchema: obj({
+      project_id: int('视频项目 ID'),
+      payload: { type: 'object', description: '提示词计划字段（可选 run_id）', additionalProperties: true },
+    }, ['project_id', 'payload']),
+    handler: ({ project_id, payload }) => callApi('PATCH', `/api/v1/video-projects/${Number(project_id)}/prompt`, { body: payload }),
+  },
+  {
+    name: 'video_project_scene_reference',
+    description: '读取或确认视频换人场景参考帧：action=get 列出候选，action=confirm 需传 candidate_path。',
+    inputSchema: obj({
+      project_id: int('视频项目 ID'),
+      shot_id: int('镜头 ID'),
+      action: enumStr(['get', 'confirm'], 'get=读取候选，confirm=确认'),
+      candidate_path: str('确认时必填，候选帧路径'),
+    }, ['project_id', 'shot_id', 'action']),
+    handler: ({ project_id, shot_id, action, candidate_path }) => {
+      const path = `/api/v1/video-projects/${Number(project_id)}/shots/${Number(shot_id)}/scene-reference`
+      if (action === 'get') return callApi('GET', path)
+      const candidate = String(candidate_path || '').trim()
+      if (!candidate) throw new Error('confirm 时 candidate_path 必填')
+      return callApi('PATCH', path, { body: { candidate_path: candidate } })
+    },
+  },
+  {
+    name: 'generate_video_project',
+    description: '启动视频换人生成；可选 run_id 重新生成指定运行。',
+    inputSchema: obj({
+      project_id: int('视频项目 ID'),
+      run_id: int('运行 ID（可选）'),
+    }, ['project_id']),
+    handler: ({ project_id, run_id }) => callApi('POST', `/api/v1/video-projects/${Number(project_id)}/generate`, {
+      body: run_id === undefined ? {} : { run_id },
+    }),
+  },
+  {
+    name: 'video_project_runs',
+    description: '管理视频换人运行：action=list 列表，get 详情，logs 日志，cancel 取消。',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    inputSchema: obj({
+      project_id: int('视频项目 ID'),
+      action: enumStr(['list', 'get', 'logs', 'cancel'], '运行操作'),
+      run_id: int('运行 ID（get/logs/cancel 必填）'),
+      after_id: int('日志起始 ID（可选）'),
+      limit: int('日志条数（可选，默认 200）'),
+    }, ['project_id', 'action']),
+    handler: ({ project_id, action, run_id, after_id, limit }) => {
+      const base = `/api/v1/video-projects/${Number(project_id)}/runs`
+      if (action === 'list') return callApi('GET', base)
+      const id = Number(run_id)
+      if (!Number.isSafeInteger(id) || id <= 0) throw new Error(`${action} 需要 run_id`)
+      if (action === 'get') return callApi('GET', `${base}/${id}`)
+      if (action === 'logs') return callApi('GET', `${base}/${id}/logs`, { query: { after_id, limit } })
+      if (action === 'cancel') return callApi('POST', `${base}/${id}/cancel`, { body: {} })
+      throw new Error('action 仅支持 list / get / logs / cancel')
+    },
+  },
+  {
+    name: 'retry_video_project_chunk',
+    description: '重试视频换人的单个失败片段。',
+    inputSchema: obj({
+      project_id: int('视频项目 ID'),
+      chunk_id: int('片段 ID'),
+    }, ['project_id', 'chunk_id']),
+    handler: ({ project_id, chunk_id }) => callApi('POST', `/api/v1/video-projects/${Number(project_id)}/chunks/${Number(chunk_id)}/retry`, { body: {} }),
+  },
+  {
+    name: 'list_pipeline_chains',
+    description: '列出链式分镜流水线（全局/项目/集覆盖）。',
+    inputSchema: obj({
+      scope_type: str('作用域：global / drama / episode（可选）'),
+      scope_id: int('作用域 ID（可选）'),
+    }),
+    handler: ({ scope_type, scope_id }) => callApi('GET', '/api/v1/pipelines/chains', {
+      query: { scope_type, scope_id },
+    }),
+  },
+  {
+    name: 'get_pipeline_chain',
+    description: '读取一条链式分镜流水线的步骤、插件、参数与覆盖。',
+    inputSchema: obj({
+      key: str('流水线 key'),
+      scope_type: str('作用域：global / drama / episode（可选）'),
+      scope_id: int('作用域 ID（可选）'),
+    }, ['key']),
+    handler: ({ key, scope_type, scope_id }) => callApi(
+      'GET',
+      `/api/v1/pipelines/chains/${encodeURIComponent(String(key))}`,
+      { query: { scope_type, scope_id } },
+    ),
+  },
+  {
+    name: 'save_pipeline_overrides',
+    description: '保存链式流水线覆盖：parameters、step_toggles、knowledge_refs。',
+    inputSchema: obj({
+      key: str('流水线 key'),
+      scope_type: str('作用域：global / drama / episode（可选）'),
+      scope_id: int('作用域 ID（可选）'),
+      parameters: { type: 'object', description: '参数覆盖', additionalProperties: true },
+      step_toggles: { type: 'object', description: '步骤开关', additionalProperties: true },
+      knowledge_refs: { type: 'object', description: '步骤知识引用', additionalProperties: true },
+    }, ['key']),
+    handler: ({ key, scope_type, scope_id, parameters, step_toggles, knowledge_refs }) => callApi(
+      'PUT',
+      `/api/v1/pipelines/chains/${encodeURIComponent(String(key))}/overrides`,
+      { body: { scope_type, scope_id, parameters, step_toggles, knowledge_refs } },
+    ),
+  },
+  {
+    name: 'start_pipeline_run',
+    description: '启动链式分镜流水线运行；message 为创作要求，可指定模型、配置、chain_key 和参数覆盖。',
+    inputSchema: obj({
+      episode_id: int('剧集 ID'),
+      drama_id: int('项目 ID'),
+      message: str('创作要求/修改说明'),
+      model: str('文本模型（可选）'),
+      config_id: int('AI 配置 ID（可选）'),
+      chain_key: str('流水线 key（可选）'),
+      parameters: { type: 'object', description: '运行参数覆盖（可选）', additionalProperties: true },
+    }, ['episode_id', 'drama_id', 'message']),
+    handler: args => callApi('POST', '/api/v1/pipelines/runs', { body: args }),
+  },
+  {
+    name: 'get_pipeline_run',
+    description: '读取链式流水线运行详情；include_trace=true 时同时返回步骤追踪。',
+    inputSchema: obj({
+      run_id: int('运行 ID'),
+      include_trace: bool('是否同时返回 trace（可选）'),
+    }, ['run_id']),
+    handler: async ({ run_id, include_trace }) => {
+      const id = Number(run_id)
+      const run = await callApi('GET', `/api/v1/pipelines/runs/${id}`)
+      if (!include_trace) return run
+      const trace = await callApi('GET', `/api/v1/pipelines/runs/${id}/trace`)
+      return { run, trace }
+    },
+  },
+  {
+    name: 'get_latest_pipeline_run',
+    description: '读取某集最近一次链式流水线运行。',
+    inputSchema: obj({ episode_id: int('剧集 ID') }, ['episode_id']),
+    handler: ({ episode_id }) => callApi('GET', `/api/v1/pipelines/runs/latest/${Number(episode_id)}`),
+  },
+  {
+    name: 'control_pipeline_run',
+    description: '控制链式流水线运行：pause、resume、continue、auto_skip（auto_skip 需 attempts）。',
+    inputSchema: obj({
+      run_id: int('运行 ID'),
+      action: enumStr(['pause', 'resume', 'continue', 'auto_skip'], '控制动作'),
+      attempts: int('auto_skip 的尝试次数'),
+    }, ['run_id', 'action']),
+    handler: ({ run_id, action, attempts }) => {
+      const id = Number(run_id)
+      if (action === 'pause') return callApi('POST', `/api/v1/pipelines/runs/${id}/pause`, { body: {} })
+      if (action === 'resume') return callApi('POST', `/api/v1/pipelines/runs/${id}/resume`, { body: {} })
+      if (action === 'continue') return callApi('POST', `/api/v1/pipelines/runs/${id}/continue`, { body: {} })
+      if (action === 'auto_skip') {
+        const n = Number(attempts)
+        if (!Number.isSafeInteger(n) || n < 0) throw new Error('auto_skip 需要非负整数 attempts')
+        return callApi('POST', `/api/v1/pipelines/runs/${id}/auto-skip`, { body: { attempts: n } })
+      }
+      throw new Error('action 仅支持 pause / resume / continue / auto_skip')
+    },
+  },
+  {
+    name: 'skip_pipeline_shot',
+    description: '在链式流水线中跳过指定镜头，可附原因。',
+    inputSchema: obj({
+      run_id: int('运行 ID'),
+      shot_number: int('镜头序号'),
+      reason: str('跳过原因（可选）'),
+    }, ['run_id', 'shot_number']),
+    handler: ({ run_id, shot_number, reason }) => callApi(
+      'POST',
+      `/api/v1/pipelines/runs/${Number(run_id)}/skip-shot`,
+      { body: { shot_number: Number(shot_number), reason } },
+    ),
+  },
+  {
+    name: 'rerun_pipeline_sound',
+    description: '重跑链式流水线的声音计划阶段。',
+    inputSchema: obj({ run_id: int('运行 ID') }, ['run_id']),
+    handler: ({ run_id }) => callApi('POST', `/api/v1/pipelines/runs/${Number(run_id)}/rerun-sound`, { body: {} }),
+  },
+  {
+    name: 'start_video_batch',
+    description: '启动整集批量视频生成（持久队列，并发 1-5）。items 每项含 storyboard_id 和 request 参数。',
+    inputSchema: obj({
+      episode_id: int('剧集 ID'),
+      concurrency: int('并发数 1-5'),
+      items: {
+        type: 'array',
+        description: '分镜生成项',
+        items: {
+          type: 'object',
+          properties: {
+            storyboard_id: int('分镜 ID'),
+            request: { type: 'object', description: '生成参数', additionalProperties: true },
+          },
+          required: ['storyboard_id'],
+          additionalProperties: false,
+        },
+      },
+    }, ['episode_id', 'concurrency', 'items']),
+    handler: ({ episode_id, concurrency, items }) => callApi(
+      'POST',
+      `/api/v1/episodes/${Number(episode_id)}/video-batch`,
+      { body: { concurrency: Number(concurrency), items } },
+    ),
+  },
+  {
+    name: 'get_video_batch',
+    description: '读取某集当前批量视频进度。',
+    inputSchema: obj({ episode_id: int('剧集 ID') }, ['episode_id']),
+    handler: ({ episode_id }) => callApi('GET', `/api/v1/episodes/${Number(episode_id)}/video-batch`),
+  },
+  {
+    name: 'stop_video_batch',
+    description: '停止某集批量视频生成（已完成项保留）。',
+    inputSchema: obj({ episode_id: int('剧集 ID') }, ['episode_id']),
+    handler: ({ episode_id }) => callApi('POST', `/api/v1/episodes/${Number(episode_id)}/video-batch/stop`, { body: {} }),
+  },
+  {
+    name: 'recover_task',
+    description: '恢复一个可恢复的生成任务。',
+    inputSchema: obj({ task_id: int('任务 ID') }, ['task_id']),
+    handler: ({ task_id }) => callApi('POST', `/api/v1/tasks/${Number(task_id)}/recover`, { body: {} }),
+  },
+  {
+    name: 'get_task_diagnostics',
+    description: '读取任务诊断信息（失败原因、上游状态、建议）。',
+    inputSchema: obj({ task_id: int('任务 ID') }, ['task_id']),
+    handler: ({ task_id }) => callApi('GET', `/api/v1/tasks/${Number(task_id)}/diagnostics`),
+  },
+  {
+    name: 'delete_task',
+    description: '删除生成任务记录（不可恢复）。',
+    inputSchema: obj({ task_id: int('任务 ID') }, ['task_id']),
+    handler: ({ task_id }) => callApi('DELETE', `/api/v1/tasks/${Number(task_id)}`),
+  },
+  {
+    name: 'get_episode_task_center',
+    description: '读取某集任务中心：生成任务、合并、语音、音频、流水线、导出汇总。',
+    inputSchema: obj({ episode_id: int('剧集 ID') }, ['episode_id']),
+    handler: ({ episode_id }) => callApi('GET', `/api/v1/episodes/${Number(episode_id)}/task-center`),
+  },
+  {
+    name: 'clear_episode_tasks',
+    description: '清空某集已完成/失败的生成任务（保留进行中与成片）。',
+    inputSchema: obj({ episode_id: int('剧集 ID') }, ['episode_id']),
+    handler: ({ episode_id }) => callApi('DELETE', `/api/v1/episodes/${Number(episode_id)}/generation-tasks`),
+  },
+  {
+    name: 'optimize_storyboard',
+    description: '优化单个分镜的视频/图片提示词与生成参数（分镜工作台“优化”按钮）。',
+    inputSchema: obj({ storyboard_id: int('分镜 ID') }, ['storyboard_id']),
+    handler: ({ storyboard_id }) => callApi('POST', `/api/v1/storyboards/${Number(storyboard_id)}/optimize`, { body: {} }),
+  },
+  {
+    name: 'preflight_storyboard',
+    description: '对分镜执行视觉预检（参考图、首帧、上一镜尾帧），可传预检选项。',
+    inputSchema: obj({
+      storyboard_id: int('分镜 ID'),
+      options: { type: 'object', description: '预检选项（可选）', additionalProperties: true },
+    }, ['storyboard_id']),
+    handler: ({ storyboard_id, options }) => callApi(
+      'POST',
+      `/api/v1/storyboards/${Number(storyboard_id)}/preflight`,
+      { body: options || {} },
+    ),
+  },
+  {
+    name: 'acceptance_storyboard',
+    description: '对分镜执行验收检查，可传验收选项。',
+    inputSchema: obj({
+      storyboard_id: int('分镜 ID'),
+      options: { type: 'object', description: '验收选项（可选）', additionalProperties: true },
+    }, ['storyboard_id']),
+    handler: ({ storyboard_id, options }) => callApi(
+      'POST',
+      `/api/v1/storyboards/${Number(storyboard_id)}/acceptance`,
+      { body: options || {} },
+    ),
+  },
+  {
+    name: 'recalc_storyboard_timing',
+    description: '分镜时间重算：action=preview 预览，action=apply 应用。',
+    inputSchema: obj({
+      storyboard_id: int('分镜 ID'),
+      action: enumStr(['preview', 'apply'], 'preview=预览，apply=应用'),
+    }, ['storyboard_id', 'action']),
+    handler: ({ storyboard_id, action }) => callApi(
+      'POST',
+      `/api/v1/storyboards/${Number(storyboard_id)}/recalc-timing/${action === 'apply' ? 'apply' : 'preview'}`,
+      { body: {} },
+    ),
+  },
+  {
+    name: 'get_storyboard_generation_gate',
+    description: '读取分镜生成门禁（是否允许提交视频生成及原因）。',
+    inputSchema: obj({ storyboard_id: int('分镜 ID') }, ['storyboard_id']),
+    handler: ({ storyboard_id }) => callApi('GET', `/api/v1/storyboards/${Number(storyboard_id)}/generation-gate`),
+  },
+  {
+    name: 'get_sound_plan',
+    description: '读取某集声音计划（音效/环境声/BGM 线索与状态）。',
+    inputSchema: obj({ episode_id: int('剧集 ID') }, ['episode_id']),
+    handler: ({ episode_id }) => callApi('GET', `/api/v1/storyboards/sound-plan/${Number(episode_id)}`),
+  },
+  {
+    name: 'generate_sound_plan',
+    description: '生成声音计划线索，可指定 cue_ids、覆盖、配置和提示词。',
+    inputSchema: obj({
+      episode_id: int('剧集 ID'),
+      cue_ids: intArray('要生成的线索 ID 列表'),
+      overwrite: bool('是否覆盖已有结果（可选）'),
+      config_id: int('音频生成配置 ID（可选）'),
+      prompts: { type: 'object', description: '按 cue ID 覆盖提示词（可选）', additionalProperties: true },
+      negatives: { type: 'object', description: '按 cue ID 覆盖负面词（可选）', additionalProperties: true },
+    }, ['episode_id', 'cue_ids']),
+    handler: ({ episode_id, ...body }) => callApi(
+      'POST',
+      `/api/v1/episodes/${Number(episode_id)}/sound-plan/generate`,
+      { body },
+    ),
+  },
+  {
+    name: 'get_sound_plan_status',
+    description: '读取某集声音计划生成进度。',
+    inputSchema: obj({ episode_id: int('剧集 ID') }, ['episode_id']),
+    handler: ({ episode_id }) => callApi('GET', `/api/v1/episodes/${Number(episode_id)}/sound-plan/status`),
+  },
+  {
+    name: 'cancel_sound_plan',
+    description: '取消某集声音计划生成。',
+    inputSchema: obj({ episode_id: int('剧集 ID') }, ['episode_id']),
+    handler: ({ episode_id }) => callApi('POST', `/api/v1/episodes/${Number(episode_id)}/sound-plan/cancel`, { body: {} }),
+  },
+  {
+    name: 'attach_sound_cue',
+    description: '把生成的声音线索挂到某条音频轨（可替换已有素材）。',
+    inputSchema: obj({
+      episode_id: int('剧集 ID'),
+      cue_id: int('声音线索 ID'),
+      track_id: int('目标音轨 ID（可选）'),
+      replace_existing: bool('是否替换已有素材（可选）'),
+    }, ['episode_id', 'cue_id']),
+    handler: ({ episode_id, cue_id, track_id, replace_existing }) => callApi(
+      'POST',
+      `/api/v1/episodes/${Number(episode_id)}/sound-plan/cues/${Number(cue_id)}/attach`,
+      { body: { track_id, replace_existing } },
+    ),
+  },
+  {
     name: 'list_api_endpoints',
     description: '列出后端全部 REST 端点（可按路径关键字过滤）。配合 api_request 调用未封装成工具的能力。',
     inputSchema: obj({ keyword: str('路径关键字，如 storyboards / ai-configs') }),
@@ -1172,30 +1742,53 @@ const TOOLS: ToolDef[] = [
         seen.add(key)
         return true
       })
-      return { total: endpoints.length, endpoints }
+      return {
+        total: endpoints.length,
+        endpoints,
+        note: '仅 method+path，不含参数 schema。JSON 接口用 api_request（支持 PATCH），multipart 文件用 api_upload；MCP 自身配置不可调用。',
+      }
     },
   },
   {
     name: 'api_request',
-    description: '直接调用任意后端 REST 接口（万能兜底）。path 必须以 /api/v1/ 开头；先用 list_api_endpoints 查路径。',
+    description: '直接调用任意后端 REST 接口（万能兜底，仅 JSON）。path 必须以 /api/v1/ 开头；先用 list_api_endpoints 查路径。MCP 自身配置不可调用。',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     inputSchema: obj({
-      method: str('GET / POST / PUT / DELETE'),
-      path: str('接口路径，如 /api/v1/dramas'),
+      method: str('GET / POST / PUT / PATCH / DELETE'),
+      path: str('接口路径，如 /api/v1/dramas；不要包含查询串'),
       query: { type: 'object', description: '查询参数对象（可选）', additionalProperties: true },
       body: { type: 'object', description: 'JSON 请求体（可选）', additionalProperties: true },
     }, ['method', 'path']),
     handler: ({ method, path, query, body }) => {
       const verb = String(method || '').toUpperCase()
-      if (!['GET', 'POST', 'PUT', 'DELETE'].includes(verb)) throw new Error('method 仅支持 GET/POST/PUT/DELETE')
-      const target = String(path || '')
-      if (!target.startsWith('/api/v1/')) throw new Error('path 必须以 /api/v1/ 开头')
-      if (target.includes('..')) throw new Error('path 不合法')
-      // 不允许模型改 MCP 自身配置（关服务 / 换 token 会把自己锁死）
-      if (target === '/api/v1/mcp' || target.startsWith('/api/v1/mcp/')) {
-        throw new Error('MCP 自身配置不通过 MCP 暴露，请到设置页操作')
+      if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(verb)) {
+        throw new Error('method 仅支持 GET/POST/PUT/PATCH/DELETE')
       }
-      return callApi(verb, target, { query, body })
+      return callApi(verb, normalizeApiPath(path), { query, body })
     },
+  },
+  {
+    name: 'api_upload',
+    description: '以 multipart/form-data 上传文件到任意后端 REST 接口（万能上传兜底），用于视频项目源视频/参考脸、剪辑素材、音频导入等仅接受文件的接口。单文件上限 64MB；MCP 自身配置不可调用。',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    inputSchema: obj({
+      path: str('POST 接口路径，如 /api/v1/video-projects/1/source-video；不要包含查询串'),
+      data_base64: str('文件内容 base64，可带 data:<mime>;base64, 前缀'),
+      filename: str('文件名（可选，建议带扩展名）'),
+      field: str('文件字段名，默认 file；视频项目源视频用 video，参考脸用 image'),
+      fields: { type: 'object', description: '额外表单字段（可选，值会转为字符串）', additionalProperties: true },
+    }, ['path', 'data_base64']),
+    handler: args => callApiUpload(String(args?.path || ''), args),
+  },
+  {
+    name: 'api_download',
+    description: '下载 /static/ 媒体或 /api/v1/ 资源并返回 base64。默认上限 8MB，可调至 32MB；适合取回图片、音频、字幕和短视频，超限请直接访问 URL。',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: obj({
+      path: str('资源路径，如 /static/projects/1/xxx.png 或 /api/v1/exports/1'),
+      max_bytes: int('最大字节数（可选，默认 8MB，最大 32MB）'),
+    }, ['path']),
+    handler: args => callApiDownload(String(args?.path || ''), args),
   },
 ]
 
@@ -1244,19 +1837,29 @@ async function handleRpc(payload: RpcRequest): Promise<object | null> {
           name: tool.name,
           description: tool.description,
           inputSchema: tool.inputSchema,
+          annotations: toolAnnotations(tool),
         })),
       })
     case 'tools/call': {
       const name = String(params?.name || '')
       const tool = TOOLS.find(t => t.name === name)
       if (!tool) return rpcError(id, -32602, `未知工具：${name}`)
+      if (process.env.MCP_READONLY === '1' && !toolAnnotations(tool).readOnlyHint) {
+        return rpcResult(id, {
+          content: [{ type: 'text', text: `MCP_READONLY=1：${name} 不是只读工具，已拒绝` }],
+          isError: true,
+        })
+      }
       const args = params?.arguments && typeof params.arguments === 'object' ? params.arguments : {}
+      const started = Date.now()
       try {
         const data = await tool.handler(args)
         const text = typeof data === 'string' ? data : JSON.stringify(data ?? null, null, 2)
+        console.log(`[mcp] ${name} ok ${Date.now() - started}ms`)
         return rpcResult(id, { content: [{ type: 'text', text }] })
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
+        console.warn(`[mcp] ${name} failed ${Date.now() - started}ms: ${message}`)
         return rpcResult(id, { content: [{ type: 'text', text: message }], isError: true })
       }
     }
@@ -1292,6 +1895,13 @@ async function mcpHandler(c: Context): Promise<Response> {
 
   const batch = Array.isArray(payload)
   const items = (batch ? payload : [payload]) as RpcRequest[]
+  if (batch && items.length > MCP_MAX_BATCH_ITEMS) {
+    return c.json({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32600, message: `批量 JSON-RPC 最多 ${MCP_MAX_BATCH_ITEMS} 条` },
+    }, 400)
+  }
   const results: object[] = []
   for (const item of items) {
     const result = await handleRpc(item)
@@ -1318,6 +1928,7 @@ async function stopServer(): Promise<void> {
 
 async function startServer(port: number): Promise<void> {
   await stopServer()
+  assertMcpHostAllowed()
   const { Hono } = await import('hono')
   const app = new Hono()
   app.all('/', mcpHandler)

@@ -596,7 +596,7 @@ def create_app(
                 def no_upload(_value):
                     raise BadRequest("管理端测试暂不支持上传参考图，请改用网关任务")
 
-                graph = build_job_graph(row, inputs, no_upload)
+                graph = build_job_graph(row, inputs, no_upload, no_upload)
                 response = client.submit(graph)
                 prompt_id = response.get("prompt_id") or ""
                 result = f"已提交到 ComfyUI：prompt_id={prompt_id}"

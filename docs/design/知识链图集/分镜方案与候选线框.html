@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分镜方案与候选线框</title>
+<style>html,body{margin:0;padding:0;background:#f7f8fa;}</style>
+</head>
+<body>
+<div id="scheme-settings-ui">
+  <style>
+    #scheme-settings-ui {
+      --bg-base:#f7f8fa; --bg-1:#ffffff; --bg-2:#f1f3f6; --border:#e7e9ee; --border-strong:#d6dae1;
+      --text-0:#17181a; --text-1:#3a3f47; --text-2:#5c6370; --text-3:#9aa1ad;
+      --accent:#f97316; --accent-bg:rgba(249,115,22,0.10); --accent-text:#ea580c;
+      --success:#16a34a; --success-bg:rgba(22,163,74,0.10); --error:#dc2626; --error-bg:rgba(220,38,38,0.10);
+      --info:#2563eb; --info-bg:rgba(37,99,235,0.10); --warning:#d97706; --warning-bg:rgba(217,119,6,0.12);
+      --font-body:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue','PingFang SC','Microsoft YaHei',sans-serif;
+      --font-mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+      background:var(--bg-base); color:var(--text-0); font-family:var(--font-body);
+      padding:24px 20px 20px; line-height:1.45;
+    }
+    #scheme-settings-ui *,#scheme-settings-ui *::before,#scheme-settings-ui *::after{box-sizing:border-box;margin:0;padding:0;}
+    #scheme-settings-ui .frame{max-width:1400px;margin:0 auto;min-width:0;}
+    #scheme-settings-ui .eyebrow{font:500 10px/1 var(--font-mono);letter-spacing:.18em;text-transform:uppercase;color:var(--text-2);margin-bottom:6px;}
+    #scheme-settings-ui h1{font-size:24px;font-weight:650;letter-spacing:-.02em;margin-bottom:4px;}
+    #scheme-settings-ui .lede{font-size:13px;color:var(--text-2);margin-bottom:16px;}
+    #scheme-settings-ui .app{display:flex;border:1px solid var(--border-strong);border-radius:14px;background:var(--bg-1);overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,.05),0 4px 14px rgba(16,24,40,.08);}
+    #scheme-settings-ui .nav{width:220px;flex-shrink:0;border-right:1px solid var(--border);padding:16px 12px;background:var(--bg-base);}
+    #scheme-settings-ui .nav-label{font-size:11px;font-weight:650;color:var(--text-3);letter-spacing:.06em;padding:8px 12px 4px;}
+    #scheme-settings-ui .nav-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:13px;font-weight:550;border-radius:10px;color:var(--text-1);}
+    #scheme-settings-ui .nav-item.active{background:var(--accent-bg);color:var(--accent-text);font-weight:650;}
+    #scheme-settings-ui .nav-item .dot{width:6px;height:6px;border-radius:50%;background:var(--text-3);flex-shrink:0;}
+    #scheme-settings-ui .nav-item.active .dot{background:var(--accent);}
+    #scheme-settings-ui .nav-badge{margin-left:auto;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--accent);color:#fff;font:700 10px/16px var(--font-body);text-align:center;}
+    #scheme-settings-ui .content{flex:1;min-width:0;padding:20px 28px 28px;}
+    #scheme-settings-ui .head{display:flex;align-items:flex-start;gap:16px;margin-bottom:12px;}
+    #scheme-settings-ui .head h2{font-size:18px;font-weight:650;}
+    #scheme-settings-ui .head p{font-size:12.5px;color:var(--text-2);margin-top:3px;max-width:660px;}
+    #scheme-settings-ui .head-actions{margin-left:auto;display:flex;gap:8px;flex-shrink:0;}
+    #scheme-settings-ui .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 18px;border-radius:980px;background:#e8eaee;color:var(--text-0);font:600 13px/1 var(--font-body);white-space:nowrap;border:none;}
+    #scheme-settings-ui .btn-sm{min-height:30px;padding:0 14px;font-size:12px;}
+    #scheme-settings-ui .btn-primary{background:linear-gradient(135deg,#f97316 0%,#fb923c 100%);color:#fff;}
+    #scheme-settings-ui .btn-ghost{background:transparent;color:var(--accent-text);}
+    #scheme-settings-ui .btn-danger{background:var(--error-bg);color:var(--error);}
+    #scheme-settings-ui .btn[disabled]{opacity:.45;}
+    #scheme-settings-ui .banner{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--warning-bg);color:#92400e;font-size:12.5px;margin-bottom:14px;}
+    #scheme-settings-ui .banner.info{background:var(--info-bg);color:#1d4ed8;}
+    #scheme-settings-ui .banner.err{background:var(--error-bg);color:var(--error);}
+    #scheme-settings-ui .card{border:1px solid var(--border);border-radius:14px;background:var(--bg-1);box-shadow:0 1px 2px rgba(16,24,40,.05);margin-bottom:14px;overflow:hidden;}
+    #scheme-settings-ui .card-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);}
+    #scheme-settings-ui .card-head h3{font-size:14px;font-weight:650;}
+    #scheme-settings-ui .card-head .sub{font-size:11.5px;color:var(--text-3);}
+    #scheme-settings-ui .card-head .right{margin-left:auto;display:flex;align-items:center;gap:8px;}
+    #scheme-settings-ui .card-body{padding:14px 16px;}
+    #scheme-settings-ui .tag{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:980px;background:rgba(23,24,26,.06);color:var(--text-2);font:550 11px var(--font-body);white-space:nowrap;}
+    #scheme-settings-ui .tag-accent{background:var(--accent-bg);color:var(--accent-text);}
+    #scheme-settings-ui .tag-success{background:var(--success-bg);color:#15803d;}
+    #scheme-settings-ui .tag-error{background:var(--error-bg);color:var(--error);}
+    #scheme-settings-ui .tag-info{background:var(--info-bg);color:#1d4ed8;}
+    #scheme-settings-ui .tag-warning{background:var(--warning-bg);color:#b45309;}
+    #scheme-settings-ui .mono{font-family:var(--font-mono);font-size:11.5px;color:var(--text-2);}
+    #scheme-settings-ui .field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;}
+    #scheme-settings-ui .field label{font-size:12px;font-weight:600;color:var(--text-1);}
+    #scheme-settings-ui .hint{font-size:11.5px;color:var(--text-3);}
+    #scheme-settings-ui .input{width:100%;padding:9px 14px;border:1px solid var(--border-strong);border-radius:10px;background:var(--bg-1);font:13.5px var(--font-body);}
+    #scheme-settings-ui .input.ro{background:var(--bg-2);color:var(--text-2);}
+    #scheme-settings-ui .row{display:flex;gap:10px;align-items:center;}
+    #scheme-settings-ui .row.wrap{flex-wrap:wrap;}
+    #scheme-settings-ui .grow{flex:1;min-width:0;}
+    #scheme-settings-ui .split{display:grid;grid-template-columns:minmax(240px,320px) minmax(0,1fr);gap:14px;align-items:start;}
+    #scheme-settings-ui .item{display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;}
+    #scheme-settings-ui .item.active{border-color:var(--accent);background:var(--accent-bg);}
+    #scheme-settings-ui .item b{font-size:13px;font-weight:650;}
+    #scheme-settings-ui .item .tags{display:flex;gap:6px;flex-wrap:wrap;}
+    #scheme-settings-ui table{width:100%;border-collapse:collapse;}
+    #scheme-settings-ui th{font:600 11px var(--font-body);color:var(--text-3);text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap;}
+    #scheme-settings-ui td{font-size:12.5px;color:var(--text-1);padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:top;}
+    #scheme-settings-ui tr:last-child td{border-bottom:none;}
+    #scheme-settings-ui tr.locked td{background:var(--bg-2);color:var(--text-2);}
+    #scheme-settings-ui .tabs{margin-bottom:14px;}
+    #scheme-settings-ui .tabs input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;}
+    #scheme-settings-ui .seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;padding:3px;background:var(--bg-1);border:1px solid var(--border);border-radius:10px;max-width:520px;}
+    #scheme-settings-ui .seg label{padding:6px 18px;border-radius:7px;color:var(--text-2);font:600 12px var(--font-body);text-align:center;cursor:pointer;white-space:nowrap;}
+    #scheme-settings-ui .panel{display:none;}
+    #scheme-settings-ui #sct1:checked ~ .seg label[for="sct1"],
+    #scheme-settings-ui #sct2:checked ~ .seg label[for="sct2"],
+    #scheme-settings-ui #sct3:checked ~ .seg label[for="sct3"]{background:var(--accent-bg);color:var(--accent-text);}
+    #scheme-settings-ui #sct1:checked ~ .panels .p1,
+    #scheme-settings-ui #sct2:checked ~ .panels .p2,
+    #scheme-settings-ui #sct3:checked ~ .panels .p3{display:block;}
+    #scheme-settings-ui .diff{border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+    #scheme-settings-ui .diff-head{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg-2);border-bottom:1px solid var(--border);}
+    #scheme-settings-ui .diff-head b{font-size:13px;font-weight:650;}
+    #scheme-settings-ui .diff-body{padding:0;}
+    #scheme-settings-ui .line{display:flex;gap:10px;padding:6px 14px;font-family:var(--font-mono);font-size:11.5px;border-bottom:1px solid var(--border);}
+    #scheme-settings-ui .line:last-child{border-bottom:none;}
+    #scheme-settings-ui .line .sign{width:12px;flex-shrink:0;font-weight:700;}
+    #scheme-settings-ui .line.add{background:var(--success-bg);color:#15803d;}
+    #scheme-settings-ui .line.del{background:var(--error-bg);color:var(--error);}
+    #scheme-settings-ui .line.ctx{color:var(--text-2);}
+    #scheme-settings-ui .kv{display:grid;grid-template-columns:150px 1fr 1fr;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+    #scheme-settings-ui .kv > div{background:var(--bg-1);padding:9px 12px;font-size:12.5px;}
+    #scheme-settings-ui .kv .k{background:var(--bg-2);font-weight:600;color:var(--text-1);}
+    #scheme-settings-ui .kv .old{color:var(--text-2);}
+    #scheme-settings-ui .kv .new{color:#15803d;background:var(--success-bg);}
+    #scheme-settings-ui .kv .head{font:600 11px var(--font-body);color:var(--text-3);background:var(--bg-2);}
+    #scheme-settings-ui .specimens{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px;}
+    #scheme-settings-ui .spec{border:1px dashed var(--border-strong);border-radius:12px;padding:12px;background:var(--bg-base);}
+    #scheme-settings-ui .spec h4{font:600 11px var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-2);margin-bottom:8px;}
+    #scheme-settings-ui .spec .card{margin-bottom:0;box-shadow:none;}
+    #scheme-settings-ui .notes{margin-top:18px;padding-top:14px;border-top:1px solid var(--border-strong);}
+    #scheme-settings-ui .notes h3{font-size:14px;font-weight:650;margin-bottom:8px;}
+    #scheme-settings-ui .notes ol{padding-left:20px;display:flex;flex-direction:column;gap:6px;}
+    #scheme-settings-ui .notes li{font-size:12.5px;color:var(--text-1);line-height:1.65;}
+    #scheme-settings-ui .notes code{font-family:var(--font-mono);font-size:11.5px;background:var(--bg-2);border-radius:5px;padding:1px 5px;}
+    @media (max-width:1100px){
+      #scheme-settings-ui .app{flex-direction:column;}
+      #scheme-settings-ui .nav{width:100%;border-right:none;border-bottom:1px solid var(--border);}
+      #scheme-settings-ui .split,#scheme-settings-ui .specimens{grid-template-columns:1fr;}
+      #scheme-settings-ui .kv{grid-template-columns:1fr;}
+    }
+  </style>
+
+  <div class="frame">
+    <p class="eyebrow">UI Wireframe · Settings / Schemes</p>
+    <h1>设置 → 分镜拆分：方案只读、校验方案、方案候选与 diff</h1>
+    <p class="lede">不新增「分镜校验」顶级页签（旧批量动作检验已下线）。拆分方案、校验方案、方案候选统一收在现有「分镜拆分」页签的三个子页签里，一处审批、一套口径。</p>
+
+    <div class="app">
+      <aside class="nav">
+        <div class="nav-label">基础</div>
+        <div class="nav-item"><span class="dot"></span>AI 服务</div>
+        <div class="nav-item"><span class="dot"></span>配音</div>
+        <div class="nav-item"><span class="dot"></span>小说</div>
+        <div class="nav-item"><span class="dot"></span>通用</div>
+        <div class="nav-item"><span class="dot"></span>手机接力</div>
+        <div class="nav-item"><span class="dot"></span>风格预设</div>
+        <div class="nav-item"><span class="dot"></span>流程规则</div>
+        <div class="nav-item"><span class="dot"></span>知识库</div>
+        <div class="nav-item active"><span class="dot"></span>分镜拆分<span class="nav-badge">2</span></div>
+        <div class="nav-item"><span class="dot"></span>分镜流水线</div>
+        <div class="nav-item"><span class="dot"></span>Agent 配置</div>
+        <div class="nav-item"><span class="dot"></span>任务队列</div>
+        <div class="nav-item"><span class="dot"></span>存储位置</div>
+        <div class="nav-item"><span class="dot"></span>MCP</div>
+        <div class="nav-item"><span class="dot"></span>关于更新</div>
+      </aside>
+
+      <div class="content">
+        <div class="head">
+          <div>
+            <h2>分镜拆分</h2>
+            <p>方案在 Obsidian 里写，同步后成为候选；这里只看内容、看差异、批准或拒绝。已发布方案在运行时只读。</p>
+          </div>
+          <div class="head-actions">
+            <span class="btn btn-sm">打开 Vault</span>
+            <span class="btn btn-sm">同步方案</span>
+          </div>
+        </div>
+
+        <div class="tabs">
+          <input type="radio" name="sct" id="sct1" checked>
+          <input type="radio" name="sct" id="sct2">
+          <input type="radio" name="sct" id="sct3">
+          <div class="seg">
+            <label for="sct1">拆分方案</label>
+            <label for="sct2">校验方案</label>
+            <label for="sct3">方案候选 · 2</label>
+          </div>
+
+          <div class="panels" style="margin-top:14px;">
+            <!-- ===== 拆分方案（只读） ===== -->
+            <section class="panel p1">
+              <div class="split">
+                <div class="card">
+                  <div class="card-head"><h3>方案列表</h3><div class="right"><span class="tag">启用 3</span><span class="tag">归档 3</span></div></div>
+                  <div class="card-body">
+                    <div class="item active">
+                      <b>标准短剧段落</b>
+                      <div class="tags"><span class="tag tag-accent">待确认 1</span><span class="tag">Obsidian</span><span class="tag">v4</span></div>
+                      <span class="hint">6–15 秒 · 台词原子 · 边界承接 · 5 集使用中</span>
+                    </div>
+                    <div class="item">
+                      <b>爆款钩子节拍（扩展）</b>
+                      <div class="tags"><span class="tag">Obsidian</span><span class="tag">v2</span></div>
+                      <span class="hint">6–12 秒 · 段尾钩子 · 2 集使用中</span>
+                    </div>
+                    <div class="item">
+                      <b>H3 紧凑段</b>
+                      <div class="tags"><span class="tag tag-error">正文与数值矛盾</span><span class="tag">v3</span></div>
+                      <span class="hint">6–8 秒 · 本地 H3 · 1 集使用中</span>
+                    </div>
+                    <div class="item">
+                      <b>钩子节拍（旧）</b>
+                      <div class="tags"><span class="tag">归档</span><span class="tag tag-warning">compat: legacy</span></div>
+                      <span class="hint">重新启用前必须先通过检查并发布新版本</span>
+                    </div>
+                    <div class="item">
+                      <b>导演板（旧）</b>
+                      <div class="tags"><span class="tag">归档</span><span class="tag tag-warning">compat: legacy</span></div>
+                      <span class="hint">正文 5–10 秒与数值 6–10 秒不一致</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <div class="card-head"><h3>标准短剧段落</h3><span class="sub">只读 · 编辑在 Obsidian</span>
+                    <div class="right"><span class="tag tag-success">已发布 v4</span><span class="btn btn-sm">在 Obsidian 中编辑</span></div>
+                  </div>
+                  <div class="card-body">
+                    <div class="row wrap" style="margin-bottom:12px;">
+                      <div class="grow field" style="margin-bottom:0;"><label>方案标识</label><span class="input ro mono">standard</span></div>
+                      <div class="grow field" style="margin-bottom:0;"><label>来源文档</label><span class="input ro mono">40-方案/10-拆分方案/standard.md</span></div>
+                    </div>
+                    <div class="row wrap" style="margin-bottom:12px;">
+                      <div class="field" style="margin-bottom:0;width:150px;"><label>最短秒数</label><span class="input ro">6</span></div>
+                      <div class="field" style="margin-bottom:0;width:150px;"><label>最长秒数</label><span class="input ro">15</span></div>
+                      <div class="grow field" style="margin-bottom:0;"><label>覆盖策略</label><span class="input ro">下限 90% · 按字数换算 · 不足则阻断</span></div>
+                    </div>
+                    <div class="field">
+                      <label>引用知识（来自方案文档，不在这里勾选）</label>
+                      <div class="row wrap">
+                        <span class="tag tag-info">short-drama/pacing</span>
+                        <span class="tag tag-info">short-drama/directing</span>
+                        <span class="tag tag-info">short-drama/continuity</span>
+                        <span class="tag">shared/craft · applies_to: short-drama</span>
+                      </div>
+                    </div>
+                    <div class="field">
+                      <label>结构化策略（只读）</label>
+                      <span class="input ro mono">speechAtomic · boundary=single_side · hook=none · style=standard</span>
+                      <span class="hint">覆盖策略只更新覆盖相关键，台词原子、边界与钩子策略不会被覆盖丢失。</span>
+                    </div>
+                    <div class="field" style="margin-bottom:0;">
+                      <label>方案增量文本（提示词 / Skill）</label>
+                      <span class="input ro" style="min-height:88px;line-height:1.7;">你是短剧分镜导演。按台词原子与场景契约拆分，单镜 6–15 秒，单机位单主体…（只读预览，完整内容在 Obsidian）</span>
+                    </div>
+                  </div>
+                  <div class="card-head" style="border-top:1px solid var(--border);border-bottom:none;"><h3>版本历史</h3>
+                    <div class="right"><span class="btn btn-sm" disabled>回滚到此版本</span></div>
+                  </div>
+                  <table>
+                    <thead><tr><th>版本</th><th>发布时间</th><th>来源</th><th>变化</th><th>操作</th></tr></thead>
+                    <tbody>
+                      <tr><td class="mono">v4（当前）</td><td class="mono">11-12 21:07</td><td>候选批准</td><td>覆盖下限 85% → 90%</td><td><span class="tag">使用中</span></td></tr>
+                      <tr><td class="mono">v3</td><td class="mono">11-08 10:12</td><td>初始导出</td><td>从应用内置方案导出</td><td><span class="btn btn-sm">回滚到 v3</span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="banner info"><span>已移除的写操作：保存方案、复制为新方案、恢复默认、删除方案。改内容去 Obsidian；要退回旧口径用「回滚到指定版本」；要新方案就在 Vault 里新建文档（可复制 90-模板）。</span></div>
+            </section>
+
+            <!-- ===== 校验方案 ===== -->
+            <section class="panel p2">
+              <div class="card">
+                <div class="card-head"><h3>校验方案</h3><span class="sub">确定性校验器读取，不注入模型</span>
+                  <div class="right">
+                    <span class="input ro" style="width:220px;">分镜校验 · 标准版 v2 ▾</span>
+                    <span class="btn btn-sm">在 Obsidian 中编辑</span>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <span class="hint">逐镜校验与声音校验是确定性步骤：方案在这里是「判定与证据口径」。锁定硬检查不可关闭、不可降级；方案检查只能加严；建议检查可关闭且不影响门禁。当前分镜段没有校验 Agent，已下线的批量动作检验不会恢复。</span>
+                </div>
+                <table>
+                  <thead><tr><th>层</th><th>检查项</th><th>范围</th><th>严重度</th><th>门禁</th><th>证据要求</th><th>启用</th><th>修复提示</th></tr></thead>
+                  <tbody>
+                    <tr class="locked"><td><span class="tag">锁定</span></td><td>单机位单主体<span class="mono">single_camera</span></td><td>shot</td><td>error</td><td>block</td><td>提示词结构</td><td><span class="tag">不可关</span></td><td>合并子镜头为一个镜头</td></tr>
+                    <tr class="locked"><td><span class="tag">锁定</span></td><td>时长 6–15 秒<span class="mono">duration_bounds</span></td><td>shot</td><td>error</td><td>block</td><td>时间轴</td><td><span class="tag">不可关</span></td><td>调整段边界</td></tr>
+                    <tr class="locked"><td><span class="tag">锁定</span></td><td>台词逐字与容量<span class="mono">dialogue_integrity</span></td><td>shot</td><td>error</td><td>block</td><td>原文对照</td><td><span class="tag">不可关</span></td><td>补回台词或重拆</td></tr>
+                    <tr><td><span class="tag tag-info">方案</span></td><td>轴线与视线匹配<span class="mono">axis_match</span></td><td>pair</td><td>warning</td><td>warn</td><td>相邻镜合同</td><td><span class="tag tag-success">开</span></td><td>调整屏幕左右</td></tr>
+                    <tr><td><span class="tag tag-info">方案</span></td><td>尾动作承接<span class="mono">action_handoff</span></td><td>pair</td><td>error</td><td>block</td><td>动作终点/起点</td><td><span class="tag tag-success">开</span></td><td>补过渡动作</td></tr>
+                    <tr><td><span class="tag tag-info">方案</span></td><td>反应镜头覆盖<span class="mono">reaction_coverage</span></td><td>episode</td><td>info</td><td>warn</td><td>节拍计划</td><td><span class="tag tag-success">开</span></td><td>补反应镜</td></tr>
+                    <tr><td><span class="tag">建议</span></td><td>空镜时长偏好<span class="mono">empty_shot_style</span></td><td>shot</td><td>info</td><td>warn</td><td>—</td><td><span class="tag">关</span></td><td>可忽略</td></tr>
+                  </tbody>
+                </table>
+                <div class="card-body" style="border-top:1px solid var(--border);">
+                  <div class="row wrap">
+                    <span class="tag tag-error">阻断生成 4 项</span>
+                    <span class="tag tag-warning">人工确认 2 项</span>
+                    <span class="tag">提示 1 项</span>
+                    <span class="hint grow">门禁影响：error + block 会挡住生成前门禁；warning 保留人工确认；info 不阻断。适用方案可用 applies_to 限定。</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ===== 方案候选 + diff ===== -->
+            <section class="panel p3">
+              <div class="card">
+                <div class="card-head"><h3>待确认候选</h3><span class="sub">只有拆分/校验方案走审批；知识同步即发布</span>
+                  <div class="right"><span class="tag tag-accent">2 待确认</span><span class="btn btn-sm">全部拒绝</span></div>
+                </div>
+                <table>
+                  <thead><tr><th>方案</th><th>类型</th><th>来源文档</th><th>基准 → 候选</th><th>检查</th><th>操作</th></tr></thead>
+                  <tbody>
+                    <tr>
+                      <td><b>标准短剧段落</b><span class="mono">standard</span></td>
+                      <td><span class="tag tag-info">拆分</span></td>
+                      <td class="mono">40-方案/10-拆分方案/standard.md</td>
+                      <td class="mono">v4 → v5</td>
+                      <td><span class="tag tag-success">通过</span></td>
+                      <td><span class="btn btn-sm btn-primary">看 diff</span></td>
+                    </tr>
+                    <tr>
+                      <td><b>分镜校验 · 标准版</b><span class="mono">validation-standard</span></td>
+                      <td><span class="tag tag-info">校验</span></td>
+                      <td class="mono">40-方案/20-校验方案/standard.md</td>
+                      <td class="mono">v2 → v3</td>
+                      <td><span class="tag tag-error">冲突</span></td>
+                      <td><span class="btn btn-sm">看 diff</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="diff">
+                <div class="diff-head">
+                  <b>候选 diff · 标准短剧段落</b>
+                  <span class="mono">v4 → v5 · 来源 standard.md · 内容哈希 a1b2c3…</span>
+                  <div class="right" style="margin-left:auto;display:flex;gap:8px;">
+                    <span class="btn btn-sm">在 Obsidian 中打开</span>
+                    <span class="btn btn-sm btn-danger">拒绝</span>
+                    <span class="btn btn-sm btn-primary">批准并发布 v5</span>
+                  </div>
+                </div>
+                <div class="diff-body">
+                  <div style="padding:14px;">
+                    <div class="kv">
+                      <div class="head">字段</div><div class="head">当前发布 v4</div><div class="head">候选 v5</div>
+                      <div class="k">最长秒数</div><div class="old">15</div><div class="new">15（不变）</div>
+                      <div class="k">覆盖下限</div><div class="old">90%</div><div class="new">92%</div>
+                      <div class="k">引用知识</div><div class="old">pacing · directing</div><div class="new">pacing · directing · continuity</div>
+                      <div class="k">结构化策略</div><div class="old">hook=none</div><div class="new">hook=none（保留）</div>
+                      <div class="k">门禁影响</div><div class="old">覆盖不足阻断</div><div class="new">覆盖不足阻断（更严）</div>
+                    </div>
+                  </div>
+                  <div style="padding:0 14px 14px;">
+                    <div class="hint" style="margin-bottom:6px;">正文差异（方案增量文本）</div>
+                    <div class="diff">
+                      <div class="line ctx"><span class="sign"> </span><span>你是短剧分镜导演。按台词原子与场景契约拆分，单镜 6–15 秒。</span></div>
+                      <div class="line del"><span class="sign">−</span><span>覆盖率下限 90%，不足时提示补拆。</span></div>
+                      <div class="line add"><span class="sign">+</span><span>覆盖率下限 92%，不足时阻断并列出缺场清单。</span></div>
+                      <div class="line add"><span class="sign">+</span><span>相邻镜必须写明动作终点与动作起点，供连贯检查使用。</span></div>
+                      <div class="line ctx"><span class="sign"> </span><span>禁止项：不得覆盖单机位、6–15 秒、固定四区与台词完整性。</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="banner err" style="margin-top:14px;">
+                <span>「分镜校验 · 标准版 v3」不可批准：候选试图把锁定检查 dialogue_integrity 的 severity 从 error 降为 warning。锁定硬检查只能加严，不能削弱。请在 Obsidian 中改回后重新同步。</span>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="specimens">
+      <div class="spec">
+        <h4>空态 · 没有候选</h4>
+        <div class="card">
+          <div class="card-head"><h3>没有待确认的方案</h3></div>
+          <div class="card-body">
+            <span class="hint">在 Obsidian 里改方案文档后点「同步方案」，变更会出现在这里。知识文档不需要审批，同步即发布。</span>
+            <div class="row" style="margin-top:10px;"><span class="btn btn-sm">同步方案</span><span class="btn btn-sm btn-ghost">去知识库</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="spec">
+        <h4>归档方案 · 重新启用</h4>
+        <div class="card">
+          <div class="card-head"><h3>导演板（旧）</h3><div class="right"><span class="tag tag-warning">legacy</span></div></div>
+          <div class="card-body">
+            <span class="hint">正文写 5–10 秒、数值是 6–10 秒，两者矛盾。先在 Obsidian 统一口径并通过检查，再发布新版本才能启用。</span>
+            <div class="row" style="margin-top:10px;"><span class="btn btn-sm" disabled>重新启用</span><span class="btn btn-sm">在 Obsidian 中修正</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="spec">
+        <h4>拒绝后 · 审计留痕</h4>
+        <div class="card">
+          <div class="card-head"><h3>已拒绝</h3><div class="right"><span class="tag">审计保留</span></div></div>
+          <div class="card-body">
+            <span class="hint">拒绝不会删除来源文档与候选记录；运行时继续使用当前发布版本。修改后重新同步会生成新候选。</span>
+            <div class="row" style="margin-top:10px;"><span class="btn btn-sm">看拒绝记录</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="notes">
+      <h3>设计说明</h3>
+      <ol>
+        <li><strong>不新增「分镜校验」顶级页签</strong>：旧批量动作检验已下线（创建/撤销返回 410），前端有测试断言其入口不存在。校验方案作为「分镜拆分」的第二个子页签，避免复活旧入口，也保证规则一套、口径一套。<code>分镜流水线</code> 页签的规则包区只加一条只读跳转「校验方案见分镜拆分」。</li>
+        <li><strong>沿用 breakdown-layout</strong>：左列表 <code>minmax(240px,320px)</code> + 右详情；右侧由编辑卡改为只读详情卡，字段全部 <code>input.ro</code>，无保存按钮。</li>
+        <li><strong>列表新增信息</strong>：来源（内置导出 / Obsidian / 自定义）、当前版本、引用知识数、候选徽标、正文与数值矛盾徽标、使用集数；归档方案标 <code>compat: legacy</code> 并禁用「重新启用」直到通过检查。</li>
+        <li><strong>写操作迁移</strong>：删除保存/复制/恢复默认/删除四个按钮，替换为「在 Obsidian 中编辑」「回滚到指定版本」「同步方案」。回滚走方案版本接口，不删中间版本。</li>
+        <li><strong>diff 需新建组件</strong>：仓库当前没有 diff 查看组件。新增轻量结构化 diff（字段级三列表 + 正文行级 ±），复用 <code>.card</code>/<code>.tag</code>/<code>.overlay &gt; .dialog</code>；不引入第三方 diff 库。真实实现中「看 diff」打开右侧抽屉或弹窗，线框里内联展开便于评审。</li>
+        <li><strong>批准前门禁</strong>：候选检查未通过（缺列、未知 scope、非法 severity、削弱锁定检查、正文与时长数值矛盾）时批准按钮置灰，并给出具体原因与修改位置。</li>
+        <li><strong>校验方案表格</strong>：八列必填字段全部可见（检查项 / 范围 / 严重度 / 门禁 / 证据要求 / 启用 / 修复提示，外加层与 applies_to），锁定行灰底且开关不可点；底部汇总门禁影响（阻断 / 人工确认 / 提示 各几项）。</li>
+        <li><strong>投影只读</strong>：<code>breakdown_methods</code> 与 <code>validation_schemes</code> 是运行时投影，页面不直接写；版本事实源是方案版本表，避免设置页与运行时各存一份。</li>
+      </ol>
+    </div>
+  </div>
+</div>
+</body>
+</html>

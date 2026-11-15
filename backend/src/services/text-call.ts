@@ -7,6 +7,7 @@
  */
 import { getConfigById, getTextConfig, getTextProviderBaseUrl } from './ai.js'
 import { joinProviderUrl } from './adapters/url.js'
+import { callDshBridgeText, isDshBridgeEnabled, readDshBridgeDescriptor } from './dsh-bridge.js'
 
 export interface TextCallOptions {
   system?: string
@@ -17,6 +18,8 @@ export interface TextCallOptions {
   temperature?: number
   timeoutMs?: number
   responseFormat?: 'json' | 'text'
+  /** DSH 桥角色；未设置时用 generic。桥不可用/未开启时忽略。 */
+  role?: string
   fetchImpl?: typeof fetch
 }
 
@@ -38,6 +41,30 @@ function chatUrl(baseUrl: string): string {
 
 /** 调用一次文本模型；返回纯文本 */
 export async function callText(options: TextCallOptions): Promise<TextCallResult> {
+  if (options.fetchImpl === undefined && await isDshBridgeEnabled()) {
+    const descriptor = readDshBridgeDescriptor()
+    if (descriptor === null) {
+      if (process.env.DSH_BRIDGE_STRICT === '1') {
+        throw new Error('DSH 文本桥已启用，但未找到桥描述文件')
+      }
+      console.warn('[dsh-bridge] 已启用但未找到桥描述文件，回退原文本 provider')
+    } else {
+      try {
+        return await callDshBridgeText(descriptor, {
+          role: options.role ?? 'generic',
+          system: options.system,
+          prompt: options.prompt,
+          maxTokens: options.maxTokens,
+          temperature: options.temperature,
+          timeoutMs: options.timeoutMs,
+        })
+      } catch (cause) {
+        if (process.env.DSH_BRIDGE_STRICT === '1') throw cause
+        console.warn(`[dsh-bridge] 调用失败，回退原文本 provider：${cause instanceof Error ? cause.message : String(cause)}`)
+      }
+    }
+  }
+
   const config = (options.configId ? await getConfigById(options.configId) : null) || (await getTextConfig())
   const model = options.model || config.model
   if (!model) throw new Error('文本模型未配置')

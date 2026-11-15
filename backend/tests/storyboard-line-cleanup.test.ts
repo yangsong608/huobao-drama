@@ -158,6 +158,37 @@ test('applyEpisodeMerge 清理锚点失效的孤儿台词（硬删与软删分�
   assert.ok(liveLine(absolute))
 })
 
+test('删除分镜时按镜头号清理同集骨架，避免拆分面板残留已删除分镜', async () => {
+  const episodeId = newEpisode()
+  const storyboardId = insertStoryboard(episodeId, 9)
+  const job = db.insert(schema.storyboardPipelineJobs).values({
+    episodeId,
+    dramaId: drama.id,
+    status: 'done',
+    stage: 'repair',
+    message: '删除清理测试',
+    ...timestamps,
+  }).returning().get()
+  const skeleton = db.insert(schema.storyboardSkeletons).values({
+    jobId: job.id,
+    episodeId,
+    dramaId: drama.id,
+    storyboardNumber: 9,
+    actionSummary: '测试动作',
+    sourceExcerpt: '测试原文',
+    status: 'validated',
+    storyboardId,
+    ...timestamps,
+  }).returning().get()
+
+  const response = await app.request(`/api/v1/storyboards/${storyboardId}`, { method: 'DELETE' })
+  assert.equal(response.status, 200)
+  const remaining = db.select().from(schema.storyboardSkeletons)
+    .where(eq(schema.storyboardSkeletons.id, skeleton.id))
+    .all()
+  assert.equal(remaining.length, 0)
+})
+
 test.after(async () => {
   db.$client.close()
   await fs.promises.rm(root, { recursive: true, force: true })

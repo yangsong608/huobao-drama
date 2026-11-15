@@ -213,6 +213,7 @@ export async function generateVoiceProfiles(input: VoiceDesignInput): Promise<Vo
 
   try {
     const { data } = await callTextJson<{ profiles?: any[] }>({
+      role: 'voice_designer',
       system: rule,
       prompt,
       model: input.model,

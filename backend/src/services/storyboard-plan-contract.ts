@@ -45,6 +45,8 @@ export interface PlanShot {
   actionArc?: { initial: string; action: string; result: string } | null
   /** 原文只有发声动作、没有具体台词时必须补的 inferred 台词要求 */
   speechRequirement?: { speaker: string; basis: string } | null
+  /** 连续无台词节拍被压缩成单机位过渡镜时记录来源节拍数 */
+  narrativeRun?: { compressed: boolean; sourceBeatCount: number } | null
 }
 
 /** 场景契约的最小只读视图；由 scene-contract 服务提供，避免服务间循环依赖 */

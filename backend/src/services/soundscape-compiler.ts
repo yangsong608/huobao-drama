@@ -878,6 +878,7 @@ export async function compileScenePromptsWithText(
     const labels = batch.map((scene) => scene.sceneLabel).join('、')
     try {
       const { data } = await callTextJson<{ scenes?: unknown[] }>({
+        role: 'sound_designer',
         system: [
           '你是短剧声音设计师，负责为 Stable Audio Open 编写英文提示词。',
           '只输出 JSON，不要解释。所有提示词必须是英文。',

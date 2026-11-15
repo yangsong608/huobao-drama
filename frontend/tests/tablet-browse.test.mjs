@@ -337,12 +337,12 @@ test('触控可见：项目卡片操作在粗指针下常驻', () => {
   assert.match(cardCoarse, /\.more-wrap \{ opacity: 1; \}/)
 })
 
-test('只新增远程配对页，业务路由与视图不受影响', () => {
+test('新增视频与远程配对页，既有业务路由不受影响', () => {
   const config = readRoot('nuxt.config.ts')
   assert.equal(countOccurrences(config, 'pages.push('), 1, 'pages:extend 应只有一次 pages.push')
   const pushedFiles = config.match(/fileURLToPath\(new URL\('\.\/app\/views\/[^']+'/g) || []
-  assert.equal(pushedFiles.length, 4, 'pages:extend 应仍只有 4 条路由')
-  for (const route of ['/drama/:id', '/drama/:id/episode/:episodeNumber', '/drama/:id/episode/:episodeNumber/edit', '/novels/:id']) {
+  assert.equal(pushedFiles.length, 5, 'pages:extend 应包含 5 条动态路由（新增视频工作台）')
+  for (const route of ['/drama/:id', '/drama/:id/episode/:episodeNumber', '/drama/:id/episode/:episodeNumber/edit', '/novels/:id', '/videos/:id']) {
     assert.ok(config.includes(`path: '${route}'`), `路由丢失：${route}`)
   }
 
@@ -353,13 +353,15 @@ test('只新增远程配对页，业务路由与视图不受影响', () => {
     'pages/novels/index.vue',
     'pages/pair.vue',
     'pages/settings.vue',
-  ], 'pages 目录只允许增加远程配对页 /pair')
+    'pages/videos/index.vue',
+  ], 'pages 目录允许增加配对页与视频列表页')
   assert.deepEqual(walkFiles('views/'), [
     'views/drama/detail.vue',
     'views/drama/edit.vue',
     'views/drama/episode.vue',
     'views/novel/detail.vue',
-  ], 'views 目录不应新增文件')
+    'views/video/detail.vue',
+  ], 'views 目录允许增加视频工作台')
   const pairPage = read('pages/pair.vue')
   assert.match(pairPage, /definePageMeta\(\{ layout: false \}\)/, '配对页必须使用独立布局')
 })

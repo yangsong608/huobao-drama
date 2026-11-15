@@ -1,0 +1,5 @@
+# 火宝 DSH 插件宿主行。
+# 插件启动后自建 127.0.0.1 专用桥，并把地址/令牌写入 ~/.dsh/moss-huobao-bridge.json。
+- insert:
+    - id: moss-huobao
+      name: dsh-moss-huobao

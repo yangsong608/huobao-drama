@@ -182,6 +182,7 @@ export const sqliteSchemaStatements = [
     subtitle_url TEXT,
     composed_video_url TEXT,
     status TEXT DEFAULT 'pending',
+    tags TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT
@@ -514,6 +515,7 @@ export const sqliteSchemaStatements = [
     beat_plan_json TEXT,
     action_arc_json TEXT,
     speech_requirement_json TEXT,
+    narrative_run_json TEXT,
     speech_segments_json TEXT,
     boundary_type TEXT,
     boundary_word TEXT,
@@ -522,6 +524,9 @@ export const sqliteSchemaStatements = [
     screen_right TEXT,
     axis_side TEXT,
     landmark_side TEXT,
+    intent_type TEXT,
+    narration_json TEXT,
+    action_plan_json TEXT,
     plan_version INTEGER NOT NULL DEFAULT 1,
     action_summary TEXT NOT NULL,
     source_excerpt TEXT NOT NULL,
@@ -1375,6 +1380,125 @@ export const sqliteSchemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_episode ON pipeline_jobs (episode_id)`,
   `CREATE INDEX IF NOT EXISTS idx_script_chapters_import ON script_chapters (import_id, chapter_index)`,
 
+  // ===== 视频换人工作台：独立项目/运行/镜头/片段/日志 =====
+  `CREATE TABLE IF NOT EXISTS video_projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'face',
+    status TEXT NOT NULL DEFAULT 'draft',
+    source_video_path TEXT,
+    source_video_meta TEXT,
+    reference_face_paths TEXT NOT NULL DEFAULT '[]',
+    prompt TEXT NOT NULL DEFAULT '',
+    config_id INTEGER,
+    latest_run_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS video_swap_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES video_projects(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL,
+    config_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'uploaded',
+    stage TEXT NOT NULL DEFAULT 'uploaded',
+    progress INTEGER NOT NULL DEFAULT 0,
+    analysis_json TEXT,
+    final_prompt_json TEXT,
+    scene_reference_path TEXT,
+    max_generation_seconds REAL DEFAULT 8,
+    chunk_overlap_ms INTEGER DEFAULT 1000,
+    min_chunk_seconds REAL DEFAULT 5,
+    max_chunks INTEGER DEFAULT 50,
+    audio_master_path TEXT,
+    proxy_path TEXT,
+    total_chunks INTEGER NOT NULL DEFAULT 0,
+    completed_chunks INTEGER NOT NULL DEFAULT 0,
+    merge_path TEXT,
+    output_meta TEXT,
+    params_json TEXT,
+    edl_json TEXT,
+    gateway_job_id TEXT,
+    error_code TEXT,
+    error_message TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS video_swap_shots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES video_swap_runs(id) ON DELETE CASCADE,
+    shot_index INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    chunk_count INTEGER NOT NULL DEFAULT 1,
+    source_path TEXT,
+    scene_reference_path TEXT,
+    scene_reference_candidates TEXT,
+    final_prompt_json TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    output_path TEXT,
+    error_code TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (run_id, shot_index)
+  )`,
+  `CREATE TABLE IF NOT EXISTS video_swap_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES video_swap_runs(id) ON DELETE CASCADE,
+    shot_id INTEGER NOT NULL REFERENCES video_swap_shots(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL,
+    source_start_ms INTEGER NOT NULL,
+    source_end_ms INTEGER NOT NULL,
+    overlap_before_ms INTEGER NOT NULL DEFAULT 0,
+    overlap_after_ms INTEGER NOT NULL DEFAULT 0,
+    warmup_frames INTEGER NOT NULL DEFAULT 0,
+    target_frames INTEGER,
+    cut_point_confidence REAL,
+    source_path TEXT,
+    output_path TEXT,
+    trimmed_path TEXT,
+    trim_start_ms INTEGER,
+    trim_end_ms INTEGER,
+    status TEXT NOT NULL DEFAULT 'queued',
+    gateway_job_id TEXT,
+    seam_ssim REAL,
+    seam_color_delta REAL,
+    seam_face_similarity REAL,
+    seam_verdict TEXT,
+    seam_json TEXT,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    error_code TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (run_id, shot_id, chunk_index)
+  )`,
+  `CREATE TABLE IF NOT EXISTS video_swap_run_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES video_swap_runs(id) ON DELETE CASCADE,
+    shot_id INTEGER,
+    chunk_id INTEGER,
+    level TEXT NOT NULL DEFAULT 'info',
+    stage TEXT NOT NULL,
+    message TEXT NOT NULL,
+    detail_json TEXT,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_video_projects_updated ON video_projects (deleted_at, updated_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_video_projects_status ON video_projects (status)`,
+  `CREATE INDEX IF NOT EXISTS idx_video_swap_runs_project ON video_swap_runs (project_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_video_swap_runs_status ON video_swap_runs (status)`,
+  `CREATE INDEX IF NOT EXISTS idx_video_swap_shots_status ON video_swap_shots (run_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_video_swap_chunks_shot ON video_swap_chunks (shot_id, chunk_index)`,
+  `CREATE INDEX IF NOT EXISTS idx_video_swap_chunks_status ON video_swap_chunks (run_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_video_swap_logs_run ON video_swap_run_logs (run_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_video_swap_logs_stage ON video_swap_run_logs (run_id, stage)`,
+
   // ===== 远程接力：已配对设备（只存令牌哈希，不存明文） =====
   `CREATE TABLE IF NOT EXISTS remote_devices (
     id TEXT PRIMARY KEY,
@@ -1685,6 +1809,31 @@ export function initSqliteSchema(sqlite: Database.Database) {
   for (const statement of sqliteSchemaStatements) {
     sqlite.exec(statement)
   }
+  // 视频换人：P4 先建表，P6 补代理路径；只加列，不改历史运行。
+  const videoRunColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(video_swap_runs)').all() as { name: string }[]).map(c => c.name),
+  )
+  if (!videoRunColumns.has('proxy_path')) {
+    sqlite.exec('ALTER TABLE video_swap_runs ADD COLUMN proxy_path TEXT')
+  }
+  for (const name of ['params_json', 'edl_json']) {
+    if (!videoRunColumns.has(name)) sqlite.exec(`ALTER TABLE video_swap_runs ADD COLUMN ${name} TEXT`)
+  }
+  const videoShotColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(video_swap_shots)').all() as { name: string }[]).map(c => c.name),
+  )
+  if (!videoShotColumns.has('scene_reference_candidates')) {
+    sqlite.exec('ALTER TABLE video_swap_shots ADD COLUMN scene_reference_candidates TEXT')
+  }
+  const videoChunkColumns = new Set(
+    (sqlite.prepare('PRAGMA table_info(video_swap_chunks)').all() as { name: string }[]).map(c => c.name),
+  )
+  if (!videoChunkColumns.has('seam_json')) {
+    sqlite.exec('ALTER TABLE video_swap_chunks ADD COLUMN seam_json TEXT')
+  }
+  if (!videoChunkColumns.has('warmup_frames')) {
+    sqlite.exec('ALTER TABLE video_swap_chunks ADD COLUMN warmup_frames INTEGER NOT NULL DEFAULT 0')
+  }
   // 兼容已安装的桌面版；仅增加任务恢复元数据，不改写历史生成结果。
   const taskColumns = new Set((sqlite.prepare('PRAGMA table_info(sys_task)').all() as { name: string }[]).map(c => c.name))
   for (const [name, type] of Object.entries({ config_id: 'INTEGER', config_base_url: 'TEXT', stage: 'TEXT', error_code: 'TEXT', transition_id: 'INTEGER', episode_id: 'INTEGER' })) {
@@ -1751,6 +1900,7 @@ export function initSqliteSchema(sqlite: Database.Database) {
     beat_plan_json: 'TEXT',
     action_arc_json: 'TEXT',
     speech_requirement_json: 'TEXT',
+    narrative_run_json: 'TEXT',
     speech_segments_json: 'TEXT',
     boundary_type: 'TEXT',
     boundary_word: 'TEXT',
@@ -1759,6 +1909,9 @@ export function initSqliteSchema(sqlite: Database.Database) {
     screen_right: 'TEXT',
     axis_side: 'TEXT',
     landmark_side: 'TEXT',
+    intent_type: 'TEXT',
+    narration_json: 'TEXT',
+    action_plan_json: 'TEXT',
     plan_version: 'INTEGER NOT NULL DEFAULT 1',
   })) {
     if (!skeletonColumns.has(name)) sqlite.exec(`ALTER TABLE storyboard_skeletons ADD COLUMN ${name} ${type}`)
@@ -1840,6 +1993,7 @@ export function initSqliteSchema(sqlite: Database.Database) {
     camera_side: 'TEXT',
     scene_geography_id: 'INTEGER',
     negative_constraints: 'TEXT',
+    tags: 'TEXT',
     background_landmarks: 'TEXT',
     segment_plan: 'TEXT',
     contract_version: 'INTEGER NOT NULL DEFAULT 0',
@@ -1956,6 +2110,8 @@ export function initSqliteSchema(sqlite: Database.Database) {
   // 项目级旁白音色与默认 BGM
   if (!dramaColumns.has('narrator_voice_id')) sqlite.exec('ALTER TABLE dramas ADD COLUMN narrator_voice_id INTEGER')
   if (!dramaColumns.has('bgm_url')) sqlite.exec('ALTER TABLE dramas ADD COLUMN bgm_url TEXT')
+  // 旁白形态：对白驱动 / 旁白驱动小说改编
+  if (!dramaColumns.has('narration_form')) sqlite.exec(`ALTER TABLE dramas ADD COLUMN narration_form TEXT DEFAULT 'dialogue'`)
 
   // ===== V3 列扩展：小说来源与故事圣经 =====
   if (!dramaColumns.has('source_novel_id')) sqlite.exec('ALTER TABLE dramas ADD COLUMN source_novel_id INTEGER')

@@ -575,3 +575,110 @@ test('工作流列表代理按类型返回网关工作流', async () => {
   assert.equal(rejected.status, 502)
   assert.match((await json(rejected)).message, /unauthorized|鉴权|网关/)
 })
+
+test('video-swap 配置只登记命名工作流并走网关探针', async () => {
+  const settings = {
+    face_engine: 'facefusion',
+    face_workflow_slug: 'h3-face-swap',
+    facefusion_dir: '/tmp/facefusion',
+    facefusion_python: '/tmp/facefusion/.venv/bin/python',
+    facefusion_model: 'hyperswap_1a_256',
+    facefusion_execution_providers: 'cpu',
+    facefusion_timeout_seconds: 1800,
+    character_workflow_slug: 'h3-recast-relay',
+    character_short_workflow_slug: 'h3-recast',
+    character_short_max_seconds: 6,
+    character_relay_warmup_seconds: 5.17,
+    analysis_config_id: 7,
+    scene_ref_base_url: baseUrl,
+    scene_ref_api_key: 'image-key',
+    scene_ref_workflow_prefix: 'qwen-image-edit',
+    scene_ref_candidates: 2,
+    timeout_seconds: 3600,
+    max_auto_retries: 1,
+    seam_ssim_threshold: 0.92,
+    seam_color_delta_threshold: 12,
+    seam_face_similarity_threshold: 0.75,
+  }
+  const created = await createConfig({
+    service_type: 'video-swap',
+    provider: 'comfyui',
+    base_url: baseUrl,
+    api_key: 'swap-key',
+    provider_settings: settings,
+  })
+  assert.equal(created.status, 201, await created.clone().text())
+  const data = (await json(created)).data
+  assert.equal(data.service_type, 'video-swap')
+  assert.equal(data.provider_settings.face_engine, 'facefusion')
+  assert.equal(data.provider_settings.face_workflow_slug, 'h3-face-swap')
+  assert.equal(data.provider_settings.facefusion_model, 'hyperswap_1a_256')
+  assert.equal(data.provider_settings.character_workflow_slug, 'h3-recast-relay')
+  assert.equal(data.provider_settings.character_short_workflow_slug, 'h3-recast')
+  assert.equal(data.provider_settings.character_short_max_seconds, 6)
+  assert.equal(data.provider_settings.character_relay_warmup_seconds, 5.17)
+  assert.equal(data.provider_settings.analysis_config_id, 7)
+  assert.equal(data.provider_settings.scene_ref_candidates, 2)
+
+  const badSlug = await createConfig({
+    service_type: 'video-swap',
+    provider: 'comfyui',
+    base_url: baseUrl,
+    provider_settings: { ...settings, character_workflow_slug: 'Bad Slug!' },
+  })
+  assert.equal(badSlug.status, 400)
+  assert.match((await json(badSlug)).message, /character_workflow_slug/)
+
+  const badShortMax = await createConfig({
+    service_type: 'video-swap',
+    provider: 'comfyui',
+    base_url: baseUrl,
+    provider_settings: { ...settings, character_short_max_seconds: 11 },
+  })
+  assert.equal(badShortMax.status, 400)
+  assert.match((await json(badShortMax)).message, /character_short_max_seconds/)
+
+  const badWarmup = await createConfig({
+    service_type: 'video-swap',
+    provider: 'comfyui',
+    base_url: baseUrl,
+    provider_settings: { ...settings, character_relay_warmup_seconds: 11 },
+  })
+  assert.equal(badWarmup.status, 400)
+  assert.match((await json(badWarmup)).message, /character_relay_warmup_seconds/)
+
+  const badEngine = await createConfig({
+    service_type: 'video-swap',
+    provider: 'comfyui',
+    base_url: baseUrl,
+    provider_settings: { ...settings, face_engine: 'other' },
+  })
+  assert.equal(badEngine.status, 400)
+  assert.match((await json(badEngine)).message, /face_engine/)
+
+  const rawWorkflow = await createConfig({
+    service_type: 'video-swap',
+    provider: 'comfyui',
+    base_url: baseUrl,
+    provider_settings: { ...settings, workflow: { 1: {} } },
+  })
+  assert.equal(rawWorkflow.status, 400)
+  assert.match((await json(rawWorkflow)).message, /不接受工作流 JSON/)
+
+  lastProbe = null
+  const probe = (await json(await app.request('/api/v1/ai-configs/test', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      service_type: 'video-swap',
+      provider: 'comfyui',
+      base_url: baseUrl,
+      api_key: 'swap-key',
+      provider_settings: settings,
+    }),
+  }))).data
+  assert.equal(probe.ok, true)
+  assert.equal(probe.url, `${baseUrl}/v1/workflows`)
+  assert.equal(lastProbe?.url, '/v1/workflows')
+  assert.equal(lastProbe?.headers.authorization, 'Bearer swap-key')
+})

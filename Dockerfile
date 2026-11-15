@@ -28,6 +28,7 @@ ARG HUOBAO_VERSION=dev
 ENV NODE_ENV=production \
     HUOBAO_VERSION=${HUOBAO_VERSION} \
     PORT=5679 \
+    HOST=0.0.0.0 \
     FFMPEG_BIN=/usr/bin/ffmpeg \
     FFPROBE_BIN=/usr/bin/ffprobe \
     HUOBAO_DATA_DIR=/app/data \

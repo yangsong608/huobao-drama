@@ -162,6 +162,8 @@ export const pipelineChainAPI = {
   continueRun: (runId: number) => api.post(`/pipelines/runs/${runId}/continue`, {}),
   skipShot: (runId: number, shotNumber: number, reason?: string) =>
     api.post(`/pipelines/runs/${runId}/skip-shot`, { shot_number: shotNumber, reason }),
+  setAutoSkip: (runId: number, attempts: number) =>
+    api.post(`/pipelines/runs/${runId}/auto-skip`, { attempts }),
   rerunSound: (runId: number) => api.post(`/pipelines/runs/${runId}/rerun-sound`, {}),
 }
 
@@ -284,6 +286,8 @@ export const storyboardAPI = {
   acceptance: (id: number) => api.get(`/storyboards/${id}/acceptance`),
   runAcceptance: (id: number, data: any = {}) => api.post(`/storyboards/${id}/acceptance`, data),
   optimize: (id: number) => api.post(`/storyboards/${id}/optimize`, {}),
+  recalcTimingPreview: (id: number) => api.post(`/storyboards/${id}/recalc-timing/preview`, {}),
+  recalcTimingApply: (id: number) => api.post(`/storyboards/${id}/recalc-timing/apply`, {}),
   syncContracts: (episodeId: number) => api.post('/storyboards/contracts/sync', { episode_id: episodeId }),
   soundPlan: (episodeId: number) => api.get(`/storyboards/sound-plan/${episodeId}`),
 }
@@ -1596,6 +1600,68 @@ export const aiConfigAPI = {
     api.post<{ workflows: any[] }>('/ai-configs/comfyui/workflows', d),
 }
 
+async function uploadFieldReq<T = any>(path: string, field: string, file: File): Promise<T> {
+  assertClientWritable(path)
+  const fd = new FormData()
+  fd.append(field, file, file.name)
+  const resp = await fetch(`${BASE}${path}`, { method: 'POST', body: fd, headers: clientHeaders() })
+  const json = await resp.json()
+  if (!resp.ok || (json.code && json.code >= 400)) {
+    const errorCode = typeof json.error_code === 'string' ? json.error_code : undefined
+    const status = resp.status || json.code
+    notifyRemoteHttpError(status, errorCode, path)
+    const error = new Error(json.message || `${resp.status}`) as Error & {
+      status?: number
+      code?: string
+      errorCode?: string
+      data?: any
+    }
+    error.status = status
+    error.code = json.code
+    error.errorCode = errorCode
+    error.data = json.data
+    throw error
+  }
+  notifyLocalWrite('POST', path)
+  return json.data ?? json
+}
+
+export const videoAPI = {
+  routePreview: (configId?: number | null) =>
+    api.get(`/video-projects/route-preview${configId ? `?config_id=${configId}` : ''}`),
+  list: (params: { keyword?: string; status?: string; page?: number; page_size?: number } = {}) => {
+    const q = new URLSearchParams()
+    if (params.keyword) q.set('keyword', params.keyword)
+    if (params.status) q.set('status', params.status)
+    if (params.page) q.set('page', String(params.page))
+    if (params.page_size) q.set('page_size', String(params.page_size))
+    return api.get(`/video-projects${q.size ? `?${q.toString()}` : ''}`)
+  },
+  get: (id: number) => api.get(`/video-projects/${id}`),
+  create: (data: { title: string; mode: string; prompt?: string; config_id?: number | null }) =>
+    api.post('/video-projects', data),
+  update: (id: number, data: Record<string, any>) => api.patch(`/video-projects/${id}`, data),
+  del: (id: number) => api.del(`/video-projects/${id}`),
+  duplicate: (id: number) => api.post(`/video-projects/${id}/duplicate`),
+  uploadSource: (id: number, file: File) => uploadFieldReq(`/video-projects/${id}/source-video`, 'video', file),
+  uploadFace: (id: number, file: File) => uploadFieldReq(`/video-projects/${id}/reference-faces`, 'image', file),
+  preflight: (id: number) => api.post(`/video-projects/${id}/preflight`, {}),
+  analyze: (id: number) => api.post(`/video-projects/${id}/analyze`, {}),
+  shots: (id: number, runId?: number) => api.get(`/video-projects/${id}/shots${runId ? `?run_id=${runId}` : ''}`),
+  aiAnalysis: (id: number) => api.post(`/video-projects/${id}/ai-analysis`, {}),
+  savePrompt: (id: number, payload: Record<string, any>) => api.patch(`/video-projects/${id}/prompt`, payload),
+  sceneReference: (id: number, shotId: number) => api.get(`/video-projects/${id}/shots/${shotId}/scene-reference`),
+  confirmSceneReference: (id: number, shotId: number, candidatePath: string) =>
+    api.patch(`/video-projects/${id}/shots/${shotId}/scene-reference`, { candidate_path: candidatePath }),
+  generate: (id: number, runId?: number) => api.post(`/video-projects/${id}/generate`, runId ? { run_id: runId } : {}),
+  runs: (id: number) => api.get(`/video-projects/${id}/runs`),
+  run: (id: number, runId: number) => api.get(`/video-projects/${id}/runs/${runId}`),
+  logs: (id: number, runId: number, afterId = 0, limit = 200) =>
+    api.get(`/video-projects/${id}/runs/${runId}/logs?after_id=${afterId}&limit=${limit}`),
+  cancel: (id: number, runId: number) => api.post(`/video-projects/${id}/runs/${runId}/cancel`, {}),
+  retryChunk: (id: number, chunkId: number) => api.post(`/video-projects/${id}/chunks/${chunkId}/retry`, {}),
+}
+
 // lang 缺省/为 zh 时读写基础版（不带 query，保持原请求形态）
 const langQ = (lang?: string) => (lang && lang !== 'zh' ? `?lang=${lang}` : '')
 
@@ -1664,6 +1730,23 @@ export const mcpAPI = {
   status: () => api.get('/mcp'),
   update: (data: { enabled?: boolean; port?: number }) => api.put('/mcp', data),
   rotateToken: () => api.post('/mcp/token'),
+}
+
+// DSH 文本桥：设置开关与状态（不回传桥接令牌）
+export interface DshBridgeStatus {
+  enabled: boolean
+  envEnabled: boolean
+  descriptorPresent: boolean
+  bridgeBaseUrl?: string
+  pluginVersion?: string
+  dshVersion?: string
+  health?: unknown
+  error?: string | null
+}
+
+export const dshBridgeAPI = {
+  status: () => api.get<DshBridgeStatus>('/settings/dsh-bridge'),
+  update: (enabled: boolean) => api.put<{ enabled: boolean }>('/settings/dsh-bridge', { enabled }),
 }
 
 // 服务器/Docker 部署的版本检查与更新（桌面版走 useDesktopBridge，不用此 API）

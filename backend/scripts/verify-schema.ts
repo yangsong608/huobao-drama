@@ -37,6 +37,32 @@ const REQUIRED_TABLES: Record<string, string[]> = {
     'kind', 'drama_id', 'episode_id', 'resource', 'status', 'priority', 'payload', 'progress', 'note',
     'error', 'attempts', 'max_attempts', 'locked_by', 'heartbeat_at', 'created_at', 'started_at', 'finished_at',
   ],
+  video_projects: [
+    'title', 'mode', 'status', 'source_video_path', 'source_video_meta', 'reference_face_paths',
+    'prompt', 'config_id', 'latest_run_id', 'created_at', 'updated_at', 'deleted_at',
+  ],
+  video_swap_runs: [
+    'project_id', 'mode', 'config_id', 'status', 'stage', 'progress', 'analysis_json',
+    'final_prompt_json', 'scene_reference_path', 'max_generation_seconds', 'chunk_overlap_ms',
+    'min_chunk_seconds', 'max_chunks', 'audio_master_path', 'proxy_path', 'total_chunks', 'completed_chunks',
+    'merge_path', 'output_meta', 'params_json', 'edl_json', 'gateway_job_id', 'error_code', 'error_message',
+    'started_at', 'finished_at', 'created_at', 'updated_at',
+  ],
+  video_swap_shots: [
+    'run_id', 'shot_index', 'start_ms', 'end_ms', 'duration_ms', 'chunk_count', 'source_path',
+    'scene_reference_path', 'scene_reference_candidates', 'final_prompt_json', 'status', 'output_path', 'error_code',
+    'error_message', 'created_at', 'updated_at',
+  ],
+  video_swap_chunks: [
+    'run_id', 'shot_id', 'chunk_index', 'source_start_ms', 'source_end_ms', 'overlap_before_ms',
+    'overlap_after_ms', 'warmup_frames', 'target_frames', 'cut_point_confidence', 'source_path', 'output_path',
+    'trimmed_path', 'trim_start_ms', 'trim_end_ms', 'status', 'gateway_job_id', 'seam_ssim',
+    'seam_color_delta', 'seam_face_similarity', 'seam_verdict', 'seam_json', 'retry_count', 'error_code',
+    'error_message', 'created_at', 'updated_at',
+  ],
+  video_swap_run_logs: [
+    'run_id', 'shot_id', 'chunk_id', 'level', 'stage', 'message', 'detail_json', 'created_at',
+  ],
   novels: [
     'title', 'topic', 'genre', 'number_of_chapters', 'word_number', 'user_guidance',
     'core_seed', 'character_dynamics', 'world_building', 'plot_architecture', 'character_state',
@@ -115,6 +141,9 @@ const expectedIndexes = [
   'idx_pipeline_jobs_status', 'idx_pipeline_jobs_episode',
   'idx_novels_updated', 'idx_novel_chapters_novel', 'idx_novel_jobs_novel', 'idx_novel_jobs_running',
   'idx_novel_imports_request', 'idx_novel_imports_drama', 'idx_novel_import_eps_import',
+  'idx_video_projects_updated', 'idx_video_projects_status', 'idx_video_swap_runs_project',
+  'idx_video_swap_runs_status', 'idx_video_swap_shots_status', 'idx_video_swap_chunks_shot',
+  'idx_video_swap_chunks_status', 'idx_video_swap_logs_run', 'idx_video_swap_logs_stage',
 ]
 const missingIndexes = expectedIndexes.filter((i) => !indexes.includes(i))
 

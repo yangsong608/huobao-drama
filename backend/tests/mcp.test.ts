@@ -137,7 +137,12 @@ test('握手与工具列表：initialize / tools/list', async () => {
   const list = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, token)
   const names = list.json.result.tools.map((t: any) => t.name)
   assert.equal(names.length, getMcpStatus().tool_count)
-  assert.equal(getMcpStatus().tool_count, 66)
+  assert.equal(getMcpStatus().tool_count, 112)
+  const byName = new Map(list.json.result.tools.map((tool: any) => [tool.name, tool]))
+  assert.equal((byName.get('list_projects') as any).annotations.readOnlyHint, true)
+  assert.equal((byName.get('delete_storyboard') as any).annotations.destructiveHint, true)
+  assert.equal((byName.get('generate_video') as any).annotations.openWorldHint, true)
+  assert.equal(list.json.result.tools.every((tool: any) => tool.annotations), true)
   const expectedTools = [
     'list_projects', 'api_request', 'list_api_endpoints', 'generate_image', 'parse_script', 'import_novel_to_drama',
     'create_episode', 'update_episode', 'create_storyboard', 'update_storyboard', 'delete_storyboard',
@@ -150,6 +155,17 @@ test('握手与工具列表：initialize / tools/list', async () => {
   for (const expected of expectedTools) {
     assert.ok(names.includes(expected), `缺少工具 ${expected}`)
   }
+})
+
+test('批量 JSON-RPC 上限为 20 条', async () => {
+  const token = getMcpStatus().token
+  const batch = Array.from({ length: 21 }, (_, index) => ({
+    jsonrpc: '2.0', id: index + 1, method: 'ping',
+  }))
+  const result = await rpc(batch, token)
+  assert.equal(result.status, 400)
+  assert.equal(result.json.error.code, -32600)
+  assert.match(result.json.error.message, /最多 20 条/)
 })
 
 test('工具调用：list_projects 与 api_request', async () => {
@@ -530,6 +546,47 @@ test('token 轮换：旧 token 立即失效', async () => {
   const withNew = await rpc({ jsonrpc: '2.0', id: 8, method: 'ping' }, newToken)
   assert.equal(withNew.status, 200)
   assert.deepEqual(withNew.json.result, {})
+})
+
+test('MCP_READONLY=1 只允许只读工具', async () => {
+  const token = getMcpStatus().token
+  const previous = process.env.MCP_READONLY
+  process.env.MCP_READONLY = '1'
+  try {
+    const read = await rpc({
+      jsonrpc: '2.0', id: 10, method: 'tools/call',
+      params: { name: 'list_projects', arguments: {} },
+    }, token)
+    assert.equal(read.json.result.isError, undefined)
+
+    const write = await rpc({
+      jsonrpc: '2.0', id: 11, method: 'tools/call',
+      params: { name: 'delete_storyboard', arguments: { storyboard_id: 1 } },
+    }, token)
+    assert.equal(write.json.result.isError, true)
+    assert.match(write.json.result.content[0].text, /MCP_READONLY/)
+  } finally {
+    if (previous === undefined) delete process.env.MCP_READONLY
+    else process.env.MCP_READONLY = previous
+  }
+})
+
+test('非回环 MCP_HOST 需要显式 MCP_ALLOW_REMOTE=1', async () => {
+  const previousHost = process.env.MCP_HOST
+  const previousAllow = process.env.MCP_ALLOW_REMOTE
+  process.env.MCP_HOST = '0.0.0.0'
+  delete process.env.MCP_ALLOW_REMOTE
+  try {
+    const status = await applyMcpConfig({ enabled: true })
+    assert.match(status.error || '', /MCP_ALLOW_REMOTE/)
+    assert.equal(status.enabled, false)
+  } finally {
+    if (previousHost === undefined) delete process.env.MCP_HOST
+    else process.env.MCP_HOST = previousHost
+    if (previousAllow === undefined) delete process.env.MCP_ALLOW_REMOTE
+    else process.env.MCP_ALLOW_REMOTE = previousAllow
+    await applyMcpConfig({ enabled: false })
+  }
 })
 
 test('关闭：端口释放', async () => {
