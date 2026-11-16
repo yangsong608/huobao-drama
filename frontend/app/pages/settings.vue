@@ -1004,6 +1004,70 @@
             <p class="settings-desc">{{ t('settings.breakdown.subtitle') }}</p>
           </div>
 
+          <section class="card svc-group v2-coverage-card">
+            <div class="svc-group-head">
+              <div class="svc-group-heading">
+                <span class="svc-group-title">
+                  {{ t('storyboardV2.settings.title') }}
+                  <span class="tag">{{ t('storyboardV2.shadow') }}</span>
+                </span>
+                <div class="svc-group-sub">{{ t('storyboardV2.settings.subtitle') }}</div>
+              </div>
+              <span v-if="v2ConfigSaving || v2ProductionSaving" class="tag tag-accent ml-auto">{{ t('settings.breakdown.saving') }}</span>
+            </div>
+            <label class="v2-production-toggle">
+              <input
+                type="checkbox"
+                :checked="v2Config.production_enabled"
+                :disabled="v2ProductionSaving"
+                @change="toggleV2Production($event.target.checked)"
+              />
+              <span>
+                <strong>{{ t('storyboardV2.settings.productionTitle') }}</strong>
+                <small>{{ t('storyboardV2.settings.productionHint') }}</small>
+              </span>
+            </label>
+            <p v-if="v2ConfigLoading" class="config-empty"><Loader2 :size="14" class="animate-spin" /> {{ t('common.loading') }}</p>
+            <p v-else-if="v2ConfigLoadFailed" class="config-empty">{{ t('storyboardV2.settings.loadFailed') }}</p>
+            <template v-else>
+              <div class="v2-preset-grid">
+                <button
+                  v-for="preset in v2Config.presets"
+                  :key="preset.key"
+                  type="button"
+                  :class="['v2-preset-card', { active: preset.key === v2Config.active_preset_key }]"
+                  @click="selectV2Preset(preset.key)"
+                >
+                  <span class="v2-preset-head">
+                    <strong>{{ preset.name }}</strong>
+                    <span v-if="preset.key === v2Config.active_preset_key" class="tag tag-accent">{{ t('storyboardV2.settings.active') }}</span>
+                  </span>
+                  <span class="v2-preset-desc">{{ preset.description }}</span>
+                  <span class="v2-preset-meta">{{ t('storyboardV2.settings.rhythmTarget', { n: preset.targetAverageSeconds }) }}</span>
+                </button>
+              </div>
+              <div class="v2-checklist-head">
+                <div>
+                  <strong>{{ t('storyboardV2.settings.checklistTitle') }}</strong>
+                  <p class="field-hint">{{ t('storyboardV2.settings.checklistHint') }}</p>
+                </div>
+                <button class="btn btn-sm" :disabled="v2ChecklistSaving" @click="saveV2Checklist">
+                  <Loader2 v-if="v2ChecklistSaving" :size="12" class="animate-spin" />
+                  {{ t('storyboardV2.settings.checklistSave') }}
+                </button>
+              </div>
+              <div class="v2-checklist">
+                <label v-for="item in v2ChecklistItems" :key="item.key" class="v2-checklist-item">
+                  <input type="checkbox" :checked="item.enabled" @change="toggleV2Checklist(item.key, $event.target.checked)" />
+                  <span>
+                    <strong>{{ item.label }}</strong>
+                    <small>{{ item.prompt }}</small>
+                  </span>
+                </label>
+              </div>
+            </template>
+          </section>
+
           <div class="breakdown-layout">
             <section class="card svc-group breakdown-list-card">
               <div class="svc-group-head">
@@ -2374,7 +2438,7 @@ import RemoteDeviceList from '~/components/RemoteDeviceList.vue'
 import { toast } from 'vue-sonner'
 import { toastError } from '~/composables/useToast'
 import { useI18n } from 'vue-i18n'
-import { aiConfigAPI, promptAPI, skillsAPI, knowledgeAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, dshBridgeAPI, uploadAPI, pipelineRuleAPI, breakdownMethodAPI, dubbingAPI, bgmAPI } from '~/composables/useApi'
+import { aiConfigAPI, promptAPI, skillsAPI, knowledgeAPI, storageAPI, stylePresetAPI, settingsAPI, serverUpdateAPI, mcpAPI, dshBridgeAPI, uploadAPI, pipelineRuleAPI, breakdownMethodAPI, dubbingAPI, bgmAPI, storyboardV2API } from '~/composables/useApi'
 import { useRemoteRole, remoteErrorMessage } from '~/composables/useRemoteGuest'
 import { useRemotePairing } from '~/composables/useRemotePairing'
 import { presenceState, refreshPresenceEntries, safePresenceRelayPath } from '~/composables/usePresence'
@@ -4022,6 +4086,83 @@ async function resetPipelineRuleItem(rule) {
   } catch (e) { toastError(e) }
 }
 
+// ===== 分镜 V2 覆盖预设 / 验收清单 =====
+const v2Config = ref({ active_preset_key: '', presets: [], review_checklist: { items: [], enabled: [] } })
+const v2ConfigLoading = ref(false)
+const v2ConfigLoadFailed = ref(false)
+const v2ConfigSaving = ref(false)
+const v2ChecklistSaving = ref(false)
+const v2ProductionSaving = ref(false)
+const v2ChecklistItems = computed(() => v2Config.value.review_checklist?.items || [])
+
+async function loadV2Config() {
+  v2ConfigLoading.value = true
+  v2ConfigLoadFailed.value = false
+  try {
+    v2Config.value = await storyboardV2API.config()
+  } catch (e) {
+    v2ConfigLoadFailed.value = true
+    toastError(e, { fallback: 'storyboardV2.settings.loadFailed' })
+  } finally {
+    v2ConfigLoading.value = false
+  }
+}
+
+async function toggleV2Production(enabled) {
+  if (v2ProductionSaving.value) return
+  if (enabled && !window.confirm(t('storyboardV2.settings.productionConfirm'))) {
+    await loadV2Config()
+    return
+  }
+  v2ProductionSaving.value = true
+  try {
+    const result = await storyboardV2API.setProduction(enabled)
+    v2Config.value.production_enabled = Boolean(result?.production_enabled)
+    toast.success(t('storyboardV2.settings.productionSaved'))
+  } catch (e) {
+    toastError(e)
+    await loadV2Config()
+  } finally {
+    v2ProductionSaving.value = false
+  }
+}
+
+async function selectV2Preset(key) {
+  if (!key || key === v2Config.value.active_preset_key || v2ConfigSaving.value) return
+  v2ConfigSaving.value = true
+  try {
+    const data = await storyboardV2API.setActivePreset(key)
+    v2Config.value = data
+    toast.success(t('storyboardV2.settings.saved'))
+  } catch (e) {
+    toastError(e)
+  } finally {
+    v2ConfigSaving.value = false
+  }
+}
+
+function toggleV2Checklist(key, checked) {
+  const items = v2Config.value.review_checklist?.items || []
+  const item = items.find(entry => entry.key === key)
+  if (item) item.enabled = checked
+  v2Config.value.review_checklist.enabled = items.filter(entry => entry.enabled).map(entry => entry.key)
+}
+
+async function saveV2Checklist() {
+  if (v2ChecklistSaving.value) return
+  v2ChecklistSaving.value = true
+  try {
+    const enabled = v2ChecklistItems.value.filter(item => item.enabled).map(item => item.key)
+    const result = await storyboardV2API.saveReviewChecklist(enabled)
+    v2Config.value.review_checklist = result
+    toast.success(t('storyboardV2.settings.checklistSaved'))
+  } catch (e) {
+    toastError(e)
+  } finally {
+    v2ChecklistSaving.value = false
+  }
+}
+
 // ===== 分镜拆分方案 =====
 const breakdownMethods = ref([])
 const breakdownLoading = ref(false)
@@ -4162,7 +4303,7 @@ onMounted(() => {
   loadPipelineRules()
   if (tab.value === 'dubbing') loadDubbing()
   if (tab.value === 'novel') loadNovel()
-  if (tab.value === 'breakdown') loadBreakdownMethods()
+  if (tab.value === 'breakdown') { loadBreakdownMethods(); loadV2Config() }
 })
 
 // 主机级设置等角色明确后再加载；访客不发起这些请求
@@ -4410,7 +4551,7 @@ async function applyUpdate() {
 watch(tab, (t) => {
   if (t === 'about' && remoteRole.ready && !isGuest.value) refreshUpdateState()
   if (t === 'rules') loadPipelineRules()
-  if (t === 'breakdown') loadBreakdownMethods()
+  if (t === 'breakdown') { loadBreakdownMethods(); loadV2Config() }
   // 进入 Agent 页总是按当前内容语言重载（幂等）：兜住「先切语言、后进 Agent」的时序
   if (t === 'agents' && remoteRole.ready && !isGuest.value) {
     loadAgentPrompt(selectedAgent.value)
@@ -5121,6 +5262,35 @@ onBeforeUnmount(stopUsagePoll)
 .breakdown-item:hover { border-color: var(--accent); }
 .breakdown-item.active { border-color: var(--accent); background: var(--accent-bg); }
 .breakdown-editor-card .field { margin-top: 14px; }
+
+.v2-coverage-card { margin-bottom: 16px; }
+.v2-preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.v2-preset-card {
+  display: flex; flex-direction: column; gap: 6px; text-align: left;
+  padding: 12px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface-2); color: var(--text-1); cursor: pointer;
+}
+.v2-preset-card:hover { border-color: var(--accent); }
+.v2-preset-card.active { border-color: var(--accent); background: var(--accent-bg); }
+.v2-preset-head { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.v2-preset-desc { color: var(--text-2); font-size: 12px; line-height: 1.55; }
+.v2-preset-meta { color: var(--text-3); font-size: 11px; }
+.v2-production-toggle { display: flex; align-items: flex-start; gap: 9px; margin-top: 16px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); }
+.v2-production-toggle input { margin-top: 3px; }
+.v2-production-toggle span { display: flex; flex-direction: column; gap: 3px; }
+.v2-production-toggle strong { font-size: 12px; }
+.v2-production-toggle small { color: var(--text-2); font-size: 11.5px; line-height: 1.5; }
+.v2-checklist-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 18px; }
+.v2-checklist-head .field-hint { margin: 4px 0 0; }
+.v2-checklist { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px; margin-top: 10px; }
+.v2-checklist-item {
+  display: flex; align-items: flex-start; gap: 8px; padding: 9px 10px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
+}
+.v2-checklist-item input { margin-top: 3px; }
+.v2-checklist-item span { display: flex; flex-direction: column; gap: 3px; }
+.v2-checklist-item strong { font-size: 12px; }
+.v2-checklist-item small { color: var(--text-2); font-size: 11.5px; line-height: 1.5; }
 .breakdown-empty-hint {
   margin-top: 12px;
   padding: 10px 12px;

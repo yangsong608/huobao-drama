@@ -4586,5 +4586,50 @@
       "faceFormat": "Choose PNG, JPG or WebP",
       "faceTooLarge": "Face image must be under 20MB"
     }
+  },
+  "storyboardV2": {
+    "shadow": "V2",
+    "settings": {
+      "title": "V2 Coverage Presets",
+      "subtitle": "V2 shadow plans and production splitting settings; the current pipeline stays unchanged while the production switch is off.",
+      "loadFailed": "Failed to load V2 settings",
+      "active": "Active",
+      "rhythmTarget": "Rhythm target {n}s, review reference only",
+      "checklistTitle": "Creative Review Checklist",
+      "checklistHint": "Review hints only; the system never rewrites shots from them. Structural invariants are read-only.",
+      "checklistSave": "Save checklist",
+      "checklistSaved": "Checklist saved",
+      "saved": "Coverage preset saved",
+      "productionTitle": "Use V2 production splitting",
+      "productionHint": "When enabled, new split jobs use V2 plans; disabling rolls new jobs back to v1. In-flight jobs keep their starting algorithm. Existing storyboards are unchanged.",
+      "productionConfirm": "Switch the production splitting algorithm? Confirm a V2 plan preview first.",
+      "productionSaved": "Production splitting switch saved"
+    },
+    "preview": {
+      "button": "V2 Plan Preview",
+      "title": "Storyboard V2 Plan Preview",
+      "subtitle": "Plan only. No TTS, images, or video are generated.",
+      "generate": "Generate preview",
+      "regenerate": "Regenerate",
+      "confirm": "Confirm plan",
+      "confirmed": "Plan confirmed",
+      "export": "Export Markdown",
+      "exporting": "Exporting",
+      "loading": "Generating plan…",
+      "failed": "Failed to generate V2 plan",
+      "empty": "No V2 plan yet",
+      "summary": "Scenes {scenes} · Beats {beats} · Shots {shots} · Avg {avg}s",
+      "preset": "Coverage preset",
+      "issues": "Structural issues",
+      "noIssues": "No structural issues",
+      "checklist": "Review checklist",
+      "noLines": "No dialogue",
+      "noActions": "No action",
+      "close": "Close",
+      "version": "Version {n}",
+      "statusDraft": "Draft",
+      "statusConfirmed": "Confirmed",
+      "regenHint": "Regenerating creates a new draft version"
+    }
   }
 }

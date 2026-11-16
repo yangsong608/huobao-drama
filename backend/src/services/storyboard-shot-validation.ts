@@ -184,15 +184,19 @@ export function validateRepairedShot(input: RepairedShotInput): RepairedShotVali
     }
   }
 
-  if (sourceQuotes.length) {
-    const missing = includesAllQuotes(descriptionQuotes, sourceQuotes)
-    if (missing.length) {
-      errors.push(`${label}漏掉了原剧本台词：${missing.map(text => `「${text.slice(0, 30)}${text.length > 30 ? '…' : ''}」`).join('、')}；必须逐字保留，不能改写成动作。`)
+  // 有明确计划台词时，计划是唯一来源；混合摘录可能同时包含动作和多个说话人，
+  // 不能再从摘录反推“整句台词”，否则会把动作误当成漏掉的台词。
+  if (!planTexts.length) {
+    if (sourceQuotes.length) {
+      const missing = includesAllQuotes(descriptionQuotes, sourceQuotes)
+      if (missing.length) {
+        errors.push(`${label}漏掉了原剧本台词：${missing.map(text => `「${text.slice(0, 30)}${text.length > 30 ? '…' : ''}」`).join('、')}；必须逐字保留，不能改写成动作。`)
+      }
+    } else if (sourceIntent.vocal && !descriptionQuotes.length) {
+      errors.push(`${label}原剧本是「${sourceIntent.evidence.slice(0, 3).join('、')}」这类发声动作，但分镜没有补出具体台词。必须遵循小说语意补一句可拍的具体台词，不能改成拍围裙/翻炊饼等非语言动作。`)
+    } else if (!sourceIntent.vocal && descriptionQuotes.length) {
+      errors.push(`${label}原剧本此段没有台词或发声动作，修补却自行加了台词；请删掉创作台词，或从原文中找到依据。`)
     }
-  } else if (sourceIntent.vocal && !descriptionQuotes.length) {
-    errors.push(`${label}原剧本是「${sourceIntent.evidence.slice(0, 3).join('、')}」这类发声动作，但分镜没有补出具体台词。必须遵循小说语意补一句可拍的具体台词，不能改成拍围裙/翻炊饼等非语言动作。`)
-  } else if (!sourceIntent.vocal && descriptionQuotes.length) {
-    errors.push(`${label}原剧本此段没有台词或发声动作，修补却自行加了台词；请删掉创作台词，或从原文中找到依据。`)
   }
 
   if (descriptionIntent.vocal && !descriptionQuotes.length) {

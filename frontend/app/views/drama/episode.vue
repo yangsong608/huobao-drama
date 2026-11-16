@@ -608,6 +608,11 @@
               <span class="tag mono" :title="t('episode.vid.aspectRatio')">{{ dramaAspectRatio }}</span>
               <span class="tag mono" :title="t('episode.sb.narrationFormHint')">{{ dramaNarrationFormLabel }}</span>
               <div class="ml-auto flex gap-1">
+                <button class="btn btn-sm" :disabled="rn || v2Preview.loading" :title="t('storyboardV2.preview.subtitle')" @click="openV2Preview">
+                  <Loader2 v-if="v2Preview.loading" :size="11" class="animate-spin" />
+                  <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                  {{ t('storyboardV2.preview.button') }}
+                </button>
                 <button class="btn btn-sm" :disabled="rn || methodSaving || splitRunning || splitStarting" :title="currentBreakdownMethodName" @click="doBreakdown">
                   <Loader2 v-if="splitRunning || splitStarting" :size="11" class="animate-spin" />
                   <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
@@ -3071,6 +3076,86 @@
         </div>
       </div>
 
+      <div v-if="v2Preview.open" class="overlay v2-preview-overlay" @click.self="closeV2Preview">
+        <div class="dialog v2-preview-dialog" role="dialog" aria-modal="true" :aria-label="t('storyboardV2.preview.title')">
+          <header class="dialog-head">
+            <div>
+              <h2 class="dialog-title">{{ t('storyboardV2.preview.title') }}</h2>
+              <p class="dialog-sub">{{ t('storyboardV2.preview.subtitle') }}</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" @click="closeV2Preview">{{ t('storyboardV2.preview.close') }}</button>
+          </header>
+          <div class="dialog-body v2-preview-body">
+            <div v-if="v2Preview.loading" class="v2-preview-state">
+              <Loader2 :size="18" class="animate-spin" />
+              {{ t('storyboardV2.preview.loading') }}
+            </div>
+            <div v-else-if="v2Preview.error" class="v2-preview-state is-error">{{ v2Preview.error || t('storyboardV2.preview.failed') }}</div>
+            <template v-else-if="v2Plan">
+              <div class="v2-preview-summary">
+                <span class="tag mono">{{ t('storyboardV2.preview.summary', { scenes: v2Plan.diagnostics.sceneCount, beats: v2Plan.diagnostics.beatCount, shots: v2Plan.diagnostics.shotCount, avg: v2Plan.diagnostics.averageDuration }) }}</span>
+                <span class="tag">{{ t('storyboardV2.preview.preset') }}：{{ v2Plan.config.coveragePresetName }}</span>
+                <span class="tag mono">{{ t('storyboardV2.preview.version', { n: v2Preview.view.version }) }}</span>
+                <span class="tag" :class="{ 'tag-success': v2Preview.view.status === 'confirmed' }">{{ V2_STATUS_LABELS[v2Preview.view.status] || v2Preview.view.status }}</span>
+              </div>
+              <div v-if="v2Preview.view.issues.length" class="v2-preview-issues">
+                <strong>{{ t('storyboardV2.preview.issues') }}（{{ v2Preview.view.issues.length }}）</strong>
+                <p v-for="issue in v2Preview.view.issues" :key="`${issue.ruleId}-${issue.shotId}-${issue.message}`">
+                  <span class="tag">{{ issue.ruleId }}</span>
+                  {{ issue.shotId || '全局' }}：{{ issue.message }}（{{ issue.evidence }}）
+                </p>
+              </div>
+              <div v-else class="v2-preview-ok">{{ t('storyboardV2.preview.noIssues') }}</div>
+              <div class="v2-preview-shots">
+                <article v-for="shot in v2Plan.shots" :key="shot.shotId" class="v2-shot-card">
+                  <header class="v2-shot-head">
+                    <strong>{{ shot.shotId }}</strong>
+                    <span class="tag">{{ V2_COVERAGE_LABELS[shot.coverage] || shot.coverage }}</span>
+                    <span class="mono">{{ shot.duration }}s</span>
+                  </header>
+                  <div class="v2-shot-meta">
+                    {{ V2_CUT_LABELS[shot.cutReason] || shot.cutReason }} · {{ V2_SIZE_LABELS[shot.camera.shotSize] || shot.camera.shotSize }} / {{ V2_ANGLE_LABELS[shot.camera.angle] || shot.camera.angle }}
+                  </div>
+                  <div class="v2-shot-scene">{{ shot.sceneLabel }}{{ shot.time ? ` · ${shot.time}` : '' }}</div>
+                  <div v-if="shot.lines.length" class="v2-shot-block">
+                    <span class="v2-shot-label">台词</span>
+                    <p v-for="line in shot.lines" :key="line.beatId"><b>{{ line.speaker }}</b> {{ line.text }}</p>
+                  </div>
+                  <div v-if="shot.actions.length" class="v2-shot-block">
+                    <span class="v2-shot-label">{{ shot.actions.every(action => action.narration) ? '旁白' : '动作' }}</span>
+                    <p v-for="action in shot.actions" :key="action.beatId">{{ action.text }}</p>
+                  </div>
+                  <div v-if="!shot.lines.length && !shot.actions.length" class="v2-shot-empty">{{ t('storyboardV2.preview.noLines') }}</div>
+                </article>
+              </div>
+              <section v-if="v2PreviewChecklist.length" class="v2-preview-checklist">
+                <h3>{{ t('storyboardV2.preview.checklist') }}</h3>
+                <ul>
+                  <li v-for="item in v2PreviewChecklist" :key="item.key">
+                    <strong>{{ item.label }}</strong>
+                    <span>{{ item.prompt }}</span>
+                  </li>
+                </ul>
+              </section>
+            </template>
+            <p v-else class="config-empty">{{ t('storyboardV2.preview.empty') }}</p>
+          </div>
+          <footer class="dialog-foot">
+            <button class="btn" @click="closeV2Preview">{{ t('storyboardV2.preview.close') }}</button>
+            <button class="btn" :disabled="v2Preview.loading || remoteReadonly" :title="t('storyboardV2.preview.regenHint')" @click="regenerateV2Preview">
+              {{ v2Plan ? t('storyboardV2.preview.regenerate') : t('storyboardV2.preview.generate') }}
+            </button>
+            <button class="btn" :disabled="!v2Plan || v2Preview.exporting" @click="exportV2Preview">
+              {{ v2Preview.exporting ? t('storyboardV2.preview.exporting') : t('storyboardV2.preview.export') }}
+            </button>
+            <button class="btn btn-primary ml-auto" :disabled="!v2Plan || v2Preview.confirming || v2Preview.view?.status === 'confirmed' || (v2Preview.view?.issues?.length || 0) > 0" @click="confirmV2Preview">
+              <Loader2 v-if="v2Preview.confirming" :size="12" class="animate-spin" />
+              {{ t('storyboardV2.preview.confirm') }}
+            </button>
+          </footer>
+        </div>
+      </div>
+
       <ConfirmDialog
         :open="assetDelete.open"
         :title="t('episode.delete.title', { type: assetDeleteTypeLabel })"
@@ -3151,7 +3236,7 @@ import {
   Plus, X, ListTodo, CircleHelp, Mic, AudioLines, SlidersHorizontal, Trash2, Scissors, Ellipsis,
   Share2, AlertCircle, Sparkles,
 } from 'lucide-vue-next'
-import { API_BASE, api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, planningAPI, pipelineChainAPI, soundPlanAPI } from '~/composables/useApi'
+import { API_BASE, api, dramaAPI, episodeAPI, storyboardAPI, characterAPI, sceneAPI, propAPI, taskAPI, mergeAPI, transitionAPI, aiConfigAPI, uploadAPI, pipelineRuleAPI, dubbingAPI, filmAPI, breakdownMethodAPI, frameAssetAPI, planningAPI, pipelineChainAPI, soundPlanAPI, storyboardV2API } from '~/composables/useApi'
 import { startTour, autoTour } from '~/composables/useTour'
 import { useAgent, coverageShortfall } from '~/composables/useAgent'
 import { resolveTextModelSelection } from '~/utils/text-model-selection'
@@ -7087,6 +7172,114 @@ function pollVideoPromptBatch(attempts = 240) {
   }
   setTimeout(() => tick(attempts), 2500)
 }
+
+// ===== 分镜 V2 影子预览 =====
+const v2Preview = reactive({
+  open: false,
+  loading: false,
+  confirming: false,
+  exporting: false,
+  view: null,
+  error: '',
+})
+const v2Plan = computed(() => v2Preview.view?.plan || null)
+const v2PreviewChecklist = computed(() =>
+  (v2Preview.view?.review_checklist?.items || []).filter(item => item.enabled),
+)
+const V2_COVERAGE_LABELS = {
+  establishing: '建立',
+  master: 'Master',
+  over_shoulder: '过肩',
+  reverse: '反打',
+  reaction: '反应',
+  insert: '插入',
+}
+const V2_CUT_LABELS = {
+  scene_open: '场景开场',
+  scene_change: '场景变化',
+  new_beat: '新节拍',
+  listener_reaction: '听者反应',
+  coverage_change: '覆盖变化',
+  action_change: '动作主体变化',
+  duration_limit: '容量上限',
+}
+const V2_SIZE_LABELS = { wide: '全景', medium: '中景', medium_close: '中近景', close_up: '近景' }
+const V2_ANGLE_LABELS = { eye_level: '平视', high_angle: '俯拍', low_angle: '仰拍', over_shoulder: '过肩' }
+const V2_STATUS_LABELS = { draft: '草稿', confirmed: '已确认', superseded: '已替代' }
+
+async function openV2Preview() {
+  if (!epId.value || remoteReadonly.value) return
+  v2Preview.open = true
+  if (v2Preview.view || v2Preview.loading) return
+  v2Preview.loading = true
+  v2Preview.error = ''
+  try {
+    v2Preview.view = await storyboardV2API.latestPlan(epId.value)
+  } catch (e) {
+    try {
+      v2Preview.view = await storyboardV2API.createPlan(epId.value)
+    } catch (createError) {
+      v2Preview.error = String(createError?.message || e?.message || '')
+    }
+  } finally {
+    v2Preview.loading = false
+  }
+}
+
+async function regenerateV2Preview() {
+  if (!epId.value || v2Preview.loading || remoteReadonly.value) return
+  v2Preview.loading = true
+  v2Preview.error = ''
+  try {
+    v2Preview.view = await storyboardV2API.createPlan(epId.value)
+  } catch (e) {
+    v2Preview.error = String(e?.message || '')
+  } finally {
+    v2Preview.loading = false
+  }
+}
+
+async function confirmV2Preview() {
+  const id = v2Preview.view?.id
+  if (!id || v2Preview.confirming || (v2Preview.view?.issues?.length || 0) > 0) return
+  v2Preview.confirming = true
+  try {
+    v2Preview.view = await storyboardV2API.confirm(id)
+    toast.success(t('storyboardV2.preview.confirmed'))
+  } catch (e) {
+    toastError(e)
+  } finally {
+    v2Preview.confirming = false
+  }
+}
+
+async function exportV2Preview() {
+  const id = v2Preview.view?.id
+  if (!id || v2Preview.exporting) return
+  v2Preview.exporting = true
+  try {
+    const result = await storyboardV2API.markdown(id)
+    const markdown = String(result?.markdown || '')
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `分镜V2-第${episode.value?.episode_number || ''}集.md`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    toastError(e)
+  } finally {
+    v2Preview.exporting = false
+  }
+}
+
+function closeV2Preview() {
+  v2Preview.open = false
+}
+
 async function doBreakdown() {
   if (rn.value || methodSaving.value || splitStarting.value || splitRunning.value) return
   if (sbs.value.length > 0) {
@@ -13344,5 +13537,35 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
 }
 @media (max-width: 640px) {
   .sound-track { grid-template-columns: 60px minmax(0, 1fr); }
+}
+
+.dialog-sub { margin: 4px 0 0; color: var(--text-2); font-size: 12px; line-height: 1.5; }
+.v2-preview-dialog { width: min(1000px, calc(100vw - 48px)); max-height: 88vh; display: flex; flex-direction: column; }
+.v2-preview-body { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.v2-preview-state { display: flex; align-items: center; gap: 8px; padding: 28px 0; color: var(--text-2); font-size: 13px; }
+.v2-preview-state.is-error { color: var(--danger, #dc2626); }
+.v2-preview-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.v2-preview-issues, .v2-preview-ok { border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.6; }
+.v2-preview-issues { border: 1px solid color-mix(in srgb, var(--danger, #dc2626) 35%, var(--border)); background: color-mix(in srgb, var(--danger, #dc2626) 7%, transparent); }
+.v2-preview-issues p { margin: 5px 0 0; }
+.v2-preview-ok { border: 1px solid color-mix(in srgb, #16a34a 30%, var(--border)); color: #15803d; background: color-mix(in srgb, #16a34a 7%, transparent); }
+.v2-preview-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 10px; }
+.v2-shot-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); min-width: 0; }
+.v2-shot-head { display: flex; align-items: center; gap: 7px; }
+.v2-shot-head .mono { margin-left: auto; color: var(--text-3); font-size: 11px; }
+.v2-shot-meta, .v2-shot-scene { color: var(--text-3); font-size: 11.5px; line-height: 1.45; }
+.v2-shot-block { border-top: 1px dashed var(--border); padding-top: 6px; }
+.v2-shot-label { color: var(--text-3); font-size: 10px; font-weight: 700; letter-spacing: .04em; }
+.v2-shot-block p { margin: 3px 0 0; font-size: 12px; line-height: 1.55; color: var(--text-1); }
+.v2-shot-block p b { color: var(--text-2); font-weight: 600; }
+.v2-shot-empty { color: var(--text-3); font-size: 11.5px; }
+.v2-preview-checklist { border-top: 1px solid var(--border); padding-top: 10px; }
+.v2-preview-checklist h3 { margin: 0 0 6px; font-size: 12px; }
+.v2-preview-checklist ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+.v2-preview-checklist li { font-size: 12px; line-height: 1.55; color: var(--text-2); }
+.v2-preview-checklist li strong { color: var(--text-1); margin-right: 6px; }
+@media (max-width: 640px) {
+  .v2-preview-dialog { width: calc(100vw - 20px); max-height: 92vh; }
+  .v2-preview-shots { grid-template-columns: 1fr; }
 }
 </style>

@@ -276,6 +276,21 @@ export const breakdownMethodAPI = {
   duplicate: (key: string) => api.post(`/breakdown-methods/${key}/duplicate`),
 }
 
+// 分镜 V2 影子计划：覆盖预设、验收清单、预览/确认/导出
+export const storyboardV2API = {
+  config: () => api.get('/storyboard-v2/coverage-presets'),
+  setActivePreset: (key: string) => api.put('/storyboard-v2/coverage-presets/active', { key }),
+  setProduction: (enabled: boolean) => api.put('/storyboard-v2/production', { enabled }),
+  reviewChecklist: () => api.get('/storyboard-v2/review-checklist'),
+  saveReviewChecklist: (enabled: string[]) => api.put('/storyboard-v2/review-checklist', { enabled }),
+  createPlan: (episodeId: number, data: Record<string, any> = {}) =>
+    api.post('/storyboard-v2/plans', { episode_id: episodeId, ...data }),
+  latestPlan: (episodeId: number) => api.get(`/storyboard-v2/plans/latest/${episodeId}`),
+  plan: (id: number) => api.get(`/storyboard-v2/plans/${id}`),
+  confirm: (id: number) => api.post(`/storyboard-v2/plans/${id}/confirm`, {}),
+  markdown: (id: number) => api.get(`/storyboard-v2/plans/${id}/markdown`),
+}
+
 export const storyboardAPI = {
   create: (data: any) => api.post('/storyboards', data),
   update: (id: number, data: any) => api.put(`/storyboards/${id}`, data),

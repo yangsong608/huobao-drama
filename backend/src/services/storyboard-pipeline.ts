@@ -17,6 +17,9 @@ import { buildSceneBindingBlock, getCanonicalSceneGroups } from './scene-canonic
 import { buildSceneContractBlock, getSceneContractMap } from './scene-contract.js'
 import { deriveProjectNegativeConstraints, formatProjectNegativeAnalysis } from './project-negative-constraints.js'
 import { buildPlannedShotsBlock, planStoryboardShots, type PlannedStoryboardShot } from './storyboard-planner.js'
+import { planProductionStoryboardShots } from './storyboard-v2-production.js'
+import { getActiveV2CoveragePreset, isStoryboardV2ProductionEnabled } from './storyboard-v2-config.js'
+import { collectVoiceTimingProfiles } from './voice-timing.js'
 import { interruptStoryboardAuditForEpisode } from './storyboard-audit-jobs.js'
 import { validateRepairedShot } from './storyboard-shot-validation.js'
 import { cleanupFrameAssetsForEpisode } from './storyboard-frame-assets.js'
@@ -69,6 +72,8 @@ export interface PipelineState {
   skeletonsInitialized?: boolean
   storyboardsCleared?: boolean
   soundPlanId?: number
+  /** 任务创建时锁定规划器；续跑时不受全局开关变化影响。 */
+  plannerMode?: 'v1' | 'v2'
 }
 
 export type PipelineJobRow = typeof schema.storyboardPipelineJobs.$inferSelect
@@ -304,6 +309,7 @@ function parseState(row: PipelineJobRow): PipelineState {
       skeletonsInitialized: parsed.skeletonsInitialized === true,
       storyboardsCleared: parsed.storyboardsCleared === true,
       soundPlanId: typeof parsed.soundPlanId === 'number' ? parsed.soundPlanId : undefined,
+      plannerMode: parsed.plannerMode === 'v2' ? 'v2' : parsed.plannerMode === 'v1' ? 'v1' : undefined,
     }
   } catch {
     return { chunks: [] }
@@ -1601,7 +1607,8 @@ async function runSkeletonStage(
     ? params.splitPresetKey
     : (episode?.breakdownMethod || null)
   const maxSegmentSeconds = getMaxSegmentSeconds(splitPresetKey)
-  // 第一次进入预拆：清掉本任务旧骨架；续拆时保留已完成块
+  // 第一次进入预拆：清掉本任务旧骨架；续拆时保留已完成块。
+  // 规划器在任务首次进入预拆时锁定，续跑不会被全局开关中途切换。
   if (!state.skeletonsInitialized) {
     db.delete(schema.storyboardSkeletons).where(eq(schema.storyboardSkeletons.jobId, row.id)).run()
     for (const chunk of state.chunks) {
@@ -1610,8 +1617,12 @@ async function runSkeletonStage(
       chunk.error = undefined
     }
     state.skeletonsInitialized = true
+    state.plannerMode = isStoryboardV2ProductionEnabled() ? 'v2' : 'v1'
     persistState(row.id, state, { status: 'running' })
   }
+  const useV2Production = state.plannerMode === 'v2'
+  const v2CoveragePreset = useV2Production ? getActiveV2CoveragePreset() : null
+  const v2TimingProfiles = useV2Production ? await collectVoiceTimingProfiles(row.dramaId) : null
   for (const chunk of state.chunks) {
     if (chunk.status === 'done') continue
     const fresh = getJobRow(row.id)
@@ -1642,27 +1653,32 @@ async function runSkeletonStage(
       .from(schema.props)
       .where(and(eq(schema.props.dramaId, row.dramaId), isNull(schema.props.deletedAt)))
       .all()
-    const planned = planStoryboardShots({
+    const previousShot = previousSkeleton ? {
+      shotNumber: previousSkeleton.storyboardNumber,
+      sceneId: previousSkeleton.sceneId,
+      location: previousSkeleton.location,
+      time: previousSkeleton.time,
+      screenLeft: previousSkeleton.screenLeft,
+      screenRight: previousSkeleton.screenRight,
+      axisSide: previousSkeleton.axisSide,
+      landmarkSide: previousSkeleton.landmarkSide,
+    } : null
+    const planned = planProductionStoryboardShots({
       script: chunk.script,
       shotStart,
       sceneGroups,
       characters,
       props,
-      previousShot: previousSkeleton ? {
-        shotNumber: previousSkeleton.storyboardNumber,
-        sceneId: previousSkeleton.sceneId,
-        location: previousSkeleton.location,
-        time: previousSkeleton.time,
-        screenLeft: previousSkeleton.screenLeft,
-        screenRight: previousSkeleton.screenRight,
-        axisSide: previousSkeleton.axisSide,
-        landmarkSide: previousSkeleton.landmarkSide,
-      } : null,
+      previousShot,
       sceneContracts,
       minDuration: 2,
       maxDuration: maxSegmentSeconds,
       silentDuration: params.silentShotSeconds,
       narrationForm: params.narrationForm,
+    }, {
+      useV2: useV2Production,
+      timingProfiles: v2TimingProfiles || undefined,
+      coveragePreset: v2CoveragePreset || undefined,
     })
     if (!planned.shots.length) {
       persistState(row.id, state, {
@@ -1677,7 +1693,92 @@ async function runSkeletonStage(
       shots: planned.shots.length,
       coverage: Number(planned.coverage.toFixed(3)),
       shotStart,
+      planner: useV2Production ? 'v2' : 'v1',
     })
+    if (useV2Production) {
+      const splitRunId = startStepRun(runStepInput(row, 'skeleton-split', 'chunk', `chunk-${chunk.index}`, {
+        label: chunk.label,
+        chars: nonWsLength(chunk.script),
+        shotStart,
+        attempt: 1,
+        planner: 'v2',
+        directSkeletons: true,
+      }))
+      if (planned.coverage < params.excerptRejectRatio) {
+        const issue = `本段 V2 骨架只覆盖了约 ${(planned.coverage * 100).toFixed(0)}% 的原文，低于拒收阈值 ${(params.excerptRejectRatio * 100).toFixed(0)}%。`
+        finishStepRun(splitRunId, { status: 'failed', issues: [issue] })
+        persistState(row.id, state, { status: 'failed', errorMsg: issue })
+        return false
+      }
+      const characterIdByName = new Map(characters.map(character => [character.name, character.id]))
+      const groups = sceneGroups || []
+      const ts = now()
+      const rows = planned.shots.map(shot => {
+        const ids = [...new Set([shot.speaker, ...(shot.subjects || [])].filter(Boolean))]
+          .map(name => characterIdByName.get(String(name)))
+          .filter((id): id is number => typeof id === 'number')
+        const sceneId = shot.sceneId ?? groups.find(group => group.name === shot.location)?.canonicalId ?? null
+        return {
+          jobId: row.id,
+          episodeId: row.episodeId,
+          dramaId: row.dramaId,
+          chunkIndex: chunk.index,
+          storyboardNumber: shot.storyboardNumber,
+          sceneId,
+          title: shot.titleHint,
+          location: shot.location,
+          time: shot.time,
+          characterIds: JSON.stringify(ids),
+          propIds: JSON.stringify([]),
+          duration: shot.duration,
+          transition: shot.transition || 'cut',
+          continuity: '',
+          actionStart: shot.actionStart,
+          actionEnd: shot.actionEnd,
+          coverageType: shot.coverageType,
+          shotType: shot.shotType,
+          subject: shot.subject,
+          beatPlanJson: JSON.stringify(shot.beats || []),
+          actionArcJson: JSON.stringify(shot.actionArc || null),
+          speechRequirementJson: null,
+          narrativeRunJson: null,
+          speechSegmentsJson: JSON.stringify(shot.speechSegments || []),
+          boundaryType: shot.boundaryType,
+          boundaryWord: shot.boundaryWord,
+          boundaryOutJson: JSON.stringify({}),
+          screenLeft: shot.screenLeft,
+          screenRight: shot.screenRight,
+          axisSide: shot.axisSide,
+          landmarkSide: shot.landmarkSide,
+          intentType: null,
+          narrationJson: null,
+          actionPlanJson: null,
+          planVersion: 2,
+          actionSummary: shot.summaryHint || shot.sourceExcerpt.slice(0, 80),
+          sourceExcerpt: shot.sourceExcerpt,
+          status: 'draft',
+          createdAt: ts,
+          updatedAt: ts,
+        }
+      })
+      if (rows.length) db.insert(schema.storyboardSkeletons).values(rows).run()
+      chunk.status = 'done'
+      chunk.shots = rows.length
+      chunk.finishedAt = ts
+      const totalShots = skeletonShots(row.id).length
+      persistState(row.id, state, { status: 'running', totalShots, errorMsg: null })
+      finishStepRun(splitRunId, {
+        status: 'passed',
+        output: { shots: rows.length, coverage: planned.coverage, planner: 'v2', direct: true },
+      })
+      logTaskSuccess('StoryboardPipeline', 'skeleton-v2-direct-done', {
+        jobId: row.id,
+        chunk: `${chunk.index + 1}/${state.chunks.length}`,
+        shots: rows.length,
+        coverage: Number(planned.coverage.toFixed(3)),
+      })
+      continue
+    }
     let chunkDone = false
     let lastError = ''
     for (let blockAttempt = 1; blockAttempt <= params.blockMaxAttempts; blockAttempt += 1) {

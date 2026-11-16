@@ -4586,5 +4586,50 @@
       "faceFormat": "PNG、JPG、WebP を選択してください",
       "faceTooLarge": "顔画像は 20MB 以下にしてください"
     }
+  },
+  "storyboardV2": {
+    "shadow": "V2",
+    "settings": {
+      "title": "V2 カバレッジプリセット",
+      "subtitle": "V2 シャドープランと本番分割の設定。本番スイッチが無効な間は現在の分割経路は変わりません。",
+      "loadFailed": "V2 設定の読み込みに失敗しました",
+      "active": "使用中",
+      "rhythmTarget": "リズム目標 {n} 秒（確認用）",
+      "checklistTitle": "創作確認チェックリスト",
+      "checklistHint": "確認のヒントのみ。分镜を自動修正しません。構造不変条件は読み取り専用です。",
+      "checklistSave": "チェックリストを保存",
+      "checklistSaved": "チェックリストを保存しました",
+      "saved": "カバレッジプリセットを保存しました",
+      "productionTitle": "V2 本番分割を使用",
+      "productionHint": "有効にすると新しい分割ジョブは V2 プランを使用します。無効にすると新しいジョブは v1 に戻り、実行中のジョブは開始時のアルゴリズムを維持します。既存の分镜は変更されません。",
+      "productionConfirm": "本番分割アルゴリズムを切り替えますか？先に V2 プランのプレビューを確認してください。",
+      "productionSaved": "本番分割スイッチを保存しました"
+    },
+    "preview": {
+      "button": "V2 プラン预览",
+      "title": "分镜 V2 プランプレビュー",
+      "subtitle": "プランのみ生成します。TTS・画像・動画は生成しません。",
+      "generate": "プレビュー生成",
+      "regenerate": "再生成",
+      "confirm": "プランを確認",
+      "confirmed": "プランを確認しました",
+      "export": "Markdown を書き出す",
+      "exporting": "書き出し中",
+      "loading": "プランを生成中…",
+      "failed": "V2 プランの生成に失敗しました",
+      "empty": "V2 プランはまだありません",
+      "summary": "シーン {scenes} · ビート {beats} · ショット {shots} · 平均 {avg}s",
+      "preset": "カバレッジプリセット",
+      "issues": "構造問題",
+      "noIssues": "構造問題なし",
+      "checklist": "確認チェックリスト",
+      "noLines": "台詞なし",
+      "noActions": "動作なし",
+      "close": "閉じる",
+      "version": "バージョン {n}",
+      "statusDraft": "下書き",
+      "statusConfirmed": "確認済み",
+      "regenHint": "再生成すると新しい下書きバージョンを作成します"
+    }
   }
 }

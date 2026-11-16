@@ -4586,5 +4586,50 @@
       "faceFormat": "PNG, JPG, WebP를 선택하세요",
       "faceTooLarge": "얼굴 이미지는 20MB 이하여야 합니다"
     }
+  },
+  "storyboardV2": {
+    "shadow": "V2",
+    "settings": {
+      "title": "V2 커버리지 프리셋",
+      "subtitle": "V2 그림자 계획 및 생산 분할 설정입니다. 생산 스위치가 꺼져 있으면 현재 분할 경로는 변경되지 않습니다.",
+      "loadFailed": "V2 설정을 불러오지 못했습니다",
+      "active": "사용 중",
+      "rhythmTarget": "리듬 목표 {n}초, 검토 참고용",
+      "checklistTitle": "창작 검토 체크리스트",
+      "checklistHint": "검토 힌트만 제공하며 샷을 자동 수정하지 않습니다. 구조 불변식은 읽기 전용입니다.",
+      "checklistSave": "체크리스트 저장",
+      "checklistSaved": "체크리스트가 저장되었습니다",
+      "saved": "커버리지 프리셋이 저장되었습니다",
+      "productionTitle": "V2 생산 분할 사용",
+      "productionHint": "활성화하면 새 분할 작업이 V2 계획을 사용합니다. 비활성화하면 새 작업은 v1로 롤백되고 진행 중인 작업은 시작 시 알고리즘을 유지합니다. 기존 스토리보드는 변경되지 않습니다.",
+      "productionConfirm": "생산 분할 알고리즘을 전환할까요? 먼저 V2 계획 미리보기를 확인하세요.",
+      "productionSaved": "생산 분할 스위치가 저장되었습니다"
+    },
+    "preview": {
+      "button": "V2 계획 미리보기",
+      "title": "스토리보드 V2 계획 미리보기",
+      "subtitle": "계획만 생성합니다. TTS, 이미지, 영상은 생성하지 않습니다.",
+      "generate": "미리보기 생성",
+      "regenerate": "다시 생성",
+      "confirm": "계획 확정",
+      "confirmed": "계획이 확정되었습니다",
+      "export": "Markdown 내보내기",
+      "exporting": "내보내는 중",
+      "loading": "계획 생성 중…",
+      "failed": "V2 계획 생성 실패",
+      "empty": "아직 V2 계획이 없습니다",
+      "summary": "장면 {scenes} · 비트 {beats} · 샷 {shots} · 평균 {avg}초",
+      "preset": "커버리지 프리셋",
+      "issues": "구조 문제",
+      "noIssues": "구조 문제 없음",
+      "checklist": "검토 체크리스트",
+      "noLines": "대사 없음",
+      "noActions": "동작 없음",
+      "close": "닫기",
+      "version": "버전 {n}",
+      "statusDraft": "초안",
+      "statusConfirmed": "확정됨",
+      "regenHint": "다시 생성하면 새 초안 버전이 만들어집니다"
+    }
   }
 }

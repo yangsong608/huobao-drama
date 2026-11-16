@@ -491,6 +491,20 @@ export const sqliteSchemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_storyboard_pipeline_jobs_episode ON storyboard_pipeline_jobs (episode_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_storyboard_pipeline_jobs_status ON storyboard_pipeline_jobs (status)`,
 
+  `CREATE TABLE IF NOT EXISTS storyboard_v2_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL,
+    drama_id INTEGER NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'draft',
+    plan_json TEXT NOT NULL,
+    issues_json TEXT,
+    confirmed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_storyboard_v2_plans_episode ON storyboard_v2_plans (episode_id, version)`,
+
   `CREATE TABLE IF NOT EXISTS storyboard_skeletons (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id INTEGER NOT NULL,

@@ -567,6 +567,22 @@ export const storyboardPipelineJobs = sqliteTable('storyboard_pipeline_jobs', {
   finishedAt: text('finished_at'),
 })
 
+export const storyboardV2Plans = sqliteTable('storyboard_v2_plans', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  episodeId: integer('episode_id').notNull(),
+  dramaId: integer('drama_id').notNull(),
+  /** 每集递增的计划版本 */
+  version: integer('version').notNull().default(1),
+  /** draft / reviewed / confirmed / superseded */
+  status: text('status').notNull().default('draft'),
+  /** V2Plan 全量 JSON：beats、shots、issues、diagnostics */
+  planJson: text('plan_json').notNull(),
+  issuesJson: text('issues_json'),
+  confirmedAt: text('confirmed_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
 export const storyboardSkeletons = sqliteTable('storyboard_skeletons', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   jobId: integer('job_id').notNull(),

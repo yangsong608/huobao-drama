@@ -96,7 +96,7 @@ export interface StoryboardPlanResult {
   sourceChars: number
 }
 
-interface SceneBlock {
+export interface SceneBlock {
   label: string
   sceneType: string
   location: string
@@ -106,7 +106,7 @@ interface SceneBlock {
   bodyEnd: number
 }
 
-interface RawBeat {
+export interface RawBeat {
   start: number
   end: number
   text: string
@@ -151,6 +151,8 @@ const OUTDOOR_LOCATION_RE = /(街|市|广场|门外|巷|路)/
 const CONTINUATION_VERB_RE = /^(?:站|坐|躺|靠|走|跑|转|抬|低|伸|收|放|拿|端|推|拉|举|摔|捡|看|望|瞥|盯|白|瞪|瞟|瞄|皱|撇|点|摇|笑|哭|骂|喊|说|问|答|回|进|出|起|落|停|冲|退|跪|蹲|扶|抱|握|擦|切|雕|刻|拍|摸|指|掀|揭|倒|盛|装|穿|脱|递|接|追|躲|藏|愣|颤|抖|急|忙|连|又|便|就|才|却|仍|还|继续|随即|接着|然后)/
 const STATE_CLAUSE_RE = /^(?:神情|脸色|目光|眼神|声音|身子|眉头|嘴角|下巴|眼睛|嘴唇|双手|手里|身上|脸上|语气|表情)/
 const ADVERB_START_RE = /^(?:吃味|心酸|失落|得意|嫌弃|酸溜溜|热切|讪讪|冷笑|苦笑|皱眉|撇嘴|急|忙|怒|喜|悲|羞|慌|愣|又|便|就|才|却|仍|还|继续|随即|接着|然后)/
+/** 动作 + 冒号台词：如「唐奕扯起一个勉强的笑容，和声道：……」 */
+const ACTION_LED_SPEECH_RE = /(?:说|道|问|喊|答|叫|嚷|吼|骂|开口|低声|轻声|高声|沉声|冷声|怒声|嘟囔|吆喝|唱喝|笑道|急道|叹道|招呼|打圆场|接话|插话|回道|应道|解释|补充|反驳|嘀咕|自语|念叨|念|叹|指|看|望|笑|皱眉|点头|摇头|转身|走|站|坐|拍|拿|举|放|递|推|拉|抬|低|凑|凑近|摆手|拱手|抱拳)/
 
 function nonWsLength(value: string) {
   return String(value || '').replace(/\s+/g, '').length
@@ -579,10 +581,109 @@ function inlineBeats(input: {
   return beats
 }
 
+function discoverScriptSpeakers(script: string): string[] {
+  const names = new Set<string>()
+  for (const line of String(script || '').split('\n')) {
+    const match = line.match(/^\s*(?:@)?([\u4e00-\u9fa5A-Za-z0-9·]{1,6})\s*(?:[（(][^）)]*[）)])?\s*[：:]\s*\S/)
+    if (!match) continue
+    const name = match[1].trim()
+    if (!name || META_SPEAKER_RE.test(name) || NARRATIVE_SPEAKER_RE.test(name) || ACTION_LED_SPEECH_RE.test(name)) continue
+    names.add(name)
+  }
+  return [...names]
+}
+
+function speakerAliasEntries(characters?: PlannerEntity[]): Array<{ alias: string; canonical: string }> {
+  const entries: Array<{ alias: string; canonical: string }> = []
+  const seen = new Set<string>()
+  for (const character of characters || []) {
+    const canonical = String(character.name || '').trim()
+    if (!canonical) continue
+    const aliases = new Set<string>([canonical])
+    const base = canonical.replace(/[（(].*?[）)]/g, '').trim()
+    if (base.length >= 2) aliases.add(base)
+    for (const match of canonical.matchAll(/[（(]([^）)]+)[）)]/g)) {
+      for (const part of match[1].split(/[\/、,，]/)) {
+        const alias = part.trim()
+        if (alias.length >= 2) aliases.add(alias)
+      }
+    }
+    for (const alias of aliases) {
+      if (seen.has(alias)) continue
+      seen.add(alias)
+      entries.push({ alias, canonical })
+    }
+  }
+  return entries.sort((a, b) => b.alias.length - a.alias.length)
+}
+
+function leadingSpeaker(prefix: string, aliases: Array<{ alias: string; canonical: string }>): string | null {
+  let best: { alias: string; canonical: string; index: number } | null = null
+  for (const entry of aliases) {
+    const index = prefix.indexOf(entry.alias)
+    if (index < 0) continue
+    if (!best || index < best.index || (index === best.index && entry.alias.length > best.alias.length)) {
+      best = { ...entry, index }
+    }
+  }
+  return best && best.index <= 24 ? best.canonical : null
+}
+
+function actionLedDialogue(
+  line: string,
+  lineStart: number,
+  script: string,
+  paragraph: number,
+  scene: SceneBlock,
+  aliases: Array<{ alias: string; canonical: string }>,
+  context: BeatBuildContext,
+  maxSpeechChars: number,
+): { beats: RawBeat[]; speaker: string } | null {
+  const colonIndex = line.search(/[：:]/)
+  if (colonIndex <= 0 || colonIndex > 80) return null
+  const prefix = line.slice(0, colonIndex).trim()
+  const content = line.slice(colonIndex + 1).trim()
+  if (!prefix || effectiveChars(content) < 2) return null
+  if (META_SPEAKER_RE.test(prefix) || SIGNBOARD_RE.test(prefix)) return null
+  if (!ACTION_LED_SPEECH_RE.test(prefix)) return null
+  const speaker = leadingSpeaker(prefix, aliases)
+  if (!speaker) return null
+  const prefixStart = lineStart + line.indexOf(prefix)
+  const actionBeats = actionBeatsFromSpan(
+    script,
+    trimSpan(script, prefixStart, prefixStart + prefix.length),
+    paragraph,
+    scene,
+    context,
+  )
+  const contentStart = lineStart + line.lastIndexOf(content)
+  const contentEnd = contentStart + content.length
+  const effectiveSpeaker = INNER_MONOLOGUE_SPEAKER_RE.test(prefix) || NARRATION_RE.test(prefix) ? '旁白' : speaker
+  const dialogue = dialogueBeats({
+    source: script,
+    lineStart,
+    textStart: lineStart,
+    textEnd: lineStart + line.length,
+    contentStart,
+    contentEnd,
+    speaker: effectiveSpeaker,
+    paragraph,
+    scene,
+    maxSpeechChars,
+  })
+  if (!dialogue.length) return null
+  context.subject = effectiveSpeaker === '旁白' ? context.subject : effectiveSpeaker
+  return { beats: [...actionBeats, ...dialogue], speaker: effectiveSpeaker }
+}
+
 function parseSceneBeats(script: string, scene: SceneBlock, maxSpeechChars: number, input: StoryboardPlannerInput): RawBeat[] {
   const beats: RawBeat[] = []
   let paragraph = 0
   const context: BeatBuildContext = { input, subject: '' }
+  const aliases = speakerAliasEntries([
+    ...(input.characters || []),
+    ...discoverScriptSpeakers(script).map(name => ({ name })),
+  ])
   const body = script.slice(scene.bodyStart, scene.bodyEnd)
   for (const lineMatch of body.matchAll(/^.*$/gm)) {
     const line = lineMatch[0]
@@ -599,6 +700,16 @@ function parseSceneBeats(script: string, scene: SceneBlock, maxSpeechChars: numb
       if (!speaker || META_SPEAKER_RE.test(speaker) || narrativeColon || /^\d+(?:-\d+)?秒?$/.test(speaker) || !content) {
         // 继续按普通叙述处理；「更不对的是姿态：」这类冒号不是台词
       } else {
+        const exactAlias = aliases.some(entry => entry.alias === speaker)
+        const leading = exactAlias ? null : leadingSpeaker(speaker, aliases)
+        if (leading) {
+          const actionLed = actionLedDialogue(line, lineStart, script, paragraph, scene, aliases, context, maxSpeechChars)
+          if (actionLed) {
+            beats.push(...actionLed.beats)
+            paragraph += 1
+            continue
+          }
+        }
         const contentStart = lineStart + line.lastIndexOf(content)
         const contentEnd = contentStart + content.length
         const effectiveSpeaker = INNER_MONOLOGUE_SPEAKER_RE.test(speaker) || NARRATION_RE.test(speaker) ? '旁白' : speaker
@@ -619,12 +730,31 @@ function parseSceneBeats(script: string, scene: SceneBlock, maxSpeechChars: numb
         continue
       }
     }
+    const actionLed = actionLedDialogue(line, lineStart, script, paragraph, scene, aliases, context, maxSpeechChars)
+    if (actionLed) {
+      beats.push(...actionLed.beats)
+      paragraph += 1
+      continue
+    }
     for (const span of sentenceSpans(script, lineStart, lineStart + line.length)) {
       beats.push(...inlineBeats({ source: script, span, paragraph, scene, maxSpeechChars }, context))
     }
     paragraph += 1
   }
   return beats
+}
+
+/** 供 V2 等上游消费者复用剧本节拍解析，不套用 v1 的镜头合并策略。 */
+export function parseStoryboardBeats(input: StoryboardPlannerInput): Array<{ scene: SceneBlock; beats: RawBeat[] }> {
+  const script = String(input.script || '').replace(/\r\n?/g, '\n')
+  if (!script.trim()) return []
+  const maxDuration = Math.max(2, Math.min(20, input.maxDuration ?? 15))
+  const maxSpeechChars = Math.max(8, Math.floor((maxDuration - DIALOGUE_LINE_PAUSE_SECONDS) * DIALOGUE_CHARS_PER_SECOND))
+  const scenes = sceneBlocks(script, input.sceneGroups || [], input.previousShot)
+  return scenes.map(scene => ({
+    scene,
+    beats: parseSceneBeats(script, scene, maxSpeechChars, input),
+  }))
 }
 
 function isSpeechCueText(text: string): boolean {

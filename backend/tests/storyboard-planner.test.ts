@@ -11,7 +11,7 @@ process.env.STORAGE_PATH = path.join(root, 'static')
 process.env.WORKSPACE_PATH = path.join(root, 'workspace')
 process.env.MYSQL_AUTO_IMPORT = 'false'
 
-const { planStoryboardShots, buildPlannedShotsBlock } = await import('../src/services/storyboard-planner.ts')
+const { planStoryboardShots, buildPlannedShotsBlock, parseStoryboardBeats } = await import('../src/services/storyboard-planner.ts')
 const { validatePlanSequence, extractPlanSpeechSegments } = await import('../src/services/storyboard-plan-contract.ts')
 
 const SCENE_GROUPS = [{
@@ -507,4 +507,26 @@ test('对白驱动形态：静默压缩与时长逻辑零回归', () => {
   const result = planStoryboardShots({ script, shotStart: 1, maxDuration: 15, silentDuration: 6 })
   assert.ok(result.shots.some(shot => shot.narrativeRun?.compressed))
   assert.ok(result.shots.every(shot => shot.duration >= 2 && shot.duration <= 6))
+})
+
+
+test('动作引出台词时识别真实说话人，不把动作短语当角色', () => {
+  const script = `## S01 | 内景 · 邓州小饭馆 | 正午
+
+老者：（冷喝）尧夫，不可无理！
+
+孙郎中赶紧打圆场：对嘛，只是饭桌上的闲聊。
+
+老者摇头一叹：事已至此，就此告辞！`
+  const scenes = parseStoryboardBeats({
+    script,
+    shotStart: 1,
+    characters: [{ name: '孙郎中' }],
+    maxDuration: 15,
+  })
+  const beats = scenes.flatMap(scene => scene.beats)
+  const dialogue = beats.filter(beat => beat.kind === 'dialogue')
+  assert.deepEqual(dialogue.map(beat => beat.speaker), ['老者', '孙郎中', '老者'])
+  assert.ok(dialogue.some(beat => beat.dialogueText.includes('对嘛，只是饭桌上的闲聊')))
+  assert.ok(beats.every(beat => !beat.speaker.includes('摇头') && !beat.speaker.includes('打圆场')))
 })

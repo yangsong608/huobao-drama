@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url'
 import dramas from './routes/dramas.js'
 import episodes from './routes/episodes.js'
 import storyboards from './routes/storyboards.js'
+import storyboardV2 from './routes/storyboardV2.js'
 import storyboardFrameAssets from './routes/storyboardFrameAssets.js'
 import scenes from './routes/scenes.js'
 import characters from './routes/characters.js'
@@ -114,6 +115,7 @@ api.route('/dramas', dramas)
 api.route('/video-projects', videoProjects)
 api.route('/episodes', episodes)
 api.route('/storyboards', storyboards)
+api.route('/storyboard-v2', storyboardV2)
 // 分镜末帧资产：/episodes/:id/frame-assets、/storyboards/:id/frame-assets/last、/storyboards/:id/first-frame
 api.route('/', storyboardFrameAssets)
 api.route('/scenes', scenes)

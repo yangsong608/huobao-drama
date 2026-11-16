@@ -707,3 +707,27 @@ test('预拆 v3：发声动作没有 inferred 台词时拒绝，补台词后锁�
   assert.ok(vocal.actionArcJson)
   assert.ok((JSON.parse(vocal.speechSegmentsJson || '[]') as any[]).some(item => item.text.includes('大白炊饼')))
 })
+
+
+test('有明确计划台词时，混合摘录不会把动作误判成漏台词', () => {
+  const sourceExcerpt = '张三：你来了。李四走进门，点头。李四：来了。'
+  const description = '张三坐在桌前抬头说：「你来了。」李四走进门，点头说：「来了。」'
+  const videoPrompt = [
+    '出场人物：@张三、@李四｜场景：@测试屋',
+    '画面调度：画面左：张三；画面右：李四；无过肩；背景地标：无；轴线A；动作起点：张三坐着；动作终点：李四点头',
+    '0-2秒：张三说：「你来了。」李四走进门，点头说：「来了。」',
+  ].join('\n')
+  const result = validateRepairedShot({
+    sourceExcerpt,
+    planSpeechSegments: [
+      { speaker: '张三', text: '你来了。', order: 1 },
+      { speaker: '李四', text: '来了。', order: 2 },
+    ],
+    description,
+    videoPrompt,
+    characterIds: [1, 2],
+    duration: 2,
+    shotLabel: '第 2 镜',
+  })
+  assert.equal(result.errors.some(error => error.includes('漏掉了原剧本台词')), false)
+})

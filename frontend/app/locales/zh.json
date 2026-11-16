@@ -4586,5 +4586,50 @@
       "faceFormat": "请选择 PNG、JPG 或 WebP 图片",
       "faceTooLarge": "人脸图片不能超过 20MB"
     }
+  },
+  "storyboardV2": {
+    "shadow": "V2",
+    "settings": {
+      "title": "V2 覆盖预设",
+      "subtitle": "V2 影子计划与生产拆分设置；生产开关关闭时，当前拆分链路保持不变。",
+      "loadFailed": "V2 设置加载失败",
+      "active": "当前",
+      "rhythmTarget": "节奏目标 {n} 秒，仅作验收参考",
+      "checklistTitle": "创作验收清单",
+      "checklistHint": "只给审核提示，不自动改分镜；结构不变量由系统只读维护。",
+      "checklistSave": "保存清单",
+      "checklistSaved": "验收清单已保存",
+      "saved": "覆盖预设已保存",
+      "productionTitle": "使用 V2 生产拆分",
+      "productionHint": "开启后，新拆分任务使用 V2 计划；关闭后新任务回滚 v1，进行中的任务保持启动时算法。已有分镜不受影响。",
+      "productionConfirm": "确认切换生产拆分算法？建议先确认 V2 计划预览。",
+      "productionSaved": "生产拆分开关已保存"
+    },
+    "preview": {
+      "button": "V2 计划预览",
+      "title": "分镜 V2 计划预览",
+      "subtitle": "只生成计划，不生成 TTS、图片或视频。",
+      "generate": "生成预览",
+      "regenerate": "重新生成",
+      "confirm": "确认计划",
+      "confirmed": "计划已确认",
+      "export": "导出 Markdown",
+      "exporting": "导出中",
+      "loading": "正在生成计划…",
+      "failed": "生成 V2 计划失败",
+      "empty": "还没有 V2 计划",
+      "summary": "场景 {scenes} · 节拍 {beats} · 镜头 {shots} · 平均 {avg}s",
+      "preset": "覆盖预设",
+      "issues": "结构问题",
+      "noIssues": "没有结构问题",
+      "checklist": "验收清单",
+      "noLines": "无台词",
+      "noActions": "无动作",
+      "close": "关闭",
+      "version": "版本 {n}",
+      "statusDraft": "草稿",
+      "statusConfirmed": "已确认",
+      "regenHint": "重新生成会新建一个草稿版本"
+    }
   }
 }
