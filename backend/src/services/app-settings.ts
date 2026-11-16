@@ -652,7 +652,7 @@ export const STORYBOARD_AUDIT_POLICY_DEFAULTS: StoryboardAuditPolicy = {
     silentCharacterWarnSeconds: 8,
     silentCharacterErrorSeconds: 12,
     emptyShotWarnSeconds: 6,
-    promptSegmentMaxChars: 12,
+    promptSegmentMaxChars: 18,
   },
   semantic: {
     enabled: true,

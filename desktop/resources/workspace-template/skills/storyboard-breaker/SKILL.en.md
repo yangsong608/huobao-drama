@@ -9,7 +9,7 @@ description: Storyboard splitting rules — one storyboard carries one camera se
 
 One storyboard = one video generation task = one camera setup + one subject + one continuous action. Screen left/right, axis and background-landmark sides are scene-level constants: set them once and keep them for every shot in the same scene.
 
-- Each storyboard is 6-15 seconds.
+- Each storyboard is 2-15 seconds.
 - Only continuous movement within the same camera setup is allowed. A new camera setup, subject, action or emotional beat requires a new storyboard.
 - Do not write 【镜头N】 numbering in the description and never cut between sub-shots inside one storyboard; time segments within one setup are not sub-shots.
 
@@ -32,7 +32,7 @@ One storyboard = one video generation task = one camera setup + one subject + on
 | Field | Requirement |
 |---|---|
 | `description` | One continuous shot: who + concrete action + body detail + expression + position/eyeline; do not write 【镜头N】 numbering |
-| `duration` | 6-15 seconds; internal time segments 1-6 seconds each |
+| `duration` | 2-15 seconds; internal time segments 1-6 seconds each |
 | `scene_id` | Canonical scene ID |
 | `character_ids` | Characters actually visible; empty array when none |
 | `prop_ids` | Key props; empty array when none |

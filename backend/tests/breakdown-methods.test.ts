@@ -229,7 +229,7 @@ test('扩展版预置方案覆盖开场、钩子节点、机位、台词与自�
   assert.equal(extended.sortOrder, 25)
   assert.ok(extended.description.includes('参考'))
   for (const word of [
-    '外力施压', '开场 0–3 秒', '段尾钩子', '6–12 秒', '一个机位、一个主体、一个连续动作',
+    '外力施压', '开场 0–3 秒', '段尾钩子', '2–15 秒', '一个机位、一个主体、一个连续动作',
     'A 主镜', 'B 反打', 'C 特写', 'D 环境', '台词', '自检',
   ]) {
     assert.ok(extended.skill.includes(word), `扩展版 Skill 缺少 ${word}`)
@@ -267,8 +267,8 @@ test('内置方案文本符合内容要求，standard 两段为空', () => {
 test('六个内置方案声明单段最长秒数，用于计算覆盖下限', () => {
   const expected: Record<string, number> = {
     standard: 15,
-    'hook-beat': 12,
-    'hook-beat-extended': 12,
+    'hook-beat': 15,
+    'hook-beat-extended': 15,
     'director-board': 10,
     'h3-compact': 8,
     'trailer-cut': 6,
@@ -304,9 +304,9 @@ test('覆盖下限按剧本字数与方案单段上限计算，并按存活分�
   const extendedEp = newScriptEpisode('hook-beat-extended', 3000)
   let coverage = svc.getEpisodeCoverage(extendedEp)!
   assert.equal(coverage.scriptChars, 3000)
-  assert.equal(coverage.maxSegmentSeconds, 12)
+  assert.equal(coverage.maxSegmentSeconds, 15)
   assert.equal(coverage.targetSeconds, 360)
-  assert.equal(coverage.floor, 27)
+  assert.equal(coverage.floor, 22)
   assert.equal(coverage.actual, 0)
   assert.equal(coverage.ok, false)
 
@@ -325,10 +325,10 @@ test('覆盖下限按剧本字数与方案单段上限计算，并按存活分�
   addStoryboards(standardEp, 21)
   assert.equal(svc.getEpisodeCoverage(standardEp)!.ok, false, '低于下限必须判定不完整')
   const deletedEp = newScriptEpisode('hook-beat-extended', 3000)
-  addStoryboards(deletedEp, 27)
+  addStoryboards(deletedEp, 22)
   const removed = db.select().from(storyboards).where(eq(storyboards.episodeId, deletedEp)).all()[0]
   db.update(storyboards).set({ deletedAt: ts }).where(eq(storyboards.id, removed.id)).run()
-  assert.equal(svc.getEpisodeCoverage(deletedEp)!.actual, 26)
+  assert.equal(svc.getEpisodeCoverage(deletedEp)!.actual, 21)
   assert.equal(svc.getEpisodeCoverage(deletedEp)!.ok, false, '软删分镜不计入覆盖')
 
   assert.equal(svc.getEpisodeCoverage(undefined), null)
@@ -475,7 +475,7 @@ test('方案块尾部固定追加平台硬约束，任何方案不得覆盖 vide
       '@角色名说：「台词」',
       '旁白（画外音）：「台词」',
       '逐字复制',
-      '4 字/秒',
+      '正常语速',
       'canonical scene_id',
       '不要写「音频：」',
     ]) {
@@ -732,7 +732,7 @@ test('基础分镜提示词与技能写明统一的 description / video_prompt �
     '最后一段结束等于 duration',
     '@角色名说：「台词」',
     '旁白（画外音）：「台词」',
-    '4 字/秒',
+    '正常语速',
   ]) {
     assert.ok(prompt.includes(marker), `基础提示词缺少 ${marker}`)
   }

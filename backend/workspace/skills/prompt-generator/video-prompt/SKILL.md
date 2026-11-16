@@ -5,7 +5,7 @@ description: 视频提示词规范 — 根据单个连续分镜内容生成按�
 
 # 视频提示词（分镜段落 → video_prompt）
 
-根据单个分镜的 description（一个连续镜头的画面与台词/旁白）/ atmosphere / duration，生成驱动 AI 视频生成的 `video_prompt`。**一个分镜 = 一段 6-15 秒的单机位视频，分镜内部不切镜**；需要换景别/角度/对象时新开分镜；**全程不跨场景**、不闪回；description 不写【镜头N】编号。
+根据单个分镜的 description（一个连续镜头的画面与台词/旁白）/ atmosphere / duration，生成驱动 AI 视频生成的 `video_prompt`。**一个分镜 = 一段 2-15 秒的单机位视频，分镜内部不切镜**；需要换景别/角度/对象时新开分镜；**全程不跨场景**、不闪回；description 不写【镜头N】编号。
 
 ## 格式
 

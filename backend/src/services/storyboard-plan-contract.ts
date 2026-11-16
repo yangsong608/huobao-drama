@@ -8,6 +8,7 @@
  */
 import { findQuotedSpans } from './dialogue-lines.js'
 import { extractScriptDialogueSegments } from './dialogue-integrity.js'
+import { DIALOGUE_CHARS_PER_SECOND } from './dialogue-timing.js'
 
 export interface PlanSpeechSegment {
   speaker: string
@@ -157,6 +158,14 @@ function endsWithSpeechLeadIn(sourceExcerpt: string) {
   const text = String(sourceExcerpt || '').trim()
   // `角色：……` 是完整的无词台词行，不是停在说话提示上
   if (SCRIPT_LINE_ONLY_RE.test(text)) return false
+  // 完整台词本身也可能以“骂/说/问”等动词收尾（如“能扛骂。”），
+  // 只要最后一段角色台词完整落在摘录末尾，就不能误判为下一镜才说话。
+  const completeLines = extractScriptDialogueSegments(text)
+  const tail = text.replace(/\s+$/, '')
+  if (completeLines.some(line => {
+    const raw = String(line.raw || '').replace(/\s+$/, '')
+    return raw && tail.endsWith(raw)
+  })) return false
   return SPEECH_LEAD_IN_RE.test(text)
 }
 
@@ -198,7 +207,7 @@ export function validatePlanSequence(plans: PlanShot[], options: {
   sceneContracts?: Map<number, PlanSceneContract>
   allowPendingInferredSpeech?: boolean
 } = {}): PlanGateResult {
-  const minDuration = options.minDuration ?? 6
+  const minDuration = options.minDuration ?? 2
   const maxDuration = options.maxDuration ?? 15
   const issues: PlanIssue[] = []
   const boundaries: BoundaryContract[] = []
@@ -294,16 +303,24 @@ export function validatePlanSequence(plans: PlanShot[], options: {
 
     const speakers = [...new Set(plan.speechSegments.map(item => String(item.speaker || '').trim()).filter(Boolean))]
     if (speakers.length > 1) {
-      issues.push(issue(
-        'multi_speaker_shot',
-        plan.shotNumber,
-        `${label}有 ${speakers.length} 个说话人（${speakers.join('、')}）；一个分镜只能一个说话人，请拆成正反打或单人镜头。`,
-        plan.sourceExcerpt.slice(0, 80),
-      ))
+      // 多人快速短对白允许共镜（最多 3 人，每句不超过 24 字）；总时长由镜头上限控制。
+      // 长篇独白仍必须按说话人/节拍拆镜。
+      const rapidExchange = speakers.length <= 3
+        && !speakers.includes('旁白')
+        && !speakers.includes('画外音')
+        && plan.speechSegments.every(item => effectiveSpeechChars(item.text) <= 24)
+      if (!rapidExchange) {
+        issues.push(issue(
+          'multi_speaker_shot',
+          plan.shotNumber,
+          `${label}有 ${speakers.length} 个说话人（${speakers.join('、')}），但不符合快速短对白条件（最多 3 人、每句不超过 24 字）；请拆成正反打或合并为短对白镜。`,
+          plan.sourceExcerpt.slice(0, 80),
+        ))
+      }
     }
 
     const speechChars = plan.speechSegments.reduce((sum, item) => sum + effectiveSpeechChars(item.text), 0)
-    const speechCapacity = Math.max(0, plan.duration - 1) * 4
+    const speechCapacity = Math.max(0, plan.duration - 0.25) * DIALOGUE_CHARS_PER_SECOND
     if (speechChars > speechCapacity) {
       issues.push(issue(
         'dialogue_over_capacity',

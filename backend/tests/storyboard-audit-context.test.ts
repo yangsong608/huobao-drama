@@ -487,7 +487,7 @@ test('修复提示词带单段时长上限与批量提交要求', async () => {
   const shot = createShot(episodeId, 1, { sceneId: scene })
   const context = ctx.buildAuditEpisodeContext(episodeId, { fileExists: () => true })
 
-  assert.equal(context.maxSegmentSeconds, 12)
+  assert.equal(context.maxSegmentSeconds, 15)
   const prompt = ctx.buildAuditRepairPrompt(context, [{
     id: 'ISSUE-1',
     check: 4,
@@ -501,6 +501,6 @@ test('修复提示词带单段时长上限与批量提交要求', async () => {
     repairAction: 'extend_duration',
     status: 'open',
   }])
-  assert.match(prompt, /不得超过 12 秒/)
+  assert.match(prompt, /不得超过 15 秒/)
   assert.match(prompt, /一次 apply_storyboard_repair 调用里批量提交/)
 })

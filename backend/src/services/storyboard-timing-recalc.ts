@@ -1,7 +1,7 @@
 /**
  * 手改旁白后的时长重算（旁白形态双轨制 P5）
  *
- * 以用户改写的旁白为准，按 4 字/秒 + 1 秒气口重算时长；超方案单段上限时
+ * 以用户改写的旁白为准，按正常语速重算时长（最终以 TTS 为准）；超方案单段上限时
  * 按标点拆到相邻新镜。同步 description、骨架旁白计划与负面约束；
  * 拆镜复用过渡插入模块的编号顺延与 @镜头N末帧 引用改写。
  * 预览不落库；应用走事务，受影响镜头回到待校验状态。
@@ -14,6 +14,7 @@ import { narrationLinesFromText } from './shot-intent-plan.js'
 import { ensureNegativeConsistency } from './storyboard-negative.js'
 import { getMaxSegmentSeconds } from './breakdown-methods.js'
 import { shiftShotNumbersForInsertion } from './storyboard-audit-insertion.js'
+import { DIALOGUE_CHARS_PER_SECOND } from './dialogue-timing.js'
 
 const PUNCT_STRIP_RE = /[\s\u3000，。！？；：、“”‘’（）《》【】…—,.!?;:"'()\[\]]/g
 const NARRATION_DESC_RE = /(?:旁白|画外音|解说词?|内心独白|心声)\s*(?:（[^）]*）|\([^)]*\))?\s*[：:]\s*[「“"][^」”"]*[」”"]/g
@@ -97,7 +98,7 @@ function packNarrationSegments(
   dialogue: TimingRecalcDialogue[],
   schemeMaxSeconds: number,
 ): TimingRecalcSegment[] {
-  const maxChars = Math.max(8, (schemeMaxSeconds - 1) * 4)
+  const maxChars = Math.max(8, Math.floor((schemeMaxSeconds - 0.25) * DIALOGUE_CHARS_PER_SECOND))
   const dialogueChars = dialogue.reduce((sum, item) => sum + effectiveChars(item.text), 0)
   const clauses = narrationText.split(/(?<=[，。！？!?；;])/).map(item => item.trim()).filter(Boolean)
   const packs: string[] = []
@@ -127,7 +128,7 @@ function packNarrationSegments(
   return packs.map((narration, index) => {
     const segDialogue = index === 0 ? dialogue : []
     const chars = effectiveChars(narration) + segDialogue.reduce((sum, item) => sum + effectiveChars(item.text), 0)
-    const duration = Math.min(schemeMaxSeconds, Math.max(6, Math.ceil(chars / 4) + 1))
+    const duration = Math.min(schemeMaxSeconds, Math.max(2, Math.ceil(chars / DIALOGUE_CHARS_PER_SECOND + 0.25)))
     return { narration, dialogue: segDialogue, duration }
   })
 }
@@ -140,12 +141,12 @@ export function previewShotTimingRecalc(storyboardId: number): TimingRecalcPrevi
   const dialogueChars = dialogue.reduce((sum, item) => sum + effectiveChars(item.text), 0)
   const narrationText = narration.join('')
   const narrationChars = effectiveChars(narrationText)
-  const requiredSeconds = Math.ceil((dialogueChars + narrationChars) / 4) + 1
+  const requiredSeconds = Math.ceil((dialogueChars + narrationChars) / DIALOGUE_CHARS_PER_SECOND + 0.5)
   const currentDuration = shot.duration || 0
   const needsSplit = requiredSeconds > schemeMaxSeconds
   const segments = needsSplit
     ? packNarrationSegments(narrationText, dialogue, schemeMaxSeconds)
-    : [{ narration: narrationText, dialogue, duration: Math.min(schemeMaxSeconds, Math.max(6, requiredSeconds)) }]
+    : [{ narration: narrationText, dialogue, duration: Math.min(schemeMaxSeconds, Math.max(2, requiredSeconds)) }]
   const descriptionOutOfSync = narrationChars > 0 && narrationLinesFromText(String(shot.description || '')).length === 0
   const negativeConflict = narrationChars > 0 && SILENT_CLAUSE_RE.test(String(shot.videoPrompt || ''))
   const suggestedDuration = segments[0].duration
@@ -203,14 +204,14 @@ function rebuildPrompt(originalPrompt: string, segment: TimingRecalcSegment): st
     cursor = end
   }
   for (const item of segment.dialogue) {
-    const seconds = Math.max(2, Math.min(6, Math.ceil(effectiveChars(item.text) / 4) + 1))
+    const seconds = Math.max(2, Math.min(6, Math.ceil(effectiveChars(item.text) / DIALOGUE_CHARS_PER_SECOND + 0.25)))
     pushFrame(seconds, `@${item.speaker}说：「${item.text}」`)
   }
   const clauses = segment.narration.split(/(?<=[，。！？!?；;])/).map(item => item.trim()).filter(Boolean)
   let pack = ''
   const flushPack = () => {
     if (!pack) return
-    const seconds = Math.max(2, Math.min(6, Math.ceil(effectiveChars(pack) / 4)))
+    const seconds = Math.max(2, Math.min(6, Math.ceil(effectiveChars(pack) / DIALOGUE_CHARS_PER_SECOND)))
     pushFrame(seconds, `旁白（画外音）：「${pack}」，画面人物嘴唇闭合，不张嘴。`)
     pack = ''
   }
@@ -261,8 +262,8 @@ function narrationPlanJson(segment: TimingRecalcSegment, form: 'dialogue' | 'nar
     mode: segment.narration ? 'adapted' : 'none',
     lines: segment.narration ? [segment.narration] : [],
     sourceQuotes: [],
-    budgetChars: Math.max(4, (segment.duration - 1) * 4),
-    overflow: chars > Math.max(4, (segment.duration - 1) * 4),
+    budgetChars: Math.max(4, Math.floor((segment.duration - 0.25) * DIALOGUE_CHARS_PER_SECOND)),
+    overflow: chars > Math.max(4, Math.floor((segment.duration - 0.25) * DIALOGUE_CHARS_PER_SECOND)),
     reason: '手改旁白重算：以用户改写的旁白为准，时长按字数折算。',
     form,
   })

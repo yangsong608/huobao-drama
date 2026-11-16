@@ -91,7 +91,7 @@ test('原文明确标注旁白时逐字保留，即使镜头内容是战斗', ()
   assert.equal(plan.action.narrationForbidden, false)
 })
 
-test('对白镜不生成旁白，旁白字数按 4 字/秒 + 1 秒气口计算', () => {
+test('对白镜不生成旁白，旁白预算按正常语速计算', () => {
   const plan = buildShotIntentPlan({
     duration: 6,
     sourceExcerpt: '张三说：「快走！」',
@@ -100,8 +100,8 @@ test('对白镜不生成旁白，旁白字数按 4 字/秒 + 1 秒气口计算',
   })
   assert.equal(plan.intent, 'dialogue')
   assert.equal(plan.narration.mode, 'none')
-  assert.equal(plan.narration.budgetChars, 20)
-  const longLine = '这是一段超过二十个字预算的旁白内容需要拆分到相邻镜头继续说完'
+  assert.equal(plan.narration.budgetChars, 34)
+  const longLine = '这是一段超过三十四个字预算的旁白内容需要拆分到相邻镜头继续说完并保证每个镜头都能完整表达'
   const overflow = buildShotIntentPlan({
     duration: 6,
     sourceExcerpt: `旁白：${longLine}`,
@@ -146,6 +146,22 @@ test('意图门禁拦截动作镜自行加旁白，并要求计划旁白逐字�
   })
   const missing = validateIntentAdherence(narration, '他站在门口。', '信息头\n他站在门口。')
   assert.ok(missing.errors.some(item => item.includes('计划旁白没有逐字写入 description')))
+})
+
+test('逐字旁白拆进多个时间帧仍算完整落地', () => {
+  const plan = buildShotIntentPlan({
+    duration: 6,
+    sourceExcerpt: '旁白：摊位后面，罗晴把一叠预算单拍在折叠桌上。',
+    characterCount: 1,
+  })
+  assert.equal(plan.narration.mode, 'source')
+  const desc = '罗晴把预算单拍在桌上。旁白（画外音）：「摊位后面，罗晴把一叠预算单拍在折叠桌上。」'
+  const prompt = [
+    '0-1秒：罗晴抬起预算单。旁白（画外音）：「摊位后面，」',
+    '1-5秒：罗晴把预算单拍在桌上。旁白（画外音）：「罗晴把一叠预算单拍在折叠桌上」',
+  ].join('\n')
+  const result = validateIntentAdherence(plan, desc, prompt)
+  assert.deepEqual(result.errors.filter(item => item.includes('计划旁白')), [])
 })
 
 test('只有发声要求、没有具体台词时仍按对白计划处理', () => {

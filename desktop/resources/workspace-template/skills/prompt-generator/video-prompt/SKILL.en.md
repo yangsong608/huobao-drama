@@ -5,7 +5,7 @@ description: Video prompt specification — generates a time-segmented video pro
 
 # Video Prompt (storyboard segment → video_prompt)
 
-From a single storyboard shot's description (the visuals and dialogue/narration of one continuous camera) / atmosphere / duration, generate the `video_prompt` that drives AI video generation. **One storyboard shot = one 6-15-second single-camera video with no cuts inside**: create a new shot when the camera setup, angle or subject must change; it **never crosses scenes** and never uses flashbacks; do not write 【镜头N】 numbering in the description.
+From a single storyboard shot's description (the visuals and dialogue/narration of one continuous camera) / atmosphere / duration, generate the `video_prompt` that drives AI video generation. **One storyboard shot = one 2-15-second single-camera video with no cuts inside**: create a new shot when the camera setup, angle or subject must change; it **never crosses scenes** and never uses flashbacks; do not write 【镜头N】 numbering in the description.
 
 ## Format
 

@@ -84,7 +84,7 @@ description: 分镜动作检验专业规范 — 五项检验、问题定位、�
 
 ### 检查 4：每句话的时长与拆分
 
-规则层按可发音字符计算所需时长（约 4 字/秒 + 每句 1 秒呼吸），报：
+规则层按可发音字符计算所需时长（约 正常语速 + 每句 1 秒呼吸），报：
 - `line_insufficient_duration`：有效时长不足。
 - `line_overlong_duration`：有效时长明显富余。
 - `line_requires_split`：单句超过 6 秒。

@@ -172,7 +172,7 @@ const PARAMETER_DEFS: PipelineParameterDefinition[] = [
   { key: 'coverageGateEnabled', label: '整集覆盖门禁', type: 'boolean', default: true, stepKey: 'skeleton-gate', description: '关闭后只提示覆盖不足，不阻断完成。' },
   { key: 'soundMaxAttempts', label: '声音设计尝试', type: 'number', default: 2, min: 1, max: 3, step: 1, stepKey: 'sound-design', description: '声音计划保存或校验失败时的重试次数。' },
   { key: 'maxWallClockMinutes', label: '单集墙钟上限', type: 'number', default: 60, min: 10, max: 240, step: 5, stepKey: 'finalize', description: '超过后暂停运行，等待人工处理。' },
-  { key: 'splitPresetKey', label: '拆分预设', type: 'string', default: 'inherit', options: ['inherit', 'standard', 'hook-beat-extended', 'h3-compact'], stepKey: 'skeleton-split', description: '默认跟随剧集选择；也可为本次运行覆盖。方案只影响风格与节奏，不覆盖 6–15 秒/单机位硬约束。' },
+  { key: 'splitPresetKey', label: '拆分预设', type: 'string', default: 'inherit', options: ['inherit', 'standard', 'hook-beat-extended', 'h3-compact'], stepKey: 'skeleton-split', description: '默认跟随剧集选择；也可为本次运行覆盖。方案只影响风格与节奏，不覆盖 2–15 秒（按内容决定，不补时长）/单机位硬约束。' },
 ]
 
 const PLUGIN_SEEDS: PipelineStepDefinition[] = [
@@ -210,7 +210,7 @@ const PLUGIN_SEEDS: PipelineStepDefinition[] = [
   },
   {
     key: 'shot-validate', name: '逐镜校验', version: '1', kind: 'validate', scope: 'shot',
-    description: '单机位、6–15 秒、四区、台词完整、发声动作与相邻镜配对。', required: true, defaultEnabled: true, available: true,
+    description: '单机位、2–15 秒（按内容决定，不补时长）、四区、台词完整、发声动作与相邻镜配对。', required: true, defaultEnabled: true, available: true,
     rulePacks: ['unit-contract', 'dialogue-integrity', 'dialogue-capacity', 'pair-continuity'],
   },
   {
@@ -272,7 +272,7 @@ const RULE_PACK_SEEDS: PipelineRulePackDefinition[] = [
     key: 'unit-contract', name: '分镜单位合同', version: '1',
     rules: [
       { key: 'single-camera', name: '单机位/单主体/连续动作', severity: 'error', locked: true, scope: 'shot', description: '不写任何【镜头N】编号；禁止子镜头切镜。' },
-      { key: 'duration', name: '6–15 秒', severity: 'error', locked: true, scope: 'shot', description: '镜头时长必须在 6–15 秒之间。' },
+      { key: 'duration', name: '2–15 秒（按内容决定，不补时长）', severity: 'error', locked: true, scope: 'shot', description: '镜头时长必须在 2–15 秒（按内容决定，不补时长）之间。' },
       { key: 'time-frames', name: '时间帧连续', severity: 'error', locked: true, scope: 'shot', description: '时间帧 1–6 秒、连续覆盖 duration。' },
       { key: 'four-sections', name: '固定四区', severity: 'error', locked: true, scope: 'shot', description: '信息头、画面调度、时间帧、负面约束。' },
       { key: 'action-endpoints', name: '动作端点', severity: 'error', locked: true, scope: 'shot', description: '有角色的镜头必须写动作起点/终点。' },
@@ -291,7 +291,7 @@ const RULE_PACK_SEEDS: PipelineRulePackDefinition[] = [
   {
     key: 'dialogue-capacity', name: '台词容量', version: '1',
     rules: [
-      { key: 'chars-per-second', name: '4 字/秒 + 1 秒气口', severity: 'error', locked: true, scope: 'shot', description: '超出镜头容量必须拆到相邻分镜。' },
+      { key: 'chars-per-second', name: '正常语速（最终以 TTS 音频为准）', severity: 'error', locked: true, scope: 'shot', description: '超出镜头容量必须拆到相邻分镜。' },
     ],
   },
   {
@@ -318,7 +318,7 @@ const RULE_PACK_SEEDS: PipelineRulePackDefinition[] = [
       { key: 'content-based-intent', name: '意图只看镜头内容', severity: 'error', locked: true, scope: 'shot', description: '战斗/比拼/动作判定基于镜头内容，题材只影响特效风格；旁白形态不影响意图判定。' },
       { key: 'action-no-narration', name: '动作镜禁旁白（对白驱动）', severity: 'error', locked: true, scope: 'shot', description: '对白驱动形态：战斗、比拼和单个动作/反应镜没有原文旁白依据时禁止旁白、画外音与内心独白；压缩过渡镜除外。旁白驱动形态不适用本条。' },
       { key: 'narration-source', name: '旁白必须有原文依据', severity: 'error', locked: true, scope: 'shot', description: '对白驱动形态：旁白只能逐字来自原文明确标注的旁白/画外音，或开场/压缩过渡镜的原文叙述。旁白驱动形态：旁白以原文叙述为素材改写，仍须有原文依据。' },
-      { key: 'narration-budget', name: '旁白字数预算', severity: 'warning', locked: true, scope: 'shot', description: '旁白按 4 字/秒 + 1 秒气口计算；对白驱动形态开场/压缩过渡旁白不超过 24 字；旁白驱动形态按本镜时长预算，超预算延长时长或按标点拆到相邻镜。' },
+      { key: 'narration-budget', name: '旁白字数预算', severity: 'warning', locked: true, scope: 'shot', description: '旁白按 正常语速（最终以 TTS 音频为准）计算；对白驱动形态开场/压缩过渡旁白不超过 24 字；旁白驱动形态按本镜时长预算，超预算延长时长或按标点拆到相邻镜。' },
       { key: 'narration-form-adapted', name: '改写式旁白（旁白驱动）', severity: 'error', locked: true, scope: 'shot', description: '旁白驱动形态：任意镜可配第三人称改写式画外旁白，可写情绪/心理/前因；称呼用项目规范名；不得逐字复述对白；旁白与画面同步，人物嘴唇闭合。' },
       { key: 'narration-form-dialogue-coexist', name: '旁白与对白分时', severity: 'error', locked: true, scope: 'shot', description: '旁白驱动形态：旁白可出现在对白镜，但同一时间帧内不得既有台词又有旁白；按时间帧分段，旁白在标点处断开，禁止词中断开。' },
       { key: 'narration-form-opening', name: '开场旁白钩子', severity: 'error', locked: true, scope: 'episode', description: '旁白驱动形态：第 1 镜必须有开场画外旁白，交代时间/地点/氛围或悬念钩子。' },

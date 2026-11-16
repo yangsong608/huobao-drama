@@ -196,16 +196,16 @@ test('视频提示词信息头缺失、时间轴断裂、尾端不符各报一�
   assert.match(issuesByCode(wrongTail, 'prompt_timeline_broken')[0].message, /结束/)
 })
 
-test('每个时间段的台词或旁白超过 4 字/秒容量给警告', () => {
+test('每个时间段的台词或旁白超过 正常语速容量给警告', () => {
   const tooLong = evaluateStoryboardRules(input({
-    shots: [shot({ duration: 3, description: '【镜头1】@甲站着。', videoPrompt: '出场人物：@甲｜场景：@室\n0-3秒：@甲说：「这是一句超过十二个字的台词」' })],
+    shots: [shot({ duration: 3, description: '【镜头1】@甲站着。', videoPrompt: '出场人物：@甲｜场景：@室\n0-3秒：@甲说：「这一句故意写得非常长，用来超过三秒的正常语速容量，所以一定会超」' })],
   }))
   const issues = issuesByCode(tooLong, 'prompt_segment_too_long')
   assert.equal(issues.length, 1)
   assert.equal(issues[0].severity, 'warning')
   assert.equal(issues[0].repairable, false, '缩短台词必须改台词文本，不允许自动修复')
-  assert.match(issues[0].message, /4 字\/秒/)
-  assert.match(issues[0].evidence || '', /容量 12 字/)
+  assert.match(issues[0].message, /正常语速/)
+  assert.match(issues[0].evidence || '', /容量 18 字/)
 
   const actionLongText = evaluateStoryboardRules(input({
     shots: [shot({ duration: 3, description: '【镜头1】@甲站着。', videoPrompt: '出场人物：@甲｜场景：@室\n0-3秒：@甲慢慢转身，抬眼看向远处，表情里带着无法掩饰的复杂情绪。' })],

@@ -24,7 +24,7 @@ export const LINE_OVERLONG_GAP_MS = 3000
 export const SILENT_WITH_CHARACTER_WARN_MS = 8000
 export const SILENT_WITH_CHARACTER_ERROR_MS = 12000
 export const EMPTY_SHOT_WARN_MS = 6000
-export const PROMPT_SEGMENT_MAX_CHARS = 12
+export const PROMPT_SEGMENT_MAX_CHARS = 18
 export const SEMANTIC_WINDOW_SIZE = 16
 export const SEMANTIC_WINDOW_STEP = 15
 export const MAX_SEMANTIC_WINDOWS = 20
@@ -689,7 +689,7 @@ function checkVideoPrompt(
       check: 1,
       severity: 'warning',
       code: 'prompt_segment_too_long',
-      message: '视频提示词某个时间段的台词/旁白超过该段容量（4 字/秒）。',
+      message: '视频提示词某个时间段的台词/旁白超过该段容量（正常语速）。',
       evidence: clip(unique(overlongSegments).join('；')),
       suggestion: '在原文标点或语义停顿处把长句拆到相邻时间段/分镜，或延长该段时长；保留全部文字与标点；自动修复不改台词。',
       repairable: false,

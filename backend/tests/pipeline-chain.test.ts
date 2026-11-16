@@ -208,9 +208,9 @@ test('拆分预设 inherit 跟随剧集，显式 key 覆盖方案块与覆盖计
   const block = breakdownSvc.getEpisodeBreakdownBlock(episodeId, 'hook-beat')
   assert.ok(block)
   assert.match(block, /爆款钩子节拍/)
-  assert.match(block, /6-15 秒/)
+  assert.match(block, /2-15 秒/)
   const coverage = breakdownSvc.getEpisodeCoverage(episodeId, 0.9, 2, 'hook-beat')
-  assert.equal(coverage?.maxSegmentSeconds, 12)
+  assert.equal(coverage?.maxSegmentSeconds, 15)
 })
 
 test('墙钟预算超限时暂停运行，而不是继续调用模型', async () => {

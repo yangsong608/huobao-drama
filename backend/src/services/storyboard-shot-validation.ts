@@ -91,6 +91,7 @@ export interface RepairedShotInput {
   videoPrompt?: string | null
   characterIds?: number[]
   duration?: number | null
+  movement?: string | null
   sceneId?: number | null
   characters?: Array<{ id: number; name: string }>
   shotLabel?: string
@@ -98,7 +99,7 @@ export interface RepairedShotInput {
   planSpeechSegments?: Array<{ speaker?: string; text: string }>
   /** 意图/旁白/动作计划；战斗、比拼、动作镜没有原文旁白依据时禁止旁白 */
   intentPlan?: ShotIntentPlan | null
-  /** 当前拆分方案的单段上限；空表示只按平台 6–15 秒合同 */
+  /** 当前拆分方案的单段上限；空表示只按平台 2–15 秒（按内容决定，不补时长）合同 */
   maxAllowedSeconds?: number | null
   expectedActionStart?: string | null
   expectedActionEnd?: string | null
@@ -136,6 +137,7 @@ export function validateRepairedShot(input: RepairedShotInput): RepairedShotVali
     videoPrompt: prompt,
     characterIds: input.characterIds,
     duration: input.duration,
+    movement: input.movement,
     shotLabel: label,
     checkSubshots: true,
     forbidShotMarkers: true,

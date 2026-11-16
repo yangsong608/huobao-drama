@@ -84,6 +84,31 @@ test('引号内的舞台提示不参与逐字比对', () => {
   assert.equal(report.ok, true)
 })
 
+test('description 里“听到「先报名」”这类引用不当作第二句台词', () => {
+  const description = '【镜头1】@罗晴说：「两位。先报名，再结仇。社团内部矛盾不要浪费招新资源。」@陆小满听到「先报名」时下颌微微一收。'
+  const prompt = [
+    HEADER,
+    '0-2秒：@罗晴嘴唇开合。@罗晴说：「两位。先报名，」',
+    '2-3秒：@罗晴嘴唇开合。@罗晴说：「再结仇。」',
+    '3-7秒：@罗晴嘴唇开合。@罗晴说：「社团内部矛盾不要浪费招新资源。」',
+  ].join('\n')
+  const report = inspectDialogueIntegrity(description, prompt)
+  assert.ok(report)
+  assert.equal(report.ok, true)
+})
+
+test('description 里“说到「许愿」”这类引用也不当作第二句台词', () => {
+  const description = '【镜头1】@罗晴说：「一半场地经费，你要成果、要宣传、还不能出安全问题。这不叫活动要求，这叫许愿。」说到「许愿」时她下巴轻轻一抬。'
+  const prompt = [
+    HEADER,
+    '0-6秒：@罗晴嘴唇开合。@罗晴说：「一半场地经费，你要成果、要宣传、还不能出安全问题。」',
+    '6-9秒：@罗晴嘴唇开合。@罗晴说：「这不叫活动要求，这叫许愿。」',
+  ].join('\n')
+  const report = inspectDialogueIntegrity(description, prompt)
+  assert.ok(report)
+  assert.equal(report.ok, true)
+})
+
 test('description 没有口白引号时不拦截，招牌引号也不会被当成台词', () => {
   assert.equal(
     inspectDialogueIntegrity('【镜头1】@甲站在门前，招牌上写着「唐记」。', `${HEADER}\n0-3秒：@甲站立。`),

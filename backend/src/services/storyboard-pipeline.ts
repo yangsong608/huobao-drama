@@ -853,8 +853,8 @@ async function buildRepairMessage(input: RepairRunnerInput) {
     '2. description 直接写一个连续镜头：谁 + 具体动作 + 肢体细节 + 表情 + 站位/视线；不要写【镜头1】这类编号，禁止子镜头切镜。',
     '3. video_prompt 固定四区：信息头 → 画面调度（画面左/右、过肩、背景地标屏幕侧、轴线、动作起点/终点）→ 时间帧 → 负面约束。',
     intentPlan?.narration.form === 'narration'
-      ? '4. 时间帧从 0 连续写到 duration，每段 1-6 秒；台词与旁白按 4 字/秒 + 1 秒气口分配；台词逐字复制 description；旁白与台词分时不重叠。'
-      : '4. 时间帧从 0 连续写到 duration，每段 1-6 秒；台词按 4 字/秒 + 1 秒气口分配；台词逐字复制 description。',
+      ? '4. 时间帧从 0 连续写到 duration，每段 1-6 秒；台词与旁白按正常语速分配（最终以 TTS 音频为准）；台词逐字复制 description；旁白与台词分时不重叠。'
+      : '4. 时间帧从 0 连续写到 duration，每段 1-6 秒；台词按正常语速分配（最终以 TTS 音频为准）；台词逐字复制 description。',
     '5. 不写完整 BGM/环境声风格；声音由第四步统一设计。',
     '6. 不得改变计划层的边界：上一镜尾状态和本镜起状态必须接上；过渡词只允许出现一次，不能在本镜和上一镜重复。',
     '7. 同一场戏必须逐字沿用上一镜的画面左/右、地标侧、轴线；不得因为说话人变化交换左右；需要换边/越轴时先插中性镜头，不要在本镜硬翻。',
@@ -904,10 +904,34 @@ async function defaultSkeletonRunner(input: SkeletonRunnerInput) {
   const sceneBindingBlock = buildSceneBindingBlock(input.chunk.script, groups)
   const contracts = [...(await getSceneContractMap(input.dramaId)).values()]
   const sceneContractBlock = buildSceneContractBlock(contracts)
-  await agent.generate(
-    [{ role: 'user', content: buildSkeletonMessage(input, sceneBindingBlock, sceneContractBlock) }],
-    { maxSteps: 40, requestContext: input.requestContext },
-  )
+  const started = Date.now()
+  logTaskProgress('StoryboardPipeline', 'skeleton-agent-start', {
+    jobId: input.jobId,
+    chunk: `${input.chunk.index + 1}/${input.totalChunks}`,
+    label: input.chunk.label,
+    chars: input.chunk.script.length,
+    plannedShots: input.plannedShots.length,
+    previousShots: input.previousDrafts.length,
+  })
+  try {
+    await agent.generate(
+      [{ role: 'user', content: buildSkeletonMessage(input, sceneBindingBlock, sceneContractBlock) }],
+      { maxSteps: 12, requestContext: input.requestContext },
+    )
+    logTaskSuccess('StoryboardPipeline', 'skeleton-agent-done', {
+      jobId: input.jobId,
+      chunk: `${input.chunk.index + 1}/${input.totalChunks}`,
+      elapsedMs: Date.now() - started,
+    })
+  } catch (error) {
+    logTaskError('StoryboardPipeline', 'skeleton-agent-failed', {
+      jobId: input.jobId,
+      chunk: `${input.chunk.index + 1}/${input.totalChunks}`,
+      elapsedMs: Date.now() - started,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
 }
 
 async function defaultRepairRunner(input: RepairRunnerInput) {
@@ -1635,7 +1659,7 @@ async function runSkeletonStage(
         landmarkSide: previousSkeleton.landmarkSide,
       } : null,
       sceneContracts,
-      minDuration: 6,
+      minDuration: 2,
       maxDuration: maxSegmentSeconds,
       silentDuration: params.silentShotSeconds,
       narrationForm: params.narrationForm,

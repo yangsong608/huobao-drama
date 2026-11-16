@@ -14,6 +14,7 @@ import {
   competitionEvidence as findCompetitionEvidence,
   strongCombatEvidence as findStrongCombatEvidence,
 } from './storyboard-content.js'
+import { DIALOGUE_CHARS_PER_SECOND } from './dialogue-timing.js'
 
 export type ShotIntentType =
   | 'dialogue'
@@ -33,7 +34,7 @@ export interface NarrationPlan {
   lines: string[]
   /** 与 lines 对应的原文摘录片段 */
   sourceQuotes: string[]
-  /** 按 4 字/秒 + 1 秒气口折算的本镜旁白字数上限 */
+  /** 按正常语速（最终以 TTS 音频为准）折算的本镜旁白字数上限 */
   budgetChars: number
   /** 原文旁白超出本镜容量；修补时按原文标点拆到相邻镜，不得截断 */
   overflow: boolean
@@ -117,6 +118,13 @@ function cleanText(value: unknown) {
 
 function normalizeForMatch(value: unknown) {
   return String(value || '').replace(/[\s\u3000]+/g, '')
+}
+
+/** 逐字旁白可合法拆进多个时间帧；比对时去掉引号与标点后再串联。 */
+function normalizeNarrationForMatch(value: unknown) {
+  return normalizeForMatch(value)
+    .replace(/[「」『』“”‘’"]/g, '')
+    .replace(/[，。！？；：、,.!?;:]/g, '')
 }
 
 function uniqueStrings(values: Array<string | null | undefined>, limit = 8) {
@@ -348,7 +356,7 @@ function planTags(intent: ShotIntentType, hasDialogue: boolean, hasNarration: bo
 export function buildShotIntentPlan(input: ShotIntentInput): ShotIntentPlan {
   const excerpt = String(input.sourceExcerpt || '')
   const duration = Number(input.duration || 0) || 6
-  const budgetChars = Math.max(4, Math.floor((duration - 1) * 4))
+  const budgetChars = Math.max(4, Math.floor((duration - 0.25) * DIALOGUE_CHARS_PER_SECOND))
   const characterCount = Number(input.characterCount || 0)
   const speechNarration = narrationSegmentsFromSpeech(input.speechSegments)
   const excerptNarration = narrationSegmentsFromExcerpt(excerpt)
@@ -581,20 +589,23 @@ export function validateIntentAdherence(
       .join('')
       .replace(/[\s\u3000，。！？；：、“”‘’（）《》【】…—,.!?;:"'()\[\]]/g, '').length
     if (actualChars > plan.narration.budgetChars) {
-      errors.push(`旁白约 ${actualChars} 字，超出本镜预算 ${plan.narration.budgetChars} 字（4 字/秒 + 1 秒气口）；请延长时长或按标点拆到相邻镜，不得截断。`)
+      errors.push(`旁白约 ${actualChars} 字，超出本镜预算 ${plan.narration.budgetChars} 字（正常语速，最终以 TTS 为准）；请延长时长或按标点拆到相邻镜，不得截断。`)
     }
     const mouthText = desc.replace(/(?:不|没|未)(?:有)?(?:张嘴|张口|开口|说话)/g, '')
     if (ON_SCREEN_MOUTH_RE.test(mouthText)) {
       warnings.push('旁白镜头里出现了张嘴/开口动作；旁白应只作为画外音，画面人物保持嘴唇闭合。')
     }
   } else {
+    const promptNarration = [...promptWithoutNegatives.matchAll(NARRATION_LINE_RE)]
+      .map(match => String(match[1] || '').split('\n')[0])
+      .join('')
     for (const line of plan.narration.lines) {
       const normalized = normalizeForMatch(line)
       if (!normalized) continue
       if (!normalizeForMatch(desc).includes(normalized)) {
         errors.push(`计划旁白没有逐字写入 description：「${truncate(line, 24)}」。`)
       }
-      if (!normalizeForMatch(prompt).includes(normalized)) {
+      if (!normalizeNarrationForMatch(promptNarration).includes(normalizeNarrationForMatch(line))) {
         errors.push(`计划旁白没有逐字写入 video_prompt：「${truncate(line, 24)}」。`)
       }
     }
@@ -657,7 +668,7 @@ export function formatIntentPlanBlock(plan: ShotIntentPlan): string {
     '### 镜头意图计划（本步已裁定，修补必须执行）',
     `- 意图：${intentLabel(plan.intent)}${plan.evidence.length ? `（依据：${plan.evidence.join('、')}）` : ''}`,
     `- 旁白：${narration}`,
-    `- 旁白字数上限：${plan.narration.budgetChars} 字（4 字/秒 + 1 秒气口）`,
+    `- 旁白字数上限：${plan.narration.budgetChars} 字（正常语速，最终以 TTS 为准）`,
     ...actionLines,
     plan.action.narrationForbidden
       ? '- 硬约束：本镜没有原文旁白依据，禁止新增任何旁白、画外音、内心独白；原文对白仍按计划台词或骨架发声要求执行。'

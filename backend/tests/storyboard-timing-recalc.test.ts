@@ -27,7 +27,7 @@ const episode = db.insert(schema.episodes).values({
   dramaId: drama.id, episodeNumber: 1, title: '第1集', content: '原文', scriptContent: '原文', createdAt: ts, updatedAt: ts,
 }).returning().get()
 
-const LONG_NARRATION = '唐奕回到柜台里，望向店外马老三守着锅灶、店内马婶前后支应，一切井然有序，他嘴角牵起一个弧度，拿起柜下一块两尺多长的半弧木条，用小刀继续雕琢吉他琴头'
+const LONG_NARRATION = '唐奕回到柜台里，望向店外马老三守着锅灶、店内马婶前后支应，一切井然有序，他嘴角牵起一个弧度，拿起柜下一块两尺多长的半弧木条，用小刀继续雕琢吉他琴头，窗外天色慢慢暗下来，街上的人声也渐渐稀疏，他把木条翻了个面，继续修整琴头的弧线，神情踏实宁静'
 
 function promptWithNarration(narration: string, seconds: number, negativeExtra = '；不生成任何对话，对白以及旁白') {
   return [
@@ -78,7 +78,7 @@ test('预览：超预算旁白给出拆镜建议，每段不超方案上限', ()
   assert.equal(preview.negativeConflict, true)
   for (const segment of preview.segments) {
     assert.ok(segment.duration <= preview.schemeMaxSeconds)
-    assert.ok(eff(segment.narration) <= (segment.duration - 1) * 4)
+    assert.ok(eff(segment.narration) <= Math.floor((segment.duration - 0.25) * 6))
   }
 })
 
@@ -123,7 +123,7 @@ test('应用拆镜：编号顺延、引用改写、骨架克隆、状态回待�
     const row = shots.find(item => item.id === id)!
     const narrationChars = [...String(row.videoPrompt).matchAll(/旁白（画外音）：「([^」]*)」/g)]
       .reduce((sum, match) => sum + eff(match[1]), 0)
-    assert.ok(narrationChars <= (row.duration - 1) * 4, `镜${row.storyboardNumber} 旁白${narrationChars}字超预算`)
+    assert.ok(narrationChars <= Math.floor((row.duration - 0.25) * 6), `镜${row.storyboardNumber} 旁白${narrationChars}字超预算`)
   }
 })
 
@@ -141,13 +141,13 @@ test('短旁白手改：只修负面约束与 description，时长不变', () =>
   const shot = makeShot(20, 6, promptWithNarration(short, 6), '六婶排队。')
   const preview = previewShotTimingRecalc(shot.id)!
   assert.equal(preview.needsSplit, false)
-  assert.equal(preview.suggestedDuration, 6)
+  assert.equal(preview.suggestedDuration, 4)
   assert.equal(preview.negativeConflict, true)
   const result = applyShotTimingRecalc(shot.id)!
   assert.equal(result.changed, true)
   assert.equal(result.insertedStoryboardIds.length, 0)
   const fresh = db.select().from(schema.storyboards).where(eq(schema.storyboards.id, shot.id)).get()!
-  assert.equal(fresh.duration, 6)
+  assert.equal(fresh.duration, 4)
   assert.doesNotMatch(String(fresh.videoPrompt), /不生成任何对话，对白以及旁白/)
   assert.match(String(fresh.videoPrompt), /不生成任何对白与对话/)
   assert.match(String(fresh.description), /旁白（画外音）：「/)

@@ -650,8 +650,10 @@ test('四段式管线：人工修好 manual 镜头后可续跑并进入声音设
     }).where(eq(schema.storyboards.id, shot2Id)).run()
   }
   db.update(schema.storyboardSkeletons).set({
-    status: 'manual',
+    status: 'validated',
     storyboardId: shot2Id,
+    sourceExcerpt: '李四从柜台后抬头，朝门口喊道：「等等！」',
+    speechSegmentsJson: JSON.stringify([{ speaker: '张三', text: '等等！', sourceQuote: '等等！', order: 1 }]),
     updatedAt: ts,
   }).where(eq(schema.storyboardSkeletons.id, skeleton2.id)).run()
 

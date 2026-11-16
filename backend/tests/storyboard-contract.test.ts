@@ -57,6 +57,16 @@ test('合同解析：画内/画外人物、屏幕左右、过肩、时间帧、�
   assert.equal(parsed.contractVersion, 1)
 })
 
+test('屏幕左右只认子句开头的角色，视线目标不会造成翻边', () => {
+  const prompt = PROMPT.replace('画面右：范仲淹', '画面右：范仲淹站在门口、视线落在唐大郎（唐奕）脸上')
+  const parsed = contract.parseContractFromPrompt(prompt, [
+    { id: 24, name: '唐大郎（唐奕）' },
+    { id: 39, name: '范仲淹' },
+  ], [24, 39])
+  assert.deepEqual(parsed.screenLeft, ['唐大郎（唐奕）'])
+  assert.deepEqual(parsed.screenRight, ['范仲淹'])
+})
+
 test('旧格式没有画面调度/负面约束也能解析画内人物和时间帧', () => {
   const parsed = contract.parseContractFromPrompt(
     '出场人物：@唐大郎（唐奕）｜场景：@唐记食铺大堂\n0-3秒：@唐大郎（唐奕）站着。',

@@ -23,6 +23,7 @@ import { buildLanguageDirective } from './language.js'
 import { getContentLanguageFromRC, getEpisodeId } from './context.js'
 import { getVoiceReferenceInstructions } from './voice-reference-instructions.js'
 import { getEpisodeBreakdownBlock } from '../services/breakdown-methods.js'
+import { createAgentModelFetch } from './model-fetch.js'
 import { STORYBOARD_UNIT_RULES } from '../services/storyboard-unit-contract.js'
 
 // Default prompts (used when workspace/prompts/<type>.md 文件缺失时兜底)
@@ -83,7 +84,7 @@ export const DEFAULT_PROMPTS: Record<string, { name: string; instructions: strin
     instructions: `你是分镜导演，按四段式管线工作：预拆骨架 → 逐镜修补 → 逐镜校验 → 声音设计。当前阶段由用户消息和工具上下文指定，只能调用当前阶段允许的工具。
 
 铁律：
-- 一个分镜 = 一个机位 + 一个主体 + 一个连续动作，6-15 秒；禁止子镜头切镜。
+- 一个分镜 = 一个机位 + 一个主体 + 一个连续动作，2-15 秒（按内容决定，不补时长）；禁止子镜头切镜。
 - 预拆阶段只产出骨架：场次、人物、机位骨架、时长、动作摘要、转场、连续性、逐字原文摘录；不写最终台词，不写视频提示词。
 - 逐镜修补阶段必须充分理解小说原意：加载目标骨架、前 1-2 镜已修补内容、后 1-2 镜草稿、完整场景原文；原剧本有台词就逐字保留，原剧本只有「喊/叫卖/揽客/吆喝」这类发声动作时，必须遵循小说语意补出具体台词，不能改成非语言动作。
 - 视频提示词固定四区：信息头 → 画面调度 → 时间帧 → 负面约束。声音不在修补阶段写完整风格。
@@ -95,7 +96,7 @@ export const DEFAULT_PROMPTS: Record<string, { name: string; instructions: strin
     name: '分镜拆解',
     instructions: `你是资深影视分镜师，擅长将剧本拆解为分镜方案，并直接产出可供视频生成使用的提示词。
 
-核心定义：一个分镜 = 一个机位 + 一个主体 + 一个连续动作 = 一个视频生成任务，6-15 秒。需要换机位、换主体、换动作/情绪节点时必须新开分镜；description 不要写【镜头1】【镜头2】等任何编号，禁止子镜头切镜。
+核心定义：一个分镜 = 一个机位 + 一个主体 + 一个连续动作 = 一个视频生成任务，2-15 秒（按内容决定，不补时长）。需要换机位、换主体、换动作/情绪节点时必须新开分镜；description 不要写【镜头1】【镜头2】等任何编号，禁止子镜头切镜。
 
 剧本全覆盖（最高优先级）：剧本里的每一场戏、每一句台词、每一个关键动作都必须出现在分镜里，不得删场、并场或只保留高潮场。拆分时按剧本场次逐场覆盖，每场至少一段；段落数低于覆盖下限时先补拆，不得以节奏或镜头美学为由删减。
 
@@ -115,7 +116,7 @@ export const DEFAULT_PROMPTS: Record<string, { name: string; instructions: strin
 - character_ids：当前段落涉及的角色 ID 列表，可以为空，也可以包含多个角色；必须从 characters 中选择
 - prop_ids：当前段落出现的关键道具 ID 列表（道具在画面中被看到、使用或特写时绑定），可以为空；必须从 props 中选择
 - scene_id：若可匹配到 scenes 中已有场景，必须填写正确 scene_id；无匹配时置空
-- duration：分镜总时长 6-15 秒
+- duration：分镜总时长 2-15 秒（按内容决定，不补时长）
 - description：一个连续镜头的画面描述——谁 + 具体动作 + 肢体细节 + 表情 + 站位/视线；有台词时写「@角色名说：「台词」」，旁白写「旁白（画外音）：「台词」」；不要写【镜头1】【镜头2】等任何编号，禁止子镜头切镜；运镜、景别、表情、心理和动作不得写成台词或旁白
 - atmosphere：氛围、光线、色调、环境感受
 - transition：与上一镜的转场方式，只能填 cut / fade / dissolve / wipe；同场景连续动作优先 cut，跨场景或时间跳跃用 fade/dissolve，强调节奏冲击可用 wipe
@@ -123,11 +124,12 @@ export const DEFAULT_PROMPTS: Record<string, { name: string; instructions: strin
 - sound_effect：本段环境声描述；同场景的多个段落必须复用同一段环境声描述，保证拼接后声床连续
 - video_prompt：该段落的视频生成提示词（规则见下）
 
-时长规则（硬约束）：
-- 总量锚定：目标总时长 = 剧本字数 ÷ 500字/分钟，段落数 ≈ 目标总时长 ÷ 12秒，允许 ±20% 浮动
-- 段落数下限（硬约束）：ceil(剧本非空白字数 × 0.12 ÷ 15 × 0.9)；采用默认 6-15 秒规范时，3000 字剧本至少 22 段。实际段落数低于下限即视为拆分不完整，必须继续拆段；±20% 只允许向上浮动，不允许跌破下限
-- 节奏分层：过渡段（赶路/空镜/转场）8-10 秒；叙事段 10-15 秒；爆点段（特写/规则揭示/情感爆发/反转）12-15 秒且镜头节奏放慢
-- 台词下限：段落时长 ≥ 段内台词与旁白总字数（写在 description 中的部分）÷ 4.5字/秒 + 2秒表演余量，装不下的台词拆到下一个段落
+时长规则（内容驱动，硬约束）：
+- 不预设镜头时长、不按 12 秒平均、不按段落数分配总时长；每个段落时长只由该镜实际台词/旁白音频和可见动作事件决定。
+- 过渡段、空镜、反应镜只保留有新信息或动作变化的部分；没有内容就删掉或并入相邻镜，不许用固定 8–10 秒或“动作延续”凑时长。
+- 对白/旁白以真实音频时长为准；拆分阶段只做保守估算，声音阶段再用实际音频校准。台词装不下就拆到相邻段，不能加速硬塞。
+- 动作镜按动作事件和速度计算时长；一个动作事件很多时拆成多个短镜，不把一个连续动作拉长到上限。
+- 段数由剧本场景和叙事节拍决定：不删场、不跳段；不要用固定段落数下限替代剧本覆盖检查。
 
 video_prompt 规则（硬约束）：
 - 第一行信息头固定为「出场人物：@角色A、@角色B｜场景：@场景名」；没有角色写「出场人物：无」，没有场景写「场景：未指定」；信息头单独一行，不加句号
@@ -412,9 +414,11 @@ async function getModel(fileModel: string | undefined, modelOverride?: string, t
   const tempFetch = temperature !== null
     ? createTemperatureFetch(providerName, temperature, thinkingOffFetch)
     : thinkingOffFetch
-  const fetchImpl = isOfficialOpenAIHost(resolvedBaseURL)
-    ? tempFetch
-    : createMaxTokensFetch(providerName, tempFetch)
+  const fetchImpl = createAgentModelFetch({
+    fetchImpl: isOfficialOpenAIHost(resolvedBaseURL)
+      ? tempFetch
+      : createMaxTokensFetch(providerName, tempFetch),
+  })
 
   if (providerName === 'gemini') {
     const googleProvider = createGoogleGenerativeAI({

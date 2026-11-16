@@ -74,16 +74,29 @@ function extractSideNames(blocking: string, side: '左' | '右'): string[] {
   return []
 }
 
+function leadingCharacterName(text: string, characters: ContractCharacter[]): string | null {
+  const trimmed = text.trim().replace(/^@+/, '')
+  const bare = trimmed.replace(/^(?:画面[左右]的?|左侧|右侧|左边|右边)/, '')
+  const parenthesized = /[（(]([^）)]+)[）)]/.exec(trimmed)?.[1] || ''
+  const sorted = [...characters].sort((a, b) => b.name.length - a.name.length)
+  for (const character of sorted) {
+    if (bare.startsWith(character.name) || parenthesized.includes(character.name)) return character.name
+  }
+  return null
+}
+
 function normalizeSideNames(names: string[], characters: ContractCharacter[]): string[] {
   const result: string[] = []
   for (const raw of names) {
     const text = raw.trim()
     if (!text) continue
-    const hit = [...characters]
-      .sort((a, b) => b.name.length - a.name.length)
-      .find(character => text === character.name || text.includes(character.name))
-    const name = hit?.name || text
-    if (!result.includes(name)) result.push(name)
+    // 只认该侧子句开头的角色；“视线落在某人脸上”里的对侧角色不能算到这一侧。
+    const name = leadingCharacterName(text, characters)
+    if (name) {
+      if (!result.includes(name)) result.push(name)
+    } else if (!characters.length && !result.includes(text)) {
+      result.push(text)
+    }
   }
   return result
 }

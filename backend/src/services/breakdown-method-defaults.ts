@@ -22,26 +22,26 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
   {
     key: 'standard',
     name: '标准短剧段落',
-    description: '6–15 秒单机位、台词原子、边界承接；适合作为默认生产方案。',
+    description: '2–15 秒（按内容决定，不补时长）单机位、台词原子、边界承接；适合作为默认生产方案。',
     prompt: '',
     skill: '',
     maxSegmentSeconds: 15,
-    minSegmentSeconds: 6,
-    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 6, "maxDuration": 15, "style": "standard"}',
+    minSegmentSeconds: 2,
+    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 2, "maxDuration": 15, "style": "standard"}',
     archived: 0,
     sortOrder: 10,
   },
   {
     key: 'hook-beat',
     name: '爆款钩子节拍',
-    description: '参考短剧分镜 Skill 的钩子节拍思路：6–12 秒一段，开场抓人、段尾留悬念，适合竖屏短剧。',
+    description: '参考短剧分镜 Skill 的钩子节拍思路：2–15 秒（按内容决定，不补时长）一段，开场抓人、段尾留悬念，适合竖屏短剧。',
     prompt: `你是竖屏短剧的爆款导演，拆分时以「留住观众」为第一目标。
 先用 0–2 秒给出冲突、危险或强信息差的画面，再展开人物反应；冲突、反转、误会与秘密优先于环境铺垫。
 每个段落结尾必须留钩子：悬念未解、反转将出、危险逼近、关键信息只说一半，四类钩子至少选一类。
 台词服务冲突，能短不长；纯环境镜头不得作为段落开场。
 剧本全覆盖优先：不删场、不跳段、不合并关键情节，钩子服务剧情而不是替代剧情。`,
     skill: `【钩子节拍拆分规则】
-- 每个分镜段落 6–12 秒，段内 2–3 个子镜头；一个段落只讲一个冲突单元。
+- 每个分镜段落 2–15 秒（按内容决定，不补时长），段内 2–3 个子镜头；一个段落只讲一个冲突单元。
 - 开场 0–2 秒必须是冲突画面或信息差画面，禁止用空镜、走路、风景开场。
 - 段尾钩子必须写进 segment 的 description 末句，并在 video_prompt 中用最后的子镜头画面承接。
 - 台词密度高：有冲突就写台词，避免连续两个子镜头无台词、无动作信息。
@@ -53,9 +53,9 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
 - 段落数下限 = ceil(剧本字数 × 0.12 ÷ 12 × 0.9)；3000 字剧本至少 27 段。实际段落数低于下限即视为拆分不完整，必须补拆，不允许把多场压成一段。
 - 钩子只能加在已有剧情上，不能替代或挤掉场次；过场戏可以压缩子镜头，但不得删场。
 - 保存前逐场核对剧本场次与分镜段落：缺场、缺台词、缺关键动作时先补拆，再检查钩子。`,
-    maxSegmentSeconds: 12,
-    minSegmentSeconds: 6,
-    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 6, "maxDuration": 12, "hook": "strong", "style": "hook"}',
+    maxSegmentSeconds: 15,
+    minSegmentSeconds: 2,
+    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 2, "maxDuration": 15, "hook": "strong", "style": "hook"}',
     archived: 1,
     sortOrder: 20,
   },
@@ -96,7 +96,7 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
 - 总时长仍按基础公式锚定（剧本字数 ÷ 500 字/分钟）；钩子节点是位置指引，不是新增时长。
 
 三、段落与单机位
-- 每个分镜段落 6–12 秒，一个机位、一个主体、一个连续动作；需要换机位、换主体或跨动作节点时新开分镜。
+- 每个分镜段落 2–15 秒（按内容决定，不补时长），一个机位、一个主体、一个连续动作；需要换机位、换主体或跨动作节点时新开分镜。
 - 同一机位内的连续运动写成多个时间帧（每段 1–6 秒）；时间帧不是子镜头，description 不写【镜头N】编号。
 - 一个分镜段落只在一个场景内，不跨场景；换场景必须换段。
 - 剧本每出现一个新场景就新开段落；同一场可拆多段，不得把不同场并进一段或跳过整场。
@@ -158,15 +158,15 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
   1) 剧本场次是否逐场覆盖、段落数是否达到下限（3000 字至少 27 段）？
   2) 第一段第一拍是否在施压或出事？
   3) 每个分镜段落最后一句是否是具体钩子？
-  4) 段长是否 6–12 秒、是否单机位单主体连续动作？
+  4) 段长是否 2–15 秒（按内容决定，不补时长）、是否单机位单主体连续动作？
   5) 是否只有一个场景、是否跨轴？
   6) 台词是否超容量、是否连续两个分镜无信息？
   7) 特写/近景是否占多数、全景是否过多？
   8) 角色/道具/场景 ID 是否全部来自上下文？
 - 自检不通过时先改分镜，不要靠加旁白或加解释兜底；缺场缺戏只能补拆，不能删减。`,
-    maxSegmentSeconds: 12,
-    minSegmentSeconds: 6,
-    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 6, "maxDuration": 12, "hook": "strong", "style": "hook"}',
+    maxSegmentSeconds: 15,
+    minSegmentSeconds: 2,
+    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 2, "maxDuration": 15, "hook": "strong", "style": "hook"}',
     archived: 0,
     sortOrder: 25,
   },
@@ -191,21 +191,21 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
 - 段落数下限 = ceil(剧本字数 × 0.12 ÷ 10 × 0.9)；3000 字剧本至少 33 段；低于下限必须补拆，不允许用长镜头压掉场次。
 - 保存前逐场核对剧本场次、台词与关键动作是否全部落在分镜里，缺失先补拆再调机位。`,
     maxSegmentSeconds: 10,
-    minSegmentSeconds: 6,
-    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 6, "maxDuration": 10, "style": "director-board"}',
+    minSegmentSeconds: 2,
+    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 2, "maxDuration": 10, "style": "director-board"}',
     archived: 1,
     sortOrder: 30,
   },
   {
     key: 'h3-compact',
     name: 'H3 紧凑段',
-    description: '参考本机 H3 导演流程与 720p 8 秒上限：5–8 秒一段，单场景单动作，适合本地视频管线。',
+    description: '参考本机 H3 导演流程与 720p 8 秒上限：2–8 秒（按内容决定，不补时长）一段，单场景单动作，适合本地视频管线。',
     prompt: `你是本地 H3 视频管线的导演，拆分必须优先保证「剧本全覆盖、能生成、能接上」。
 剧本每一场戏都必须保留；单段虽短，但不得用删场、并场的方式换稳定，场次多就多拆段。
-每个分镜段落控制在 5–8 秒，只安排一个主动作或一个情绪变化；优先单场景、少人物调度，避免复杂运镜与多人交叉走位。
+每个分镜段落控制在 2–8 秒（按内容决定，不补时长），只安排一个主动作或一个情绪变化；优先单场景、少人物调度，避免复杂运镜与多人交叉走位。
 台词与旁白要短，单段不超过 24 字；镜头以固定机位或轻推为主，减少快速摇移与大幅变焦。`,
     skill: `【H3 紧凑段规则】
-- 每个分镜段落 5–8 秒，一个机位、一个连续动作；同一机位内的连续运动写成多个时间帧，不写【镜头N】编号；超过 8 秒的动作拆到下一段。
+- 每个分镜段落 2–8 秒（按内容决定，不补时长），一个机位、一个连续动作；同一机位内的连续运动写成多个时间帧，不写【镜头N】编号；超过 8 秒的动作拆到下一段。
 - 单段台词与旁白合计不超过 24 字；长台词拆成反应镜头或下一段继续。
 - 优先固定镜头、轻推、轻移；禁止复杂环绕、快速甩镜与多人同时大范围调度。
 - 一个段落只保留一个主动作，动作链条过长时在动作完成点切段。
@@ -217,8 +217,8 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
 - 段落数下限 = ceil(剧本字数 × 0.12 ÷ 8 × 0.9)；3000 字剧本至少 41 段；动作可以拆细，但不得跳过剧情。
 - 单场戏超过 8 秒时按动作节点拆成多段，不压缩场次；保存前逐场核对场次、台词与关键动作是否齐全。`,
     maxSegmentSeconds: 8,
-    minSegmentSeconds: 6,
-    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 6, "maxDuration": 8, "style": "h3"}',
+    minSegmentSeconds: 2,
+    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 2, "maxDuration": 8, "style": "h3"}',
     archived: 0,
     sortOrder: 40,
   },
@@ -243,8 +243,8 @@ export const DEFAULT_BREAKDOWN_METHODS: readonly BreakdownMethodSeed[] = [
 - 段落数下限 = ceil(剧本字数 × 0.12 ÷ 6 × 0.9)；3000 字剧本至少 54 段；低于下限说明剧情被略过，必须补拆。
 - 保存前逐场核对剧本场次是否都有对应段落与关键画面；跳切可以跨时间，但不能跳过剧情。`,
     maxSegmentSeconds: 6,
-    minSegmentSeconds: 6,
-    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 6, "maxDuration": 6, "style": "trailer"}',
+    minSegmentSeconds: 2,
+    policyJson: '{"speechAtomic": true, "boundary": "single_side", "minDuration": 2, "maxDuration": 6, "style": "trailer"}',
     archived: 1,
     sortOrder: 50,
   },

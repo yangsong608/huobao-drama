@@ -272,7 +272,7 @@ export const breakdownMethods = sqliteTable('breakdown_methods', {
   /** 覆盖下限使用的单段最长秒数；自定义方案按 15 秒兜底 */
   maxDurationSeconds: integer('max_duration_seconds').notNull().default(15),
   /** 计划层最短镜头时长 */
-  minDurationSeconds: integer('min_duration_seconds').notNull().default(6),
+  minDurationSeconds: integer('min_duration_seconds').notNull().default(2),
   /** 结构化 SplitPolicy：台词原子、边界策略、钩子策略、覆盖偏好等 */
   policyJson: text('policy_json'),
   /** 归档方案保留历史，不出现在新选择列表 */

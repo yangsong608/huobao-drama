@@ -6,12 +6,14 @@
  * - 场景：按场次头切块并绑定 canonical scene_id；无场次头时承接上一镜场景；
  * - 说话人：一个分镜只允许一个说话人，换人必须换镜；
  * - 节拍：每个动作句/台词行是一个节拍，长台词在标点处切开；
- * - 分镜：按 6-15 秒与台词容量组装，动作只做同镜衔接，不跨场/不跨说话人。
+ * - 分镜：时长由台词、旁白和动作事件决定，动作只做同镜衔接，不跨场/不跨说话人。
  *
  * 模型只负责补动作摘要、角色/道具和画面常量，不再决定拆分边界；
  * 保存工具会把 source_excerpt/duration/speech_segments 锁定为本算法的结果。
  */
 import { findQuotedSpans } from './dialogue-lines.js'
+import { estimateActionTiming } from './action-timing.js'
+import { DIALOGUE_CHARS_PER_SECOND, DIALOGUE_LINE_PAUSE_SECONDS } from './dialogue-timing.js'
 import { isCombatOrCompetitionText } from './storyboard-content.js'
 import type { NarrationForm } from './pipeline-chain.js'
 import type { CanonicalSceneGroup } from './scene-canonical.js'
@@ -63,6 +65,7 @@ export interface PlannedStoryboardShot extends PlanShot {
   /** 本场第一个镜头且没有现成契约：由本镜建立画面常量 */
   establishesScene: boolean
   shotType: 'establishing' | 'action' | 'dialogue' | 'reaction' | 'insert' | 'transition'
+  coverageRole: 'master' | 'reverse' | 'reaction' | null
   subject: string | null
   subjects: string[]
   beatCount: number
@@ -122,6 +125,8 @@ interface RawBeat {
 interface DraftShot {
   beats: RawBeat[]
   scene: SceneBlock
+  /** 本镜由解释性回答触发，禁止再与上一镜合并 */
+  hardBoundary?: boolean
   /** 多个连续无台词节拍压缩成一个单机位过渡/反应镜 */
   compressedSilent?: boolean
 }
@@ -156,11 +161,11 @@ function effectiveChars(value: string) {
 }
 
 function speechSeconds(value: string) {
-  return Math.max(1, Math.ceil(effectiveChars(value) / 4))
+  return Math.max(0.5, effectiveChars(value) / DIALOGUE_CHARS_PER_SECOND)
 }
 
 function actionSeconds(value: string) {
-  return Math.max(1, Math.ceil(effectiveChars(value) * 0.12))
+  return Math.max(0.5, estimateActionTiming(value).seconds)
 }
 
 function emptySemantics(): BeatSemantics {
@@ -633,11 +638,11 @@ function isSpeechLeadInBeat(text: string): boolean {
 }
 
 function beatWeight(beat: RawBeat, form: NarrationForm = 'dialogue'): number {
-  if (beat.kind === 'dialogue') return speechSeconds(beat.dialogueText) + 0.5
+  if (beat.kind === 'dialogue') return speechSeconds(beat.dialogueText) + DIALOGUE_LINE_PAUSE_SECONDS
   // “马伯急道。”这类开口提示是台词的同镜引子，不再按整句动作占时长。
   if (isSpeechLeadInBeat(beat.text)) return 0.5
   // 旁白驱动形态：叙述 prose 由画外音念出，按语速占时长而非动作估算；0.5 秒气口余量对齐对白节拍。
-  return form === 'narration' ? speechSeconds(beat.text) + 0.5 : actionSeconds(beat.text)
+  return form === 'narration' ? speechSeconds(beat.text) + DIALOGUE_LINE_PAUSE_SECONDS : actionSeconds(beat.text)
 }
 
 function shotWeight(beats: RawBeat[], form: NarrationForm = 'dialogue'): number {
@@ -677,8 +682,22 @@ function lastDialogueSpeaker(beats: RawBeat[]): string {
   return dialogue?.speaker || ''
 }
 
+const RAPID_DIALOGUE_MAX_LINE_CHARS = 20
+const RAPID_DIALOGUE_MAX_SPEAKERS = 3
+
+function isShortDialogueBeat(beat: RawBeat | null | undefined): boolean {
+  return Boolean(beat && beat.kind === 'dialogue'
+    && beat.speaker !== '旁白'
+    && effectiveChars(beat.dialogueText) <= RAPID_DIALOGUE_MAX_LINE_CHARS)
+}
+
 function lastActionBeat(beats: RawBeat[]): RawBeat | null {
   return [...beats].reverse().find(beat => beat.kind === 'action') || null
+}
+
+const EXPLANATORY_ANSWER_RE = /^\s*(?:因为|所以|其实|原因是|主要是|就是|这不是|那不是)/
+function isQuestionText(text: string): boolean {
+  return /[？?]\s*$/.test(String(text || '').trim())
 }
 
 function boundaryBetween(previous: RawBeat[], next: RawBeat): string | null {
@@ -690,8 +709,20 @@ function boundaryBetween(previous: RawBeat[], next: RawBeat): string | null {
   if (!prev.subject && sem.subject) return 'subject_set'
   // 人物镜可以带环境状态作背景；场景描述仍属于同一空间。
   if (prev.subject && !sem.subject) return null
-  // 说话人变化是硬边界；一个镜头只能一个说话人。
-  if (prevSpeaker && nextSpeaker && prevSpeaker !== nextSpeaker) return 'speaker'
+  // 说话人变化是硬边界；但多人快速短对白允许共镜，避免一句一切镜。
+  if (prevSpeaker && nextSpeaker && prevSpeaker !== nextSpeaker) {
+    const previousDialogue = [...previous].reverse().find(beat => beat.kind === 'dialogue') || null
+    if (previousDialogue && isQuestionText(previousDialogue.dialogueText)
+      && next.kind === 'dialogue' && EXPLANATORY_ANSWER_RE.test(next.dialogueText)) {
+      return 'explanation'
+    }
+    const rapidExchange = isShortDialogueBeat(previousDialogue)
+      && isShortDialogueBeat(next)
+      && !['旁白', '画外音'].includes(prevSpeaker)
+      && !['旁白', '画外音'].includes(nextSpeaker)
+      && new Set([...previous, next].filter(beat => beat.kind === 'dialogue').map(beat => beat.speaker)).size <= RAPID_DIALOGUE_MAX_SPEAKERS
+    if (!rapidExchange) return 'speaker'
+  }
   if (!prevSpeaker && nextSpeaker && prev.subject && prev.subject !== nextSpeaker) {
     const action = lastActionBeat(previous)
     // 短到达/反应可以作开口引子与台词同镜；长动作或带目标动作必须另起。
@@ -700,6 +731,11 @@ function boundaryBetween(previous: RawBeat[], next: RawBeat): string | null {
   if (prevSpeaker && !nextSpeaker && sem.subject && sem.subject !== prevSpeaker) {
     const shortReaction = next.kind === 'action' && effectiveChars(next.text) <= 14 && !next.semantics.target
     if (!shortReaction) return 'speaker_to_other'
+  }
+  if (prevSpeaker && !nextSpeaker && sem.subject === prevSpeaker) {
+    // 台词后最多带一个短反应；第二个动作起另开动作/反应镜，避免把整段动作塞进对白镜。
+    const lastDialogueIndex = previous.reduce((last, beat, index) => beat.kind === 'dialogue' ? index : last, -1)
+    if (previous.slice(lastDialogueIndex + 1).some(beat => beat.kind === 'action')) return 'speaker_to_actions'
   }
   if (!prevSpeaker && !nextSpeaker && prev.subject && sem.subject && prev.subject !== sem.subject) {
     // 同一空间里的短动作/反应可以共享一镜；带目标的长动作另起。
@@ -714,7 +750,9 @@ function boundaryBetween(previous: RawBeat[], next: RawBeat): string | null {
 
 function canMergeShots(left: DraftShot, right: DraftShot, maxDuration: number, form: NarrationForm = 'dialogue'): boolean {
   if (left.scene !== right.scene) return false
+  if (right.hardBoundary) return false
   if (shotWeight([...left.beats, ...right.beats], form) > maxDuration) return false
+  if (isCombatOrCompetitionText([...left.beats, ...right.beats].map(beat => beat.text).join(' '))) return false
   if (boundaryBetween(left.beats, right.beats[0])) return false
   return true
 }
@@ -735,6 +773,7 @@ function mergeSilentGroup(group: DraftShot[]): DraftShot {
   return {
     beats: group.flatMap(item => item.beats),
     scene: group[0].scene,
+    hardBoundary: group[0].hardBoundary,
     compressedSilent: true,
   }
 }
@@ -788,13 +827,15 @@ function groupShots(beats: RawBeat[], maxDuration: number, form: NarrationForm =
   const shots: DraftShot[] = []
   let current: RawBeat[] = []
   let currentScene: SceneBlock | null = null
+  let pendingHardBoundary = false
   const flush = () => {
     if (!current.length || !currentScene) return
-    shots.push({ beats: current, scene: currentScene })
+    shots.push({ beats: current, scene: currentScene, hardBoundary: pendingHardBoundary })
+    pendingHardBoundary = false
     current = []
     currentScene = null
   }
-  const startNewShot = (beat: RawBeat) => {
+  const startNewShot = (beat: RawBeat, hardBoundary = false) => {
     let carry: RawBeat[] = []
     if (beat.kind === 'dialogue' && current.length) {
       const tail = current[current.length - 1]
@@ -807,6 +848,7 @@ function groupShots(beats: RawBeat[], maxDuration: number, form: NarrationForm =
     flush()
     current = [...carry, beat]
     currentScene = beat.scene
+    pendingHardBoundary = hardBoundary
   }
   let overrideSource: SceneBlock | null = null
   let overrideScene: SceneBlock | null = null
@@ -840,7 +882,7 @@ function groupShots(beats: RawBeat[], maxDuration: number, form: NarrationForm =
     }
     const semanticBreak = boundaryBetween(current, beat)
     if (semanticBreak) {
-      startNewShot(beat)
+      startNewShot(beat, semanticBreak === 'explanation')
       continue
     }
     if (shotWeight([...current, beat], form) > maxDuration) {
@@ -859,8 +901,39 @@ function groupShots(beats: RawBeat[], maxDuration: number, form: NarrationForm =
       const left = shots[index]
       const right = shots[index + 1]
       if (!canMergeShots(left, right, maxDuration, form)) continue
-      if (shotWeight(left.beats, form) >= 6 && shotWeight(right.beats, form) >= 6) continue
-      shots[index] = { beats: [...left.beats, ...right.beats], scene: left.scene }
+      // 同一语义单元总时长不超过上限即可合并；不能因为单镜已达到 6 秒就拒绝。
+      shots[index] = { ...left, beats: [...left.beats, ...right.beats], scene: left.scene }
+      shots.splice(index + 1, 1)
+      changed = true
+      break
+    }
+  }
+
+  // 第二次合并：同一场景、总时长不超过 15 秒、未换机位，允许把相邻快对话/动作收进一镜。
+  const MAX_MERGE_LINE_CHARS = 24
+  changed = true
+  while (changed) {
+    changed = false
+    for (let index = 0; index < shots.length - 1; index += 1) {
+      const left = shots[index]
+      const right = shots[index + 1]
+      if (left.scene !== right.scene) continue
+      if (right.hardBoundary) continue
+      // 第二次合并只服务连续对白，不能把纯动作/反应镜吞进对话镜。
+      if (!left.beats.some(beat => beat.kind === 'dialogue')
+        || !right.beats.some(beat => beat.kind === 'dialogue')) continue
+      const beats = [...left.beats, ...right.beats]
+      if (shotWeight(beats, form) > maxDuration) continue
+      if (isCombatOrCompetitionText(beats.map(beat => beat.text).join(' '))) continue
+      const dialogues = beats.filter(beat => beat.kind === 'dialogue')
+      const speakers = new Set(dialogues.map(beat => beat.speaker).filter(Boolean))
+      if (speakers.size > RAPID_DIALOGUE_MAX_SPEAKERS) continue
+      if (dialogues.some(beat => effectiveChars(beat.dialogueText) > MAX_MERGE_LINE_CHARS)) continue
+      const cameras = new Set(beats.map(beat => beat.semantics.camera).filter(Boolean))
+      if (cameras.size > 1) continue
+      const subjects = new Set(beats.map(groupSubject).filter(Boolean))
+      if (subjects.size > RAPID_DIALOGUE_MAX_SPEAKERS) continue
+      shots[index] = { ...left, beats, scene: left.scene }
       shots.splice(index + 1, 1)
       changed = true
       break
@@ -1021,17 +1094,17 @@ function summaryOf(shot: DraftShot, speech: PlanSpeechSegment[], requirement: { 
 export function planStoryboardShots(input: StoryboardPlannerInput): StoryboardPlanResult {
   const script = String(input.script || '').replace(/\r\n?/g, '\n')
   if (!script.trim()) return { shots: [], coverage: 0, sceneCount: 0, sourceChars: 0 }
-  const minDuration = Math.max(2, Math.min(15, input.minDuration ?? 6))
+  const minDuration = Math.max(2, Math.min(15, input.minDuration ?? 2))
   const maxDuration = Math.max(minDuration, input.maxDuration ?? 15)
-  const silentDuration = Math.max(minDuration, Math.min(maxDuration, input.silentDuration ?? minDuration))
   const form: NarrationForm = input.narrationForm === 'narration' ? 'narration' : 'dialogue'
-  const maxSpeechChars = Math.max(8, (maxDuration - 1) * 4)
+  const maxSpeechChars = Math.max(8, Math.floor((maxDuration - DIALOGUE_LINE_PAUSE_SECONDS) * DIALOGUE_CHARS_PER_SECOND))
   const scenes = sceneBlocks(script, input.sceneGroups || [], input.previousShot)
   const beats: RawBeat[] = []
   for (const scene of scenes) beats.push(...parseSceneBeats(script, scene, maxSpeechChars, input))
   if (!beats.length) return { shots: [], coverage: 0, sceneCount: scenes.length, sourceChars: nonWsLength(script) }
   const drafts = compressSilentRuns(groupShots(beats, maxDuration, form), form)
   const shots: PlannedStoryboardShot[] = []
+  let previousPlanned: PlannedStoryboardShot | null = null
   let cursorShot = input.shotStart
   let previousSides: ReturnType<typeof sidesForScene> = input.previousShot ? {
     screenLeft: input.previousShot.screenLeft || null,
@@ -1080,21 +1153,17 @@ export function planStoryboardShots(input: StoryboardPlannerInput): StoryboardPl
     const speechRequirement = speechRequirementOf(draft.beats, speech, subject)
     const speaker = speechSpeaker || speechRequirement?.speaker || null
     const weight = shotWeight(draft.beats, form)
-    const speechWeight = speech.reduce((sum, item) => sum + speechSeconds(item.text) + 1, 0)
-    // 旁白驱动形态：叙述 prose 按 4 字/秒 + 1 秒气口折算旁白时长，旁白决定镜头长度。
+    const speechWeight = speech.reduce((sum, item) => sum + speechSeconds(item.text) + DIALOGUE_LINE_PAUSE_SECONDS, 0)
+    // 旁白驱动形态：叙述 prose 按正常语速折算旁白时长，最终以 TTS 音频为准。
     const narrationChars = form === 'narration'
       ? draft.beats
           .filter(beat => beat.kind === 'action' && !isSpeechLeadInBeat(beat.text))
           .reduce((sum, beat) => sum + effectiveChars(beat.text), 0)
       : 0
-    const narrationWeight = narrationChars > 0 ? Math.ceil(narrationChars / 4) + 1 : 0
-    // 无台词/无发声要求的镜头固定目标时长：静默反应、环境插入不再撑到 7–10 秒；
-    // 战斗/比拼动作段保留编排时长；旁白驱动形态下有 prose 的镜头按旁白时长走。
-    const actionSequence = isCombatOrCompetitionText(draft.beats.map(beat => beat.text).join(' '))
-    const silent = !speech.length && !speechRequirement
-    const duration = silent && !actionSequence && narrationWeight === 0
-      ? silentDuration
-      : Math.min(maxDuration, Math.max(minDuration, Math.ceil(Math.max(weight, speechWeight, narrationWeight, speechRequirement ? 6 : 0))))
+    const narrationWeight = narrationChars > 0 ? narrationChars / DIALOGUE_CHARS_PER_SECOND + DIALOGUE_LINE_PAUSE_SECONDS : 0
+    // 时长只由内容决定：对白/旁白音频估算与动作事件时长取最大值；没有内容才用模型最小可生成时长。
+    const contentWeight = Math.max(weight, speechWeight, narrationWeight, speechRequirement ? 4 : 0)
+    const duration = Math.min(maxDuration, Math.max(minDuration, Math.ceil(contentWeight)))
     const actionArc = deriveActionArc(draft.beats, speech, shotType, subject)
     const sceneSides = sidesForScene(draft.scene, input.sceneContracts)
     const sameScene = draft.scene.sceneId != null
@@ -1136,6 +1205,7 @@ export function planStoryboardShots(input: StoryboardPlannerInput): StoryboardPl
       segmentKind: speech.length ? 'dialogue' : (shotType === 'reaction' ? 'reaction' : 'action'),
       establishesScene,
       shotType,
+      coverageRole: null,
       subject,
       subjects,
       beatCount: draft.beats.length,
@@ -1146,6 +1216,13 @@ export function planStoryboardShots(input: StoryboardPlannerInput): StoryboardPl
         : null,
       beats: plannedBeatsOf(draft.beats),
     })
+    const currentShot = shots[shots.length - 1]
+    if (draft.hardBoundary && previousPlanned && previousPlanned.sceneId === currentShot.sceneId
+      && previousPlanned.speechSegments.length && currentShot.speechSegments.length) {
+      previousPlanned.coverageRole = 'master'
+      currentShot.coverageRole = 'reverse'
+    }
+    previousPlanned = currentShot
     cursorShot += 1
   }
   const covered = shots.reduce((sum, shot) => sum + nonWsLength(shot.sourceExcerpt), 0)
@@ -1170,6 +1247,7 @@ export function buildPlannedShotsBlock(shots: PlannedStoryboardShot[], form: Nar
       : []),
   ]
   for (const shot of shots) {
+    const speakers = [...new Set(shot.speechSegments.map(item => String(item.speaker || '').trim()).filter(Boolean))]
     const speech = shot.speechSegments.length
       ? shot.speechSegments.map(item => `${item.speaker || '角色'}「${item.text}」`).join('；')
       : '无'
@@ -1179,11 +1257,11 @@ export function buildPlannedShotsBlock(shots: PlannedStoryboardShot[], form: Nar
           ? '建立镜：本镜必须补全画面左/右、轴线、地标，后续镜头逐字沿用'
           : '沿用本场建立镜：可留空，服务端按场景契约补齐；不得自行改写或翻转')
     lines.push([
-      `- 第 ${shot.storyboardNumber} 镜｜${shot.sceneLabel}｜${shot.location || '场景待绑定'} / ${shot.time || '时间未写'}｜${shot.duration} 秒｜${shot.shotType}｜主体：${shot.subject || '场景'}｜说话人：${shot.speaker || '无'}`,
+      `- 第 ${shot.storyboardNumber} 镜｜${shot.sceneLabel}｜${shot.location || '场景待绑定'} / ${shot.time || '时间未写'}｜${shot.duration} 秒｜${shot.shotType}${shot.coverageRole ? `｜覆盖：${shot.coverageRole === 'master' ? '双人Master/过肩' : shot.coverageRole === 'reverse' ? '反打单人' : '反应特写'}` : ''}｜主体：${shot.subject || '场景'}｜说话人：${speakers.length ? speakers.join('、') : '无'}`,
       `  锁定摘录：${shot.sourceExcerpt.replace(/\s+/g, ' ').slice(0, 220)}`,
       `  锁定台词：${speech}`,
       `  锁定动作弧：${shot.actionArc.initial} → ${shot.actionArc.result}`,
-      ...(form === 'narration' ? [`  旁白预算：${Math.max(0, (shot.duration - 1) * 4)} 字（4 字/秒 + 1 秒气口）`] : []),
+      ...(form === 'narration' ? [`  旁白预算：${Math.max(0, Math.floor((shot.duration - DIALOGUE_LINE_PAUSE_SECONDS) * DIALOGUE_CHARS_PER_SECOND))} 字（正常语速，最终以 TTS 为准）`] : []),
       `  节拍：${shot.beats.map(beat => `${beat.kind === 'dialogue' ? `台词(${beat.speaker || '旁白'})` : (beat.semantics.subject || '场景')}：${beat.text.replace(/\s+/g, ' ').slice(0, 60)}`).join('；')}`,
       ...(shot.speechRequirement ? [`  发声要求：${shot.speechRequirement.speaker || '角色'}「${shot.speechRequirement.basis}」→ 必须补 inferred_dialogue`] : []),
       `  画面常量：${sidesLine}`,

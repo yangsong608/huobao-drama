@@ -15,7 +15,7 @@ import { getDramaBackground } from '../../services/drama-background.js'
 import { cleanupFrameAssetsForEpisode } from '../../services/storyboard-frame-assets.js'
 import { parseContractFromPrompt, syncStoryboardContract } from '../../services/storyboard-contract.js'
 import { ensureNegativeConsistency } from '../../services/storyboard-negative.js'
-import { stripPlaceholderDialogue, validateStoryboardUnit } from '../../services/storyboard-unit-contract.js'
+import { alignBlockingToFrames, alignScreenSidesToFrames, fitPromptTimeline, rebalancePromptTimeline, stripPlaceholderDialogue, validateStoryboardUnit } from '../../services/storyboard-unit-contract.js'
 import { validateRepairedShot } from '../../services/storyboard-shot-validation.js'
 import { intentPlanFromRow, narrationLinesFromText } from '../../services/shot-intent-plan.js'
 import { serializeStoryboardTags } from '../../services/storyboard-tags.js'
@@ -697,6 +697,8 @@ const saveStoryboards = createTool({
             sceneId: sb.scene_id,
           })
         }
+        normalizedPrompts[index] = alignScreenSidesToFrames(alignBlockingToFrames(normalizedPrompts[index]))
+        sb.video_prompt = normalizedPrompts[index]
         plans.set(sb.scene_id, plan)
       }
     }
@@ -710,6 +712,7 @@ const saveStoryboards = createTool({
             videoPrompt: normalizedPrompts[index],
             characterIds: sb.character_ids,
             duration: sb.duration,
+            movement: sb.movement,
             shotLabel: `本块第 ${index + 1} 个分镜`,
           })
         })
@@ -1031,6 +1034,7 @@ const updateStoryboard = createTool({
           videoPrompt: fields.video_prompt,
           characterIds: currentCharacterIds,
           duration: 'duration' in fields ? fields.duration : storyboard.duration,
+          movement: 'movement' in fields ? fields.movement : storyboard.movement,
           shotLabel: `分镜 ${storyboard.storyboardNumber}`,
           checkSubshots: true,
         })
@@ -1296,7 +1300,7 @@ const saveStoryboardSkeletons = createTool({
         : (inferredSpeech.length ? inferredSpeech : extractPlanSpeechSegments(excerpt))
       const speechSource = inferredSpeech.length ? 'inferred' as const : planned?.speechSource
       const duration = Number(planned?.duration || skeleton.duration || 0)
-      if (duration < 6 || duration > 15) errors.push(`${label}时长 ${duration} 秒，必须在 6-15 秒之间。`)
+      if (duration < 2 || duration > 15) errors.push(`${label}时长 ${duration} 秒，必须在 2-15 秒（按内容决定，不补时长）之间。`)
       if (excerpt) {
         const normalizedExcerpt = normalizeExcerptText(excerpt)
         const position = normalizedScript.indexOf(normalizedExcerpt, cursor)
@@ -1481,7 +1485,7 @@ const saveStoryboardSkeletons = createTool({
       let effectiveNew = withContracts(planShots, contractMap)
       const planGate = validatePlanSequence(
         [...effectiveHistory, ...effectiveNew],
-        { minDuration: 6, maxDuration, sceneContracts: contractMap },
+        { minDuration: 2, maxDuration, sceneContracts: contractMap },
       )
       if (planGate.issues.some(item => item.severity === 'error')) {
         const messages = planGate.issues.filter(item => item.severity === 'error').map(item => item.message)
@@ -1498,7 +1502,7 @@ const saveStoryboardSkeletons = createTool({
       effectiveNew = withContracts(effectiveNew, synced)
       const finalGate = validatePlanSequence(
         [...effectiveHistory, ...effectiveNew],
-        { minDuration: 6, maxDuration, sceneContracts: synced },
+        { minDuration: 2, maxDuration, sceneContracts: synced },
       )
       if (finalGate.issues.some(item => item.severity === 'error')) {
         throw new Error(`拒绝保存骨架：${planIssuesText(finalGate.issues.filter(item => item.severity === 'error'))}。`)
@@ -1600,7 +1604,7 @@ const saveRepairedStoryboard = createTool({
     const propIds: number[] = [...new Set<number>(
       ((input.prop_ids ?? skeleton.propIds ?? skeleton.prop_ids ?? []) as number[]).filter(Boolean),
     )]
-    const duration = Number(input.duration || skeleton.duration || 0)
+    let duration = Number(input.duration || skeleton.duration || 0)
     await validateStoryboardBindings(episodeId, dramaId, canonicalScene, characterIds, propIds)
     if (canonicalScene == null) {
       return { error: '该镜没有场景；请补 scene_id 或 location 后重试。' }
@@ -1619,6 +1623,12 @@ const saveRepairedStoryboard = createTool({
       sceneRow?.location || null,
       getContentLanguageFromRC(context?.requestContext),
     ) || ''
+    videoPrompt = rebalancePromptTimeline(videoPrompt, duration)
+    videoPrompt = alignBlockingToFrames(videoPrompt)
+    videoPrompt = alignScreenSidesToFrames(videoPrompt)
+    const fitted = fitPromptTimeline(videoPrompt, duration, 15)
+    videoPrompt = fitted.prompt
+    duration = fitted.duration
     await validateVideoPromptVoices(videoPrompt, dramaId, characterIds)
 
     const previous = runtime.previousShots?.[0] || null
@@ -1635,6 +1645,8 @@ const saveRepairedStoryboard = createTool({
         logTaskWarn('StoryboardPipeline', 'scene-side-normalized', { episodeId, shotNumber })
       }
     }
+    // 以本镜时间帧/轴线为最终依据，防止场景级 plan 把已经对齐的左右再翻回去。
+    videoPrompt = alignScreenSidesToFrames(videoPrompt)
 
     const values = {
       title: input.title || skeleton.title,
@@ -1702,6 +1714,7 @@ const saveRepairedStoryboard = createTool({
       videoPrompt,
       characterIds,
       duration,
+      movement: input.movement,
       sceneId: canonicalScene,
       characters: allCharacters,
       shotLabel: `第 ${shotNumber} 镜`,
@@ -1749,6 +1762,7 @@ const saveRepairedStoryboard = createTool({
       attempts: (skeleton.attempts || 0) + 1,
       issuesJson: validation.warnings.length ? JSON.stringify(validation.warnings) : null,
       repairLogJson: JSON.stringify({ at: ts, warnings: validation.warnings }),
+      duration,
       // 改写式旁白落库后，计划 lines 同步为成稿实际旁白，保持计划与成稿同源。
       ...(intentPlan?.narration.mode === 'adapted' ? (() => {
         const actualLines = narrationLinesFromText(videoPrompt)

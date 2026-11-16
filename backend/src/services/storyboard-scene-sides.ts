@@ -37,12 +37,22 @@ function replaceLandmarks(prompt: string, value: string): string {
 }
 
 function swapScreenSides(prompt: string): string {
-  const left = SIDE_PATTERNS.left.exec(prompt)
-  const right = SIDE_PATTERNS.right.exec(prompt)
-  if (!left || !right) return prompt
-  return prompt
-    .replace(SIDE_PATTERNS.left, `${left[1]}：${right[2]}`)
-    .replace(SIDE_PATTERNS.right, `${right[1]}：${left[2]}`)
+  // 整镜镜像：画面调度和时间帧里的屏幕左右一起交换；只交换“在左/在右”轴线映射，不碰“左前臂”等身体左右。
+  let next = prompt
+    .replace(/画面左/g, '__SCREEN_LEFT__')
+    .replace(/画面右/g, '画面左')
+    .replace(/__SCREEN_LEFT__/g, '画面右')
+    .replace(/Screen\s*left/gi, '__SCREEN_LEFT__')
+    .replace(/Screen\s*right/gi, 'Screen left')
+    .replace(/__SCREEN_LEFT__/g, 'Screen right')
+    .replace(/화면\s*왼쪽/g, '__SCREEN_LEFT__')
+    .replace(/화면\s*오른쪽/g, '화면 왼쪽')
+    .replace(/__SCREEN_LEFT__/g, '화면 오른쪽')
+  next = next.replace(/(轴线[^\n]*)/, line => line
+    .replace(/在左/g, '__AT_LEFT__')
+    .replace(/在右/g, '在左')
+    .replace(/__AT_LEFT__/g, '在右'))
+  return next
 }
 
 function addPlan(plan: SceneSidePlan, parsed: ParsedContract) {

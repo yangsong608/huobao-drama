@@ -29,7 +29,7 @@ const SPEECH_VERB_RE = /(?:说|道|问|喊|答|唱喝|唱喏|嘟囔|自语|吼|�
 const SPEAKER_COLON_RE = /@[^\s，。！？；：、,.!?;:]{1,24}\s*(?:[（(][^）)]*[）)])?\s*[：:]\s*$/
 
 /** 招牌、字幕、书面语等非口白引号：不参与台词完整性比对 */
-const NON_SPEECH_PREFIX_RE = /(?:写|印|刻|绣|标|题|显示|上书|挂着|贴着)\s*(?:着|道|了|有)?\s*[：:]?\s*$/
+const NON_SPEECH_PREFIX_RE = /(?:写|印|刻|绣|标|题|显示|上书|挂着|贴着|听到|听见|看到|看见|读到|念到|提到|说到|讲到|谈到|说起|讲起|记起|想起)\s*(?:着|道|了|有)?\s*[：:]?\s*$/
 
 function stripStageDirections(text: string): string {
   return text
